@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar, Optional
@@ -15,9 +16,12 @@ from poly.handlers.protobuf.stop_keywords_pb2 import (
     StopKeywordReferences,
 )
 from poly.resources.function import Function
-from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
+
+logger = logging.getLogger(__name__)
 
 
+@register_resource("phrase_filtering")
 @dataclass
 class PhraseFilter(MultiResourceYamlResource):
     """Dataclass representing an Agent Studio Phrase Filter (Stop Keyword)"""
@@ -48,6 +52,35 @@ class PhraseFilter(MultiResourceYamlResource):
         self.language_code = language_code
         self.function = function
 
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "PhraseFilter"]:
+        """Parse phrase filters from a projection dict."""
+        phrase_filters = {}
+        filters_projection = (
+            projection.get("stopKeywords", {}).get("filters", {}).get("entities", {})
+        )
+        if "stopKeywords" not in projection or any(
+            "title" not in f for f in filters_projection.values()
+        ):
+            logger.debug("No read access to phrase filtering - it will not be pulled.")
+            return {}
+
+        for filter_id, filter_data in filters_projection.items():
+            references = filter_data.get("references", {})
+            global_functions = references.get("globalFunctions", {})
+            function_id = next(iter(global_functions), None) if global_functions else None
+
+            phrase_filters[filter_id] = cls(
+                resource_id=filter_id,
+                name=filter_data.get("title", ""),
+                description=filter_data.get("description", ""),
+                regular_expressions=filter_data.get("regularExpressions", []),
+                say_phrase=filter_data.get("sayPhrase", False),
+                language_code=filter_data.get("languageCode", ""),
+                function=function_id,
+            )
+        return phrase_filters
+
     @property
     def file_path(self) -> str:
         path_safe_name = utils.clean_name(self.name, lowercase=False)
@@ -76,7 +109,7 @@ class PhraseFilter(MultiResourceYamlResource):
     ) -> "PhraseFilter":
         return cls(
             resource_id=resource_id,
-            name=(yaml_dict.get("name") or name or ""),
+            name=yaml_dict.get("name") or name,
             description=(yaml_dict.get("description") or "").strip(),
             regular_expressions=yaml_dict.get("regular_expressions", []),
             say_phrase=yaml_dict.get("say_phrase", False),
@@ -106,6 +139,9 @@ class PhraseFilter(MultiResourceYamlResource):
         cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
         """Replace function name with ID in a parsed YAML dict."""
+        yaml_dict = super().from_pretty_dict(
+            yaml_dict, resource_mappings=resource_mappings, **kwargs
+        )
         function_name = yaml_dict.get("function")
         if function_name:
             for resource in resource_mappings or []:

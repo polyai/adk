@@ -5,7 +5,7 @@ description: Watch a walkthrough of building a production-ready voice agent with
 
 This walkthrough shows how to build a production-ready voice agent with the **PolyAI ADK**.
 
-It demonstrates the end-to-end developer workflow and shows how the ADK fits alongside the [PolyAI ADK extension for VS Code and Cursor](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor).
+It demonstrates the end-to-end developer workflow and shows how the ADK fits alongside the [PolyAI ADK extension for VS Code and Cursor](../tooling/tooling.md#polyai-adk-extension-for-vs-code-and-cursor).
 
 ## Watch the video
 
@@ -41,18 +41,11 @@ It demonstrates the end-to-end developer workflow and shows how the ADK fits alo
 
 !!! tip "Best viewed alongside the docs"
 
-    This walkthrough is a useful companion to the installation and getting started pages. It is often easiest to watch the workflow once, then follow the written steps yourself.
+    This walkthrough is a useful companion to the written [getting started](./get-started.md) steps — watch it before or after working through them, whichever suits you.
 
 ## Next steps
 
 <div class="grid cards" markdown>
-
--   **Set up the ADK**
-
-    ---
-
-    Install the ADK and get your first project running.
-    [Open getting started](./get-started.md)
 
 -   **Build an agent**
 
@@ -60,5 +53,12 @@ It demonstrates the end-to-end developer workflow and shows how the ADK fits alo
 
     Follow the step-by-step tutorial for building with the ADK.
     [Open the tutorial](../tutorials/build-an-agent.md)
+
+-   **Working locally**
+
+    ---
+
+    Understand what a local project contains and how it maps to Agent Studio.
+    [Read working locally](../development/working-locally.md)
 
 </div>

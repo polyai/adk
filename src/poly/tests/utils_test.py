@@ -3,7 +3,10 @@
 Copyright PolyAI Limited
 """
 
+import copy
+import tempfile
 import unittest
+from pathlib import Path
 
 import poly.resources.resource_utils as resource_utils
 from poly import utils
@@ -17,6 +20,19 @@ from poly.resources import (
     Variable,
     VariantAttribute,
 )
+from poly.resources.flows import (
+    ASRBiasing,
+    ASRConfig,
+    BargeInConfig,
+    DTMFConfig,
+    FlowSettings,
+    FlowStep,
+    LLMConfig,
+    ReasoningEffort,
+    StepType,
+    VADConfig,
+)
+from poly.utils import prepush
 
 
 class MergeUtilsTests(unittest.TestCase):
@@ -137,15 +153,17 @@ class MergeUtilsTests(unittest.TestCase):
         updated = "keep\nversion A\nkeep"
         incoming = "keep\nversion B\nkeep"
         result = utils.merge_strings(original, updated, incoming)
-        expected = "\n".join([
-            "keep",
-            "<<<<<<<",
-            "version A",
-            "=======",
-            "version B",
-            ">>>>>>>",
-            "keep",
-        ])
+        expected = "\n".join(
+            [
+                "keep",
+                "<<<<<<<",
+                "version A",
+                "=======",
+                "version B",
+                ">>>>>>>",
+                "keep",
+            ]
+        )
         self.assertEqual(result, expected)
 
     def test_merge_strings_with_trailing_newlines(self):
@@ -289,7 +307,6 @@ def test_code(
             restored_code,
         )
 
-
         with_docstring_code = """import random
 def test_code(
     conv: Conversation,
@@ -371,16 +388,8 @@ def test_code(
 
     def test_restore_function_def_line_comment_with_hash_in_body(self):
         """Test that a # inside the comment text is not double-spaced."""
-        code = (
-            "def test_code(\n"
-            "    conv: Conversation\n"
-            "):  # see issue #123\n"
-            "    pass\n"
-        )
-        expected = (
-            "def test_code(conv: Conversation):  # see issue #123\n"
-            "    pass\n"
-        )
+        code = "def test_code(\n    conv: Conversation\n):  # see issue #123\n    pass\n"
+        expected = "def test_code(conv: Conversation):  # see issue #123\n    pass\n"
         restored = resource_utils.restore_function_def_line(code, "test_code")
         self.assertEqual(restored, expected)
 
@@ -407,10 +416,14 @@ class StringUtilsTests(unittest.TestCase):
         self.assertEqual(cleaned_name, "this_is_a_test_name_with_special_chars")
 
         allow_uppercase = "ThisIsATestName"
-        self.assertEqual(resource_utils.clean_name(allow_uppercase, lowercase=False), "ThisIsATestName")
+        self.assertEqual(
+            resource_utils.clean_name(allow_uppercase, lowercase=False), "ThisIsATestName"
+        )
 
         allow_non_english = "こんにちは"
-        self.assertEqual(resource_utils.clean_name(allow_non_english, lowercase=False), "こんにちは")
+        self.assertEqual(
+            resource_utils.clean_name(allow_non_english, lowercase=False), "こんにちは"
+        )
 
     def test_to_snake_case(self):
         camel_case = "ThisIsATestName"
@@ -425,6 +438,57 @@ class StringUtilsTests(unittest.TestCase):
 
         mixed_case = "this_is_another_test_name"
         self.assertEqual(resource_utils.to_camel_case(mixed_case), "thisIsAnotherTestName")
+
+
+class GenerateSubresourceIdTests(unittest.TestCase):
+    """Tests for generate_subresource_id deriving ids from a subresource's scoped name.
+
+    Subresources (conditions, parameters, delay responses) are matched by name inside
+    their parent, so deriving the id from that scoped name is what makes two reads - and
+    two branches - agree on an id instead of each minting a random one.
+    """
+
+    def test_same_scope_always_yields_the_same_id(self):
+        """The same scope derives the same id, however many times it is asked for."""
+        first = resource_utils.generate_subresource_id(
+            "CONDITION", "Booking Flow", "Greeting", "Go to menu"
+        )
+        second = resource_utils.generate_subresource_id(
+            "CONDITION", "Booking Flow", "Greeting", "Go to menu"
+        )
+
+        self.assertEqual(first, second)
+
+    def test_id_has_the_shape_of_a_randomly_minted_id(self):
+        """Derived ids must be drop-in replacements for the random ids they replaced."""
+        derived = resource_utils.generate_subresource_id("PARAMETER", "look_up_booking", "ref")
+
+        self.assertRegex(derived, r"^PARAMETER-[a-f0-9]{8}$")
+
+    def test_different_scopes_yield_different_ids(self):
+        """The same condition name under a different step is a different subresource."""
+        under_greeting = resource_utils.generate_subresource_id(
+            "CONDITION", "Booking Flow", "Greeting", "Go to menu"
+        )
+        under_farewell = resource_utils.generate_subresource_id(
+            "CONDITION", "Booking Flow", "Farewell", "Go to menu"
+        )
+
+        self.assertNotEqual(under_greeting, under_farewell)
+
+    def test_scope_order_is_significant(self):
+        """Scope parts are ordered outermost first, so swapping them is a different scope."""
+        flow_then_step = resource_utils.generate_subresource_id("CONDITION", "booking", "greeting")
+        step_then_flow = resource_utils.generate_subresource_id("CONDITION", "greeting", "booking")
+
+        self.assertNotEqual(flow_then_step, step_then_flow)
+
+    def test_different_prefixes_yield_different_ids(self):
+        """Two kinds of subresource sharing a scope must not share an id."""
+        condition = resource_utils.generate_subresource_id("CONDITION", "greet", "confirm")
+        parameter = resource_utils.generate_subresource_id("PARAMETER", "greet", "confirm")
+
+        self.assertNotEqual(condition, parameter)
 
 
 class ResourceReferenceTests(unittest.TestCase):
@@ -547,9 +611,7 @@ class ValidateReferencesTests(unittest.TestCase):
         self.assertTrue(valid)
         self.assertEqual(invalid, [])
 
-        valid, invalid = resource_utils.validate_references(
-            {"attributes": {}, "variables": {}}, []
-        )
+        valid, invalid = resource_utils.validate_references({"attributes": {}, "variables": {}}, [])
         self.assertTrue(valid)
         self.assertEqual(invalid, [])
 
@@ -664,10 +726,10 @@ class ResourceMappingTests(unittest.TestCase):
             resource_prefix="ft",
         ),
         ResourceMapping(
-            resource_id="attr-customer-name",
-            resource_name="customer-name",
+            resource_id="attr-customer_name",
+            resource_name="customer_name",
             resource_type=VariantAttribute,
-            file_path="config/variant_attributes.yaml/variant_attributes/customer-name",
+            file_path="config/variant_attributes.yaml/variant_attributes/customer_name",
             flow_name=None,
             resource_prefix="attr",
         ),
@@ -823,14 +885,14 @@ class ResourceMappingTests(unittest.TestCase):
     def test_replace_resource_ids_with_names_attributes_handoff_sms_entities(self):
         """Test IDs->names swap for attr, ho, twilio_sms, entity references."""
         prompt = (
-            "Use {{attr:attr-customer-name}}, {{ho:handoff-1}}, "
+            "Use {{attr:attr-customer_name}}, {{ho:handoff-1}}, "
             "{{twilio_sms:SMS_TEMPLATE-123}} and {{entity:ENTITY-customer_name}}."
         )
         updated = resource_utils.replace_resource_ids_with_names(
             prompt, self.TEST_RESOURCE_MAPPINGS
         )
         expected = (
-            "Use {{attr:customer-name}}, {{ho:default}}, "
+            "Use {{attr:customer_name}}, {{ho:default}}, "
             "{{twilio_sms:test_template}} and {{entity:customer_name}}."
         )
         self.assertEqual(updated, expected)
@@ -838,14 +900,14 @@ class ResourceMappingTests(unittest.TestCase):
     def test_replace_resource_names_with_ids_attributes_handoff_sms_entities(self):
         """Test names->IDs swap for attr, ho, twilio_sms, entity references."""
         prompt = (
-            "Use {{attr:customer-name}}, {{ho:default}}, "
+            "Use {{attr:customer_name}}, {{ho:default}}, "
             "{{twilio_sms:test_template}} and {{entity:customer_name}}."
         )
         updated = resource_utils.replace_resource_names_with_ids(
             prompt, self.TEST_RESOURCE_MAPPINGS
         )
         expected = (
-            "Use {{attr:attr-customer-name}}, {{ho:handoff-1}}, "
+            "Use {{attr:attr-customer_name}}, {{ho:handoff-1}}, "
             "{{twilio_sms:SMS_TEMPLATE-123}} and {{entity:ENTITY-customer_name}}."
         )
         self.assertEqual(updated, expected)
@@ -867,6 +929,174 @@ class ResourceMappingTests(unittest.TestCase):
         )
         expected = "Hello {{vrbl:VAR-customer_name}}, order {{vrbl:VAR-order_id}}."
         self.assertEqual(updated, expected)
+
+
+class ReplaceResourceNamesWithIdsInDataTests(unittest.TestCase):
+    """Tests for replace_resource_names_with_ids_in_data (dict/list walking variant)."""
+
+    # Reuse the same mappings as the string-based reference tests.
+    TEST_RESOURCE_MAPPINGS = ResourceMappingTests.TEST_RESOURCE_MAPPINGS
+
+    def _nested_data(self) -> dict:
+        """A representative nested structure with references at multiple depths.
+
+        References appear inside dict values, list items, and deeply nested
+        dicts, interleaved with non-string values (int, bool, None).
+        """
+        return {
+            "prompt": "Call {{fn:Function 1}} then {{fn:Function 2}}.",
+            "enabled": True,
+            "retries": 3,
+            "fallback": None,
+            "steps": [
+                "First use {{fn:Function 1}}.",
+                42,
+                {
+                    "instruction": "Then {{entity:customer_name}} and {{ho:default}}.",
+                    "nested": {
+                        "deep": "Send {{twilio_sms:test_template}} now.",
+                        "count": 7,
+                    },
+                },
+            ],
+            "closing": "Finally {{attr:customer_name}}.",
+        }
+
+    def test_equivalence_with_string_path_over_serialized_yaml(self):
+        """In-data replacement matches the serialize -> string replace -> reparse path.
+
+        The equivalence holds because references only ever appear inside scalar
+        string values, never in keys or YAML structure.
+        """
+        data = self._nested_data()
+
+        # Baseline: run the existing string-based replacer over the serialized YAML.
+        yaml_string = resource_utils.dump_yaml(data)
+        replaced_yaml = resource_utils.replace_resource_names_with_ids(
+            yaml_string, self.TEST_RESOURCE_MAPPINGS
+        )
+        baseline = resource_utils.load_yaml(replaced_yaml)
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        self.assertEqual(result, baseline)
+
+    def test_scalar_string_references_are_replaced_at_all_depths(self):
+        """Every string leaf has its references swapped, keys untouched."""
+        data = self._nested_data()
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        self.assertEqual(result["prompt"], "Call {{fn:function-1}} then {{fn:function-2}}.")
+        self.assertEqual(result["steps"][0], "First use {{fn:function-1}}.")
+        self.assertEqual(
+            result["steps"][2]["instruction"],
+            "Then {{entity:ENTITY-customer_name}} and {{ho:handoff-1}}.",
+        )
+        self.assertEqual(
+            result["steps"][2]["nested"]["deep"],
+            "Send {{twilio_sms:SMS_TEMPLATE-123}} now.",
+        )
+        self.assertEqual(result["closing"], "Finally {{attr:attr-customer_name}}.")
+
+    def test_reference_shaped_keys_are_not_rewritten(self):
+        """Only scalar string values are rewritten; dict keys are left untouched."""
+        data = {"{{fn:Function 1}}": "Refers to {{fn:Function 2}}."}
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        # Key preserved verbatim, value rewritten.
+        self.assertEqual(result, {"{{fn:Function 1}}": "Refers to {{fn:function-2}}."})
+
+    def test_non_string_leaves_are_preserved(self):
+        """Ints, bools, and None pass through unchanged and keep their types."""
+        data = self._nested_data()
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        self.assertIs(result["enabled"], True)
+        self.assertEqual(result["retries"], 3)
+        self.assertIsNone(result["fallback"])
+        self.assertEqual(result["steps"][1], 42)
+        self.assertEqual(result["steps"][2]["nested"]["count"], 7)
+
+    def test_input_is_not_mutated(self):
+        """Calling the function leaves the original structure untouched."""
+        data = self._nested_data()
+        original = copy.deepcopy(data)
+
+        resource_utils.replace_resource_names_with_ids_in_data(data, self.TEST_RESOURCE_MAPPINGS)
+
+        self.assertEqual(data, original)
+
+    def test_result_containers_are_independent_of_input(self):
+        """Mutating the returned structure does not affect the input."""
+        data = self._nested_data()
+        original = copy.deepcopy(data)
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        # Mutate nested dict and list containers in the result.
+        result["steps"].append("new step")
+        result["steps"][2]["nested"]["count"] = 999
+
+        self.assertEqual(data, original)
+
+    def test_empty_containers_round_trip(self):
+        """Empty dicts and lists are returned as fresh empty containers."""
+        self.assertEqual(
+            resource_utils.replace_resource_names_with_ids_in_data({}, self.TEST_RESOURCE_MAPPINGS),
+            {},
+        )
+        self.assertEqual(
+            resource_utils.replace_resource_names_with_ids_in_data([], self.TEST_RESOURCE_MAPPINGS),
+            [],
+        )
+
+    def test_flow_scoped_mappings_only_apply_for_matching_flow(self):
+        """Flow-scoped references are swapped only when flow_folder_name matches."""
+        data = {
+            "prompt": "In the flow, call {{ft:Flow Function}} and {{fn:Function 1}}.",
+        }
+
+        flow_1_result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS, flow_folder_name="flow_1"
+        )
+        self.assertEqual(
+            flow_1_result["prompt"],
+            "In the flow, call {{ft:flow-function-1}} and {{fn:function-1}}.",
+        )
+
+        flow_2_result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS, flow_folder_name="flow_2"
+        )
+        self.assertEqual(
+            flow_2_result["prompt"],
+            "In the flow, call {{ft:flow-function-2}} and {{fn:function-1}}.",
+        )
+
+    def test_flow_scoped_mappings_not_applied_without_flow(self):
+        """Without a matching flow_folder_name, flow-scoped references are left as-is."""
+        data = {
+            "prompt": "Call {{ft:Flow Function}} and {{fn:Function 1}}.",
+        }
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        # The flow-scoped {{ft:...}} reference is untouched; the global {{fn:...}} is swapped.
+        self.assertEqual(result["prompt"], "Call {{ft:Flow Function}} and {{fn:function-1}}.")
 
 
 class FlowUtilsTests(unittest.TestCase):
@@ -918,6 +1148,165 @@ class FlowUtilsTests(unittest.TestCase):
         self.assertIsNone(flow_name_none)
 
     # TODO: Test assigning positions to flow steps
+
+class ClearUnusedSettingsFromFlowStepTest(unittest.TestCase):
+    """Tests for prepush.clear_unused_settings_from_flow_step.
+
+    update_step_settings merges per section, so a section dropped from the local
+    YAML is read by the backend as "not updated" rather than "cleared". Removed
+    sections therefore need an explicit clear_step_settings command, using the
+    section names the backend's enum accepts.
+    """
+
+    FLOW_ID = "FLOW-abc"
+    STEP_ID = "step-1"
+    RESOURCE_ID = "FLOW-abc_step-1"
+
+    def _step(self, **settings_kwargs) -> FlowStep:
+        return FlowStep(
+            resource_id=self.RESOURCE_ID,
+            step_id=self.STEP_ID,
+            name="Step 1",
+            flow_id=self.FLOW_ID,
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            prompt="Hello",
+            settings=FlowSettings(step_id=self.STEP_ID, flow_id=self.FLOW_ID, **settings_kwargs),
+        )
+
+    def _all_sections(self) -> dict:
+        return {
+            "asr_biasing": ASRBiasing(is_enabled=True),
+            "dtmf": DTMFConfig(is_enabled=True),
+            "asr": ASRConfig(provider="p", model="m"),
+            "vad": VADConfig(
+                provider="p",
+                vad_start=1.0,
+                vad_end=2.0,
+                speech_threshold=3.0,
+                silence_threshold=4.0,
+            ),
+            "barge_in": BargeInConfig(is_enabled=True),
+            "llm": LLMConfig(provider_model_id="model-1", reasoning_effort=ReasoningEffort.MEDIUM),
+        }
+
+    def _clear(self, original: FlowStep, updated: FlowStep) -> list[list[str]]:
+        """Run the prepush step and return the sections of each queued command."""
+        queued = []
+        prepush.clear_unused_settings_from_flow_step(
+            {FlowStep: {self.RESOURCE_ID: updated}},
+            current_resources={FlowStep: {self.RESOURCE_ID: original}},
+            queue_command=queued.append,
+        )
+        return [list(command.clear_step_settings.sections) for command in queued]
+
+    def test_clearing_barge_in_uses_backend_casing(self):
+        """barge_in must be sent as bargeIn — the backend validates against an enum."""
+        sections = self._all_sections()
+        original = self._step(**sections)
+        sections.pop("barge_in")
+        updated = self._step(**sections)
+
+        self.assertEqual(self._clear(original, updated), [["bargeIn"]])
+
+    def test_clearing_single_word_sections_are_passed_through(self):
+        """asr, vad and llm have the same name on both sides."""
+        for section in ("asr", "vad", "llm"):
+            with self.subTest(section):
+                sections = self._all_sections()
+                original = self._step(**sections)
+                sections.pop(section)
+                updated = self._step(**sections)
+
+                self.assertEqual(self._clear(original, updated), [[section]])
+
+    def test_clearing_every_clearable_section(self):
+        """All four clearable sections are sent in one command."""
+        original = self._step(**self._all_sections())
+        updated = self._step()
+
+        self.assertEqual(self._clear(original, updated), [["asr", "bargeIn", "llm", "vad"]])
+
+    def test_asr_biasing_and_dtmf_are_not_clearable(self):
+        """These deep-merge into legacy top-level mirrors, so the backend rejects them.
+
+        Sending them would fail validation for the whole command batch.
+        """
+        sections = self._all_sections()
+        original = self._step(**sections)
+        sections.pop("asr_biasing")
+        sections.pop("dtmf")
+        updated = self._step(**sections)
+
+        self.assertEqual(self._clear(original, updated), [])
+
+    def test_unclearable_sections_do_not_suppress_clearable_ones(self):
+        """Dropping asr_biasing alongside barge_in still clears barge_in."""
+        sections = self._all_sections()
+        original = self._step(**sections)
+        sections.pop("asr_biasing")
+        sections.pop("barge_in")
+        updated = self._step(**sections)
+
+        self.assertEqual(self._clear(original, updated), [["bargeIn"]])
+
+    def test_no_command_when_settings_unchanged(self):
+        original = self._step(**self._all_sections())
+        updated = self._step(**self._all_sections())
+
+        self.assertEqual(self._clear(original, updated), [])
+
+    def test_no_command_when_sections_are_added(self):
+        """Added sections go out via update_step_settings, not a clear."""
+        original = self._step()
+        updated = self._step(**self._all_sections())
+
+        self.assertEqual(self._clear(original, updated), [])
+
+    def test_step_missing_from_current_state_is_skipped(self):
+        """A step absent remotely (e.g. new from a linked project sync) is ignored."""
+        queued = []
+        prepush.clear_unused_settings_from_flow_step(
+            {FlowStep: {self.RESOURCE_ID: self._step()}},
+            current_resources={FlowStep: {}},
+            queue_command=queued.append,
+        )
+
+        self.assertEqual(queued, [])
+
+    def test_command_targets_the_right_step(self):
+        sections = self._all_sections()
+        original = self._step(**sections)
+        sections.pop("llm")
+
+        queued = []
+        prepush.clear_unused_settings_from_flow_step(
+            {FlowStep: {self.RESOURCE_ID: self._step(**sections)}},
+            current_resources={FlowStep: {self.RESOURCE_ID: original}},
+            queue_command=queued.append,
+        )
+
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0].type, "clear_step_settings")
+        self.assertEqual(queued[0].clear_step_settings.flow_id, self.FLOW_ID)
+        self.assertEqual(queued[0].clear_step_settings.step_id, self.STEP_ID)
+
+
+class JsonIoTests(unittest.TestCase):
+    """Tests for JSON file read/write helpers."""
+
+    def test_write_json_file_preserves_unicode(self):
+        data = {"site_name": "Côte Barbican"}
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "data.json"
+            utils.write_json_file(str(path), data)
+
+            raw = path.read_text(encoding="utf-8")
+            self.assertIn("Côte Barbican", raw)
+            self.assertNotIn("\\u00f4", raw)
+
+            self.assertEqual(utils.read_json_file(str(path)), data)
 
 
 if __name__ == "__main__":

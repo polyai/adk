@@ -53,6 +53,7 @@ Fields:
 - **conditions**: List of conditions to transition to other steps
 - **extracted_entities**: Entities to extract in this step (from `config/entities.yaml`)
 - **prompt**: Instructions for the LLM; use `{{entity:entity_name}}` for entity values. Cannot call functions
+- Any of the [step settings](#step-settings) below
 
 #### Conditions
 These define how the agent can transition out of one default node. They can transition to any other node and also be made to exit the flow.
@@ -68,34 +69,80 @@ Example:
 - **Function step** → use Python filename without `.py`, snake_case (e.g. `process_cancellation`).
 
 ### Advanced Steps (`steps/*.yaml`)
-A step with more advanced options, such as custom ASR and DTMF rules and the ability to call transition functions in the prompt.
+A step with more advanced options, such as the ability to call transition functions in the prompt.
 
 Fields:
 - **step_type**: `advanced_step`
 - **name**: Human-readable step name
-- **asr_biasing**: ASR settings for the turn
-  **is_enabled** Boolean if ASR settings are enabled
-  ASR settings, each is a boolean of whether to tune ASR for that type of input
-  **alphanumeric**
-  **name_spelling**
-  **numeric**
-  **party_size**
-  **precise_date**
-  **relative_date**
-  **single_number**
-  **time**
-  **yes_no**
-  **address**
-  **custom_keywords**: [] List of words to bias for
-- **dtmf_config**:
-  **is_enabled** Boolean if ASR settings are enabled
-  **inter_digit_timeout** (int) How long to wait in seconds between button presses
-  **max_digits** (int) Max number of digits to collect
-  **end_key** (str) When key is pressed, end collection
-  **collect_while_agent_speaking** (bool) Allow collection during agents speech
-  **is_pii** (bool) Does user input count as PII
 - **prompt**: Instructions for the LLM; Can call functions
+- Any of the [step settings](#step-settings) below
 
+### Step settings
+
+Steps can override project-level voice and LLM defaults for a single turn. Every section is
+optional — omit a section to inherit the project default. All of them apply to both default
+and advanced steps.
+
+```yaml
+step_type: advanced_step
+name: Collect Card Number
+asr_biasing:
+  is_enabled: true
+  numeric: true
+  custom_keywords:
+  - Acme
+dtmf_config:
+  is_enabled: true
+  max_digits: 4
+  end_key: '#'
+asr:
+  provider: deepgram
+  model: nova-3
+vad:
+  vad_start: 0.2
+  vad_end: 0.8
+barge_in:
+  is_enabled: false
+llm:
+  provider_model_id: polywhirl-3-5
+  reasoning_effort: medium
+prompt: Please read out your card number.
+```
+
+- **asr_biasing**: ASR tuning for the turn
+  - **is_enabled** (bool) Whether ASR biasing is enabled
+  - Each of the following is a boolean for whether to tune ASR for that type of input:
+    **alphanumeric**, **name_spelling**, **numeric**, **party_size**, **precise_date**,
+    **relative_date**, **single_number**, **time**, **yes_no**, **address**
+  - **custom_keywords** (list[str]) Words to bias towards
+- **dtmf_config**: Keypad input
+  - **is_enabled** (bool) Whether DTMF collection is enabled
+  - **inter_digit_timeout** (int) How long to wait in seconds between button presses. Cannot be negative
+  - **max_digits** (int) Max number of digits to collect. Cannot be negative
+  - **end_key** (str) When this key is pressed, end collection
+  - **collect_while_agent_speaking** (bool) Allow collection during the agent's speech
+  - **is_pii** (bool) Does user input count as PII
+- **asr**: Speech recognition provider override
+  - **provider** (str), **model** (str)
+- **vad**: Voice activity detection override
+  - **provider** (str)
+  - **vad_start** / **vad_end** (float) Seconds. Must be zero or greater
+  - **speech_threshold** / **silence_threshold** (float)
+- **barge_in**: Whether the caller can interrupt the agent
+  - **is_enabled** (bool)
+- **llm**: Model override for the turn
+  - **provider_model_id** (str)
+  - **reasoning_effort** (str) One of `unspecified`, `minimal`, `low`, `medium`, `high`, `auto`
+
+#### Removing settings
+
+`asr`, `vad`, `barge_in` and `llm` are removed by deleting the section from the file; the step
+then inherits the project default again.
+
+`asr_biasing` and `dtmf_config` behave differently — the platform merges them rather than
+replacing them, so they cannot be removed. Turn them off with `is_enabled: false` instead. A
+disabled `asr_biasing` or `dtmf_config` is written back out as an absent section, so after a
+`poly pull` a disabled section will not appear in the file.
 
 ### Step prompts
 Tips:

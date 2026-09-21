@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar
@@ -19,7 +20,10 @@ from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     _parse_multi_resource_path,
+    register_resource,
 )
+
+logger = logging.getLogger(__name__)
 
 LANGUAGES_FILE = os.path.join("agent_settings", "languages.yaml")
 EMPTY_LANGUAGES = {"default_language": None, "additional_languages": []}
@@ -49,6 +53,7 @@ def _write_languages(
         cls.save_to_file(utils.dump_yaml(top_level), true_file_path)
 
 
+@register_resource("default_language")
 @dataclass
 class DefaultLanguage(MultiResourceYamlResource):
     """Resource representing the default language."""
@@ -72,8 +77,32 @@ class DefaultLanguage(MultiResourceYamlResource):
             name=yaml_dict.get("language_code", name),
         )
 
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "DefaultLanguage"]:
+        """Parse default language from a projection dict."""
+        if "languages" not in projection:
+            logger.debug("No read access to the default language - it will not be pulled.")
+            return {}
+
+        language_data = projection.get("languages", {})
+        if not language_data:
+            return {}
+        default_code = language_data.get("defaultLanguageCode")
+        if not default_code:
+            return {}
+        return {
+            default_code: cls(
+                resource_id=default_code,
+                name=default_code,
+            )
+        }
+
     @property
     def command_type(self) -> str:
+        return "languages_update_default_language"
+
+    @property
+    def update_command_type(self) -> str:
         return "languages_update_default_language"
 
     def build_update_proto(self) -> Languages_UpdateDefaultLanguage:
@@ -96,13 +125,13 @@ class DefaultLanguage(MultiResourceYamlResource):
         _write_languages(type(self), true_file_path, top_level, save_to_cache)
 
     @classmethod
-    def read_from_file(cls, file_path: str) -> str:
+    def _get_matching(cls, file_path: str) -> dict:
+        """Return the default language as a dict, reshaped from its bare scalar on-disk form."""
         true_file_path, _ = _parse_multi_resource_path(file_path)
-        top_level = cls._get_top_level_data(true_file_path)
-        value = top_level.get("default_language")
+        value = cls._get_top_level_data(true_file_path).get("default_language")
         if not value:
             raise FileNotFoundError(f"default_language not found in {true_file_path}")
-        return utils.dump_yaml({"language_code": value})
+        return {"language_code": value}
 
     @classmethod
     def delete_resource(cls, file_path: str, save_to_cache: bool = False) -> None:
@@ -143,6 +172,7 @@ class DefaultLanguage(MultiResourceYamlResource):
                 )
 
 
+@register_resource("additional_languages")
 @dataclass
 class AdditionalLanguage(MultiResourceYamlResource):
     """Resource representing an additional language."""
@@ -164,6 +194,28 @@ class AdditionalLanguage(MultiResourceYamlResource):
             resource_id=resource_id,
             name=yaml_dict.get("language_code", name),
         )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "AdditionalLanguage"]:
+        """Parse additional languages from a projection dict."""
+        language_data = projection.get("languages", {})
+        if not language_data:
+            return {}
+        additional_languages = {}
+        languages_projection = language_data.get("additionalLanguages", {}).get("entities", {})
+        if "languages" not in projection or any(
+            "code" not in lang for lang in languages_projection.values()
+        ):
+            logger.debug("No read access to additional languages - they will not be pulled.")
+            return {}
+
+        for lang_id, lang in languages_projection.items():
+            code = lang.get("code")
+            additional_languages[lang_id] = cls(
+                resource_id=lang_id,
+                name=code,
+            )
+        return additional_languages
 
     @property
     def command_type(self) -> str:
@@ -190,6 +242,9 @@ class AdditionalLanguage(MultiResourceYamlResource):
         self, base_path: str, format: bool = False, save_to_cache: bool = False, **kwargs
     ) -> None:
         """Save this language into the additional_languages list."""
+        # No-op for slim resources, which are not saved to disk.
+        if self.slim:
+            return
         true_file_path = os.path.join(base_path, LANGUAGES_FILE)
         _ensure_languages_file(type(self), true_file_path, save_to_cache)
         top_level = self._get_top_level_data(true_file_path)
@@ -200,14 +255,15 @@ class AdditionalLanguage(MultiResourceYamlResource):
         _write_languages(type(self), true_file_path, top_level, save_to_cache)
 
     @classmethod
-    def read_from_file(cls, file_path: str) -> str:
+    def _get_matching(cls, file_path: str) -> dict:
+        """Return the named additional language as a dict, reshaped from its bare scalar
+        on-disk form."""
         true_file_path, segments = _parse_multi_resource_path(file_path)
         resource_name = segments[-1]
-        top_level = cls._get_top_level_data(true_file_path)
-        additional = top_level.get("additional_languages") or []
+        additional = cls._get_top_level_data(true_file_path).get("additional_languages") or []
         if resource_name not in additional:
             raise FileNotFoundError(f"Language {resource_name} not found in {true_file_path}")
-        return utils.dump_yaml({"language_code": resource_name})
+        return {"language_code": resource_name}
 
     @classmethod
     def delete_resource(cls, file_path: str, save_to_cache: bool = False) -> None:

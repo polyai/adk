@@ -40,6 +40,7 @@ def func_latency_control(
     delay_before_responses_start: int = 0,
     silence_after_each_response: int = 0,
     delay_responses: Optional[list[tuple[str, int]]] = None,
+    randomize: bool = False,
 ) -> Callable:
     """Configure latency control for a function.
 
@@ -50,6 +51,10 @@ def func_latency_control(
             delay response. Must be between 0 and 10.
         delay_responses: A list of (message, duration_ms) tuples that are
             played while the function is executing.
+        randomize: When True, shuffle delay_responses order on each function
+            invocation. Timing slots are preserved (first uses
+            delay_before_responses_start; later slots use
+            silence_after_each_response).
     """
 
     def decorator(func: Callable) -> Callable:

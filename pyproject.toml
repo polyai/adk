@@ -32,10 +32,20 @@ exclude = [
 ]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 100
 exclude = [
     "src/poly/handlers/protobuf/",
+]
+
+[tool.ruff.lint]
+# Ruff defaults (pycodestyle errors + pyflakes) plus import sorting
+select = [
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "I",
 ]
 
 [tool.ruff.format]
@@ -69,6 +79,7 @@ omit = [
 ]
 
 [tool.pytest.ini_options]
+testpaths = ["src/poly/tests"]
 norecursedirs = [
     "test_projects",
 ]
@@ -98,11 +109,36 @@ ignore_packages = [
     "rpds-py",
     "urllib3",
     "wcwidth",
+    "posthog",
+    "typing_extensions",
+    # Voice-calling deps + transitives — all permissive (BSD/MIT/Apache/ISC), but
+    # licensecheck can't auto-classify their metadata and reports UNKNOWN.
+    "aioice",
+    "aiortc",
+    "av",
+    "cffi",
+    "cryptography",
+    "dnspython",
+    "google-crc32c",
+    "numpy",
+    "pycparser",
+    "pylibsrtp",
+    "pywebrtc-audio",
+    "sounddevice",
+    "websockets",
 ]
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
-version_variables = []
+# Keep skills/*/SKILL.md metadata.version in lockstep with the CLI version.
+# Validated in CI by scripts/validate_skills.py.
+version_variables = [
+    "skills/poly-adk-branching/SKILL.md:version",
+    "skills/poly-adk-conversations/SKILL.md:version",
+    "skills/poly-adk-rtc/SKILL.md:version",
+    "skills/poly-adk-testing/SKILL.md:version",
+    "skills/poly-adk-workflow/SKILL.md:version",
+]
 branch = "main"
 commit_message = "chore(release): {version}"
 build_command = "pip install build && python -m build"
@@ -136,9 +172,24 @@ tag_format = "v{version}"
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 [project]
 name = "polyai-adk"
-version = "0.25.7"
+version = "0.59.0"
 description = "Agent Development Kit (ADK) — a CLI for managing Agent Studio projects locally"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -153,7 +204,17 @@ dependencies = [
     "ruff>=0.14.0",
     "ty",
     "argcomplete>=3.0.0",
-    "langcodes==3.5.1"
+    "langcodes==3.5.1",
+    "posthog==7.35.4",
+    "packaging>=24.0",
+    # Voice calling (`poly call`): WebRTC transport, audio I/O, and WebRTC APM / AEC3
+    # (echo cancellation). Native deps — pinned to versions with confirmed prebuilt
+    # cp314 wheels so a future release can't break installs.
+    "aiortc==1.15.0",
+    "sounddevice==0.5.6",
+    "websockets==17.1",
+    "numpy==2.5.3",
+    "pywebrtc-audio==0.2.0",
 ]
 
 [project.license]

@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar, Optional
@@ -16,7 +17,9 @@ from poly.handlers.protobuf.sms_pb2 import (
     SMSTemplateReferences,
     UpdateSMSEnvPhoneNumbers,
 )
-from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -33,6 +36,7 @@ class EnvPhoneNumbers:
         }
 
 
+@register_resource("sms_templates")
 @dataclass
 class SMSTemplate(MultiResourceYamlResource):
     """SMS resource for ADK."""
@@ -46,12 +50,14 @@ class SMSTemplate(MultiResourceYamlResource):
         *,
         resource_id: str,
         name: str,
-        text: str,
+        text: str = "",
         env_phone_numbers: EnvPhoneNumbers | dict | None = None,
+        slim: bool = False,
     ):
         self.resource_id = resource_id
         self.name = name
         self.text = text
+        self.slim = slim
         if env_phone_numbers is None:
             self.env_phone_numbers = None
         elif isinstance(env_phone_numbers, EnvPhoneNumbers):
@@ -63,6 +69,43 @@ class SMSTemplate(MultiResourceYamlResource):
                 or env_phone_numbers.get("preRelease", ""),
                 live=env_phone_numbers.get("live", ""),
             )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "SMSTemplate"]:
+        """Parse SMS templates from a projection dict."""
+        sms_templates_projection = (
+            projection.get("sms", {}).get("templates", {}).get("entities", {})
+        )
+        sms_templates = {}
+        if "sms" not in projection:
+            logger.debug("No read access to SMS templates - they will not be pulled.")
+            return {}
+
+        # Read access is checked before "active": an auth-filtered template has no
+        # "active" field, and must not be mistaken for a deactivated one. Inactive
+        # templates are stubbed too, since we can't tell them apart here - harmless,
+        # as an inactive template's id is never referenced.
+        if any("active" not in template for template in sms_templates_projection.values()):
+            logger.debug("No read access to SMS templates - keeping names for references only.")
+            return {
+                template_id: cls(
+                    resource_id=template_id,
+                    name=template_data.get("name", ""),
+                    slim=True,
+                )
+                for template_id, template_data in sms_templates_projection.items()
+            }
+
+        for sms_template_id, sms_template_data in sms_templates_projection.items():
+            if not sms_template_data.get("active", False):
+                continue
+            sms_templates[sms_template_id] = cls(
+                resource_id=sms_template_id,
+                name=sms_template_data["name"],
+                text=sms_template_data.get("text", ""),
+                env_phone_numbers=sms_template_data.get("envPhoneNumbers", {}),
+            )
+        return sms_templates
 
     @classmethod
     def to_pretty_dict(
@@ -98,7 +141,7 @@ class SMSTemplate(MultiResourceYamlResource):
     ) -> "SMSTemplate":
         return cls(
             resource_id=resource_id,
-            name=yaml_data.get("name", ""),
+            name=yaml_data.get("name") or name,
             text=yaml_data.get("text", ""),
             env_phone_numbers=yaml_data.get("env_phone_numbers", {}),
         )

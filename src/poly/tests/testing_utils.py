@@ -5,7 +5,46 @@ Copyright PolyAI Limited
 
 import os
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import requests
+
+
+def make_mock_response(status_code=200, json_body=None, content=b""):
+    """Build a MagicMock that behaves like a requests.Response.
+
+    Args:
+        status_code (int): The HTTP status code exposed on ``.status_code``.
+        json_body (Any | None): Value returned by ``.json()``. When ``None``,
+            ``.json()`` raises ``requests.exceptions.JSONDecodeError`` to
+            simulate a body that is not valid JSON.
+        content (bytes): Raw bytes exposed on ``.content``.
+
+    Returns:
+        MagicMock: A mock response whose ``.raise_for_status()`` raises
+            ``requests.HTTPError`` (with ``response`` set to the mock) when
+            ``status_code`` is >= 400, and is a no-op otherwise.
+    """
+    response = MagicMock(spec=requests.Response)
+    response.status_code = status_code
+    response.content = content
+    response.text = content.decode(errors="replace") if content else ""
+
+    if json_body is None:
+
+        def _raise_json_error():
+            raise requests.exceptions.JSONDecodeError("Expecting value", "", 0)
+
+        response.json.side_effect = _raise_json_error
+    else:
+        response.json.return_value = json_body
+
+    def _raise_for_status():
+        if status_code >= 400:
+            raise requests.HTTPError(f"{status_code} Error", response=response)
+
+    response.raise_for_status.side_effect = _raise_for_status
+    return response
 
 
 @contextmanager

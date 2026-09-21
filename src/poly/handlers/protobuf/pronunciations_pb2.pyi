@@ -6,7 +6,7 @@ from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Map
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class TTSRule(_message.Message):
-    __slots__ = ("id", "regex", "replacement", "case_sensitive", "created_at", "created_by", "updated_at", "updated_by", "language_code", "description", "position", "name")
+    __slots__ = ("id", "regex", "replacement", "case_sensitive", "created_at", "created_by", "updated_at", "updated_by", "language_code", "description", "position", "name", "source")
     ID_FIELD_NUMBER: _ClassVar[int]
     REGEX_FIELD_NUMBER: _ClassVar[int]
     REPLACEMENT_FIELD_NUMBER: _ClassVar[int]
@@ -19,6 +19,7 @@ class TTSRule(_message.Message):
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     POSITION_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
     id: str
     regex: str
     replacement: str
@@ -31,7 +32,8 @@ class TTSRule(_message.Message):
     description: str
     position: int
     name: str
-    def __init__(self, id: _Optional[str] = ..., regex: _Optional[str] = ..., replacement: _Optional[str] = ..., case_sensitive: bool = ..., created_at: _Optional[str] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[str] = ..., updated_by: _Optional[str] = ..., language_code: _Optional[str] = ..., description: _Optional[str] = ..., position: _Optional[int] = ..., name: _Optional[str] = ...) -> None: ...
+    source: str
+    def __init__(self, id: _Optional[str] = ..., regex: _Optional[str] = ..., replacement: _Optional[str] = ..., case_sensitive: bool = ..., created_at: _Optional[str] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[str] = ..., updated_by: _Optional[str] = ..., language_code: _Optional[str] = ..., description: _Optional[str] = ..., position: _Optional[int] = ..., name: _Optional[str] = ..., source: _Optional[str] = ...) -> None: ...
 
 class Pronunciations(_message.Message):
     __slots__ = ("pronunciations",)

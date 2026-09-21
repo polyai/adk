@@ -85,20 +85,24 @@ class ApiIntegration_Create(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., environments: _Optional[_Union[Environments, _Mapping]] = ...) -> None: ...
 
 class ApiIntegration_Update(_message.Message):
-    __slots__ = ("id", "name", "description")
+    __slots__ = ("id", "name", "description", "old_name")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    OLD_NAME_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     description: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ...) -> None: ...
+    old_name: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., old_name: _Optional[str] = ...) -> None: ...
 
 class ApiIntegration_Delete(_message.Message):
-    __slots__ = ("id",)
+    __slots__ = ("id", "name")
     ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
     id: str
-    def __init__(self, id: _Optional[str] = ...) -> None: ...
+    name: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationConfig_Update(_message.Message):
     __slots__ = ("id", "environment", "base_url", "auth_type")
@@ -127,23 +131,31 @@ class ApiIntegrationOperation_Create(_message.Message):
     def __init__(self, name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., integration_id: _Optional[str] = ..., id: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationOperation_Update(_message.Message):
-    __slots__ = ("id", "name", "method", "resource", "integration_id")
+    __slots__ = ("id", "name", "method", "resource", "integration_id", "integration_name", "old_name")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     METHOD_FIELD_NUMBER: _ClassVar[int]
     RESOURCE_FIELD_NUMBER: _ClassVar[int]
     INTEGRATION_ID_FIELD_NUMBER: _ClassVar[int]
+    INTEGRATION_NAME_FIELD_NUMBER: _ClassVar[int]
+    OLD_NAME_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     method: str
     resource: str
     integration_id: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., integration_id: _Optional[str] = ...) -> None: ...
+    integration_name: str
+    old_name: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., integration_id: _Optional[str] = ..., integration_name: _Optional[str] = ..., old_name: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationOperation_Delete(_message.Message):
-    __slots__ = ("id", "integration_id")
+    __slots__ = ("id", "integration_id", "integration_name", "operation_name")
     ID_FIELD_NUMBER: _ClassVar[int]
     INTEGRATION_ID_FIELD_NUMBER: _ClassVar[int]
+    INTEGRATION_NAME_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_NAME_FIELD_NUMBER: _ClassVar[int]
     id: str
     integration_id: str
-    def __init__(self, id: _Optional[str] = ..., integration_id: _Optional[str] = ...) -> None: ...
+    integration_name: str
+    operation_name: str
+    def __init__(self, id: _Optional[str] = ..., integration_id: _Optional[str] = ..., integration_name: _Optional[str] = ..., operation_name: _Optional[str] = ...) -> None: ...

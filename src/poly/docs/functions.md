@@ -4,6 +4,8 @@
 
 Functions are Python files that add deterministic logic to your agent. They can be called by the LLM during conversation, used as flow steps, or run automatically at call start/end.
 
+> To run or validate functions programmatically over the REST API instead of via local files, see the `poly functions` commands (`poly functions --help`).
+
 ## Location
 ```
 functions/                          # Global functions
@@ -40,6 +42,8 @@ flows/{flow_name}/
 - **`@func_description('...')`** (required for global and transition functions): Description shown to the LLM to decide when to call the function.
 - **`@func_parameter('param_name', '...')`** (required for each parameter except `conv` and `flow`): Description of the parameter shown to the LLM. All parameters must also have a typed Python annotation (e.g. `booking_ref: str`)
 - **`@func_latency_control(...)`** (optional): Configure delay messages while the function runs.
+  Supports `delay_before_responses_start`, `silence_after_each_response`, `delay_responses`, and
+  `randomize` (shuffle delay response order on each invocation; default `False`).
 
 Function steps do not support `@func_parameter` or `@func_description`.
 

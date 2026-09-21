@@ -5,8 +5,8 @@ Copyright PolyAI Limited
 
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import ClassVar, Optional
+from dataclasses import dataclass, field, fields
+from typing import ClassVar, Optional, TypeAlias
 
 from google.protobuf.message import Message
 
@@ -23,6 +23,50 @@ class ResourceMapping:
     file_path: Optional[str]
     flow_name: Optional[str]
     resource_prefix: Optional[str]
+    flow_id: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        """Convert the mapping to a JSON serializable dictionary.
+
+        resource_type is stored by its registered name, as the class itself
+        cannot be serialized.
+        """
+        return {
+            "resource_id": self.resource_id,
+            "resource_type": RESOURCE_CLASS_TO_NAME[self.resource_type],
+            "resource_name": self.resource_name,
+            "file_path": self.file_path,
+            "flow_name": self.flow_name,
+            "resource_prefix": self.resource_prefix,
+            "flow_id": self.flow_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Optional["ResourceMapping"]:
+        """Rebuild a mapping from its serialized form.
+
+        Args:
+            data: A dictionary as produced by to_dict().
+
+        Returns:
+            The mapping, or None if the resource type is no longer registered or
+            the data does not fit the mapping shape. The status file outlives any
+            one ADK version, so unknown data is dropped rather than raised on.
+        """
+        field_names = {f.name for f in fields(cls)}
+        # Ignore keys a newer ADK (or a hand edit) may have added.
+        mapping_data = {key: value for key, value in data.items() if key in field_names}
+        resource_type = mapping_data.get("resource_type")
+        if isinstance(resource_type, str):
+            resource_type = RESOURCE_NAME_TO_CLASS.get(resource_type)
+        if resource_type is None:
+            return None
+        mapping_data["resource_type"] = resource_type
+        try:
+            return cls(**mapping_data)
+        except TypeError:
+            # Missing required fields - drop the one mapping, not the command.
+            return None
 
 
 @dataclass
@@ -74,6 +118,7 @@ class Resource(BaseResource, ABC):
 
     resource_id: str
     name: str
+    slim: bool = field(default=False, repr=False, init=False)
 
     @staticmethod
     def get_resource_prefix(**kwargs) -> str:
@@ -135,6 +180,8 @@ class Resource(BaseResource, ABC):
     def read_to_raw(cls, file_path: str, **kwargs) -> str:
         """Read the resource from a local path."""
         contents = cls.read_from_file(file_path)
+        if utils.contains_merge_conflict(contents):
+            raise utils.MergeConflictError(file_path)
         return cls.from_pretty(contents, file_path=file_path, **kwargs)
 
     @abstractmethod
@@ -189,8 +236,9 @@ class Resource(BaseResource, ABC):
         """Read a local resource from the given file path.
 
         Args:
-            file_name (str): The name of the file.
             file_path (str): The file path to read the resource from.
+            resource_id (str): The ID of the resource.
+            resource_name (str): The name of the resource.
 
         Returns:
             Resource: The resource instance.
@@ -264,6 +312,18 @@ class Resource(BaseResource, ABC):
         """
         return [], [], []
 
+    @classmethod
+    @abstractmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Resource"]:
+        """Create a dictionary of resources from a projection.
+
+        Args:
+            projection (dict): The projection containing resource data.
+        Returns:
+            dict[str, Resource]: A dictionary mapping resource IDs to Resource instances.
+        """
+        pass
+
 
 @dataclass
 class SubResource(BaseResource, ABC):
@@ -274,18 +334,28 @@ class SubResource(BaseResource, ABC):
     name: str
 
 
+def _strip_strings(data):
+    """Recursively strip leading/trailing whitespace from all string values."""
+    if isinstance(data, dict):
+        return {k: _strip_strings(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_strip_strings(item) for item in data]
+    if isinstance(data, str):
+        return data.strip()
+    return data
+
+
 class YamlResource(Resource, ABC):
     """Abstract base class for YAML resources in the Agent Studio."""
 
     @property
     def raw(self) -> str:
         """Serialize the resource into a YAML string representation."""
-        data = self.to_yaml_dict()
-        return utils.dump_yaml(data)
+        return utils.dump_yaml(_strip_strings(self.to_yaml_dict()))
 
     def compute_hash(self) -> str:
         """Compute a hash from the dict representation (avoids YAML serialization)."""
-        return utils.compute_hash_from_dict(self.to_yaml_dict())
+        return utils.compute_hash_from_dict(_strip_strings(self.to_yaml_dict()))
 
     @classmethod
     def to_pretty_dict(
@@ -305,7 +375,7 @@ class YamlResource(Resource, ABC):
             "resource_name": getattr(self, "name", None),
             **kwargs,
         }
-        return utils.dump_yaml(self.to_pretty_dict(self.to_yaml_dict(), **merged))
+        return utils.dump_yaml(self.to_pretty_dict(_strip_strings(self.to_yaml_dict()), **merged))
 
     @classmethod
     def make_pretty(
@@ -328,8 +398,8 @@ class YamlResource(Resource, ABC):
     def from_pretty_dict(
         cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
-        """Replace resource names with IDs in a parsed YAML dict. Override in subclasses."""
-        return yaml_dict
+        """Replace resource names with IDs in a parsed YAML dict, returning a new dict."""
+        return utils.replace_resource_names_with_ids_in_data(yaml_dict, resource_mappings or [])
 
     @classmethod
     def from_pretty(
@@ -345,17 +415,23 @@ class YamlResource(Resource, ABC):
         return utils.dump_yaml(yaml_dict)
 
     @classmethod
+    def _read_yaml_dict(cls, file_path: str) -> dict:
+        """Read and parse the resource's YAML file into a dict."""
+        contents = cls.read_from_file(file_path)
+        if utils.contains_merge_conflict(contents):
+            raise utils.MergeConflictError(file_path)
+        try:
+            return utils.load_yaml(contents) or {}
+        except Exception as e:
+            raise ValueError(f"Error loading YAML file: {file_path}") from e
+
+    @classmethod
     def read_local_resource(
         cls, file_path: str, resource_id: str, resource_name: str, **kwargs
     ) -> "YamlResource":
         """Read a local YAML resource from the given file path."""
-        contents = cls.read_from_file(file_path)
         resource_mappings = kwargs.pop("resource_mappings", None)
-        contents = utils.replace_resource_names_with_ids(contents, resource_mappings or [])
-        try:
-            yaml_dict = utils.load_yaml(contents) or {}
-        except Exception as e:
-            raise ValueError(f"Error loading YAML file: {file_path}") from e
+        yaml_dict = cls._read_yaml_dict(file_path)
         yaml_dict = cls.from_pretty_dict(
             yaml_dict,
             resource_mappings=resource_mappings,
@@ -363,13 +439,15 @@ class YamlResource(Resource, ABC):
             file_path=file_path,
             **kwargs,
         )
-        return cls.from_yaml_dict(
+        instance = cls.from_yaml_dict(
             yaml_dict,
             resource_id=resource_id,
             name=resource_name,
             resource_mappings=resource_mappings,
             **kwargs,
         )
+        utils.check_yaml_field_types(instance)
+        return instance
 
     @abstractmethod
     def to_yaml_dict(self) -> dict:
@@ -452,6 +530,8 @@ class MultiResourceYamlResource(YamlResource, ABC):
         if cached is not None and cached[0] == current_mtime:
             return cached[1]
         contents = super().read_from_file(true_file_path)
+        if utils.contains_merge_conflict(contents):
+            raise utils.MergeConflictError(true_file_path)
         top_level_yaml_dict = utils.load_yaml(contents) or {}
         cls._file_cache[true_file_path] = (current_mtime, top_level_yaml_dict)
         return top_level_yaml_dict
@@ -466,7 +546,13 @@ class MultiResourceYamlResource(YamlResource, ABC):
         cls._file_cache[true_file_path] = (new_mtime, top_level_yaml_dict)
 
     @classmethod
-    def read_from_file(cls, file_path: str) -> str:
+    def _get_matching(cls, file_path: str) -> dict:
+        """Return the parsed sub-dict for a single resource from its multi-resource file.
+
+        This is the single read seam: read_from_file dumps it to a string and _read_yaml_dict
+        returns it directly. Subclasses whose on-disk format is not a standard sub-dict (e.g.
+        a bare scalar) override this to reshape it into a dict.
+        """
         true_file_path, segments = _parse_multi_resource_path(file_path)
         top_level_name = segments[0]
         top_level_yaml_dict = cls._get_top_level_data(true_file_path)
@@ -477,7 +563,7 @@ class MultiResourceYamlResource(YamlResource, ABC):
                 raise ValueError(f"Top level YAML data is not a dict: {top_level_yaml_dict}")
             if not yaml_dict:
                 raise FileNotFoundError(f"Resource not found in {true_file_path}")
-            return utils.dump_yaml(yaml_dict)
+            return yaml_dict
 
         resource_clean_name = segments[-1]
         yaml_list = top_level_yaml_dict.get(top_level_name, [])
@@ -492,7 +578,17 @@ class MultiResourceYamlResource(YamlResource, ABC):
             raise FileNotFoundError(
                 f"Resource with name {resource_clean_name} not found in {true_file_path}"
             )
-        return utils.dump_yaml(matching_resource)
+        return matching_resource
+
+    @classmethod
+    def read_from_file(cls, file_path: str) -> str:
+        """Read a single resource's contents from its multi-resource file, as YAML."""
+        return utils.dump_yaml(cls._get_matching(file_path))
+
+    @classmethod
+    def _read_yaml_dict(cls, file_path: str) -> dict:
+        """Return the single resource's parsed sub-dict from the multi-resource file."""
+        return cls._get_matching(file_path)
 
     @classmethod
     def _find_matching(cls, yaml_list, resource_clean_name) -> Optional[dict]:
@@ -605,3 +701,100 @@ class MultiResourceYamlResource(YamlResource, ABC):
     def format_resource(content: str, file_name: str, **kwargs) -> str:
         """Format the resource content."""
         return utils.format_yaml(content, file_name)
+
+
+# ---------------------------------------------------------------------------
+# Resource registry
+# ---------------------------------------------------------------------------
+
+RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {}
+RESOURCE_CLASS_TO_NAME: dict[type[Resource], str] = {}
+PROJECTION_REGISTRY: list[type[Resource]] = []
+
+
+ResourceType: TypeAlias = type[Resource]
+ResourceMap: TypeAlias = dict[ResourceType, dict[str, Resource]]
+SubResourceType: TypeAlias = type[SubResource]
+SubResourceMap: TypeAlias = dict[SubResourceType, dict[str, SubResource]]
+
+
+def register_resource(name: str) -> callable:
+    """Class decorator to register a resource type.
+
+    Registers the class in both the name mapping (for YAML discovery and
+    serialization) and the projection registry (for parsing API projections).
+
+    Args:
+        name: The string key for this resource type (e.g. "topics", "functions").
+    """
+
+    def decorator(cls: type[Resource]) -> type[Resource]:
+        RESOURCE_NAME_TO_CLASS[name] = cls
+        RESOURCE_CLASS_TO_NAME[cls] = name
+        PROJECTION_REGISTRY.append(cls)
+        return cls
+
+    return decorator
+
+
+def _filter_slim_resources(all_resources: ResourceMap) -> tuple[ResourceMap, list[ResourceMapping]]:
+    # Imported here: both modules import from this one at module level.
+    from poly.resources.function import Function
+    from poly.resources.variable import Variable
+
+    slim_resources: list[ResourceMapping] = []
+    resources: ResourceMap = {}
+
+    # Variables are slim whenever functions are. Variables have no file of their
+    # own - they exist as a reference graph derived from function code - and
+    # variableUpdate is gated on jupiter_flows rather than functions, so the API
+    # would accept a graph rebuilt from functions the user cannot read.
+    functions_slim = any(r.slim for r in all_resources.get(Function, {}).values())
+
+    for resources_dict in all_resources.values():
+        for resource in resources_dict.values():
+            if isinstance(resource, Variable):
+                resource.slim = functions_slim
+
+            if not resource.slim:
+                resources.setdefault(type(resource), {})[resource.resource_id] = resource
+                continue
+            slim_resources.append(
+                ResourceMapping(
+                    resource_id=resource.resource_id,
+                    resource_type=type(resource),
+                    resource_name=resource.name,
+                    file_path=resource.file_path,
+                    flow_name=getattr(resource, "flow_name", None),
+                    resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
+                    flow_id=getattr(resource, "flow_id", None),
+                )
+            )
+    return resources, slim_resources
+
+
+def load_resources_from_projection(
+    projection: dict,
+) -> tuple[ResourceMap, list[ResourceMapping]]:
+    """Parse a projection dict into typed Resources.
+
+    Iterates all registered resource classes and calls their from_projection()
+    classmethod. No API dependency — works fully offline.
+
+    Args:
+        projection: Raw projection dict from the Sourcerer API or a local file.
+
+    Returns:
+        A tuple containing:
+        1. A dictionary mapping resource types to {resource_id: Resource}.
+        2. A list of ResourceMapping objects for slim resources.
+    """
+    result: dict[type[Resource], dict[str, Resource]] = {}
+    for resource_cls in PROJECTION_REGISTRY:
+        resources = resource_cls.from_projection(projection)
+        if resources:
+            result[resource_cls] = resources
+
+    filtered_resources, slim_resources = _filter_slim_resources(result)
+
+    return filtered_resources, slim_resources

@@ -109,7 +109,7 @@ The agent should end each session with the closing message configured for that v
 
 !!! info "`--variant` resolves against the deployed environment"
 
-    `--variant` looks up the variant name in the environment you are chatting against (default: `main` in sandbox). If you pushed `variant_attributes.yaml` on a feature branch but have not merged it yet, the variant names will not exist in sandbox and the flag will have no effect. Merge the branch first — with [`poly branch merge`](../reference/branch_merge.md) or through Agent Studio — then run `poly chat --variant <name>`.
+    `--variant` looks up the variant name in the environment you are chatting against (default: `main` in sandbox). If you pushed `variant_attributes.yaml` on a feature branch but have not merged it yet, the variant names will not exist in sandbox and the flag will have no effect. Merge the branch first — with [`poly branch merge`](../reference/cli/branch.md#poly-branch-merge) or through Agent Studio — then run `poly chat --variant <name>`.
 
 ## Related pages
 
@@ -120,14 +120,14 @@ The agent should end each session with the closing message configured for that v
     ---
 
     Return values, utterance, hangup, and control flow.
-    [Open functions](../reference/functions.md)
+    [Open functions](../reference/resources/functions.md)
 
 -   **Variants**
 
     ---
 
     Per-site configuration using variant attributes.
-    [Open variants](../reference/variants.md)
+    [Open variants](../reference/resources/variants.md)
 
 -   **Return values reference (platform)**
 

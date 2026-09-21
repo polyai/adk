@@ -11,17 +11,21 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import datetime
+from enum import Enum
+from functools import cached_property
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
+from poly.call.session import DEFAULT_CALL_MODE, CallSession
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
+from poly.handlers.sdk import SourcererAPIError
 from poly.migration_utils import (
     MigrationFlag,
     get_all_migration_flags,
@@ -29,104 +33,40 @@ from poly.migration_utils import (
     run_migrations,
 )
 from poly.resources import (
-    AdditionalLanguage,
-    ApiIntegration,
-    AsrSettings,
     BaseFlowStep,
-    ChatGreeting,
-    ChatSafetyFilters,
-    ChatStylePrompt,
-    Condition,
-    DefaultLanguage,
-    Entity,
-    ExperimentalConfig,
+    ChildTopic,
+    Document,
     FlowConfig,
     FlowStep,
     Function,
     FunctionStep,
-    GeneralSafetyFilters,
-    Handoff,
-    KeyphraseBoosting,
     MultiResourceYamlResource,
-    PhraseFilter,
     Pronunciation,
     Resource,
+    ResourceMap,
     ResourceMapping,
-    SettingsPersonality,
-    SettingsRole,
-    SettingsRules,
-    SMSTemplate,
-    StepType,
-    SubResource,
+    ResourceType,
+    SubResourceMap,
     TestCase,
     Topic,
-    TranscriptCorrection,
-    Translation,
-    Variable,
-    Variant,
-    VariantAttribute,
-    VoiceDisclaimerMessage,
-    VoiceGreeting,
-    VoiceSafetyFilters,
-    VoiceStylePrompt,
 )
-from poly.resources.resource import _parse_multi_resource_path
-from poly.utils import compute_variable_references
+from poly.resources.resource import (
+    RESOURCE_CLASS_TO_NAME,
+    RESOURCE_NAME_TO_CLASS,
+    _parse_multi_resource_path,
+    load_resources_from_projection,
+)
+from poly.utils import prepush
+from poly.utils.commands import queue_set_default_commands
 
 logger = logging.getLogger(__name__)
+
 
 PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 
-
-# New resources to be added here
-RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
-    "api_integration": ApiIntegration,
-    "functions": Function,
-    "topics": Topic,
-    "personality": SettingsPersonality,
-    "role": SettingsRole,
-    "rules": SettingsRules,
-    "flow_steps": FlowStep,
-    "function_steps": FunctionStep,
-    "flow_config": FlowConfig,
-    "entities": Entity,
-    "experimental_config": ExperimentalConfig,
-    "safety_filters": GeneralSafetyFilters,
-    "sms_templates": SMSTemplate,
-    "handoffs": Handoff,
-    "variants": Variant,
-    "variant_attributes": VariantAttribute,
-    "variables": Variable,
-    "voice_greeting": VoiceGreeting,
-    "voice_safety_filters": VoiceSafetyFilters,
-    "voice_style_prompt": VoiceStylePrompt,
-    "voice_disclaimer": VoiceDisclaimerMessage,
-    "chat_greeting": ChatGreeting,
-    "chat_safety_filters": ChatSafetyFilters,
-    "chat_style_prompt": ChatStylePrompt,
-    "keyphrase_boosting": KeyphraseBoosting,
-    "transcript_corrections": TranscriptCorrection,
-    "asr_settings": AsrSettings,
-    "phrase_filtering": PhraseFilter,
-    "pronunciations": Pronunciation,
-    "test_cases": TestCase,
-    "translations": Translation,
-    "default_language": DefaultLanguage,
-    "additional_languages": AdditionalLanguage,
-}
-
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
 
-
-RESOURCE_CLASS_TO_NAME: dict[type[Resource], str] = {
-    v: k for k, v in RESOURCE_NAME_TO_CLASS.items()
-}
-
-ResourceType: TypeAlias = type[Resource]
-ResourceMap: TypeAlias = dict[ResourceType, dict[str, Resource]]
-SubResourceType: TypeAlias = type[SubResource]
-SubResourceMap: TypeAlias = dict[SubResourceType, dict[str, SubResource]]
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
 
@@ -152,6 +92,14 @@ class PushPhaseChangeSet:
     post: ResourceChangeSet
 
 
+class DeploymentMode(Enum):
+    """Deployment mode for the project"""
+
+    SIMPLE = "simple"
+    RELEASES = "releases"
+    RELEASES_BRANCHES = "releases_branches"
+
+
 @dataclass
 class AgentStudioProject:
     """Dataclass representing an Agent Studio Project"""
@@ -162,16 +110,20 @@ class AgentStudioProject:
     root_path: str
     resources: ResourceMap
     last_updated: datetime
+    slim_resources: list[ResourceMapping] = field(default_factory=list)
     branch_id: str = None
     project_name: Optional[str] = None
+    account_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
+    rtc_metadata: Optional[dict[str, dict]] = None
+    _deployment_mode: Optional[DeploymentMode] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
     # before they are saved.
-    _not_loaded_resources: list[ResourceType] = None
+    _not_loaded_resources: list[ResourceType] = field(default_factory=list)
 
     @property
     def all_resources(self) -> list[Resource]:
@@ -205,14 +157,17 @@ class AgentStudioProject:
         }
         if self.project_name:
             config["project_name"] = self.project_name
+        if self.account_name:
+            config["account_name"] = self.account_name
         return config
 
     @classmethod
     def _load_resources_from_status_dict(
         cls, status_dict: dict
-    ) -> tuple[ResourceMap, list[ResourceType]]:
+    ) -> tuple[ResourceMap, list[ResourceType], list[ResourceMapping]]:
         resources: ResourceMap = {}
         not_loaded_resources: list[ResourceType] = []
+        slim_resources: list[ResourceMapping] = []
         for resource_name, resource_class in RESOURCE_NAME_TO_CLASS.items():
             resource_dicts: Optional[dict[str, dict[str, Any]]] = status_dict.get(
                 "resources", {}
@@ -229,7 +184,12 @@ class AgentStudioProject:
                 )
                 for resource_id, resource_dict in resource_dicts.items()
             }
-        return resources, not_loaded_resources
+        for slim_resource_dict in status_dict.get("slim_resources", []):
+            resource_mapping = ResourceMapping.from_dict(slim_resource_dict)
+            if resource_mapping is not None:
+                slim_resources.append(resource_mapping)
+
+        return resources, not_loaded_resources, slim_resources
 
     @classmethod
     def from_file_path(cls, root_path: str) -> "AgentStudioProject":
@@ -256,17 +216,19 @@ class AgentStudioProject:
             json_bytes = base64.b64decode(encoded)
             status_dict = json.loads(json_bytes.decode("utf-8"))
 
+        migration_flags = load_migration_flags(status_dict.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, migration_flags, status_dict=status_dict)
+
         # Load resources
-        resources, not_loaded_resources = cls._load_resources_from_status_dict(status_dict)
+        resources, not_loaded_resources, slim_resources = cls._load_resources_from_status_dict(
+            status_dict
+        )
 
         last_updated_str = status_dict.get("last_updated")
         if last_updated_str:
             last_updated = datetime.fromisoformat(last_updated_str)
         else:
             last_updated = datetime.now()
-
-        migration_flags = load_migration_flags(status_dict.get("migration_flags", []))
-        migration_flags = run_migrations(root_path, migration_flags)
 
         return cls(
             region=config_dict.get("region", ""),
@@ -276,10 +238,13 @@ class AgentStudioProject:
             root_path=root_path,
             last_updated=last_updated,
             file_structure_info={},
+            slim_resources=slim_resources,
             branch_id=status_dict.get("branch_id", "main"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
+            account_name=config_dict.get("account_name") or status_dict.get("account_name"),
             _not_loaded_resources=not_loaded_resources,
             _migration_flags=migration_flags,
+            rtc_metadata=status_dict.get("rtc_metadata"),
         )
 
     def to_dict(self) -> dict:
@@ -294,24 +259,27 @@ class AgentStudioProject:
                 }
                 for rt, rs in self.resources.items()
             },
+            "slim_resources": [r.to_dict() for r in self.slim_resources or []],
             "last_updated": (self.last_updated.isoformat() if self.last_updated else None),
             "file_structure_info": self.file_structure_info,
             "branch_id": self.branch_id,
             "project_name": self.project_name,
+            "account_name": self.account_name,
             "migration_flags": [flag.value for flag in self._migration_flags]
             if self._migration_flags
             else [],
+            "rtc_metadata": self.rtc_metadata or {},
         }
 
     @classmethod
     def from_dict(cls, data: dict, root_path: str) -> "AgentStudioProject":
         """Load whole project class from a dictionary"""
-        resources, not_loaded_resources = cls._load_resources_from_status_dict(data)
+        migration_flags = load_migration_flags(data.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, migration_flags, status_dict=data)
+
+        resources, not_loaded_resources, slim_resources = cls._load_resources_from_status_dict(data)
 
         file_structure_info = cls.compute_file_structure_info(resources)
-
-        migration_flags = load_migration_flags(data.get("migration_flags", []))
-        migration_flags = run_migrations(root_path, migration_flags)
 
         return cls(
             region=data.get("region", ""),
@@ -323,8 +291,11 @@ class AgentStudioProject:
             file_structure_info=file_structure_info,
             branch_id=data.get("branch_id", "main"),
             project_name=data.get("project_name"),
+            account_name=data.get("account_name"),
             _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
+            slim_resources=slim_resources,
+            rtc_metadata=data.get("rtc_metadata"),
         )
 
     @staticmethod
@@ -362,6 +333,7 @@ class AgentStudioProject:
         account_id: str,
         project_id: str,
         project_name: str = None,
+        account_name: str = None,
         format: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
         on_save: Callable[[int, int], None] | None = None,
@@ -374,6 +346,7 @@ class AgentStudioProject:
             account_id (str): The account ID of the project
             project_id (str): The project ID
             project_name (str): The human-readable project name
+            account_name (str): The human-readable account/workspace name
             format (bool): If True, format resources after pulling
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
@@ -397,11 +370,12 @@ class AgentStudioProject:
             last_updated=datetime.now(),
             branch_id="main",
             project_name=project_name,
+            account_name=account_name,
             _migration_flags=get_all_migration_flags(),
         )
 
         try:
-            project.resources, projection = project.api_handler.pull_resources(
+            project.resources, slim_resources, projection = project.api_handler.pull_resources(
                 projection_json=projection_json
             )
         except ValueError:
@@ -413,8 +387,8 @@ class AgentStudioProject:
 
         project._check_no_duplicate_resource_paths(project.resources)
 
-        resource_mappings: list[ResourceMapping] = project._make_resource_mappings(
-            project.resources
+        resource_mappings: list[ResourceMapping] = (
+            project._make_resource_mappings(project.resources) + slim_resources
         )
 
         all_resources = project.all_resources
@@ -473,10 +447,11 @@ class AgentStudioProject:
         self,
         preserve_not_loaded_resources: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
-    ) -> None:
-        """Load the current state of project on Agent Studio into memory
+    ) -> tuple[dict[str, list["Resource"]], dict[str, Any]]:
+        """Load the current state of project on Agent Studio into memory.
 
-        This is used when no current resources are loaded.
+        Pulls resources from the API (or a projection dict), updates in-memory
+        state and the status file, but does **not** touch working-tree files.
 
         Args:
             preserve_not_loaded_resources: If True, retain the current
@@ -484,15 +459,100 @@ class AgentStudioProject:
                 for comparison without affecting local state).
             projection_json: If set, build resources from this projection dict
                 instead of fetching from the API (same shape as a sourcerer projection).
+
+        Returns:
+            A tuple of (resources dict, projection dict).
         """
-        resources, _ = self.api_handler.pull_resources(projection_json=projection_json)
+        resources, slim_resources, projection = self.api_handler.pull_resources(
+            projection_json=projection_json
+        )
         self._check_no_duplicate_resource_paths(resources)
 
         self.resources = resources
+        self.slim_resources = slim_resources
         self.file_structure_info = self.compute_file_structure_info(resources)
         if not preserve_not_loaded_resources:
             self._not_loaded_resources = []
+
+        if projection_json is None:
+            self.branch_id = self.api_handler.branch_id
+
         self.save_config()
+        return resources, projection
+
+    def fetch_project(
+        self,
+        branch_name: Optional[str] = None,
+        projection_json: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Fetch the latest remote state, optionally switching branch first.
+
+        Handles branch switching then delegates to ``load_project``.
+
+        Args:
+            branch_name: If provided, switch the API context to this branch
+                before fetching.  Raises ``ValueError`` if the branch does not
+                exist.
+            projection_json: If set, build resources from this projection dict
+                instead of fetching from the API.
+
+        Returns:
+            The projection dict.
+        """
+        if branch_name is not None:
+            branches = self.api_handler.get_branches()
+            if branch_name not in branches:
+                raise ValueError(f"Branch '{branch_name}' does not exist.")
+            branch_id = branches[branch_name]["branchId"]
+            self.branch_id = branch_id
+            self.api_handler.switch_branch(branch_id)
+
+        _, projection = self.load_project(projection_json=projection_json)
+        return projection
+
+    @staticmethod
+    def list_templates(region: str) -> list[dict[str, Any]]:
+        """List available template projects for a region.
+
+        Args:
+            region: The region to query.
+
+        Returns:
+            list[dict[str, Any]]: A list of template project summaries.
+        """
+        return AgentStudioInterface.list_template_projects(region)
+
+    def load_template(self, region: str, template_id: str) -> None:
+        """Load a template into the project.
+
+        Writes template resources to disk without updating the tracked state,
+        so the next ``poly push`` detects the template files as changes.
+        """
+        template_resources, template_slim_resources = AgentStudioInterface.get_template_resources(
+            template_id, region
+        )
+
+        self._not_loaded_resources = []
+        self.slim_resources = template_slim_resources
+        self.save_config()
+
+        # Delete only ADK-managed resource files, leaving non-ADK files intact.
+        for resource_class in RESOURCE_NAME_TO_CLASS.values():
+            for path in self._sort_paths_for_reverse_deletion(
+                resource_class.discover_resources(self.root_path), resource_class
+            ):
+                resource_class.delete_resource(path)
+
+        # Empty original_resources so all template resources are treated as new
+        # and saved directly, bypassing the three-way merge.
+        empty_resources: ResourceMap = {}
+        self._update_pulled_resources(
+            original_resources=empty_resources,
+            incoming_resources=template_resources,
+            force=True,
+            original_slim_resources=[],
+            incoming_slim_resources=template_slim_resources,
+        )
 
     def pull_project(
         self,
@@ -524,7 +584,7 @@ class AgentStudioProject:
         # Pull resources
         # -------
 
-        incoming_resources, projection = self.api_handler.pull_resources(
+        incoming_resources, slim_resources, projection = self.api_handler.pull_resources(
             projection_json=projection_json
         )
         # Only update branch id if we used the API to pull the resources
@@ -542,6 +602,8 @@ class AgentStudioProject:
             force=force,
             format=format,
             on_save=on_save,
+            original_slim_resources=self.slim_resources,
+            incoming_slim_resources=slim_resources,
         )
 
         # -------
@@ -554,24 +616,14 @@ class AgentStudioProject:
 
         # Save the updated project configuration
         self.resources = incoming_resources
+        self.slim_resources = slim_resources
 
         # Update file_structure_info
         self.file_structure_info = self.compute_file_structure_info(incoming_resources)
 
         # Delete all new resources
         if force:
-            new_resources, _, _ = self.find_new_kept_deleted(self.discover_local_resources())
-            pronunciations = []
-            for resource_mapping in new_resources:
-                # Because pronunciation uses position as a "name", deleting these out of order
-                # Effectively "changes" the name, causing some of the resources to not be deleted
-                if resource_mapping.resource_type == Pronunciation:
-                    pronunciations.append(resource_mapping.file_path)
-                else:
-                    resource_mapping.resource_type.delete_resource(resource_mapping.file_path)
-
-            for file_path in self._sort_paths_for_reverse_deletion(pronunciations, Pronunciation):
-                Pronunciation.delete_resource(file_path)
+            self._delete_new_resources()
 
         utils.export_decorators(DECORATORS, self.root_path)
         utils.save_imports(self.root_path)
@@ -595,12 +647,14 @@ class AgentStudioProject:
         Returns:
             list[str]: Always empty (force overwrite produces no conflicts).
         """
-        incoming_resources = self.get_remote_resources_by_name(env)
+        incoming_resources, slim_resources = self.get_remote_resources_by_name(env)
         if not incoming_resources:
             raise ValueError(f"No resources returned from environment '{env}'.")
         self.branch_id = self.api_handler.branch_id
 
         self._check_no_duplicate_resource_paths(incoming_resources)
+
+        self._delete_all_local_resources()
 
         files_with_conflicts = self._update_pulled_resources(
             original_resources=self.resources,
@@ -608,19 +662,41 @@ class AgentStudioProject:
             force=True,
             format=format,
             on_save=None,
+            original_slim_resources=self.slim_resources,
+            incoming_slim_resources=slim_resources,
         )
+        self.slim_resources = slim_resources
 
-        flow_folder = os.path.join(self.root_path, "flows")
-        if os.path.exists(flow_folder):
-            self._delete_empty_folders(flow_folder)
+        utils.export_decorators(DECORATORS, self.root_path)
+        utils.save_imports(self.root_path)
 
-        self.resources = incoming_resources
-        self.file_structure_info = self.compute_file_structure_info(incoming_resources)
+        return files_with_conflicts
 
+    def _delete_all_local_resources(self) -> None:
+        """Delete every local resource file, leaving a clean slate."""
+        discovered = self.discover_local_resources()
+        pronunciations: list[str] = []
+        for resource_class, file_paths in discovered.items():
+            if resource_class is Pronunciation:
+                pronunciations.extend(file_paths)
+            else:
+                for file_path in file_paths:
+                    resource_class.delete_resource(file_path)
+
+        for file_path in self._sort_paths_for_reverse_deletion(pronunciations, Pronunciation):
+            Pronunciation.delete_resource(file_path)
+
+        for entry in os.listdir(self.root_path):
+            entry_path = os.path.join(self.root_path, entry)
+            if os.path.isdir(entry_path) and entry not in {"_gen", ".git"}:
+                self._delete_empty_folders(entry_path)
+
+    def _delete_new_resources(self) -> None:
+        """Delete locally-new resources that don't exist on the remote."""
         new_resources, _, _ = self.find_new_kept_deleted(self.discover_local_resources())
         pronunciations = []
         for resource_mapping in new_resources:
-            # Because pronunciation uses position as a "name", deleting these out of order
+            # Pronunciation uses position as a "name" — deleting out of order
             # effectively "changes" the name, causing some resources not to be deleted.
             if resource_mapping.resource_type == Pronunciation:
                 pronunciations.append(resource_mapping.file_path)
@@ -629,12 +705,6 @@ class AgentStudioProject:
 
         for file_path in self._sort_paths_for_reverse_deletion(pronunciations, Pronunciation):
             Pronunciation.delete_resource(file_path)
-
-        utils.export_decorators(DECORATORS, self.root_path)
-        utils.save_imports(self.root_path)
-        self.save_config()
-
-        return files_with_conflicts
 
     @staticmethod
     def _delete_empty_folders(folder_path: str) -> None:
@@ -802,20 +872,47 @@ class AgentStudioProject:
             for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
         }
 
-        # Compute current file (formatted)
+        # Normalise local resources through resource classes to ensure
+        # serialization differences don't cause merge conflicts
         local_file_contents = {}
         MultiResourceYamlResource._file_cache.clear()
         if not force:
-            for file in incoming_file_contents.keys():
-                try:
-                    contents = Resource.read_from_file(file)
-                    if format:
-                        contents = MultiResourceYamlResource.format_resource(
-                            contents, file_name=file
+            for resource_type, resources in incoming_resources.items():
+                if not issubclass(resource_type, MultiResourceYamlResource):
+                    continue
+                for resource in resources.values():
+                    try:
+                        mapping = self._make_resource_mapping(resource)
+                        local_resource = self.read_local_resource(
+                            resource=mapping,
+                            resource_mappings=incoming_resource_mappings,
                         )
-                    local_file_contents[file] = contents
-                except FileNotFoundError:
-                    local_file_contents[file] = ""
+                        local_resource.save(
+                            self.root_path,
+                            resource_name=local_resource.name,
+                            resource_mappings=incoming_resource_mappings,
+                            format=format,
+                            save_to_cache=True,
+                        )
+                    except (FileNotFoundError, ValueError, TypeError):
+                        continue
+
+            local_file_contents = {
+                file: resource_utils.dump_yaml(top_level_yaml_dict)
+                for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
+            }
+
+            for file in incoming_file_contents:
+                if file not in local_file_contents:
+                    try:
+                        contents = Resource.read_from_file(file)
+                        if format:
+                            contents = MultiResourceYamlResource.format_resource(
+                                contents, file_name=file
+                            )
+                        local_file_contents[file] = contents
+                    except FileNotFoundError:
+                        local_file_contents[file] = ""
 
         # Save and compute merges
         for file, incoming_content in incoming_file_contents.items():
@@ -839,6 +936,27 @@ class AgentStudioProject:
             MultiResourceYamlResource.save_to_file(merged_contents, file)
         MultiResourceYamlResource._file_cache.clear()
 
+        # Delete multi-resource types whose entire type is absent from incoming
+        for resource_type, original in original_resources.items():
+            if not issubclass(resource_type, MultiResourceYamlResource):
+                continue
+            if resource_type in incoming_resources:
+                continue
+            if (
+                self._not_loaded_resources is not None
+                and resource_type in self._not_loaded_resources
+            ):
+                continue
+            deleted_paths = {res.get_path(self.root_path) for res in original.values()}
+            for file_path in self._sort_paths_for_reverse_deletion(deleted_paths, resource_type):
+                resource_type.delete_resource(file_path, save_to_cache=True)
+
+        # The deletions above only reached the cache. Flush them, then clear: a cached
+        # entry carries the pre-write mtime, so anything left behind makes every later
+        # read in this process see a file state that is not on disk.
+        MultiResourceYamlResource.write_cache_to_file()
+        MultiResourceYamlResource._file_cache.clear()
+
         return files_with_conflicts, progress_offset
 
     def _update_pulled_resources(
@@ -848,17 +966,20 @@ class AgentStudioProject:
         force: bool,
         format: bool = False,
         on_save: Callable[[int, int], None] | None = None,
+        *,
+        original_slim_resources: list[ResourceMapping],
+        incoming_slim_resources: list[ResourceMapping],
     ) -> list[str]:
         files_with_conflicts = []
 
         # Generate resource mappings
-        incoming_resource_mappings: list[ResourceMapping] = self._make_resource_mappings(
-            incoming_resources
+        incoming_resource_mappings: list[ResourceMapping] = (
+            self._make_resource_mappings(incoming_resources) + incoming_slim_resources
         )
 
         # If not force, compare with original and local changes
-        original_resource_mappings: list[ResourceMapping] = self._make_resource_mappings(
-            self.resources
+        original_resource_mappings: list[ResourceMapping] = (
+            self._make_resource_mappings(original_resources) + original_slim_resources
         )
 
         # Merging is done on a per file basis.
@@ -868,7 +989,7 @@ class AgentStudioProject:
         total = sum(len(res) for res in incoming_resources.values())
 
         multi_conflicts, current = self._update_multi_resource_yaml_resources(
-            original_resources=self.resources,
+            original_resources=original_resources,
             incoming_resources=incoming_resources,
             original_resource_mappings=original_resource_mappings,
             incoming_resource_mappings=incoming_resource_mappings,
@@ -1013,6 +1134,20 @@ class AgentStudioProject:
             ):
                 self._not_loaded_resources.remove(resource_type)
 
+        # Delete resources whose entire type is absent from incoming
+        for resource_type, original in original_resources.items():
+            if resource_type in incoming_resources:
+                continue
+            if issubclass(resource_type, MultiResourceYamlResource):
+                continue
+            if (
+                self._not_loaded_resources is not None
+                and resource_type in self._not_loaded_resources
+            ):
+                continue
+            for resource in original.values():
+                resource_type.delete_resource(resource.get_path(self.root_path))
+
         return files_with_conflicts
 
     def _stage_commands(
@@ -1047,7 +1182,7 @@ class AgentStudioProject:
         )
 
         # Queue new/updated/deleted resources
-        commands = []
+        commands = self.api_handler.get_queued_commands()
         if pre_changes.new or pre_changes.deleted or pre_changes.updated:
             commands.extend(
                 self.api_handler.queue_resources(
@@ -1075,6 +1210,13 @@ class AgentStudioProject:
                 )
             )
 
+        queue_set_default_commands(
+            new_resources,
+            updated_resources,
+            commands,
+            queue_command=lambda command: self.api_handler.queue_command(command),
+        )
+
         return commands
 
     def push_project(
@@ -1084,6 +1226,7 @@ class AgentStudioProject:
         dry_run=False,
         format=False,
         projection_json: Optional[dict[str, Any]] = None,
+        parent_projection_json: Optional[dict[str, Any]] = None,
     ) -> tuple[bool, str, list[Message]]:
         """Push the project configuration to the Agent Studio Interactor.
 
@@ -1094,6 +1237,10 @@ class AgentStudioProject:
             format (bool): If True, format the resource before saving.
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
+            parent_projection_json (Optional[dict[str, Any]]): The parent branch's
+                projection. When provided, parent ids are adopted from it entirely
+                offline (also on dry runs); an empty dict means "no parent". When
+                None, the parent branch is fetched from the platform instead.
 
         Returns:
             Tuple[bool, str, list[Message]]:
@@ -1123,12 +1270,35 @@ class AgentStudioProject:
                         [],
                     )
 
-                # Push Algorithm
+        # New local resources that path-match a parent branch resource adopt the
+        # parent's ids at mint time, so pushing does not mint ids that diverge from
+        # resources the parent already has. A supplied parent projection is used
+        # entirely offline (also on dry runs); otherwise dry runs skip the parent
+        # fetch unless the test env var forces it (to inspect the adopted ids
+        # without pushing).
+        parent_resources: ResourceMap = {}
+        if parent_projection_json is not None:
+            parent_resources, _ = load_resources_from_projection(parent_projection_json)
+        elif not dry_run or os.environ.get("POLY_ADK_SYNC_PARENT_IDS_TEST"):
+            try:
+                parent_resources = self._fetch_parent_resources()
+            except Exception as e:
+                raise SourcererAPIError("Failed to fetch parent resources") from e
+        parent_branch_paths_to_resource = self._resources_by_absolute_path(parent_resources)
+
+        # Push Algorithm
         # 1. Get new/kept/deleted resources
         new_resource_mappings, kept_resource_mappings, deleted_resource_mappings = (
-            self.find_new_kept_deleted(self.discover_local_resources())
+            self.find_new_kept_deleted(
+                self.discover_local_resources(),
+                parent_lookup=parent_branch_paths_to_resource,
+            )
         )
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
+        # Slim resources have no file to read - they exist only so that references
+        # to them still resolve to a name. Keep them out of the list we iterate,
+        # and only in the list we resolve references against.
+        resource_mappings = local_resource_mappings + self.slim_resources
 
         if format:
             # format all local resources before pushing
@@ -1142,10 +1312,31 @@ class AgentStudioProject:
         # 2. Read all new/kept resources from disk
         new_state: ResourceMap = {}
 
+        new_file_paths = {rm.file_path for rm in new_resource_mappings}
         for resource_mapping in local_resource_mappings:
+            # The parent resource supplies known_* subresource ids (function parameters,
+            # step conditions): new resources take the parent's wholesale, kept resources
+            # only inherit subresources they do not already have by name.
+            parent_resource = parent_branch_paths_to_resource.get(resource_mapping.file_path)
+            if resource_mapping.file_path in new_file_paths:
+                original_resource = parent_resource
+            elif parent_resource is not None:
+                branch_resource = self.resources.get(resource_mapping.resource_type, {}).get(
+                    resource_mapping.resource_id
+                )
+                original_resource = (
+                    self._augment_original_with_parent_subresources(
+                        branch_resource, parent_resource
+                    )
+                    if branch_resource
+                    else None
+                )
+            else:
+                original_resource = None
             local_resource = self.read_local_resource(
                 resource=resource_mapping,
-                resource_mappings=local_resource_mappings,
+                resource_mappings=resource_mappings,
+                original_resource=original_resource,
             )
             new_state.setdefault(resource_mapping.resource_type, {})[
                 resource_mapping.resource_id
@@ -1196,7 +1387,7 @@ class AgentStudioProject:
         # 4. Validate all resources with new state
         if not skip_validation:
             validation_errors = self.validate_resources(
-                resources_dict=new_state, resource_mappings=local_resource_mappings
+                resources_dict=new_state, resource_mappings=resource_mappings
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
@@ -1227,7 +1418,6 @@ class AgentStudioProject:
         if dry_run:
             return True, "Dry run completed. No changes were pushed.", commands
         else:
-            # Update local state
             self.resources = new_state
             self.file_structure_info = self.compute_file_structure_info(self.resources)
             self.save_config()
@@ -1369,8 +1559,6 @@ class AgentStudioProject:
             post push: delete dummy
         )
 
-        Only update the default variant if it's being enabled.
-
         If a function is new or updated and it references a variable, update the variable references.
 
         Args:
@@ -1390,301 +1578,50 @@ class AgentStudioProject:
         post_push_updated_resources: ResourceMap = {}
         post_push_deleted_resources: ResourceMap = {}
 
-        # If we are creating any Webchat config, instead enable Webchat and set
-        # the configs as update
-        if (
-            ChatGreeting in new_resources
-            or ChatSafetyFilters in new_resources
-            or ChatStylePrompt in new_resources
-        ):
-            self.api_handler.queue_command(
-                utils.create_command_webchat_channel_update_status(enabled=True)
-            )
-            # Move any Webchat config in new resources to updated resources
-            for resource_type in [ChatGreeting, ChatSafetyFilters, ChatStylePrompt]:
-                for resource_id, resource in new_resources.get(resource_type, {}).items():
-                    pre_push_updated_resources.setdefault(resource_type, {})[resource_id] = resource
-                if resource_type in new_resources:
-                    new_resources.pop(resource_type)
-
-        # When a function is deleted the backend prunes that function ID from all
-        # variable references. If the deleted function was the variable's only reference,
-        # the backend auto-deletes the variable, which causes an explicit delete command
-        # to fail and destroys any data on the variable.
-        # If we want to keep the variable (another function is being updated/created to reference it)
-        # Then it needs to be recreated after the function is deleted.
-        old_var_refs = compute_variable_references(
-            self.resources, self._make_resource_mappings(self.resources)
+        prepush.enable_webchat_channel(
+            new_resources,
+            pre_push_updated_resources,
+            # Lazy lambda: only touch the api_handler property (which saves config
+            # as a side effect) if a webchat command is actually queued
+            queue_command=lambda command: self.api_handler.queue_command(command),
         )
-        new_var_refs = compute_variable_references(state, self._make_resource_mappings(state))
-
-        deleted_fn_ids = set(deleted_resources.get(Function, {}).keys()) | set(
-            deleted_resources.get(FunctionStep, {}).keys()
+        prepush.fix_orphaned_variables(
+            state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            current_resources=self.resources,
+            make_resource_mappings=self._make_resource_mappings,
+        )
+        prepush.group_new_flow_resources(
+            new_resources, updated_resources, post_push_deleted_resources
+        )
+        prepush.prune_cascade_deleted_flow_children(deleted_resources)
+        prepush.replace_flow_steps_with_dummy_workaround(
+            state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            pre_push_new_resources,
+            pre_push_updated_resources,
+            post_push_deleted_resources,
+            current_resources=self.resources,
+        )
+        prepush.default_new_variant_attributes(
+            new_resources, deleted_resources, current_resources=self.resources
+        )
+        prepush.fix_conditions_for_deleted_steps(
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            current_resources=self.resources,
         )
 
-        for var_id, old_refs in old_var_refs.items():
-            if var_id not in self.resources.get(Variable, {}):
-                continue  # Variable not in current state (e.g. new variable from linked project sync)
-            if var_id in deleted_resources.get(Variable, {}):
-                continue  # already being explicitly deleted
-            all_old_fn_ids = {fn_id for field_refs in old_refs.values() for fn_id in field_refs}
-            if all_old_fn_ids.issubset(deleted_fn_ids):
-                variable = self.resources[Variable][var_id]
-                deleted_resources.setdefault(Variable, {})[var_id] = variable
-                new_resources.setdefault(Variable, {})[var_id] = variable
-
-            # If the variable references have changed, update the variable references
-            new_refs = new_var_refs.get(var_id, {})
-            if old_refs != new_refs:
-                variable = self.resources[Variable][var_id]
-                variable.references = new_refs
-                updated_resources.setdefault(Variable, {})[var_id] = variable
-
-        # Update new variables with their references
-        for var_id, variable in new_resources.get(Variable, {}).items():
-            variable_refs = new_var_refs.get(var_id, {})
-            variable.references = variable_refs
-            updated_resources.setdefault(Variable, {})[var_id] = variable
-
-        # Create flow steps at same time as creating a flow
-        for flow_config_id, flow_config in new_resources.get(FlowConfig, {}).items():
-            if not isinstance(flow_config, FlowConfig):
-                raise TypeError(f"Flow config is not a FlowConfig: {flow_config}")
-            steps = []
-            functions = []
-            for resource_id, resource in list(new_resources.get(FlowStep, {}).items()):
-                if isinstance(resource, FlowStep) and resource.flow_id == flow_config_id:
-                    steps.append(resource)
-                    new_resources[FlowStep].pop(resource_id, None)
-                    if new_resources[FlowStep] == {}:
-                        new_resources.pop(FlowStep, None)
-
-            for resource_id, resource in list(new_resources.get(Function, {}).items()):
-                if isinstance(resource, Function) and resource.flow_id == flow_config_id:
-                    functions.append(resource)
-                    new_resources[Function].pop(resource_id, None)
-                    if new_resources[Function] == {}:
-                        new_resources.pop(Function, None)
-
-            flow_config.steps = steps
-            flow_config.functions = functions
-
-            function_start_step = next(
-                (
-                    step
-                    for step in new_resources.get(FunctionStep, {}).values()
-                    if step.step_id == flow_config.start_step
-                    and step.flow_id == flow_config.resource_id
-                ),
-                None,
-            )
-            if function_start_step:
-                # Create a dummy default step
-                dummy_step_id = f"{function_start_step.step_id}_start_step_temp"
-                dummy = FlowStep(
-                    resource_id=f"{flow_config.name}_{dummy_step_id}",
-                    step_id=dummy_step_id,
-                    name=f"{flow_config.name}-temp",
-                    flow_id=flow_config.resource_id,
-                    flow_name=flow_config.name,
-                    step_type=StepType.DEFAULT_STEP,
-                    prompt="temp prompt",
-                )
-                push_flow_config = copy.deepcopy(flow_config)
-                push_flow_config.steps.append(dummy)
-                push_flow_config.start_step = dummy.step_id
-                new_resources[FlowConfig][flow_config_id] = push_flow_config
-                reset_flow_config = FlowConfig(
-                    resource_id=flow_config.resource_id,
-                    name=flow_config.name,
-                    description=flow_config.description,
-                    start_step=function_start_step.step_id,
-                )
-                updated_resources.setdefault(FlowConfig, {})[flow_config.resource_id] = (
-                    reset_flow_config
-                )
-                post_push_deleted_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
-
-        # Deleting flow config deletes all its steps/functions, so we don't need to
-        for flow_config_id in deleted_resources.get(FlowConfig, {}):
-            for resource_type in [FlowStep, Function, FunctionStep]:
-                for resource_id, resource in list(deleted_resources.get(resource_type, {}).items()):
-                    if (
-                        isinstance(resource, (FlowStep, Function, FunctionStep))
-                        and resource.flow_id == flow_config_id
-                    ):
-                        deleted_resources[resource_type].pop(resource_id, None)
-
-        # If we are deleting a start step and updating the flow config to use a different step,
-        # we need to delete the start step after the creation of the new one
-        for flow_config_id, flow_config in updated_resources.get(FlowConfig, {}).items():
-            if flow_config_id in new_resources.get(FlowConfig, {}):
-                continue
-            old_flow_config = self.resources.get(FlowConfig, {}).get(flow_config_id)
-            old_step_resource_id = f"{old_flow_config.name}_{old_flow_config.start_step}"
-
-            old_start_step = self.resources.get(FlowStep, {}).get(
-                old_step_resource_id
-            ) or self.resources.get(FunctionStep, {}).get(old_step_resource_id)
-            if not old_start_step:
-                raise ValueError(f"Old start step not found: {old_step_resource_id}")
-
-            if flow_config.start_step != old_start_step.step_id:
-                if old_start_step.resource_id in deleted_resources.get(type(old_start_step), {}):
-                    # If it's being recreated with the same name (sync ids) we need to create a dummy step
-                    new_step_resource_id = f"{flow_config.name}_{flow_config.start_step}"
-                    if (
-                        (
-                            new_start_step := (
-                                new_resources.get(FlowStep, {}).get(new_step_resource_id)
-                                or new_resources.get(FunctionStep, {}).get(new_step_resource_id)
-                            )
-                        )
-                        and new_start_step.name == old_start_step.name
-                        and isinstance(new_start_step, type(old_start_step))
-                    ):
-                        dummy_step_id = f"{old_start_step.step_id}_temp"
-                        dummy = FlowStep(
-                            resource_id=f"{new_start_step.flow_name}_{dummy_step_id}",
-                            step_id=dummy_step_id,
-                            name=f"{new_start_step.name}-temp",
-                            flow_id=new_start_step.flow_id,
-                            flow_name=new_start_step.flow_name,
-                            step_type=StepType.DEFAULT_STEP,
-                            prompt="temp prompt",
-                        )
-                        flow_config_switch_to_dummy = FlowConfig(
-                            resource_id=flow_config.resource_id,
-                            name=flow_config.name,
-                            description=flow_config.description,
-                            start_step=dummy.step_id,
-                        )
-                        pre_push_new_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
-                        pre_push_updated_resources.setdefault(FlowConfig, {})[
-                            flow_config.resource_id
-                        ] = flow_config_switch_to_dummy
-                        post_push_deleted_resources.setdefault(FlowStep, {})[dummy.resource_id] = (
-                            dummy
-                        )
-                        updated_resources.setdefault(FlowConfig, {})[flow_config.resource_id] = (
-                            flow_config
-                        )
-                    else:
-                        # Move the old start step to post-push deleted resources
-                        post_push_deleted_resources.setdefault(type(old_start_step), {})[
-                            old_start_step.resource_id
-                        ] = old_start_step
-                        deleted_resources.get(type(old_start_step), {}).pop(
-                            old_start_step.resource_id, None
-                        )
-
-        # If a flow step has changed type, we need to delete the old step and create a new one.
-        # For the start step, use a dummy workaround (empty default_step).
-        updated_flow_steps: list[tuple[str, FlowStep]] = list(
-            updated_resources.get(FlowStep, {}).items()
+        prepush.clear_unused_settings_from_flow_step(
+            updated_resources,
+            current_resources=self.resources,
+            queue_command=lambda command: self.api_handler.queue_command(command),
         )
-        removed_flow_step_ids = []
-        for flow_step_id, flow_step in updated_flow_steps:
-            original_flow_step: FlowStep = self.resources.get(FlowStep, {}).get(flow_step_id)
-            if flow_step.step_type != original_flow_step.step_type:
-                flow_config = state.get(FlowConfig, {}).get(original_flow_step.flow_id)
-                is_start_step = (
-                    flow_config is not None and flow_config.start_step == original_flow_step.step_id
-                )
-                if is_start_step:
-                    dummy_step_id = f"{original_flow_step.step_id}_temp"
-                    dummy = FlowStep(
-                        resource_id=f"{original_flow_step.flow_name}_{dummy_step_id}",
-                        step_id=dummy_step_id,
-                        name=f"{original_flow_step.name}-temp",
-                        flow_id=original_flow_step.flow_id,
-                        flow_name=original_flow_step.flow_name,
-                        step_type=StepType.DEFAULT_STEP,
-                        prompt="temp prompt",
-                    )
-                    flow_config_switch_to_dummy = FlowConfig(
-                        resource_id=flow_config.resource_id,
-                        name=flow_config.name,
-                        description=flow_config.description,
-                        start_step=dummy.step_id,
-                    )
-                    pre_push_new_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
-                    pre_push_updated_resources.setdefault(FlowConfig, {})[
-                        flow_config.resource_id
-                    ] = flow_config_switch_to_dummy
-                    updated_resources.setdefault(FlowConfig, {})[flow_config.resource_id] = (
-                        flow_config
-                    )
-                    post_push_deleted_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
-                deleted_resources.setdefault(FlowStep, {})[flow_step_id] = original_flow_step
-                new_resources.setdefault(FlowStep, {})[flow_step_id] = flow_step
-                removed_flow_step_ids.append(flow_step_id)
-
-        for flow_step_id in removed_flow_step_ids:
-            updated_resources[FlowStep].pop(flow_step_id, None)
-
-        # Add known attributes to any new variant to give it a default value
-        for variant in new_resources.get(Variant, {}).values():
-            if not isinstance(variant, Variant):
-                raise TypeError(f"Variant is not a Variant: {variant}")
-            attribute_ids = list(self.resources.get(VariantAttribute, {}).keys())
-            variant.attribute_ids = attribute_ids
-
-        # Only update the default variant if it's being enabled
-        updated_variants: list[Variant] = list(updated_resources.get(Variant, {}).values())
-        for variant in updated_variants:
-            if not variant.is_default:
-                updated_resources[Variant].pop(variant.resource_id, None)
-
-        # Don't delete condition if parent step is being deleted
-        for flow_step in list(deleted_resources.get(FlowStep, {}).values()):
-            for condition in flow_step.conditions:
-                deleted_resources.get(Condition, {}).pop(condition.resource_id, None)
-
-        # If we are deleting a step and pointing a condition to a different step, the delete will auto delete the condition so the update will fail. We should instead make it a create
-        deleted_steps = list(deleted_resources.get(FlowStep, {}).values()) + list(
-            deleted_resources.get(FunctionStep, {}).values()
-        )
-        updated_conditions = list(updated_resources.get(Condition, {}).items())
-        if deleted_steps:
-            flows_with_deleted_steps = {deleted_step.flow_id for deleted_step in deleted_steps}
-            for condition_id, condition in updated_conditions:
-                if condition.flow_id not in flows_with_deleted_steps:
-                    continue
-                original_flow_step: FlowStep = next(
-                    (
-                        flow_step
-                        for flow_step in self.resources.get(FlowStep, {}).values()
-                        if flow_step.flow_id == condition.flow_id
-                        and flow_step.step_id == condition.step_id
-                    ),
-                    None,
-                )
-                if not original_flow_step:
-                    continue
-                original_condition: Condition = next(
-                    (
-                        cond
-                        for cond in original_flow_step.conditions
-                        if cond.resource_id == condition_id
-                    ),
-                    None,
-                )
-                if not original_condition:
-                    continue
-
-                deleted_original_step = next(
-                    (
-                        step
-                        for step in deleted_steps
-                        if step.flow_id == condition.flow_id
-                        and step.step_id == original_condition.child_step
-                    ),
-                    None,
-                )
-                if deleted_original_step:
-                    new_resources.setdefault(Condition, {})[condition_id] = condition
-                    updated_resources.get(Condition, {}).pop(condition_id, None)
 
         return PushPhaseChangeSet(
             main=ResourceChangeSet(
@@ -1715,13 +1652,17 @@ class AgentStudioProject:
                 - List of new files.
                 - List of deleted files.
         """
-        files_with_conflicts = []
+        files_with_conflicts: list[str] = []
         modified_files = []
-        new_files = []
-        deleted_files = []
 
+        # Multi-resource files that fail to parse (conflict markers) are collected here so
+        # their resources are skipped by the comparison rather than raising or being counted
+        # as deleted. Single-file conflicts are caught in the kept loop below.
         new_resources_mappings, kept_resources_mappings, deleted_resources_mappings = (
-            self.find_new_kept_deleted(self.discover_local_resources())
+            self.find_new_kept_deleted(
+                self.discover_local_resources(conflict_files=files_with_conflicts),
+                conflict_files=files_with_conflicts,
+            )
         )
 
         new_files = [resource.file_path for resource in new_resources_mappings]
@@ -1729,6 +1670,7 @@ class AgentStudioProject:
         deleted_files = [resource.file_path for resource in deleted_resources_mappings]
 
         local_resources_mappings = new_resources_mappings + kept_resources_mappings
+        local_resources_mappings.extend(self.slim_resources)
 
         for kept_local_resource_mapping in kept_resources_mappings:
             original_hash = self.file_structure_info.get(
@@ -1736,34 +1678,35 @@ class AgentStudioProject:
                 {},
             ).get("hash")
 
-            local_content = kept_local_resource_mapping.resource_type.read_from_file(
-                kept_local_resource_mapping.file_path
-            )
-            if resource_utils.contains_merge_conflict(local_content):
-                files_with_conflicts.append(kept_local_resource_mapping.file_path)
+            try:
+                local_resource = self.read_local_resource(
+                    resource=kept_local_resource_mapping,
+                    resource_mappings=local_resources_mappings,
+                )
+            except resource_utils.MergeConflictError as e:
+                files_with_conflicts.extend(e.file_paths)
                 continue
-
-            local_resource = self.read_local_resource(
-                resource=kept_local_resource_mapping, resource_mappings=local_resources_mappings
-            )
 
             modified = local_resource.is_modified(original_hash)
             if modified:
                 modified_files.append(kept_local_resource_mapping.file_path)
 
+        # dedupe: several resources can share one conflicted multi-resource file
+        files_with_conflicts = list(dict.fromkeys(files_with_conflicts))
+
         return files_with_conflicts, modified_files, new_files, deleted_files
 
-    def revert_changes(self, files: list[str] = None) -> list[str]:
+    def revert_changes(self, file_paths: list[str] = None) -> list[str]:
         """Revert changes in the project.
 
         Args:
-            files (list[str]): List of specific files to revert. If None, revert all changes.
+            file_paths (list[str]): List of specific files to revert. If None, revert all changes.
         """
         reverted_files = []
         resource_mappings = self._make_resource_mappings(self.resources)
-        all_files = not files
+        all_files = not file_paths
         for resource in self.all_resources:
-            if not all_files and resource.get_path(self.root_path) not in files:
+            if not all_files and resource.get_path(self.root_path) not in file_paths:
                 continue
 
             resource.save(self.root_path, resource_mappings=resource_mappings)
@@ -1771,46 +1714,39 @@ class AgentStudioProject:
 
         return reverted_files
 
-    def get_diffs(self, all_files: bool = False, files: list[str] = None) -> dict[str, str]:
+    def get_diffs(self, file_paths: list[str] = None) -> dict[str, str]:
         """Get the diffs of all resources in the project.
 
         Args:
-            all_files (bool): If True, get diffs for all files.
-            files (list[str]): List of specific files to get diffs for.
+            file_paths (list[str]): List of specific files to get diffs for. If None, diff all.
 
         Returns:
             dict[str, str]: A dictionary mapping resource file names to their diffs.
         """
         diffs = {}
+        conflict_files: list[str] = []
+        all_files = not file_paths
         new_resources_mappings, kept_resources_mappings, deleted_resources_mappings = (
             self.find_new_kept_deleted(self.discover_local_resources())
         )
         local_resources_mappings = new_resources_mappings + kept_resources_mappings
+        local_resources_mappings.extend(self.slim_resources)
 
         for local_resource_mapping in kept_resources_mappings:
-            if not all_files and files and local_resource_mapping.file_path not in files:
+            if not all_files and file_paths and local_resource_mapping.file_path not in file_paths:
                 continue
 
             original_hash = self.file_structure_info.get(
                 os.path.relpath(local_resource_mapping.file_path, self.root_path), {}
             ).get("hash")
 
-            local_content = local_resource_mapping.resource_type.read_from_file(
-                local_resource_mapping.file_path
-            )
-            if resource_utils.contains_merge_conflict(local_content):
-                original_resource = self.resources.get(
-                    local_resource_mapping.resource_type, {}
-                ).get(local_resource_mapping.resource_id)
-                original_content = original_resource.raw if original_resource else ""
-                diffs[local_resource_mapping.file_path] = resource_utils.get_diff(
-                    original_content, local_content
+            try:
+                local_resource = self.read_local_resource(
+                    resource=local_resource_mapping, resource_mappings=local_resources_mappings
                 )
+            except resource_utils.MergeConflictError as e:
+                conflict_files.extend(e.file_paths)
                 continue
-
-            local_resource = self.read_local_resource(
-                resource=local_resource_mapping, resource_mappings=local_resources_mappings
-            )
 
             modified = local_resource.is_modified(original_hash)
             if not modified:
@@ -1826,9 +1762,13 @@ class AgentStudioProject:
                 diffs[local_resource.file_path] = diff
 
         for resource_mapping in new_resources_mappings:
-            resource = self.read_local_resource(
-                resource=resource_mapping, resource_mappings=local_resources_mappings
-            )
+            try:
+                resource = self.read_local_resource(
+                    resource=resource_mapping, resource_mappings=local_resources_mappings
+                )
+            except resource_utils.MergeConflictError as e:
+                conflict_files.extend(e.file_paths)
+                continue
 
             diffs[resource.file_path] = resource_utils.get_diff(
                 "",
@@ -1839,8 +1779,10 @@ class AgentStudioProject:
                 ),
             )
 
+        resource_utils.raise_if_merge_conflicts(conflict_files)
+
         for resource_mapping in deleted_resources_mappings:
-            if not all_files and files and resource_mapping.file_path not in files:
+            if not all_files and file_paths and resource_mapping.file_path not in file_paths:
                 continue
 
             original_resource = self.resources.get(resource_mapping.resource_type, {}).get(
@@ -1886,7 +1828,7 @@ class AgentStudioProject:
 
         return deployments, active_deployment_hashes
 
-    def get_remote_resources_by_name(self, name: str) -> ResourceMap:
+    def get_remote_resources_by_name(self, name: str) -> tuple[ResourceMap, list[ResourceMapping]]:
         """Resolve and fetch a remote project state by name.
         Supports:
         - **Environments**: sandbox / pre-release / live (active deployments)
@@ -1906,20 +1848,20 @@ class AgentStudioProject:
             deployment_id = (deployments.get(name) or {}).get("deployment_id")
             if not deployment_id:
                 logger.error(f"No active deployment found for environment '{name}'.")
-                return {}
+                return {}, []
             logger.info(f"Pulling resources from deployment '{deployment_id}' ({name})...")
             return self.api_handler.pull_deployment_resources(deployment_id)
 
         # 2) Branch name -> branch resources (event sourcing only)
         branches = self.api_handler.get_branches()
         if name in branches:
-            branch_id = branches[name]
+            branch_id = branches[name]["branchId"]
             branch_api_handler = AgentStudioInterface(
                 self.region, self.account_id, self.project_id, branch_id
             )
             logger.info(f"Pulling resources from branch '{name}'...")
-            resources, _ = branch_api_handler.pull_resources()
-            return resources
+            resources, branch_slim_resources, _ = branch_api_handler.pull_resources()
+            return resources, branch_slim_resources
 
         # 3) Deployment version hash prefix -> deployment resources
         version_hash = (name or "")[:9].lower()
@@ -1941,25 +1883,28 @@ class AgentStudioProject:
                 self.discover_local_resources()
             )
             local_resources_mappings = new_resources_mappings + kept_resources_mappings
+            # Slim resources have no file to read - resolve references against
+            # them, but never iterate them looking for one.
+            resource_mappings = local_resources_mappings + self.slim_resources
             resources: ResourceMap = {}
             for resource_mapping in local_resources_mappings:
                 resource = self.read_local_resource(
-                    resource=resource_mapping, resource_mappings=local_resources_mappings
+                    resource=resource_mapping, resource_mappings=resource_mappings
                 )
                 resources.setdefault(resource_mapping.resource_type, {})[
                     resource_mapping.resource_id
                 ] = resource
-            return resources
+            return resources, self.slim_resources
 
         logger.error(f"Name '{name}' not found in environments, branches, or deployments.")
-        return {}
+        return {}, []
 
     def diff_remote_named_versions(
         self, before_name: str, after_name: str
     ) -> Optional[dict[str, str]]:
         """Compute diffs between two remote project states (branches / envs / deployments)."""
-        before_resources = self.get_remote_resources_by_name(before_name)
-        after_resources = self.get_remote_resources_by_name(after_name)
+        before_resources, before_slim_resources = self.get_remote_resources_by_name(before_name)
+        after_resources, after_slim_resources = self.get_remote_resources_by_name(after_name)
 
         if not before_resources or not after_resources:
             logger.error(
@@ -1968,6 +1913,43 @@ class AgentStudioProject:
             )
             return None
 
+        diffs = self.diff_resource_maps(
+            before_resources, before_slim_resources, after_resources, after_slim_resources
+        )
+        if diffs is None:
+            logger.info(
+                f"No differences detected between names '{before_name}' and '{after_name}'."
+            )
+        return diffs
+
+    def diff_projections(
+        self, before_projection: dict[str, Any], after_projection: dict[str, Any]
+    ) -> Optional[dict[str, str]]:
+        """Compute diffs between two sourcerer projections without any API calls.
+
+        Empty projections are valid (e.g. diffing a branch against an empty main).
+        """
+        before_resources, before_slim_resources = load_resources_from_projection(before_projection)
+        after_resources, after_slim_resources = load_resources_from_projection(after_projection)
+        return self.diff_resource_maps(
+            before_resources,
+            before_slim_resources,
+            after_resources,
+            after_slim_resources,
+        )
+
+    def diff_resource_maps(
+        self,
+        before_resources: ResourceMap,
+        before_resource_slim_mappings: list[ResourceMapping],
+        after_resources: ResourceMap,
+        after_resource_slim_mappings: list[ResourceMapping],
+    ) -> Optional[dict[str, str]]:
+        """Compute per-file diffs between two in-memory resource maps.
+
+        Returns a mapping of file path to unified diff, or None when the two
+        states render identically.
+        """
         before_resources_by_path: dict[tuple[ResourceType, str], Resource] = {}
         for resource_type, resources_dict in before_resources.items():
             for resource_id, resource in resources_dict.items():
@@ -1977,17 +1959,13 @@ class AgentStudioProject:
         for resource_type, resources_dict in after_resources.items():
             for resource_id, resource in resources_dict.items():
                 after_resources_by_path[(resource_type, resource.file_path)] = resource
-        # Combine both resource sets to create comprehensive resource_mappings
-        # This ensures all resource references can be properly converted to pretty names
-        combined_resources: ResourceMap = {}
-        for resource_type, resources_dict in before_resources.items():
-            combined_resources[resource_type] = combined_resources.get(resource_type, {})
-            combined_resources[resource_type].update(resources_dict)
-        for resource_type, resources_dict in after_resources.items():
-            combined_resources[resource_type] = combined_resources.get(resource_type, {})
-            combined_resources[resource_type].update(resources_dict)
 
-        resource_mappings = self._make_resource_mappings(combined_resources)
+        before_resource_mappings = (
+            self._make_resource_mappings(before_resources) + before_resource_slim_mappings
+        )
+        after_resource_mappings = (
+            self._make_resource_mappings(after_resources) + after_resource_slim_mappings
+        )
 
         diffs: dict[str, str] = {}
 
@@ -2000,30 +1978,188 @@ class AgentStudioProject:
             after_resource = after_resources_by_path.get(resource_key)
 
             if before_resource and after_resource:
-                before_pretty = before_resource.to_pretty(resource_mappings=resource_mappings)
-                after_pretty = after_resource.to_pretty(resource_mappings=resource_mappings)
+                before_pretty = before_resource.to_pretty(
+                    resource_mappings=before_resource_mappings
+                )
+                after_pretty = after_resource.to_pretty(resource_mappings=after_resource_mappings)
                 if before_pretty != after_pretty:
                     diffs[before_resource.file_path] = resource_utils.get_diff(
                         before_pretty, after_pretty
                     )
             elif before_resource and not after_resource:
-                before_pretty = before_resource.to_pretty(resource_mappings=resource_mappings)
+                before_pretty = before_resource.to_pretty(
+                    resource_mappings=before_resource_mappings
+                )
                 diffs[before_resource.file_path] = resource_utils.get_diff(before_pretty, "")
             elif not before_resource and after_resource:
-                after_pretty = after_resource.to_pretty(resource_mappings=resource_mappings)
+                after_pretty = after_resource.to_pretty(resource_mappings=after_resource_mappings)
                 diffs[after_resource.file_path] = resource_utils.get_diff("", after_pretty)
 
         if not diffs:
-            logger.info(
-                f"No differences detected between names '{before_name}' and '{after_name}'."
-            )
             return None
 
         return diffs
 
-    def discover_local_resources(self) -> DiscoveredResourcePaths:
+    def _resolve_branch_fork_point(
+        self, branch_name: Optional[str] = None
+    ) -> tuple[ResourceMap, list[ResourceMapping], ResourceMap, list[ResourceMapping]]:
+        """Fetch parent (at fork point) and branch (latest) resource maps.
+
+        Args:
+            branch_name: Name of the branch. Defaults to the current branch.
+
+        Returns:
+            tuple[ResourceMap, list[ResourceMapping], ResourceMap, list[ResourceMapping]]:
+                A tuple containing:
+                1. The parent's resources at the fork point.
+                2. The parent's slim resources.
+                3. The branch's latest resources.
+                4. The branch's slim resources.
+
+        Raises:
+            ValueError: If on main with no branch specified, or the branch
+                does not exist.
+        """
+        current_name, branches = self.get_branches()
+
+        if branch_name:
+            if branch_name not in branches:
+                raise ValueError(f"Branch '{branch_name}' does not exist.")
+            branch_meta = branches[branch_name]
+        else:
+            if self.branch_id == "main" or current_name is None:
+                raise ValueError(
+                    "Cannot diff main branch. Switch to a branch or specify a branch name."
+                )
+            branch_meta = branches[current_name]
+
+        branch_id = branch_meta["branchId"]
+        parent_branch_id = branch_meta.get("parentBranchId")
+        parent_sequence_raw = branch_meta.get("parentSequence")
+
+        parent_at_sequence: Optional[int] = None
+        if parent_sequence_raw is not None:
+            try:
+                parent_at_sequence = int(parent_sequence_raw)
+            except (TypeError, ValueError):
+                logger.warning(
+                    f"Invalid parentSequence '{parent_sequence_raw}', "
+                    "falling back to latest parent projection."
+                )
+
+        if parent_at_sequence is None:
+            logger.warning(
+                "Fork-point sequence unavailable; comparing against latest parent state."
+            )
+
+        parent_id = parent_branch_id or "main"
+        parent_resources, parent_slim_resources = self.api_handler.pull_branch_resources(
+            parent_id, parent_at_sequence
+        )
+        branch_resources, branch_slim_resources = self.api_handler.pull_branch_resources(branch_id)
+
+        return parent_resources, parent_slim_resources, branch_resources, branch_slim_resources
+
+    def diff_branch(
+        self,
+        branch_name: Optional[str] = None,
+        file_paths: Optional[list[str]] = None,
+    ) -> Optional[dict[str, str]]:
+        """Compute diffs showing what a branch changed relative to its fork point.
+
+        Args:
+            branch_name: Name of the branch to diff. Defaults to the current branch.
+            file_paths: When provided, only include diffs for these files.
+
+        Returns:
+            A mapping of file path to unified diff text, or None when there
+            are no differences.
+
+        Raises:
+            ValueError: If on main with no branch specified, or the branch
+                does not exist.
+        """
+        parent_resources, parent_slim_resources, branch_resources, branch_slim_resources = (
+            self._resolve_branch_fork_point(branch_name)
+        )
+        diffs = self.diff_resource_maps(
+            parent_resources, parent_slim_resources, branch_resources, branch_slim_resources
+        )
+
+        if diffs and file_paths:
+            diffs = {fp: d for fp, d in diffs.items() if fp in file_paths}
+            if not diffs:
+                return None
+
+        return diffs
+
+    def branch_status(
+        self, branch_name: Optional[str] = None
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Categorize files changed on a branch relative to its fork point.
+
+        Args:
+            branch_name: Name of the branch. Defaults to the current branch.
+
+        Returns:
+            (new_files, modified_files, deleted_files) — lists of file paths.
+
+        Raises:
+            ValueError: If on main with no branch specified, or the branch
+                does not exist.
+        """
+        parent_resources, parent_slim_resources, branch_resources, branch_slim_resources = (
+            self._resolve_branch_fork_point(branch_name)
+        )
+
+        parent_by_path: dict[tuple, Resource] = {}
+        for resources_dict in parent_resources.values():
+            for resource in resources_dict.values():
+                parent_by_path[(type(resource), resource.file_path)] = resource
+
+        branch_by_path: dict[tuple, Resource] = {}
+        for resources_dict in branch_resources.values():
+            for resource in resources_dict.values():
+                branch_by_path[(type(resource), resource.file_path)] = resource
+
+        before_resource_mappings = (
+            self._make_resource_mappings(parent_resources) + parent_slim_resources
+        )
+        after_resource_mappings = (
+            self._make_resource_mappings(branch_resources) + branch_slim_resources
+        )
+
+        new_files: list[str] = []
+        modified_files: list[str] = []
+        deleted_files: list[str] = []
+
+        all_keys = set(parent_by_path.keys()) | set(branch_by_path.keys())
+        for key in all_keys:
+            parent_r = parent_by_path.get(key)
+            branch_r = branch_by_path.get(key)
+
+            if parent_r and branch_r:
+                if parent_r.to_pretty(
+                    resource_mappings=before_resource_mappings
+                ) != branch_r.to_pretty(resource_mappings=after_resource_mappings):
+                    modified_files.append(branch_r.file_path)
+            elif branch_r and not parent_r:
+                new_files.append(branch_r.file_path)
+            elif parent_r and not branch_r:
+                deleted_files.append(parent_r.file_path)
+
+        return new_files, modified_files, deleted_files
+
+    def discover_local_resources(
+        self, conflict_files: Optional[list[str]] = None
+    ) -> DiscoveredResourcePaths:
         """Return a dict of all discovered resources locally
         Using the resource name as the key
+
+        Args:
+            conflict_files (Optional[list[str]]): If provided, files whose discovery hits a
+                merge conflict are appended here and that resource type is skipped instead of
+                raising. If None, a MergeConflictError propagates.
 
         Returns:
             DiscoveredResourcePaths: A dictionary mapping resource types to
@@ -2031,7 +2167,13 @@ class AgentStudioProject:
         """
         discovered_resources: DiscoveredResourcePaths = {}
         for resource_class in RESOURCE_NAME_TO_CLASS.values():
-            discovered = resource_class.discover_resources(self.root_path)
+            try:
+                discovered = resource_class.discover_resources(self.root_path)
+            except resource_utils.MergeConflictError as e:
+                if conflict_files is None:
+                    raise
+                conflict_files.extend(e.file_paths)
+                continue
             discovered_resources[resource_class] = discovered or []
         return discovered_resources
 
@@ -2104,6 +2246,8 @@ class AgentStudioProject:
             raise FileNotFoundError(
                 f"File not found for resource {resource.resource_name} at {resource.file_path}"
             ) from e
+        except resource_utils.MergeConflictError:
+            raise
         except Exception as e:
             raise ValueError(
                 f"Error reading resource {resource.resource_name} at {resource.file_path}: {str(e)}"
@@ -2112,7 +2256,10 @@ class AgentStudioProject:
         return resource
 
     def find_new_kept_deleted(
-        self, discovered_resources: dict[type[Resource], list[str]]
+        self,
+        discovered_resources: dict[type[Resource], list[str]],
+        conflict_files: Optional[list[str]] = None,
+        parent_lookup: Optional[dict[str, Resource]] = None,
     ) -> tuple[
         list[ResourceMapping],
         list[ResourceMapping],
@@ -2123,6 +2270,12 @@ class AgentStudioProject:
         Args:
             discovered_resources (dict[type[Resource], list[str]]): The discovered
                 resources to compare against.
+            conflict_files (Optional[list[str]]): If provided, files whose discovery hits a
+                merge conflict are appended here and that resource type is skipped instead of
+                raising. If None, a MergeConflictError propagates.
+            parent_lookup (Optional[dict[str, Resource]]): Parent branch resources keyed by
+                absolute file path. When provided, a new resource whose file path-matches a
+                parent resource adopts the parent's id at mint time instead of a fresh one.
 
         Returns:
             tuple[
@@ -2134,6 +2287,7 @@ class AgentStudioProject:
                 - Kept resources
                 - Deleted resources
         """
+        parent_lookup = parent_lookup or {}
         deleted_resource_mappings: list[ResourceMapping] = []
         new_resource_mappings: list[ResourceMapping] = []
         kept_resource_mappings: list[ResourceMapping] = []
@@ -2155,6 +2309,22 @@ class AgentStudioProject:
             )
             flow_paths_to_names[resource_utils.clean_name(flow_config.name)] = flow_config.name
 
+        # Build a map of clean flow folder names to flow IDs (from existing resources)
+        flow_paths_to_ids: dict[str, str] = {}
+        for flow_id, flow_cfg in self.resources.get(FlowConfig, {}).items():
+            flow_paths_to_ids[resource_utils.clean_name(flow_cfg.name)] = flow_id
+
+        # Add to mapping for new flows: adopt the parent branch's flow id when the flow
+        # config path-matches a parent resource, otherwise mint a fresh id. Resolving
+        # flows first keeps every composite step id consistent with its flow_id below.
+        for flow_path in discovered_resources.get(FlowConfig, []):
+            flow_name = resource_utils.get_flow_name_from_path(flow_path)
+            if resource_utils.clean_name(flow_name) not in flow_paths_to_ids:
+                parent_flow = parent_lookup.get(flow_path)
+                flow_paths_to_ids[resource_utils.clean_name(flow_name)] = (
+                    parent_flow.resource_id if parent_flow else self.generate_uuid(FlowConfig)
+                )
+
         if not self.file_structure_info:
             self.file_structure_info = self.compute_file_structure_info(self.resources)
 
@@ -2165,39 +2335,61 @@ class AgentStudioProject:
 
         for resource_type, resource_files in discovered_resources.items():
             # Build a map of resource name to resource instance for current resources
-
             for file_path in resource_files:
                 discovered_files.add(file_path)
+
+                # Load resource name, flow name, flow id
+                resource_name = os.path.splitext(os.path.basename(file_path))[0]
+
+                flow_name = flow_paths_to_names.get(
+                    resource_utils.get_flow_name_from_path(file_path),
+                )
+                flow_id = flow_paths_to_ids.get(
+                    resource_utils.get_flow_name_from_path(file_path),
+                )
+
+                if resource_type == FlowStep:
+                    flow_step: FlowStep = self.read_local_resource(
+                        ResourceMapping(
+                            resource_id="temp_id",
+                            resource_type=FlowStep,
+                            resource_name=resource_name,
+                            file_path=file_path,
+                            flow_name=flow_name,
+                            resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
+                        ),
+                        resource_mappings=[],
+                    )
+                    resource_name = flow_step.name
+
+                if resource_type == FlowConfig:
+                    resource_name = flow_name
+
+                # Resource name in file path is cleaned, so we need to get the original name
+                if (
+                    issubclass(resource_type, MultiResourceYamlResource)
+                    or resource_type == Topic
+                    or resource_type == ChildTopic
+                ):
+                    resource = self.read_local_resource(
+                        ResourceMapping(
+                            resource_id="temp_id",
+                            resource_type=resource_type,
+                            resource_name=resource_name,
+                            file_path=file_path,
+                            flow_name=flow_name,
+                            resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
+                        ),
+                        resource_mappings=[],
+                    )
+                    resource_name = resource.name
+
                 if file_path in known_files:
-                    # Remove root path from file path
                     resource_info = self.file_structure_info.get(
                         os.path.relpath(file_path, self.root_path)
                     )
                     if not resource_info:
                         raise ValueError(f"Resource info not found for {file_path}")
-
-                    resource_name = resource_info["resource_name"]
-                    flow_name = flow_paths_to_names.get(
-                        resource_utils.get_flow_name_from_path(file_path),
-                    )
-
-                    # Default Language will only be modified, but name must
-                    # be read from file
-                    if resource_type == DefaultLanguage:
-                        resource = self.read_local_resource(
-                            ResourceMapping(
-                                resource_id=resource_info["resource_id"],
-                                resource_type=resource_type,
-                                resource_name=resource_name,
-                                file_path=file_path,
-                                flow_name=flow_name,
-                                resource_prefix=resource_type.get_resource_prefix(
-                                    file_path=file_path
-                                ),
-                            ),
-                            resource_mappings=[],
-                        )
-                        resource_name = resource.name
 
                     kept_resource_mappings.append(
                         ResourceMapping(
@@ -2207,58 +2399,36 @@ class AgentStudioProject:
                             file_path=file_path,
                             flow_name=flow_name,
                             resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
+                            flow_id=flow_id,
                         )
                     )
 
                 else:
-                    # Flow step names are not from file names, so we need to handle them separately
-                    resource_name = os.path.splitext(os.path.basename(file_path))[0]
-                    flow_name = flow_paths_to_names.get(
-                        resource_utils.get_flow_name_from_path(file_path),
-                    )
-                    resource_id = self.generate_uuid(resource_type)
-                    if resource_type == FlowStep:
-                        flow_step: FlowStep = self.read_local_resource(
-                            ResourceMapping(
-                                resource_id="temp_id",
-                                resource_type=FlowStep,
-                                resource_name=resource_name,
-                                file_path=file_path,
-                                flow_name=flow_name,
-                                resource_prefix=resource_type.get_resource_prefix(
-                                    file_path=file_path
-                                ),
-                            ),
-                            resource_mappings=[],
-                        )
-                        resource_name = flow_step.name
-                        resource_id = f"{flow_name}_{resource_id}"
+                    # Compute new resource ID, adopting the parent branch's id on a
+                    # file path match so the ids never diverge from the parent's.
+                    parent_resource = parent_lookup.get(file_path)
 
-                    elif resource_type == FunctionStep:
-                        resource_id = f"{flow_name}_{resource_id}"
-
-                    if resource_type == FlowConfig:
-                        resource_name = flow_name
-
-                    # Resource name in file path is cleaned, so we need to get the original name
-                    if (
-                        issubclass(resource_type, MultiResourceYamlResource)
-                        or resource_type == Topic
-                    ):
-                        resource = self.read_local_resource(
-                            ResourceMapping(
-                                resource_id="temp_id",
-                                resource_type=resource_type,
-                                resource_name=resource_name,
-                                file_path=file_path,
-                                flow_name=flow_name,
-                                resource_prefix=resource_type.get_resource_prefix(
-                                    file_path=file_path
-                                ),
-                            ),
-                            resource_mappings=[],
-                        )
-                        resource_name = resource.name
+                    if resource_type in (FlowStep, FunctionStep):
+                        if parent_resource:
+                            # Re-composite the parent's bare step id under the local flow
+                            # id: in a kept flow whose id diverges from the parent's, the
+                            # prefix must still agree with the flow_id that step_id
+                            # derivation strips.
+                            parent_flow_id = getattr(parent_resource, "flow_id", None) or ""
+                            bare_step_id = parent_resource.resource_id.removeprefix(
+                                f"{parent_flow_id}_"
+                            )
+                            resource_id = f"{flow_id}_{bare_step_id}"
+                        else:
+                            resource_id = f"{flow_id}_{self.generate_uuid(resource_type)}"
+                    elif resource_type == FlowConfig:
+                        resource_id = flow_id
+                    elif resource_type == Document:
+                        resource_id = os.path.basename(file_path).upper()
+                    elif parent_resource:
+                        resource_id = parent_resource.resource_id
+                    else:
+                        resource_id = self.generate_uuid(resource_type)
 
                     new_resource_mappings.append(
                         ResourceMapping(
@@ -2267,12 +2437,19 @@ class AgentStudioProject:
                             resource_name=resource_name,
                             file_path=file_path,
                             flow_name=flow_name,
+                            flow_id=flow_id,
                             resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
                         )
                     )
 
+        # Resources belonging to a conflicted (unparseable) file can't be enumerated, so
+        # they must not be counted as deleted just because discovery skipped them.
+        conflict_prefixes = tuple(f"{cf}{os.sep}" for cf in (conflict_files or []))
+
         deleted_file_paths = known_files - discovered_files
         for file_path in deleted_file_paths:
+            if file_path in (conflict_files or []) or file_path.startswith(conflict_prefixes):
+                continue
             resource_info = self.file_structure_info[os.path.relpath(file_path, self.root_path)]
             if resource_info["type"] not in RESOURCE_NAME_TO_CLASS:
                 continue
@@ -2284,6 +2461,7 @@ class AgentStudioProject:
                 and resource_type in self._not_loaded_resources
             ):
                 continue
+
             resource_id = resource_info["resource_id"]
             resource_mapping = ResourceMapping(
                 resource_id=resource_id,
@@ -2294,6 +2472,9 @@ class AgentStudioProject:
                 ),
                 file_path=file_path,
                 resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
+                flow_id=flow_paths_to_ids.get(
+                    resource_utils.get_flow_name_from_path(file_path),
+                ),
             )
             deleted_resource_mappings.append(resource_mapping)
 
@@ -2314,30 +2495,76 @@ class AgentStudioProject:
             return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
         return f"{RESOURCE_CLASS_TO_NAME[resource_type].upper()}-{uuid.uuid4().hex[:8]}"
 
-    def get_branches(self) -> tuple[Optional[str], dict[str, str]]:
+    def get_branches(self) -> tuple[Optional[str], dict[str, dict[str, Any]]]:
         """Get a list of all branches in the (remote) project.
 
         Returns:
-            Optional[str], dict[str, str]: The current branch name and a dictionary mapping
-            branch names to branch IDs. First element is None if the current branch does not exist in the remote.
+            The current branch name (None if the local branch no longer exists
+            on the remote) and a dictionary mapping branch names to their full
+            metadata dicts (each containing at least ``branchId``).
         """
         branches = self.api_handler.get_branches()
         current_branch = next(
-            (name for name, branch_id in branches.items() if branch_id == self.branch_id),
+            (name for name, meta in branches.items() if meta["branchId"] == self.branch_id),
             None,
         )
         return current_branch, branches
 
-    def create_branch(self, branch_name: str = None) -> str:
+    def create_branch(
+        self, branch_name: str = None, source_branch_name: Optional[str] = None
+    ) -> str:
         """Create a new branch in the project.
 
         Args:
             branch_name (str): The name of the new branch
+            source_branch_name (str): Name of the branch to create the new branch from.
+                Defaults to the current branch.
 
         Returns:
             str: The ID of the newly created branch
+
+        Raises:
+            ValueError: If the branch cannot be created due to deployment mode restrictions,
+                or source_branch_name does not exist.
         """
-        branch_id = self.api_handler.create_branch(branch_name)
+        branches = None
+        if source_branch_name is not None or self.deployment_mode in (
+            DeploymentMode.SIMPLE,
+            DeploymentMode.RELEASES_BRANCHES,
+        ):
+            branches = self.api_handler.get_branches()
+
+        if source_branch_name is not None:
+            if source_branch_name not in branches:
+                raise ValueError(f"Branch '{source_branch_name}' does not exist.")
+            source_branch_id = branches[source_branch_name]["branchId"]
+        else:
+            source_branch_id = self.branch_id
+
+        if self.deployment_mode == DeploymentMode.SIMPLE:
+            if len(branches) >= 2:
+                raise ValueError(
+                    "Cannot create branch. Only one branch is allowed in simple deployment mode. Please delete/merge existing branches before creating a new one."
+                )
+        if self.deployment_mode == DeploymentMode.RELEASES:
+            if source_branch_id != "main":
+                raise ValueError(
+                    "Cannot create branch. Branches can only be created from the main branch in releases deployment mode."
+                )
+        if self.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+            source_branch_meta = next(
+                (meta for meta in branches.values() if meta["branchId"] == source_branch_id),
+                None,
+            )
+            if source_branch_meta is None or (
+                not source_branch_id == "main"
+                and source_branch_meta.get("parentBranchId") != "main"
+            ):
+                raise ValueError(
+                    "Cannot create branch. Branches with depth above 2 are not allowed in releases-branches deployment mode."
+                )
+
+        branch_id = self.api_handler.create_branch(branch_name, source_branch_id)
         self.branch_id = branch_id
         self.save_config()
         return branch_id
@@ -2365,7 +2592,7 @@ class AgentStudioProject:
             bool: True if the switch was successful, False otherwise
             dict[str, Any]: The projection data
         """
-        if self.get_diffs(all_files=True) and not force:
+        if self.get_diffs() and not force:
             raise ValueError(
                 "Cannot switch branches with uncommitted changes. Use --force to switch and discard changes."
             )
@@ -2373,10 +2600,11 @@ class AgentStudioProject:
         branches = self.api_handler.get_branches()
         if branch_name not in branches:
             raise ValueError(f"Branch {branch_name} does not exist.")
-        success = self.api_handler.switch_branch(branches[branch_name])
+        branch_id = branches[branch_name]["branchId"]
+        success = self.api_handler.switch_branch(branch_id)
         projection = {}
         if success:
-            self.branch_id = branches[branch_name]
+            self.branch_id = branch_id
             _, projection = self.pull_project(
                 force=True, format=format, projection_json=projection_json, on_save=on_save
             )
@@ -2426,6 +2654,7 @@ class AgentStudioProject:
         variant: Optional[str],
         input_lang: Optional[str] = None,
         output_lang: Optional[str] = None,
+        sip_headers: Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a chat session (standard or draft).
 
@@ -2438,6 +2667,8 @@ class AgentStudioProject:
             variant (ty.Optional[str]): The variant ID to create the chat session in.
             input_lang (str): Optional. The language code for the input messages, e.g. "en-GB" or "fr-FR".
             output_lang (str): Optional. The language code for the agent's responses, e.g. "en-GB" or "fr-FR".
+            sip_headers (dict[str, str]): Optional. Simulated SIP headers exposed to
+                project functions through conv.sip_headers.
 
         Returns:
             dict: API response with conversation_id and initial greeting.
@@ -2464,6 +2695,7 @@ class AgentStudioProject:
                 variant_id=variant,
                 input_lang=input_lang,
                 output_lang=output_lang,
+                sip_headers=sip_headers,
             )
 
         return AgentStudioInterface.create_chat(
@@ -2475,6 +2707,62 @@ class AgentStudioProject:
             channel=channel,
             input_lang=input_lang,
             output_lang=output_lang,
+            sip_headers=sip_headers,
+        )
+
+    def create_call_session(
+        self,
+        environment: str,
+        variant: Optional[str] = None,
+        mode: str = DEFAULT_CALL_MODE,
+    ) -> CallSession:
+        """Bootstrap a WebRTC voice call session against a branch draft build.
+
+        Prepares the branch deployment and mints a studio token, returning the
+        parameters the signaling OFFER needs. Only draft/branch calls are
+        currently supported; deployed environments raise NotImplementedError.
+
+        Args:
+            environment (str): The environment to call. Only "draft" is supported.
+            variant (ty.Optional[str]): The variant ID to call, if any.
+            mode (str): The call mode (see ``DEFAULT_CALL_MODE``).
+
+        Returns:
+            CallSession: Parameters for opening the WebRTC call.
+
+        Raises:
+            NotImplementedError: If a non-draft environment is requested.
+            ValueError: If the branch call info response is incomplete.
+            requests.HTTPError: If the API call fails.
+        """
+        if environment != "draft":
+            raise NotImplementedError(
+                "ad call currently supports only draft/branch calls; "
+                "deployed-environment calling is not yet available."
+            )
+
+        call_info = self.api_handler.get_branch_call_info(self.branch_id)
+
+        fields = {
+            "artifactVersion": call_info.get("artifactVersion"),
+            "lambdaDeploymentVersion": call_info.get("lambdaDeploymentVersion"),
+            "authToken": call_info.get("authToken"),
+            "gatewayWsUrl": call_info.get("gatewayWsUrl"),
+        }
+        missing = [name for name, value in fields.items() if not value]
+        if missing:
+            # Report only the missing field names
+            raise ValueError(f"Incomplete branch call info; missing field(s): {', '.join(missing)}")
+
+        return CallSession(
+            account_id=self.account_id,
+            project_id=self.project_id,
+            variant_id=variant or "",
+            artifact_version=fields["artifactVersion"],
+            lambda_deployment_version=fields["lambdaDeploymentVersion"],
+            auth_token=fields["authToken"],
+            gateway_ws_url=fields["gatewayWsUrl"],
+            mode=mode,
         )
 
     def send_message(
@@ -2546,6 +2834,14 @@ class AgentStudioProject:
             environment=environment,
         )
 
+    @property
+    def studio_base_url(self) -> str:
+        """Base Agent Studio URL for this project's region."""
+        region_link_map = {"uk-1": "uk", "euw-1": "eu", "us-1": "us", "studio": ""}
+        short = region_link_map.get(self.region, self.region)
+        domain = f"studio.{short}.poly.ai" if short else "studio.poly.ai"
+        return f"https://{domain}/{self.account_id}/{self.project_id}"
+
     def get_conversation_url(self, conversation_id: str) -> str:
         """Build the Studio URL for a conversation.
 
@@ -2555,13 +2851,7 @@ class AgentStudioProject:
         Returns:
             str: The URL of the conversation.
         """
-        region_link_map = {"uk-1": "uk", "euw-1": "eu", "us-1": "us"}
-        short = region_link_map.get(self.region, self.region)
-        return (
-            f"https://studio.{short}.poly.ai"
-            f"/{self.account_id}/{self.project_id}"
-            f"/conversations/{conversation_id}"
-        )
+        return f"{self.studio_base_url}/conversations/{conversation_id}"
 
     def _make_resource_mappings(self, resources: ResourceMap) -> list[ResourceMapping]:
         resource_mappings: list[ResourceMapping] = []
@@ -2582,6 +2872,11 @@ class AgentStudioProject:
                 else getattr(resource, "flow_name", None)
             ),
             resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
+            flow_id=(
+                resource.resource_id
+                if isinstance(resource, FlowConfig)
+                else getattr(resource, "flow_id", None)
+            ),
         )
 
     def format_files(
@@ -2601,7 +2896,7 @@ class AgentStudioProject:
             self.discover_local_resources()
         )
         all_mappings = new_resources_mappings + kept_resources_mappings
-        resource_mappings: list[ResourceMapping] = [
+        filtered_resource_mappings: list[ResourceMapping] = [
             m
             for m in all_mappings
             if not files
@@ -2611,7 +2906,7 @@ class AgentStudioProject:
                 and _parse_multi_resource_path(m.file_path)[0] in files
             )
         ]
-        return self._format_resources(resource_mappings, check_only=check_only)
+        return self._format_resources(filtered_resource_mappings, check_only=check_only)
 
     def _format_resources(
         self, resource_mappings: list[ResourceMapping], check_only: bool = False
@@ -2686,11 +2981,13 @@ class AgentStudioProject:
         )
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
 
+        resource_mappings = local_resource_mappings + self.slim_resources
+
         resources: ResourceMap = {}
         for resource_mapping in local_resource_mappings:
             local_resource = self.read_local_resource(
                 resource=resource_mapping,
-                resource_mappings=local_resource_mappings,
+                resource_mappings=resource_mappings,
             )
             resources.setdefault(resource_mapping.resource_type, {})[
                 resource_mapping.resource_id
@@ -2698,7 +2995,7 @@ class AgentStudioProject:
 
         return self.validate_resources(
             resources_dict=resources,
-            resource_mappings=local_resource_mappings,
+            resource_mappings=resource_mappings,
         )
 
     @staticmethod
@@ -2749,12 +3046,12 @@ class AgentStudioProject:
         return validation_errors
 
     def merge_branch(
-        self, message: str, conflict_resolutions: list[dict[str, Any]] = None
+        self, message: Optional[str], conflict_resolutions: list[dict[str, Any]] = None
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main in the project.
 
         Args:
-            message (str): The merge commit message.
+            message (Optional[str]): The merge commit message.
             conflict_resolutions (list[dict[str, Any]]): A list of conflict
                 resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
@@ -2767,13 +3064,16 @@ class AgentStudioProject:
             list[dict[str, str]]: A list of errors
         """
         branches = self.api_handler.get_branches()
-        if self.branch_id not in branches.values():
+        branch_meta = {meta["branchId"]: meta for meta in branches.values()}
+        current_branch_meta = branch_meta.get(self.branch_id)
+
+        if not current_branch_meta:
             raise ValueError(f"Branch {self.branch_id} does not exist.")
 
         if self.branch_id == "main":
             raise ValueError("Merging from 'main' branch is not supported.")
 
-        if diffs := self.get_diffs(all_files=True):
+        if diffs := self.get_diffs():
             raise ValueError(
                 f"Cannot merge branch with uncommitted changes, diffs: {list(diffs.keys())}"
             )
@@ -2791,7 +3091,64 @@ class AgentStudioProject:
             message=message, conflict_resolutions=conflict_resolutions
         )
         if success:
-            self.switch_branch("main", force=True)
+            parent_branch_id = current_branch_meta.get("parentBranchId")
+            parent_branch_meta = branch_meta.get(parent_branch_id) or {}
+            parent_branch_name = parent_branch_meta.get("name")
+            if not parent_branch_name:
+                logger.warning(
+                    f"Could not resolve parent branch for '{self.branch_id}' "
+                    f"(parentBranchId={parent_branch_id!r}); defaulting to 'main'."
+                )
+                parent_branch_name = "main"
+            success, _ = self.switch_branch(parent_branch_name, force=True)
+            return success, [], []
+
+        return False, conflicts, errors
+
+    def sync_branch(
+        self, conflict_resolutions: list[dict[str, Any]] = None
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
+        """Sync the current branch with its parent in the project.
+
+        Args:
+            conflict_resolutions (list[dict[str, Any]]): A list of conflict
+                resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value
+
+        Returns:
+            bool: True if the sync was successful, False otherwise
+            list[dict[str, str]]: A list of conflicts
+            list[dict[str, str]]: A list of errors
+        """
+        branches = self.api_handler.get_branches()
+        branch_ids = {meta["branchId"] for meta in branches.values()}
+        if self.branch_id not in branch_ids:
+            raise ValueError(f"Branch {self.branch_id} does not exist.")
+
+        if self.branch_id == "main":
+            raise ValueError("Syncing 'main' branch is not supported.")
+
+        if diffs := self.get_diffs():
+            raise ValueError(
+                f"Cannot sync branch with uncommitted changes, diffs: {list(diffs.keys())}"
+            )
+
+        for resolution in conflict_resolutions or []:
+            if "path" not in resolution or "strategy" not in resolution:
+                raise ValueError(f"Resolution must include 'path' and 'strategy': {resolution}")
+            if resolution["strategy"] not in {"ours", "theirs", "base"}:
+                raise ValueError(
+                    f"Invalid conflict resolution strategy: {resolution['strategy']} for path {resolution['path']}. "
+                    f"Must be one of 'ours', 'theirs', or 'base'."
+                )
+
+        success, conflicts, errors = self.api_handler.sync_branch(
+            conflict_resolutions=conflict_resolutions
+        )
+        if success:
+            self.pull_project(force=True)
             return True, [], []
 
         return False, conflicts, errors
@@ -2812,13 +3169,103 @@ class AgentStudioProject:
         if branch_name == "main":
             raise ValueError("Deleting 'main' branch is not supported.")
 
-        success = self.api_handler.delete_branch(branches[branch_name])
-        if success and self.branch_id == branches[branch_name]:
+        branch_id = branches[branch_name]["branchId"]
+        success = self.api_handler.delete_branch(branch_id)
+        if success and self.branch_id == branch_id:
             self.switch_branch("main", force=True)
         return True
 
+    def _fetch_parent_resources(self) -> ResourceMap:
+        """Fetch the parent branch's resources from the platform.
+
+        Returns:
+            ResourceMap: The parent branch's resources. Empty when on main, when the
+                local branch no longer exists remotely, or when the branch has no
+                parent.
+        """
+        current_branch, branches = self.get_branches()
+        if current_branch is None or current_branch == "main":
+            return {}
+
+        parent_branch_id = branches.get(current_branch, {}).get("parentBranchId")
+        if not parent_branch_id:
+            return {}
+
+        branch_api_handler = AgentStudioInterface(
+            self.region, self.account_id, self.project_id, parent_branch_id
+        )
+        resources, _, _ = branch_api_handler.pull_resources()
+        return resources
+
+    def _resources_by_absolute_path(self, resources: ResourceMap) -> dict[str, Resource]:
+        """Key a ResourceMap's resources by absolute file path.
+
+        Args:
+            resources (ResourceMap): Resources grouped by type and id.
+
+        Returns:
+            dict[str, Resource]: The same resources keyed by absolute file path.
+        """
+        return {
+            os.path.join(self.root_path, resource.file_path): resource
+            for resources_dict in resources.values()
+            for resource in resources_dict.values()
+        }
+
+    def _augment_original_with_parent_subresources(
+        self, branch_resource: Resource, parent_resource: Resource
+    ) -> Resource:
+        """Merge parent-only subresources into a copy of a kept resource.
+
+        Subresources (function parameters, flow step conditions) are matched by name
+        when local files are read, so a subresource added both on the parent branch and
+        locally would otherwise mint a fresh id here and diverge from the parent's. The
+        branch resource wins for every name it already knows; only names the branch does
+        not have inherit the parent's subresource (and therefore its id).
+
+        Args:
+            branch_resource (Resource): This branch's version of the resource.
+            parent_resource (Resource): The parent branch's path-matched version.
+
+        Returns:
+            Resource: A copy of ``branch_resource`` with parent-only subresources
+                appended, or ``branch_resource`` itself when there is nothing to merge.
+        """
+        # Exact-type gates mirror read_local_resource's known_* extraction; note a
+        # FunctionStep is a Function subclass but takes no known_parameters there.
+        if type(branch_resource) is Function and type(parent_resource) is Function:
+            branch_names = {param.name for param in branch_resource.parameters}
+            extra = [
+                param for param in parent_resource.parameters if param.name not in branch_names
+            ]
+            if extra:
+                augmented = copy.copy(branch_resource)
+                augmented.parameters = [*branch_resource.parameters, *extra]
+                return augmented
+        elif type(branch_resource) is FlowStep and type(parent_resource) is FlowStep:
+            branch_names = {cond.name for cond in branch_resource.conditions}
+            extra = [cond for cond in parent_resource.conditions if cond.name not in branch_names]
+            if extra:
+                augmented = copy.copy(branch_resource)
+                augmented.conditions = [*branch_resource.conditions, *extra]
+                return augmented
+        return branch_resource
+
     def sync_ids_with_sandbox(self) -> bool:
-        """Sync ids of resources in sandbox into current branch
+        """Sync ids of resources in sandbox into current branch.
+
+        Returns:
+            bool: True if the sync was successful, False otherwise
+        """
+        return self.sync_ids_with_parent(parent_name="main")
+
+    def sync_ids_with_parent(self, parent_name: Optional[str] = None) -> bool:
+        """Sync ids of resources of the parent branch into the current branch.
+
+        Args:
+            parent_name (Optional[str]): Name of the branch to sync ids from. Defaults
+                to the current branch's parent, falling back to "main" when the parent
+                cannot be resolved.
 
         Returns:
             bool: True if the sync was successful, False otherwise
@@ -2826,24 +3273,77 @@ class AgentStudioProject:
         if self.branch_id == "main":
             raise ValueError("Cannot sync ids while on main branch.")
 
-        if self.get_diffs(all_files=True):
+        if self.get_diffs():
             raise ValueError("Cannot sync ids due to uncommitted changes.")
 
-        sandbox_resources = self.get_remote_resources_by_name("main")
-        # Build lookup by file path -> Resource
-        sandbox_resource_lookup: dict[str, Resource] = {}
-        for resources_dict in sandbox_resources.values():
-            for resource in resources_dict.values():
-                sandbox_resource_lookup[resource.file_path] = resource
+        # Parent slim mappings describe what the parent withheld; local files resolve
+        # their references against this branch's own slim mappings, so they are not
+        # needed here.
+        if parent_name is None:
+            parent_resources = self._fetch_parent_resources()
+            if not parent_resources:
+                logger.warning(
+                    f"Could not resolve parent branch for '{self.branch_id}'; defaulting to 'main'."
+                )
+                parent_resources, _ = self.get_remote_resources_by_name("main")
+        else:
+            parent_resources, _ = self.get_remote_resources_by_name(parent_name)
+        parent_resource_lookup: dict[str, Resource] = {
+            resource.file_path: resource
+            for resources_dict in parent_resources.values()
+            for resource in resources_dict.values()
+        }
 
-        # 1. Build sync resource_mappings: use sandbox id when there is a sandbox match by file_path
+        # 1a. Resolve synced FlowConfig ids first, so flow-scoped resources below can
+        # translate their (stale, local) flow_id to the id the flow was synced to.
+        flow_id_translation: dict[str, str] = {}
+        for resources_dict in self.resources.values():
+            for resource in resources_dict.values():
+                if not isinstance(resource, FlowConfig):
+                    continue
+                parent_version = parent_resource_lookup.get(resource.file_path)
+                flow_id_translation[resource.resource_id] = (
+                    parent_version.resource_id if parent_version else resource.resource_id
+                )
+
+        # 1b. Build sync resource_mappings: use parent id when there is a parent match by file_path
         sync_mappings: list[ResourceMapping] = []
         for resource_type, resources_dict in self.resources.items():
             for resource_id, resource in resources_dict.items():
-                sandbox_version = sandbox_resource_lookup.get(resource.file_path)
-                mapping_resource_id = (
-                    sandbox_version.resource_id if sandbox_version else resource.resource_id
-                )
+                parent_version = parent_resource_lookup.get(resource.file_path)
+                local_flow_id = getattr(resource, "flow_id", None)
+
+                if isinstance(resource, FlowConfig):
+                    mapping_resource_id = (
+                        parent_version.resource_id if parent_version else resource.resource_id
+                    )
+                    mapping_flow_id = mapping_resource_id
+                else:
+                    mapping_flow_id = flow_id_translation.get(local_flow_id, local_flow_id)
+                    if parent_version:
+                        mapping_resource_id = parent_version.resource_id
+                    else:
+                        # No parent counterpart, so this resource was added on the branch and
+                        # its composite `{flow_id}_{step_id}` id still carries the pre-sync flow
+                        # id. Re-point it at the synced flow id, otherwise the prefix and flow_id
+                        # disagree and references (start_step, child_step) cannot be resolved
+                        # back to bare step ids.
+                        #
+                        # Only flow steps embed the flow id in their own id. Flow-scoped
+                        # functions also carry a flow_id but keep a standalone id, so
+                        # prepending the synced flow id to those would corrupt them.
+                        mapping_resource_id = resource.resource_id
+                        old_prefix = f"{local_flow_id}_"
+                        if (
+                            local_flow_id
+                            and mapping_flow_id != local_flow_id
+                            and issubclass(resource_type, BaseFlowStep)
+                            and mapping_resource_id.startswith(old_prefix)
+                        ):
+                            mapping_resource_id = (
+                                f"{mapping_flow_id}_{mapping_resource_id.removeprefix(old_prefix)}"
+                            )
+
                 resource_path = resource.get_path(self.root_path)
                 sync_mappings.append(
                     ResourceMapping(
@@ -2857,6 +3357,7 @@ class AgentStudioProject:
                             else getattr(resource, "flow_name", None)
                         ),
                         resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
+                        flow_id=mapping_flow_id,
                     )
                 )
 
@@ -2867,16 +3368,17 @@ class AgentStudioProject:
                 path = resource.file_path
                 branch_by_path[path] = (resource_type, resource_id, resource)
 
+        slim_mappings = self.slim_resources
         new_state: ResourceMap = {}
         for mapping in sync_mappings:
             relative_file_path = os.path.relpath(mapping.file_path, self.root_path)
             original = branch_by_path.get(relative_file_path)
             branch_resource = original[2] if original else None
-            sandbox_resource = sandbox_resource_lookup.get(relative_file_path, branch_resource)
+            parent_resource = parent_resource_lookup.get(relative_file_path, branch_resource)
             local_resource = self.read_local_resource(
                 resource=mapping,
-                resource_mappings=sync_mappings,
-                original_resource=sandbox_resource,
+                resource_mappings=[*slim_mappings, *sync_mappings],
+                original_resource=parent_resource,
             )
 
             new_state.setdefault(mapping.resource_type, {})[mapping.resource_id] = local_resource
@@ -2970,3 +3472,882 @@ class AgentStudioProject:
             message=message,
         )
         return True
+
+    # ── Simulation tests ───────────────────────────────────────────────────
+
+    def resolve_tests(self, files: list[str] = None, tags: list[str] = None) -> list["TestCase"]:
+        """Resolve which tests match the given criteria.
+
+        Runs all tests by default. Use files or tags to filter.
+
+        Args:
+            files: List of specific test file paths to select.
+            tags: List of tags to filter by.
+
+        Returns:
+            list[TestCase]: The matched test cases.
+        """
+        tests: dict[str, TestCase] = self.resources.get(TestCase, {})
+        matched: list[TestCase] = []
+        if tags:
+            for test in tests.values():
+                if any(tag in test.tags.tags for tag in tags):
+                    matched.append(test)
+        elif files:
+            for test in tests.values():
+                if test.file_path in files:
+                    matched.append(test)
+        else:
+            matched = list(tests.values())
+
+        if not matched:
+            raise ValueError("No tests found to run based on the provided criteria.")
+
+        return matched
+
+    def trigger_tests(self, test_ids: list[str]) -> dict:
+        """Trigger tests for the project.
+
+        Args:
+            test_ids: List of test case resource IDs to run.
+
+        Returns:
+            dict: API response with test run details.
+        """
+        if not test_ids:
+            raise ValueError("No test IDs provided.")
+
+        return self.api_handler.trigger_test_run(
+            self.region,
+            self.project_id,
+            test_ids,
+            self.branch_id,
+        )
+
+    def get_test_run(self, test_run_id: str) -> dict:
+        """Get a test run by ID, including individual test results.
+
+        Args:
+            test_run_id: The test run ID.
+
+        Returns:
+            dict: The test run detail response.
+        """
+        return self.api_handler.get_test_run(self.region, self.project_id, test_run_id)
+
+    def list_test_runs(self, limit: int = 10, offset: int = 0) -> dict:
+        """List test runs for the project.
+
+        Args:
+            limit: The maximum number of test runs to return.
+            offset: The number of test runs to skip before starting to collect the result set.
+
+        Returns:
+            dict: The list of test runs.
+        """
+        return self.api_handler.list_test_runs(
+            self.region, self.project_id, limit, offset, branch_id=self.branch_id
+        )
+
+    # ── A/B tests ───────────────────────────────────────────────────
+
+    def create_ab_test(
+        self, name: str, variant_deployment_id: str, traffic_percentage: int
+    ) -> dict:
+        """Create a new A/B test for the project.
+
+        Args:
+            name: Display name for the test.
+            variant_deployment_id: ID of the pre-release variant deployment.
+            traffic_percentage: Percentage of traffic routed to variant (0-100).
+
+        Returns:
+            dict: The created A/B test record.
+        """
+        return self.api_handler.create_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            name=name,
+            variant_deployment_id=variant_deployment_id,
+            traffic_percentage=traffic_percentage,
+        )
+
+    def list_ab_tests(self, limit: int | None = None) -> list[dict]:
+        """List A/B tests for the project.
+
+        Args:
+            limit: Maximum number of tests to return.
+
+        Returns:
+            list[dict]: A list of A/B test records.
+        """
+        result = self.api_handler.list_ab_tests(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            limit=limit,
+        )
+        return result.get("ab_tests", [])
+
+    def get_active_ab_test(self) -> dict:
+        """Get the active A/B test for the project.
+
+        Returns:
+            dict: The active A/B test record, or empty dict if none.
+        """
+        return self.api_handler.get_active_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+        )
+
+    def end_ab_test(self, ab_test_id: str, chosen_deployment_id: str) -> dict:
+        """End an A/B test and choose a winner.
+
+        Args:
+            ab_test_id: The A/B test ID.
+            chosen_deployment_id: Deployment ID to keep (control or variant).
+
+        Returns:
+            dict: The ended A/B test record.
+        """
+        return self.api_handler.end_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            ab_test_id=ab_test_id,
+            chosen_deployment_id=chosen_deployment_id,
+        )
+
+    def update_ab_test(self, ab_test_id: str, traffic_percentage: int) -> dict:
+        """Update traffic percentage for an A/B test.
+
+        Args:
+            ab_test_id: The A/B test ID.
+            traffic_percentage: New traffic percentage (0-100).
+
+        Returns:
+            dict: The updated A/B test record.
+        """
+        return self.api_handler.update_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            ab_test_id=ab_test_id,
+            traffic_percentage=traffic_percentage,
+        )
+
+    # ── RTC (Real-Time Configuration) ──
+    RTC_ENV_TO_DIR = {
+        "sandbox": "draft_and_sandbox",
+        "pre-release": "pre_release",
+        "live": "live",
+    }
+
+    def get_rtc_last_updated(self, env: str) -> Optional[str]:
+        """Get the stored lastUpdated for an RTC environment."""
+        if not self.rtc_metadata:
+            return None
+        env_meta = self.rtc_metadata.get(env)
+        if not env_meta:
+            return None
+        return env_meta.get("last_updated")
+
+    def set_rtc_last_updated(self, env: str, last_updated: Optional[str]) -> None:
+        """Set the lastUpdated for an RTC environment and save."""
+        self._update_rtc_metadata(env, last_updated=last_updated)
+
+    def get_rtc_base(self, env: str) -> tuple[Optional[dict], Optional[dict]]:
+        """Get the base copies of schema and data for an environment.
+
+        Returns:
+            (base_schema, base_data) or (None, None) if not stored.
+        """
+        if not self.rtc_metadata:
+            return None, None
+        env_meta = self.rtc_metadata.get(env)
+        if not env_meta:
+            return None, None
+        return env_meta.get("base_schema"), env_meta.get("base_data")
+
+    def set_rtc_base(
+        self,
+        env: str,
+        schema: Optional[dict] = None,
+        variables: Optional[dict] = None,
+    ) -> None:
+        """Set the base copies for an RTC environment.
+
+        Only updates the fields that are provided (not None).
+        """
+        self._update_rtc_metadata(env, schema=schema, variables=variables)
+
+    def _update_rtc_metadata(
+        self,
+        env: str,
+        last_updated: Optional[str] = None,
+        schema: Optional[dict] = None,
+        variables: Optional[dict] = None,
+    ) -> None:
+        """Update RTC metadata for an environment in a single write."""
+        if self.rtc_metadata is None:
+            self.rtc_metadata = {}
+        if env not in self.rtc_metadata:
+            self.rtc_metadata[env] = {}
+        if last_updated is not None:
+            self.rtc_metadata[env]["last_updated"] = last_updated
+        if schema is not None:
+            self.rtc_metadata[env]["base_schema"] = schema
+        if variables is not None:
+            self.rtc_metadata[env]["base_data"] = variables
+        self.save_config()
+
+    def _rtc_env_dir(self, env: str) -> str:
+        """Get the local directory path for an RTC environment."""
+        dir_name = self.RTC_ENV_TO_DIR[env]
+        return os.path.join(self.root_path, "real_time_configuration", dir_name)
+
+    def rtc_fetch_config(self, env: str) -> dict:
+        """Fetch RTC config for an environment from the API.
+
+        Args:
+            env: The environment (sandbox, pre-release, live).
+
+        Returns:
+            dict: The RTC config with schema, variables, clientEnv, lastUpdated.
+        """
+        return AgentStudioInterface.get_rtc_config(
+            region=self.region,
+            project_id=self.project_id,
+            client_env=env,
+        )
+
+    def rtc_load_local(
+        self,
+        env: str,
+        schema_only: bool = False,
+        data_only: bool = False,
+    ) -> dict:
+        """Load local RTC files for an environment.
+
+        Args:
+            env: The environment to load.
+            schema_only: If True, only load schema.
+            data_only: If True, only load data.
+
+        Returns:
+            dict with 'schema' and 'variables' keys (None if not loaded).
+
+        Raises:
+            FileNotFoundError: If required files are missing.
+            ValueError: If JSON is invalid.
+        """
+        env_dir = self._rtc_env_dir(env)
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        schema = None
+        variables = None
+
+        if not data_only:
+            if not os.path.exists(schema_path):
+                raise FileNotFoundError(f"schema.json not found at {schema_path}")
+            try:
+                with open(schema_path, "r", encoding="utf-8") as f:
+                    schema = json.load(f)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in {schema_path}: {e}") from e
+
+        if not schema_only:
+            if not os.path.exists(data_path):
+                raise FileNotFoundError(f"data.json not found at {data_path}")
+            try:
+                with open(data_path, "r", encoding="utf-8") as f:
+                    variables = json.load(f)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in {data_path}: {e}") from e
+
+        return {"schema": schema, "variables": variables}
+
+    def check_rtc_drift(self, env: str) -> dict:
+        """Check for drift between local and remote RTC config.
+
+        Args:
+            env: The environment to check.
+
+        Returns:
+            dict with:
+                - status: "no_metadata" | "in_sync" | "drifted"
+                - remote_config: dict (only when drifted)
+                - local_last_updated: str (when metadata exists)
+                - remote_last_updated: str (when metadata exists)
+        """
+        local_last_updated = self.get_rtc_last_updated(env)
+        if local_last_updated is None:
+            return {"status": "no_metadata"}
+
+        remote_config = self.rtc_fetch_config(env)
+        remote_last_updated = remote_config.get("lastUpdated")
+
+        if remote_last_updated == local_last_updated:
+            return {
+                "status": "in_sync",
+                "local_last_updated": local_last_updated,
+                "remote_last_updated": remote_last_updated,
+            }
+
+        return {
+            "status": "drifted",
+            "remote_config": remote_config,
+            "local_last_updated": local_last_updated,
+            "remote_last_updated": remote_last_updated,
+        }
+
+    def rtc_pull_env(
+        self,
+        env: str,
+        schema_only: bool = False,
+        data_only: bool = False,
+    ) -> dict:
+        """Pull RTC config for a single environment from the API and write to disk.
+
+        Args:
+            env: The environment to pull (sandbox, pre-release, live).
+            schema_only: If True, only pull schema.
+            data_only: If True, only pull data.
+
+        Returns:
+            dict with environment, schema_file, data_file paths.
+        """
+        config = self.rtc_fetch_config(env)
+
+        env_dir = self._rtc_env_dir(env)
+        os.makedirs(env_dir, exist_ok=True)
+
+        schema = config.get("schema") or {}
+        variables = config.get("variables") or {}
+
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        if not data_only:
+            utils.write_json_file(schema_path, schema)
+        if not schema_only:
+            utils.write_json_file(data_path, variables)
+
+        self._update_rtc_metadata(
+            env,
+            last_updated=config.get("lastUpdated"),
+            schema=schema,
+            variables=variables,
+        )
+
+        result = {"environment": env}
+        if not data_only:
+            result["schema_file"] = schema_path
+        if not schema_only:
+            result["data_file"] = data_path
+        return result
+
+    def rtc_push_to_api(
+        self,
+        env: str,
+        schema: Optional[dict] = None,
+        variables: Optional[dict] = None,
+        schema_only: bool = False,
+        data_only: bool = False,
+    ) -> dict:
+        """Push RTC config to the API and update local state.
+
+        Args:
+            env: The environment to push to.
+            schema: Schema dict to push (None to skip).
+            variables: Variables dict to push (None to skip).
+            schema_only: If True, only push schema.
+            data_only: If True, only push data.
+
+        Returns:
+            dict with success status.
+        """
+        import requests
+
+        last_response = None
+        if schema is not None and not data_only:
+            try:
+                last_response = AgentStudioInterface.put_rtc_schema(
+                    region=self.region,
+                    project_id=self.project_id,
+                    client_env=env,
+                    schema=schema,
+                )
+            except requests.HTTPError as e:
+                return {"success": False, "error": str(e), "step": "schema"}
+
+        if variables is not None and not schema_only:
+            try:
+                last_response = AgentStudioInterface.patch_rtc_variables(
+                    region=self.region,
+                    project_id=self.project_id,
+                    client_env=env,
+                    variables=variables,
+                )
+            except requests.HTTPError as e:
+                if last_response and last_response.get("lastUpdated"):
+                    self.set_rtc_last_updated(env, last_response["lastUpdated"])
+                return {
+                    "success": False,
+                    "error": f"Schema pushed but variables failed: {e}",
+                    "step": "variables",
+                }
+
+        base_schema, base_data = self.get_rtc_base(env)
+        self._update_rtc_metadata(
+            env,
+            last_updated=last_response.get("lastUpdated") if last_response else None,
+            schema=schema if schema is not None else base_schema,
+            variables=variables if variables is not None else base_data,
+        )
+
+        env_dir = self._rtc_env_dir(env)
+        os.makedirs(env_dir, exist_ok=True)
+        if schema is not None:
+            utils.write_json_file(os.path.join(env_dir, "schema.json"), schema)
+        if variables is not None:
+            utils.write_json_file(os.path.join(env_dir, "data.json"), variables)
+
+        return {
+            "success": True,
+            "environment": env,
+            "schema_file": os.path.join(env_dir, "schema.json"),
+            "data_file": os.path.join(env_dir, "data.json"),
+        }
+
+    def rtc_diff_env(self, env: str) -> dict:
+        """Compare local RTC files against remote for one environment.
+
+        Args:
+            env: The environment to diff.
+
+        Returns:
+            dict with environment, schema changes, data changes.
+        """
+        env_dir = self._rtc_env_dir(env)
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        if not os.path.exists(schema_path) and not os.path.exists(data_path):
+            return {"environment": env, "status": "no_local_files"}
+
+        remote_config = self.rtc_fetch_config(env)
+        env_diff: dict = {"environment": env, "schema": [], "data": []}
+
+        if os.path.exists(schema_path):
+            with open(schema_path, "r", encoding="utf-8") as f:
+                local_schema = json.load(f)
+            remote_schema = remote_config.get("schema") or {}
+            env_diff["schema"] = utils.diff_dicts(local_schema, remote_schema)
+
+        if os.path.exists(data_path):
+            with open(data_path, "r", encoding="utf-8") as f:
+                local_data = json.load(f)
+            remote_data = remote_config.get("variables") or {}
+            env_diff["data"] = utils.diff_dicts(local_data, remote_data)
+
+        return env_diff
+
+    def rtc_validate_env(self, env: str) -> dict:
+        """Validate local RTC data against its schema for one environment.
+
+        Args:
+            env: The environment to validate.
+
+        Returns:
+            dict with environment, valid status, and any errors.
+        """
+        env_dir = self._rtc_env_dir(env)
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        if not os.path.exists(schema_path) or not os.path.exists(data_path):
+            return {"environment": env, "status": "skipped"}
+
+        try:
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema = json.load(f)
+            with open(data_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            return {"environment": env, "valid": False, "errors": [f"Invalid JSON: {e}"]}
+
+        validation_errors = self.validate_rtc_data(schema, data)
+        if validation_errors:
+            return {"environment": env, "valid": False, "errors": validation_errors}
+        return {"environment": env, "valid": True}
+
+    @staticmethod
+    def validate_rtc_data(schema: dict, data: dict) -> list[str]:
+        """Validate RTC data against its schema using JSON Schema Draft 7.
+
+        Returns:
+            List of validation error messages, empty if valid.
+        """
+        import jsonschema
+
+        if not schema:
+            return []
+
+        try:
+            jsonschema.Draft7Validator.check_schema(schema)
+        except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
+            return [f"Invalid schema: {e}"]
+
+        try:
+            validator = jsonschema.Draft7Validator(schema)
+            errors = sorted(
+                validator.iter_errors(data),
+                key=lambda e: [str(p) for p in e.absolute_path],
+            )
+            return [
+                f"{'.'.join(str(p) for p in e.absolute_path) or '(root)'}: {e.message}"
+                for e in errors
+            ]
+        except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
+            return [f"Invalid schema: {e}"]
+
+    def get_custom_metrics(self) -> list[dict]:
+        """List all custom metrics for the project.
+
+        Returns:
+            list[dict]: List of custom metric records.
+        """
+        return AgentStudioInterface.get_custom_metrics(
+            self.region, self.account_id, self.project_id
+        )
+
+    def export_custom_metrics(self) -> dict:
+        """Export all custom metrics as a YAML-parsed dict.
+
+        Returns:
+            dict: Mapping of metric name to metric definition.
+        """
+        return AgentStudioInterface.export_custom_metrics(
+            self.region, self.account_id, self.project_id
+        )
+
+    def create_custom_metric(self, data: dict) -> dict:
+        """Validate and create a new custom metric.
+
+        Validates that ``expected_values`` is only set for string-type metrics,
+        then creates the metric. Works around a server bug where the ``api``
+        flag is ignored on create by issuing a follow-up update when ``api``
+        is ``True``.
+
+        Args:
+            data: Metric payload — name, type, description, expected_values, api.
+
+        Returns:
+            dict: The created metric record.
+
+        Raises:
+            ValueError: If expected_values is set for a non-string metric.
+        """
+        if data.get("expected_values") and data.get("type") != "string":
+            raise ValueError("--expected-values is only valid for string metrics.")
+
+        result = AgentStudioInterface.create_custom_metric(
+            self.region, self.account_id, self.project_id, data
+        )
+
+        if data.get("api"):
+            result = AgentStudioInterface.set_custom_metric_api_flag(
+                self.region, self.account_id, self.project_id, data["name"], True
+            )
+
+        return result
+
+    def update_custom_metric(self, metric_name: str, data: dict) -> dict:
+        """Validate and update an existing custom metric.
+
+        Validates that ``expected_values`` is only set for string-type metrics
+        by fetching the metric's current type when ``expected_values`` is present.
+
+        Args:
+            metric_name: Name of the metric to update.
+            data: Fields to update — description, expected_values, active, api.
+
+        Returns:
+            dict: The updated metric record.
+
+        Raises:
+            ValueError: If expected_values is set for a non-string metric.
+        """
+        if data.get("expected_values") is not None:
+            metrics = AgentStudioInterface.get_custom_metrics(
+                self.region, self.account_id, self.project_id
+            )
+            metric = next((m for m in metrics if m.get("name") == metric_name), None)
+            if metric and metric.get("type") != "string":
+                raise ValueError("--expected-values is only valid for string metrics.")
+
+        return AgentStudioInterface.update_custom_metric(
+            self.region, self.account_id, self.project_id, metric_name, data
+        )
+
+    def import_metrics_from_file(self, file_path: str, dry_run: bool = False) -> dict:
+        """Read a YAML file and import its metrics, or preview the import.
+
+        Args:
+            file_path: Path to the YAML file with metric definitions.
+            dry_run: If True, return a preview without applying changes.
+
+        Returns:
+            dict: In dry-run mode, a preview dict with ``would_create``,
+            ``would_skip``, and ``remote_only``. Otherwise, the import result
+            with ``metadata.created`` and ``metadata.ignored``.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            ValueError: If the file contains invalid YAML.
+        """
+        from ruamel.yaml import YAML, YAMLError
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        with open(file_path) as f:
+            yaml_content = f.read()
+
+        try:
+            ry = YAML()
+            local_metrics = ry.load(yaml_content) or {}
+        except YAMLError as e:
+            raise ValueError(f"Invalid YAML: {e}") from e
+
+        local_names = set(local_metrics.keys())
+
+        return AgentStudioInterface.import_metrics_from_file(
+            self.region, self.account_id, self.project_id, yaml_content, local_names, dry_run
+        )
+
+    def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
+        """Get the history of a branch.
+
+        Args:
+            branch_id (str): The ID of the branch to get history for.
+
+        Returns:
+            list[dict[str, Any]]: A list of commit history entries for the branch.
+        """
+        return self.api_handler.get_branch_history(branch_id)
+
+    def rename_branch(self, new_branch_name: str) -> bool:
+        """Rename the current branch.
+
+        Args:
+            new_branch_name (str): The new name for the current branch.
+
+        Returns:
+            bool: True if the rename was successful, False otherwise.
+        """
+        if not new_branch_name:
+            raise ValueError("New branch name must be provided.")
+
+        if self.branch_id == "main":
+            raise ValueError("Renaming 'main' branch is not supported.")
+
+        branches = self.api_handler.get_branches()
+
+        if new_branch_name in branches:
+            raise ValueError(f"Branch {new_branch_name} already exists.")
+
+        success = self.api_handler.rename_branch(new_branch_name=new_branch_name)
+        return success
+
+    def list_archived_branches(self) -> list[dict[str, Any]]:
+        """List soft-deleted (archived) branches for the project.
+
+        Returns:
+            list[dict[str, Any]]: A list of archived branch entries.
+        """
+        return self.api_handler.list_archived_branches()
+
+    def restore_branch(self, branch_id: str) -> bool:
+        """Restore a soft-deleted branch from the archive.
+
+        Identified by id rather than name because archived names are not unique —
+        the same branch name can be archived repeatedly. Use
+        ``list_archived_branches`` to find the id.
+
+        Args:
+            branch_id (str): The branch id of the archived branch to restore.
+
+        Returns:
+            bool: True if the branch was restored successfully, False otherwise.
+        """
+        if not branch_id:
+            raise ValueError("Branch id must be provided.")
+
+        archived = self.api_handler.list_archived_branches()
+        if not any(branch.get("branchId") == branch_id for branch in archived):
+            raise ValueError(
+                f"Branch '{branch_id}' not found in archive. "
+                "Use 'poly branch list --archived' to see available branches."
+            )
+
+        return self.api_handler.restore_branch(branch_id)
+
+    def tag_branch(self, branch_name: str = None) -> bool:
+        """Tag the current branch with a new tag.
+
+        Args:
+            branch_name (str): The name of the branch to tag. If None, tags the current branch.
+        Returns:
+            bool: True if the tagging was successful, False otherwise.
+        """
+        branches = self.api_handler.get_branches()
+        if branch_name is None:
+            branch_id = self.branch_id
+            branch_name = next(
+                (name for name, meta in branches.items() if meta["branchId"] == branch_id), None
+            )
+            if branch_name is None:
+                raise ValueError(f"Current branch ID {branch_id} does not exist.")
+        else:
+            if branch_name not in branches:
+                raise ValueError(f"Branch {branch_name} does not exist.")
+            branch_id = branches[branch_name]["branchId"]
+
+        if branch_id == "main":
+            raise ValueError("Tagging 'main' branch is not supported.")
+
+        success = self.api_handler.tag_branch(branch_id)
+        return success
+
+    def untag_branch(self, branch_name: str = None) -> bool:
+        """Remove a tag from a branch.
+
+        Args:
+            branch_name (str): The name of the branch to untag. If None, untags the current branch.
+        Returns:
+            bool: True if the untagging was successful, False otherwise.
+        """
+        branches = self.api_handler.get_branches()
+        if branch_name is None:
+            branch_id = self.branch_id
+            branch_name = next(
+                (name for name, meta in branches.items() if meta["branchId"] == branch_id), None
+            )
+            if branch_name is None:
+                raise ValueError(f"Current branch ID {branch_id} does not exist.")
+        else:
+            if branch_name not in branches:
+                raise ValueError(f"Branch {branch_name} does not exist.")
+            branch_id = branches[branch_name]["branchId"]
+
+        if branch_id == "main":
+            raise ValueError("Untagging 'main' branch is not supported.")
+
+        success = self.api_handler.untag_branch(branch_id)
+        return success
+
+    def get_project_info(self) -> dict[str, Any]:
+        """Get basic information about the project from the API.
+
+        Returns:
+            dict[str, Any]: A dictionary containing project information.
+        """
+        return self.api_handler.get_project(self.region, self.account_id, self.project_id)
+
+    @property
+    def deployment_mode(self) -> DeploymentMode:
+        """Get the deployment mode for the project."""
+        if self._deployment_mode is None:
+            cfg = self.get_project_info().get("config") or {}
+            deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
+            if (
+                deployment_mode == DeploymentMode.RELEASES_BRANCHES
+                and not self.using_simplified_deployments
+            ):
+                deployment_mode = DeploymentMode.RELEASES
+            self._deployment_mode = deployment_mode
+        return self._deployment_mode
+
+    @cached_property
+    def using_simplified_deployments(self) -> bool:
+        """Check if the project is using simplified deployments.
+
+        Requires both the rollout flag and convergence.
+        """
+        flag_enabled = self.api_handler.feature_flag_enabled(
+            key="deployment-simplification",
+            region=self.region,
+            project_id=self.project_id,
+            account_id=self.account_id,
+            default=False,
+        )
+        if not flag_enabled:
+            return False
+
+        return self._has_converged()
+
+    def _has_converged(self) -> bool:
+        """Whether main and live hold the same version.
+
+        main's version is the newest deployment across live and sandbox: it has
+        no environment of its own.
+        """
+        live_deployments = self._active_deployments("live")
+        sandbox_deployments = self._active_deployments("sandbox")
+
+        # Tagging a branch deploys it to sandbox, which is only possible under
+        # simplified deployments — so a tagged sandbox deployment settles the
+        # question on its own. It also holds a branch's version rather than
+        # main's, which the comparison below would read as diverged.
+        if any(self._tag_of(deployment) for deployment in sandbox_deployments):
+            return True
+
+        live_head = self._newest(live_deployments)
+        main_head = self._newest(live_deployments + sandbox_deployments)
+
+        # Nothing deployed at all: no live content to regress.
+        if live_head is None and main_head is None:
+            return True
+
+        if live_head is None or main_head is None:
+            return False
+
+        # Past that, a usable hash on both sides is what makes equality provable.
+        # Draft deploys record an empty hash, and treating two unknowns as equal
+        # would report converged when it cannot be known.
+        live_hash = live_head.get("version_hash")
+        main_hash = main_head.get("version_hash")
+        if not live_hash or not main_hash:
+            return False
+
+        return live_hash == main_hash
+
+    def _active_deployments(self, client_env: str) -> list[dict[str, Any]]:
+        """Deployments for an environment, excluding deleted ones."""
+        deployments = self.api_handler.get_deployments(
+            self.region, self.account_id, self.project_id, client_env=client_env
+        )
+        return [d for d in (deployments or []) if not d.get("deleted", False)]
+
+    @staticmethod
+    def _tag_of(deployment: dict[str, Any]) -> Optional[str]:
+        """The tag a deployment was made under, if any.
+
+        Only the tag that deploys to sandbox appears here; the other deploys to
+        pre-release, which convergence does not read.
+        """
+        return (deployment.get("deployment_metadata") or {}).get("tag")
+
+    @staticmethod
+    def _newest(deployments: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+        """The most recently created deployment, by date rather than list order."""
+
+        def created_at(deployment: dict[str, Any]) -> datetime:
+            return datetime.strptime(deployment["created_at"], "%a, %d %b %Y %H:%M:%S %Z")
+
+        return max(deployments, key=created_at, default=None)

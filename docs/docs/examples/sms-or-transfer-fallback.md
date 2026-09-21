@@ -87,7 +87,7 @@ handoffs:
       phone_number: "+441234567890"
 ~~~
 
-See the [handoffs reference](../reference/handoffs.md) for all SIP method options and field details.
+See the [handoffs reference](../reference/resources/handoffs.md) for all SIP method options and field details.
 
 ## Per-environment sender number
 
@@ -139,21 +139,21 @@ def send_link_or_transfer(conv: Conversation, wants_sms: bool):
     ---
 
     Structure and variable substitution for SMS templates.
-    [Open SMS templates](../reference/sms.md)
+    [Open SMS templates](../reference/resources/sms.md)
 
 -   **Handoffs**
 
     ---
 
     Configure transfer destinations used by `conv.call_handoff`.
-    [Open handoffs](../reference/handoffs.md)
+    [Open handoffs](../reference/resources/handoffs.md)
 
 -   **Functions**
 
     ---
 
     Return values, conv API, and function structure.
-    [Open functions](../reference/functions.md)
+    [Open functions](../reference/resources/functions.md)
 
 -   **Conversation object reference**
 

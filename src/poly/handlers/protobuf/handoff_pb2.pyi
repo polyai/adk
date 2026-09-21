@@ -161,3 +161,23 @@ class Handoff_ResetHandoffConfigs(_message.Message):
     sip_config: SipConfig
     sip_headers: SipHeaders
     def __init__(self, sip_config: _Optional[_Union[SipConfig, _Mapping]] = ..., sip_headers: _Optional[_Union[SipHeaders, _Mapping]] = ...) -> None: ...
+
+class Handoff_Duplicate(_message.Message):
+    __slots__ = ("id", "name", "description", "sip_config", "sip_headers", "active", "references", "source_handoff_id")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    SIP_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    SIP_HEADERS_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_FIELD_NUMBER: _ClassVar[int]
+    REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_HANDOFF_ID_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    name: str
+    description: str
+    sip_config: SipConfig
+    sip_headers: SipHeaders
+    active: bool
+    references: HandoffReferences
+    source_handoff_id: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., sip_config: _Optional[_Union[SipConfig, _Mapping]] = ..., sip_headers: _Optional[_Union[SipHeaders, _Mapping]] = ..., active: bool = ..., references: _Optional[_Union[HandoffReferences, _Mapping]] = ..., source_handoff_id: _Optional[str] = ...) -> None: ...

@@ -16,6 +16,7 @@ class ChannelType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     VOICE: _ClassVar[ChannelType]
     WEB_CHAT: _ClassVar[ChannelType]
+    SMS: _ClassVar[ChannelType]
 
 class ChannelStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -23,6 +24,7 @@ class ChannelStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     CREATED: _ClassVar[ChannelStatus]
 VOICE: ChannelType
 WEB_CHAT: ChannelType
+SMS: ChannelType
 NOT_CREATED: ChannelStatus
 CREATED: ChannelStatus
 
@@ -127,8 +129,18 @@ class AudioEnhancement(_message.Message):
     ai_coustics: AICousticsEnhancement
     def __init__(self, ai_coustics: _Optional[_Union[AICousticsEnhancement, _Mapping]] = ...) -> None: ...
 
+class AmbienceSettings(_message.Message):
+    __slots__ = ("enabled", "preset", "loudness")
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    PRESET_FIELD_NUMBER: _ClassVar[int]
+    LOUDNESS_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    preset: str
+    loudness: float
+    def __init__(self, enabled: bool = ..., preset: _Optional[str] = ..., loudness: _Optional[float] = ...) -> None: ...
+
 class VoiceChannel(_message.Message):
-    __slots__ = ("config", "asr_settings", "disclaimer", "vad_config", "audio_enhancement", "silence_filler_utterances", "asr_config", "barge_in_config")
+    __slots__ = ("config", "asr_settings", "disclaimer", "vad_config", "audio_enhancement", "silence_filler_utterances", "asr_config", "barge_in_config", "ambience")
     CONFIG_FIELD_NUMBER: _ClassVar[int]
     ASR_SETTINGS_FIELD_NUMBER: _ClassVar[int]
     DISCLAIMER_FIELD_NUMBER: _ClassVar[int]
@@ -137,6 +149,7 @@ class VoiceChannel(_message.Message):
     SILENCE_FILLER_UTTERANCES_FIELD_NUMBER: _ClassVar[int]
     ASR_CONFIG_FIELD_NUMBER: _ClassVar[int]
     BARGE_IN_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    AMBIENCE_FIELD_NUMBER: _ClassVar[int]
     config: ChannelConfig
     asr_settings: _asr_settings_pb2.ASRSettings
     disclaimer: _agent_settings_pb2.DisclaimerMessage
@@ -145,7 +158,8 @@ class VoiceChannel(_message.Message):
     silence_filler_utterances: FillerUtterances
     asr_config: _asr_pb2.Asr
     barge_in_config: BargeInConfig
-    def __init__(self, config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., asr_settings: _Optional[_Union[_asr_settings_pb2.ASRSettings, _Mapping]] = ..., disclaimer: _Optional[_Union[_agent_settings_pb2.DisclaimerMessage, _Mapping]] = ..., vad_config: _Optional[_Union[VADConfig, _Mapping]] = ..., audio_enhancement: _Optional[_Union[AudioEnhancement, _Mapping]] = ..., silence_filler_utterances: _Optional[_Union[FillerUtterances, _Mapping]] = ..., asr_config: _Optional[_Union[_asr_pb2.Asr, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ...) -> None: ...
+    ambience: AmbienceSettings
+    def __init__(self, config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., asr_settings: _Optional[_Union[_asr_settings_pb2.ASRSettings, _Mapping]] = ..., disclaimer: _Optional[_Union[_agent_settings_pb2.DisclaimerMessage, _Mapping]] = ..., vad_config: _Optional[_Union[VADConfig, _Mapping]] = ..., audio_enhancement: _Optional[_Union[AudioEnhancement, _Mapping]] = ..., silence_filler_utterances: _Optional[_Union[FillerUtterances, _Mapping]] = ..., asr_config: _Optional[_Union[_asr_pb2.Asr, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ..., ambience: _Optional[_Union[AmbienceSettings, _Mapping]] = ...) -> None: ...
 
 class WebChatChannel(_message.Message):
     __slots__ = ("config", "status")
@@ -155,13 +169,79 @@ class WebChatChannel(_message.Message):
     status: ChannelStatus
     def __init__(self, config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., status: _Optional[_Union[ChannelStatus, str]] = ...) -> None: ...
 
+class SmsComplianceKeyword(_message.Message):
+    __slots__ = ("keyword", "action", "auto_reply")
+    KEYWORD_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    AUTO_REPLY_FIELD_NUMBER: _ClassVar[int]
+    keyword: str
+    action: str
+    auto_reply: str
+    def __init__(self, keyword: _Optional[str] = ..., action: _Optional[str] = ..., auto_reply: _Optional[str] = ...) -> None: ...
+
+class SmsBehaviorConfig(_message.Message):
+    __slots__ = ("tones", "emoji_use", "sign_off", "opener", "date_format", "time_format")
+    TONES_FIELD_NUMBER: _ClassVar[int]
+    EMOJI_USE_FIELD_NUMBER: _ClassVar[int]
+    SIGN_OFF_FIELD_NUMBER: _ClassVar[int]
+    OPENER_FIELD_NUMBER: _ClassVar[int]
+    DATE_FORMAT_FIELD_NUMBER: _ClassVar[int]
+    TIME_FORMAT_FIELD_NUMBER: _ClassVar[int]
+    tones: _containers.RepeatedScalarFieldContainer[str]
+    emoji_use: str
+    sign_off: str
+    opener: str
+    date_format: str
+    time_format: str
+    def __init__(self, tones: _Optional[_Iterable[str]] = ..., emoji_use: _Optional[str] = ..., sign_off: _Optional[str] = ..., opener: _Optional[str] = ..., date_format: _Optional[str] = ..., time_format: _Optional[str] = ...) -> None: ...
+
+class SmsChannel(_message.Message):
+    __slots__ = ("config", "status", "sender_phone_number", "channel_behavior_mode", "behavior_config", "ending_message", "error_fallback_message", "compliance_keywords")
+    CONFIG_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    SENDER_PHONE_NUMBER_FIELD_NUMBER: _ClassVar[int]
+    CHANNEL_BEHAVIOR_MODE_FIELD_NUMBER: _ClassVar[int]
+    BEHAVIOR_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    ENDING_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FALLBACK_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    COMPLIANCE_KEYWORDS_FIELD_NUMBER: _ClassVar[int]
+    config: ChannelConfig
+    status: ChannelStatus
+    sender_phone_number: str
+    channel_behavior_mode: str
+    behavior_config: SmsBehaviorConfig
+    ending_message: str
+    error_fallback_message: str
+    compliance_keywords: _containers.RepeatedCompositeFieldContainer[SmsComplianceKeyword]
+    def __init__(self, config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., status: _Optional[_Union[ChannelStatus, str]] = ..., sender_phone_number: _Optional[str] = ..., channel_behavior_mode: _Optional[str] = ..., behavior_config: _Optional[_Union[SmsBehaviorConfig, _Mapping]] = ..., ending_message: _Optional[str] = ..., error_fallback_message: _Optional[str] = ..., compliance_keywords: _Optional[_Iterable[_Union[SmsComplianceKeyword, _Mapping]]] = ...) -> None: ...
+
 class Channels(_message.Message):
-    __slots__ = ("voice", "web_chat")
+    __slots__ = ("voice", "web_chat", "sms")
     VOICE_FIELD_NUMBER: _ClassVar[int]
     WEB_CHAT_FIELD_NUMBER: _ClassVar[int]
+    SMS_FIELD_NUMBER: _ClassVar[int]
     voice: VoiceChannel
     web_chat: WebChatChannel
-    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ...) -> None: ...
+    sms: SmsChannel
+    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ..., sms: _Optional[_Union[SmsChannel, _Mapping]] = ...) -> None: ...
+
+class SmsChannel_UpdateSettings(_message.Message):
+    __slots__ = ("sender_phone_number", "channel_behavior_mode", "behavior_config", "ending_message", "error_fallback_message", "compliance_keywords", "enabled")
+    SENDER_PHONE_NUMBER_FIELD_NUMBER: _ClassVar[int]
+    CHANNEL_BEHAVIOR_MODE_FIELD_NUMBER: _ClassVar[int]
+    BEHAVIOR_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    ENDING_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FALLBACK_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    COMPLIANCE_KEYWORDS_FIELD_NUMBER: _ClassVar[int]
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    sender_phone_number: str
+    channel_behavior_mode: str
+    behavior_config: SmsBehaviorConfig
+    ending_message: str
+    error_fallback_message: str
+    compliance_keywords: _containers.RepeatedCompositeFieldContainer[SmsComplianceKeyword]
+    enabled: bool
+    def __init__(self, sender_phone_number: _Optional[str] = ..., channel_behavior_mode: _Optional[str] = ..., behavior_config: _Optional[_Union[SmsBehaviorConfig, _Mapping]] = ..., ending_message: _Optional[str] = ..., error_fallback_message: _Optional[str] = ..., compliance_keywords: _Optional[_Iterable[_Union[SmsComplianceKeyword, _Mapping]]] = ..., enabled: bool = ...) -> None: ...
 
 class Channel_UpdateGreeting(_message.Message):
     __slots__ = ("channel_type", "greeting")
@@ -278,6 +358,12 @@ class VoiceChannel_UpdateTemperature(_message.Message):
 class VoiceChannel_ResetTemperature(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class VoiceChannel_UpdateAmbience(_message.Message):
+    __slots__ = ("ambience",)
+    AMBIENCE_FIELD_NUMBER: _ClassVar[int]
+    ambience: AmbienceSettings
+    def __init__(self, ambience: _Optional[_Union[AmbienceSettings, _Mapping]] = ...) -> None: ...
 
 class WebChatChannel_UpdateStatus(_message.Message):
     __slots__ = ("status",)
