@@ -47,7 +47,7 @@ If the echo-cancellation library can't be loaded, the call continues without it 
 
 | Flag | Description |
 |---|---|
-| `--environment`, `-e` | Environment to call. Choices: `branch`, `draft`. Only the current branch's draft build is callable — switch to a non-main branch first. Defaults to `branch`. |
+| `--environment`, `-e` | Environment to call. Only `draft` (the current branch) is currently supported. |
 | `--variant` | Name of the variant to use for the call. |
 | `--push` | Push the project before starting the call. |
 | `--echo-cancellation` / `--no-echo-cancellation` | Toggle acoustic echo cancellation. On by default; use `--no-echo-cancellation` to disable. |

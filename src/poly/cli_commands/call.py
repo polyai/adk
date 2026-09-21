@@ -67,8 +67,8 @@ class CallCommand(BaseCommand):
             "--environment",
             "-e",
             type=str,
-            default="branch",
-            choices=["branch", "draft"],
+            default="draft",
+            choices=["draft"],
             help="Environment to call. Only the current branch's draft build is supported.",
         )
         call_parser.add_argument(
@@ -106,7 +106,7 @@ class CallCommand(BaseCommand):
     def call(
         cls,
         base_path: str,
-        environment: str = "branch",
+        environment: str = "draft",
         variant: Optional[str] = None,
         push_before_call: bool = False,
         aec: bool = True,
@@ -115,19 +115,10 @@ class CallCommand(BaseCommand):
         from poly.output.console import error, info, success, warning
 
         project = load_project(base_path)
-
-        # Only draft/branch calls are supported: the current branch must be a
-        # non-main branch (deployed-environment calling is not yet available).
         branch_label = project.get_current_branch() or project.branch_id
-        if environment in ("branch", "draft"):
-            if not project.branch_id or branch_label == "main":
-                error(
-                    "`poly call` supports only draft/branch calls. "
-                    "Switch to a non-main branch first."
-                )
-                sys.exit(1)
-        else:
-            error("`poly call` supports only draft/branch calls.")
+
+        if environment != "draft" or not project.branch_id or branch_label == "main":
+            error("`poly call` supports only draft calls.")
             sys.exit(1)
 
         if push_before_call:
