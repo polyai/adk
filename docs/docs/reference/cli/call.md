@@ -5,7 +5,7 @@ description: Reference for the `poly call` command.
 
 # `poly call`
 
-Start an interactive voice call with your agent using your microphone and speaker — the spoken sibling of [`poly chat`](./chat.md). Only draft/branch calls are supported: switch to a non-main branch, push your changes, then call the draft build.
+Start an interactive voice call with your agent using your microphone and speaker — the spoken sibling of [`poly chat`](./chat.md). Only draft calls are supported: switch to a non-main branch, push your changes, then call the draft build.
 
 Examples:
 
@@ -16,7 +16,7 @@ poly call --variant my-variant
 poly call --no-echo-cancellation
 ~~~
 
-The call connects your local audio to the agent over WebRTC. Speak to talk to the agent; press `Ctrl+C` to hang up. When the call ends, the command prints a link to the conversation in Agent Studio so you can review the transcript, function calls, and audio.
+The call connects your local audio to the agent over WebRTC. Speak to talk to the agent; press `Ctrl+C` to hang up cleanly. When the call ends, the command prints a link to the conversation in Agent Studio so you can review the transcript, function calls, and audio.
 
 Calling is only available against the current branch's **draft** build, so you must be on a non-main branch. On `main` (or with no branch) the command exits with an error.
 
