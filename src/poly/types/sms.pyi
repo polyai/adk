@@ -9,8 +9,9 @@ __all__ = [
 
 from collections.abc import Callable as Callable
 from dataclasses import dataclass
-from requests import Response as Response
 from typing import Any, Protocol
+
+from requests import Response as Response
 
 class SMSClientFailure(Exception):
     def __init__(self, integration: str, reason: str) -> None: ...

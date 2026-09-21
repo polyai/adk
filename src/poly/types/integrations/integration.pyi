@@ -2,6 +2,7 @@
 __all__ = ["Integration"]
 
 import requests
+
 from ..log_utils import ConversationLogger as ConversationLogger
 
 class Integration:

@@ -2,6 +2,8 @@
 __all__ = ["Address"]
 
 from dataclasses import dataclass
+from typing import Any
+
 from .value_extraction_types import EntityConfig as EntityConfig
 
 class ExtractionError(Exception):
@@ -39,8 +41,7 @@ class _EntityValidationRequest:
 class _EntityValidationResponse:
     is_valid: bool
     message: str | None = ...
-    country_code: int | None = ...
-    number: str | None = ...
+    details: dict[str, Any] | None = ...
 
 class _ValueExtractionClient:
     def __init__(
@@ -49,7 +50,7 @@ class _ValueExtractionClient:
         project_id: str,
         client_env: str,
         conversation_id: str,
-        turn_index: int,
+        turn_index: int | None,
         correlation_id: str | None = None,
         base_url: str = "https://api.internal.polyai.app",
         timeout: int = 8,

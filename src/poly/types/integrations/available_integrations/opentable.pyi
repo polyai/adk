@@ -2,6 +2,7 @@
 __all__ = ["OpenTable"]
 
 import requests
+
 from ..integration import Integration
 
 BASE_OPENTABLE_API_URL: str

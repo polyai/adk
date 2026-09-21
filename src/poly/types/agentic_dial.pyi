@@ -1,9 +1,9 @@
 # Copyright PolyAI Limited
 __all__ = ["AgenticDial", "Destination", "Destinations"]
 
-from typing import Any
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import Any
 
 @dataclass
 class Destination:

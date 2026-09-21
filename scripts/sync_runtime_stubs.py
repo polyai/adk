@@ -2,10 +2,18 @@
 """Sync type stubs from genai_lambda_runtime into src/poly/types/.
 
 Uses mypy's ``stubgen`` to generate .pyi stubs, then post-processes them:
-- Renames .pyi → .py
 - Rewrites ``runtime.`` / ``utils.`` imports to relative
-- Adds copyright header and noqa directives
-- Removes internal-only modules
+- Injects ``__all__`` from imports.json and adds the copyright header
+- Drops imports of internal-only modules, erasing their names to ``Any``
+- Verifies every relative import resolves inside the stub tree, and runs
+  ruff over the output so generated stubs always pass CI
+
+Two lists control what ships beyond ``imports.json``:
+- ``imports.json`` (in the runtime repo) is the public surface — it decides
+  which ``utils/`` modules are stubbed AND exported via ``__all__``.
+- ``CLOSURE_SOURCES`` below are stubbed for typing closure only (base classes
+  and annotation types referenced by public classes); they get no ``__all__``
+  entry, so nothing advertises them to users.
 
 Usage:
     python scripts/sync_runtime_stubs.py [--runtime-path PATH]
@@ -35,13 +43,18 @@ _FROM_RUNTIME_RE = re.compile(r"^from runtime\.(\S+)", re.MULTILINE)
 _IMPORT_RUNTIME_RE = re.compile(r"^import runtime\.(\w+)", re.MULTILINE)
 # Imports that should be dropped entirely from stubs
 _DROP_IMPORT_RE = re.compile(
-    r"^from (?:_typeshed|constants|utils\.api_connector|utils\.secret_vault) .*\n",
+    r"^from (?:_typeshed|constants|utils\.deferred_logger|utils\.secret_vault) .*\n",
     re.MULTILINE,
 )
 # _typeshed.Incomplete -> Any
 _INCOMPLETE_RE = re.compile(r"\bIncomplete\b")
 # Types from dropped imports that should become Any
-_UNRESOLVABLE_TYPES = re.compile(r"\bHandoffMethod\b|\bApiIntegrations\b")
+_UNRESOLVABLE_TYPES = re.compile(r"\bHandoffMethod\b|\bDeferredLogger\b")
+
+# Stubbed for typing closure (base classes and annotation types referenced by
+# public classes), but deliberately absent from imports.json: no __all__ entry,
+# nothing advertises them to users.
+CLOSURE_SOURCES = ["utils/api_connector.py"]
 
 
 def _relativize_imports(source: str, rel_path: str) -> str:
@@ -172,6 +185,80 @@ def _postprocess(source: str, rel_path: str, all_names: list[str] | None = None)
     return source
 
 
+def _check_runtime_up_to_date(python_root: Path) -> None:
+    """Verify the runtime checkout is clean and matches origin/main.
+
+    Stubs are committed to this repo, so generating them from a stale or
+    dirty runtime checkout would silently bake in wrong types.
+    """
+
+    def _git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(python_root), *args],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(
+                f"Error: git {' '.join(args)} failed in {python_root}:\n{result.stderr}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return result.stdout.strip()
+
+    _git("fetch", "--quiet", "origin", "main")
+    head = _git("rev-parse", "HEAD")
+    origin_main = _git("rev-parse", "origin/main")
+    if head != origin_main:
+        print(
+            f"Error: runtime checkout is not on origin/main "
+            f"(HEAD {head[:12]} != origin/main {origin_main[:12]}).\n"
+            f"Run `git -C {python_root} checkout main && git -C {python_root} pull` "
+            f"or pass --skip-git-check to sync anyway.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    dirty = _git("status", "--porcelain")
+    if dirty:
+        print(
+            f"Error: runtime checkout has uncommitted changes:\n{dirty}\n"
+            f"Commit or stash them, or pass --skip-git-check to sync anyway.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _unresolved_relative_imports(stub_dir: Path) -> list[str]:
+    """Return one error string per relative import that does not resolve in the tree.
+
+    Catches the silent failure mode where a stub references a module we do not
+    ship (e.g. ``from ..deferred_logger import X``): ruff's F821 only sees
+    undefined *names*, not imports of nonexistent modules.
+    """
+    errors: list[str] = []
+    for pyi_file in sorted(stub_dir.rglob("*.pyi")):
+        tree = ast.parse(pyi_file.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or not node.level:
+                continue
+            base = pyi_file.parent
+            for _ in range(node.level - 1):
+                base = base.parent
+            if node.module:
+                targets = [(base.joinpath(*node.module.split(".")), node.module)]
+            else:
+                targets = [(base / alias.name, alias.name) for alias in node.names]
+            for target, shown in targets:
+                if not (
+                    target.is_dir()
+                    or target.with_suffix(".pyi").is_file()
+                    or target.with_suffix(".py").is_file()
+                ):
+                    rel = pyi_file.relative_to(stub_dir)
+                    errors.append(f"{rel}: 'from {'.' * node.level}{shown} ...' does not resolve")
+    return errors
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync runtime type stubs using stubgen")
     parser.add_argument(
@@ -180,12 +267,20 @@ def main() -> None:
         default=Path(__file__).resolve().parent.parent.parent / "genai_lambda_runtime" / "python",
         help="Path to the genai_lambda_runtime/python directory",
     )
+    parser.add_argument(
+        "--skip-git-check",
+        action="store_true",
+        help="Skip verifying the runtime checkout is clean and up to date with origin/main",
+    )
     args = parser.parse_args()
 
     python_root: Path = args.python_root
     if not python_root.is_dir():
         print(f"Error: python root not found: {python_root}", file=sys.stderr)
         sys.exit(1)
+
+    if not args.skip_git_check:
+        _check_runtime_up_to_date(python_root)
 
     # imports.json drives __all__ generation (not which files to stub)
     imports_map = _load_imports_json(python_root)
@@ -198,18 +293,22 @@ def main() -> None:
 
     sources: list[str] = [str(runtime_dir)]
     # Add individual utils/ files referenced in imports.json
+    utils_keys: list[str] = []
     imports_file = python_root / "assets" / "imports.json"
     if imports_file.exists():
         with open(imports_file, encoding="utf-8") as f:
-            for key in json.load(f):
-                if key.startswith("utils/"):
-                    source_file = python_root / key
-                    if source_file.exists():
-                        sources.append(str(source_file))
+            utils_keys = [key for key in json.load(f) if key.startswith("utils/")]
+    for key in utils_keys + [k for k in CLOSURE_SOURCES if k not in utils_keys]:
+        source_file = python_root / key
+        if source_file.exists():
+            sources.append(str(source_file))
+        else:
+            print(f"Error: source not found: {source_file}", file=sys.stderr)
+            sys.exit(1)
 
     # Run stubgen
     with tempfile.TemporaryDirectory() as tmpdir:
-        cmd = ["uv", "run", "stubgen", "-o", tmpdir] + sources
+        cmd = ["uv", "run", "--extra", "dev", "stubgen", "-o", tmpdir] + sources
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             print(f"stubgen failed:\n{result.stderr}", file=sys.stderr)
@@ -243,6 +342,28 @@ def main() -> None:
                 dest.write_text(processed, encoding="utf-8")
                 print(f"  OK   {rel}")
                 updated += 1
+
+    unresolved = _unresolved_relative_imports(STUB_DIR)
+    if unresolved:
+        print(
+            "Unresolved imports in generated stubs — add the module to CLOSURE_SOURCES "
+            "or erase the names via the drop/Any rules:\n  " + "\n  ".join(unresolved),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Make generated stubs pass the project's lint/format checks
+    for cmd in (
+        ["uv", "run", "ruff", "check", "--fix", str(STUB_DIR)],
+        ["uv", "run", "ruff", "format", str(STUB_DIR)],
+    ):
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(
+                f"{' '.join(cmd[2:])} failed on generated stubs:\n{result.stdout}{result.stderr}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     print(f"\nSynced {updated} stub files to {STUB_DIR}")
 

@@ -1,6 +1,4 @@
 # Copyright PolyAI Limited
-# flake8: noqa
-# ruff: noqa
 __all__ = ["InvalidInput", "MissingAccess", "SecretNotFound"]
 
 from typing import Any

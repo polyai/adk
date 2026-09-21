@@ -2,8 +2,9 @@
 import re
 from datetime import date, time
 from enum import StrEnum
-from pydantic import BaseModel
 from typing import Literal
+
+from pydantic import BaseModel
 
 class EntityType(StrEnum):
     ADDRESS = "address"

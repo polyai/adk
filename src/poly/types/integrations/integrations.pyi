@@ -2,9 +2,10 @@
 __all__ = ["Integrations"]
 
 import requests
+
+from ..log_utils import ConversationLogger as ConversationLogger
 from .available_integrations.opentable import OpenTable as OpenTable
 from .available_integrations.tripleseat import Tripleseat as Tripleseat
-from ..log_utils import ConversationLogger as ConversationLogger
 
 class Integrations:
     opentable: OpenTable

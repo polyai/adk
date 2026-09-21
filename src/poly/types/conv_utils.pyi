@@ -1,10 +1,13 @@
 # Copyright PolyAI Limited
 __all__ = ["Utils"]
 
-from . import value_extraction_types as extraction_types
-from .history import AgentResponse as AgentResponse, UserInput as UserInput
-from .value_extraction import Address as Address, _EntityValidationResponse
 from typing import Any, Literal
+
+from . import value_extraction_types as extraction_types
+from .history import AgentResponse as AgentResponse
+from .history import UserInput as UserInput
+from .value_extraction import Address as Address
+from .value_extraction import _EntityValidationResponse
 
 class PromptLLMCallLimitError(Exception): ...
 
@@ -63,6 +66,8 @@ class Utils:
             "gpt-5-chat",
             "claude-sonnet-4",
             "claude-3.5-haiku",
+            "claude-haiku-4.5",
+            "gemma-3-12b",
         ] = "gpt-4o",
     ) -> str | dict: ...
     def validate_entity(

@@ -2,9 +2,8 @@
 __all__ = ["Tripleseat"]
 
 import requests
-from ..integration import Integration
 
-DEFAULT_PUBLIC_KEY: str
+from ..integration import Integration
 
 class Tripleseat(Integration):
     integration_id: str
@@ -12,7 +11,7 @@ class Tripleseat(Integration):
     def get_bookings(self) -> requests.Response: ...
     def create_lead(
         self,
-        public_key: str = ...,
+        public_key: str | None = None,
         first_name: str | None = None,
         last_name: str | None = None,
         email_address: str | None = None,

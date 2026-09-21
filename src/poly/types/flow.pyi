@@ -2,8 +2,9 @@
 __all__ = ["Flow", "FlowFunctionExecutor"]
 
 from dataclasses import dataclass
-from .conversation import Conversation as Conversation
 from typing import Any
+
+from .conversation import Conversation as Conversation
 
 @dataclass
 class Transition:

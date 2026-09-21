@@ -1,5 +1,6 @@
 # Copyright PolyAI Limited
 from typing import Any
+
 import requests
 
 VALID_HTTP_METHODS: Any

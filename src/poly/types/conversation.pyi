@@ -17,37 +17,49 @@ __all__ = [
     "PlayHTVoice",
     "MinimaxVoice",
     "HumeVoice",
+    "XaiVoice",
+    "GradiumVoice",
     "VoiceType",
     "VoiceWeighting",
+    "UnknownNamedVoice",
     "Variant",
     "State",
     "Conversation",
     "MetricEvent",
     "FunctionExecutor",
+    "ApiIntegrations",
     "ApiExecutor",
+    "ConnectorExecutor",
     "Integrations",
 ]
 
-import requests
-from . import external_events as external_events
+from collections.abc import Callable as Callable
 from dataclasses import dataclass, field
+from typing import Any, Literal, TypedDict
+
+import requests
+
+from . import external_events as external_events
 from .agentic_dial import AgenticDialData
+from .api_connector import ApiIntegrations
 from .attachment import Attachment as Attachment
+from .clock import Clock
+from .cxone import CxOne
 from .entity_validator import EntityValidationResult
 from .history import AgentResponse, UserInput
 from .integrations.integrations import Integrations
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .sms import (
-    OutgoingSMS,
-    OutgoingSMSTemplate as OutgoingSMSTemplate,
-    SMSCredentials,
-    SMSTemplate,
-)
+from .sms import OutgoingSMS, SMSCredentials, SMSTemplate
+from .sms import OutgoingSMSTemplate as OutgoingSMSTemplate
+from .verified_context import VerifiedContext
 from .webchat import WebchatInterface
-from typing import Any, Literal
 
 def best_effort_substitute(prompt: str, variables: dict) -> str: ...
+
+class TranslationEntry(TypedDict):
+    translation_key: str
+    localized_texts: dict[str, str]
 
 class SMSIntegrationNotFound(Exception):
     def __init__(self, secret_name: str, integration: str) -> None: ...
@@ -83,6 +95,7 @@ class ElevenLabsVoice(TTSVoice):
             "eleven_turbo_v2",
             "eleven_turbo_v2_5",
             "eleven_flash_v2_5",
+            "eleven_v3",
         ]
         | None = "eleven_turbo_v2_5",
         speed: float | None = None,
@@ -218,6 +231,12 @@ class GoogleVoice(TTSVoice):
     @property
     def gender(self) -> str | None: ...
 
+class XaiVoice(TTSVoice):
+    def __init__(self, provider_voice_id: str, language: str | None = None) -> None: ...
+
+class GradiumVoice(TTSVoice):
+    def __init__(self, provider_voice_id: str, model_name: str | None = None) -> None: ...
+
 VoiceType = (
     CustomVoice
     | ElevenLabsVoice
@@ -227,7 +246,13 @@ VoiceType = (
     | MinimaxVoice
     | HumeVoice
     | GoogleVoice
+    | XaiVoice
+    | GradiumVoice
 )
+
+class UnknownNamedVoice(Exception):
+    def __init__(self, name: str) -> None: ...
+
 SupportedLanguageCodes: Any
 
 class VoiceWeighting:
@@ -304,7 +329,7 @@ class ReadOnlyDict(dict):
 
 class TranslationReplacementProxy:
     def __init__(
-        self, translations_config: dict[str, dict[str, str]] | None, language_code: str | None
+        self, translations_config: dict[str, TranslationEntry] | None, language_code: str | None
     ) -> None: ...
     def __getattr__(self, name): ...
 
@@ -324,11 +349,22 @@ class FunctionExecutor(dict):
 class ApiExecutor:
     conv: Any
     api_integrations: Any
-    def __init__(self, conv: Conversation, api_integrations: Any | None = None) -> None: ...
+    def __init__(
+        self, conv: Conversation, api_integrations: ApiIntegrations | None = None
+    ) -> None: ...
+    def __getattr__(self, name: str) -> Any: ...
+
+class ConnectorExecutor:
+    conv: Any
+    api_integrations: Any
+    def __init__(
+        self, conv: Conversation, api_integrations: ApiIntegrations | None = None
+    ) -> None: ...
     def __getattr__(self, name: str) -> Any: ...
 
 class Conversation:
     utils: Any
+    clock: Any
     memory: Any
     log: Any
     agentic_dial: Any
@@ -355,6 +391,7 @@ class Conversation:
         handoffs: dict[str, HandoffConfig] | None = None,
         integration_attributes: dict[str, Any] | None = None,
         memory: Memory | None = None,
+        verified_context: VerifiedContext | None = None,
         metric_events: list[MetricEvent] | None = None,
         sms_received: list[external_events.SMSReceived] | None = None,
         realtime_config: dict[str, Any] | None = None,
@@ -365,10 +402,15 @@ class Conversation:
         entities: dict[str, EntityValidationResult] | None = None,
         apis: list[ApiIntegrationData] | None = None,
         variables: dict[str, str] | None = None,
-        translations: dict[str, dict] | None = None,
+        translations: dict[str, TranslationEntry] | None = None,
         agentic_dial: AgenticDialData | None = None,
         provider_voice_id: str | None = None,
+        named_voices: dict[str, dict] | None = None,
         integrations_config: dict[str, Any] | None = None,
+        clock: Clock | None = None,
+        api_overrides: dict | None = None,
+        connectors: list[ApiIntegrationData] | None = None,
+        test_metadata: dict[str, Any] | None = None,
     ) -> None: ...
     @classmethod
     def from_runtime_data(
@@ -380,6 +422,9 @@ class Conversation:
         env: str,
         flow_transition: FlowTransition,
         vpc_enabled: bool = False,
+        clock: Clock | None = None,
+        api_overrides: dict | None = None,
+        test_metadata: dict[str, Any] | None = None,
     ) -> Conversation: ...
     @property
     def id(self) -> str: ...
@@ -392,6 +437,8 @@ class Conversation:
     @property
     def sip_headers(self) -> dict[str, str]: ...
     @property
+    def cxone(self) -> CxOne: ...
+    @property
     def integration_attributes(self) -> dict[str, Any] | None: ...
     @property
     def caller_number(self) -> str | None: ...
@@ -399,6 +446,8 @@ class Conversation:
     def callee_number(self) -> str | None: ...
     @property
     def state(self) -> State: ...
+    @property
+    def verified_context(self) -> VerifiedContext: ...
     @property
     def entities(self) -> Entities: ...
     @property
@@ -434,6 +483,8 @@ class Conversation:
     @property
     def api(self) -> ApiExecutor: ...
     @property
+    def connectors(self) -> ConnectorExecutor: ...
+    @property
     def generic_external_events(self) -> list[dict]: ...
     @property
     def channel_type(self) -> str: ...
@@ -448,9 +499,15 @@ class Conversation:
     @property
     def provider_voice_id(self) -> str: ...
     @property
+    def current_voice(self) -> VoiceType | None: ...
+    @property
+    def current_voice_name(self) -> str | None: ...
+    def get_voice_by_name(self, name: str) -> VoiceType: ...
+    @property
     def integrations(self) -> Integrations: ...
     def send_email(self, to: str, body: str, subject: str = "") -> None: ...
-    def set_voice(self, voice: VoiceType): ...
+    def set_voice(self, voice: VoiceType | str): ...
+    def set_voice_speed(self, speed: float) -> bool: ...
     def set_language(self, language: SupportedLanguageCodes): ...
     def set_asr_biasing(
         self, keywords: list[str] | None = None, custom_biases: dict[str, float] | None = None
@@ -513,5 +570,5 @@ class Conversation:
     def discard_recording(self) -> None: ...
 
 def retrieve_sms_credentials(
-    secret_name: str, secret_dict: dict[str, Any], project_id: str, integration: str
-) -> SMSCredentials: ...
+    secret_dict: dict[str, Any], project_id: str, integration: str
+) -> SMSCredentials | None: ...
