@@ -132,6 +132,7 @@ nav:
           - branch: reference/cli/branch.md
           - review: reference/cli/review.md
           - chat: reference/cli/chat.md
+          - call: reference/cli/call.md
           - test: reference/cli/test.md
           - conversations: reference/cli/conversations.md
           - deployments: reference/cli/deployments.md

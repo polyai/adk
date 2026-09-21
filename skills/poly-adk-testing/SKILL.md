@@ -2,8 +2,8 @@
 name: poly-adk-testing
 description: >
   This skill should be used when the user wants to "test the agent", "chat with the agent",
-  "run the test suite", "write a test case", "check why a test failed", or "run a function"
-  built with the PolyAI ADK. Covers poly validate, scripted poly chat, the test_suite/
+  "call the agent", "run the test suite", "write a test case", "check why a test failed",
+  or "run a function" built with the PolyAI ADK. Covers poly validate, scripted poly chat, the test_suite/
   simulated conversation tests, and executing functions in isolation. Part of the PolyAI
   ADK skills suite. Do NOT use for inspecting real production calls (use
   poly-adk-conversations) or the general build workflow (use poly-adk-workflow).
@@ -57,6 +57,12 @@ Useful flags for reproducing specific situations:
 With `--json`, output is a `conversations` array with per-turn detail mirroring the `--functions`/`--flows`/`--state` flags you enabled.
 
 Chat is for judging whether a conversation *feels* right. Anything worth checking twice belongs in the test suite instead.
+
+## Voice calls (`poly call`) — a user-only route
+
+`poly call` places a live WebRTC voice call to the agent through the user's microphone and speaker (draft/branch build only). It's the route for judging **voice-specific** behavior — speech, timing, barge-in — that a transcript can't show.
+
+It is interactive and human-driven: **you (the AI agent) can't use it** — there's no way to speak into a call or script it non-interactively. When a user wants to check voice/audio behavior, point them at `poly call` (`poly call --help`) rather than running it yourself.
 
 ## 3. Simulated conversation tests
 

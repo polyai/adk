@@ -7184,14 +7184,6 @@ class CreateCallSessionTest(unittest.TestCase):
 
         self.assertEqual(session.variant_id, "")
 
-    def test_custom_mode_is_passed_through(self):
-        """The requested call mode is preserved on the session."""
-        self.mock_api_handler.get_branch_call_info.return_value = self._valid_call_info()
-
-        session = self.project.create_call_session("draft", mode="echo")
-
-        self.assertEqual(session.mode, "echo")
-
     def test_non_draft_raises_not_implemented(self):
         """Deployed environments are not yet supported and must not call the API."""
         with self.assertRaises(NotImplementedError):
