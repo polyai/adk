@@ -1,6 +1,173 @@
 # CHANGELOG
 
 
+## v0.60.0 (2026-09-21)
+
+### Build System
+
+- **call**: `poly call` command (ad call 4/N) ([#323](https://github.com/polyai/adk/pull/323),
+  [`4479062`](https://github.com/polyai/adk/commit/447906219f66a262076c5560a5201747b9b681af))
+
+Stacked on #322.
+
+## What - `cli_commands/call.py` — `CallCommand`: `load_project` → branch guard (draft-only) →
+  optional `--push` → `create_call_session` → `run_call`. Args: `--path`, `-e/--environment`,
+  `--variant`, `--mode` (defaults to `DEFAULT_CALL_MODE`), `--push`. - Registered in `cli.py`. Voice
+  stack lazy-imported so other commands stay light.
+
+## Depends on `create_call_session` (#319) + `run_call` (#322).
+
+## Tests `command_test.py` (4): branch guard, run_call wiring, broken-deps hint, push-failure abort.
+
+## Stack
+
+- [x] 1. #319 — model + bootstrap - [x] 2. #320 — signaling protocol - [x] 3. #322 — WebRTC
+  transport - [x] 4. **\`poly call\` CLI ← this PR** - [ ] 5. echo cancellation
+
+## Related https://linear.app/poly-ai/issue/DEVP-703/feature-ad-call
+
+---------
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+- **call**: Acoustic echo cancellation (ad call 5/5)
+  ([#324](https://github.com/polyai/adk/pull/324),
+  [`7153615`](https://github.com/polyai/adk/commit/7153615a6e4034805ef17f20631e3c27d6db3d2f))
+
+Stacked on #323. Final PR in the `ad call` stack.
+
+## What - `call/aec.py` — `EchoCanceller` (wraps the WebRTC APM / AEC3 via `pywebrtc-audio`, the
+  same canceller behind browser `getUserMedia({echoCancellation: true})`) + `FarEndReference`, a
+  thread-safe FIFO carrying the speaker's played audio to the mic path. - `media.py` —
+  `SpeakerPlayer` records the samples it sends to the DAC as the far-end reference;
+  `MicrophoneTrack` runs each captured block through the canceller before sending. - `client.py` —
+  `run_call(..., aec=...)` wires the reference to both ends. - `call.py` — `--echo-cancellation` /
+  `--no-echo-cancellation` (**on by default**). If the APM can't load, warn and continue without it
+  rather than aborting.
+
+## Why On a laptop speaker the agent's TTS is picked up by the mic and sent back, tripping barge-in.
+  AEC3 removes it (~27 dB attenuation measured on real hardware) while preserving genuine barge-in.
+
+## Deps None new — the native wheels already ship in #322.
+
+## Tests `aec_test.py`: `FarEndReference` FIFO semantics (numpy only) + `EchoCanceller` pure-echo
+  attenuation / passthrough (skipped if the APM is absent). `command_test.py`: default-on,
+  graceful-degrade-on-missing-dep.
+
+## Stack
+
+- [x] 1. #319 — model + bootstrap - [x] 2. #320 — signaling protocol - [x] 3. #322 — WebRTC
+  transport - [x] 4. #323 — `poly call` CLI - [x] 5. **echo cancellation ← this PR**
+
+## Related https://linear.app/poly-ai/issue/DEVP-703/feature-ad-call
+
+---------
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+- **call**: Webrtc signaling protocol (ad call 2/N) ([#320](https://github.com/polyai/adk/pull/320),
+  [`a0b12e9`](https://github.com/polyai/adk/commit/a0b12e9ed1225300d7c4b07d9df66d15f984cbdd))
+
+## What Pure JSON-over-WebSocket signaling protocol for the WebRTC gateway. -
+  `build_offer_message()` — the draft-call OFFER, matching the browser's `webrtc-types.ts` (studio
+  `authToken` + `agentVersionOverride` + account/project/variant, `callSid`, `mode`). -
+  `parse_message()` — typed `Answer` / `IceCandidate` / `Error` / `Close`. Error `code`/`message`
+  are read from the gateway's `data` nesting (with a top-level fallback), matching the Go gateway's
+  actual wire format. - `signaling_url()` — appends `/api/v1/webrtc/signal`.
+
+## Depends on `CallSession` from #319 (used to build the OFFER).
+
+## Tests `tests/call/signaling_test.py` (14): URL building, OFFER shape/callSid/variant handling,
+  and all inbound message types incl. both error-nesting shapes.
+
+## Stack
+
+- [x] 1. #319 — model + bootstrap - [x] 2. **signaling ← this PR** - [ ] 3. WebRTC transport (media
+  + driver) — adds the voice deps - [ ] 4. `poly call` CLI - [ ] 5. echo cancellation
+
+## Related https://linear.app/poly-ai/issue/DEVP-703/feature-ad-call
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+- **call**: Webrtc transport (media + driver) (ad call 3/N)
+  ([#322](https://github.com/polyai/adk/pull/322),
+  [`27cc804`](https://github.com/polyai/adk/commit/27cc804ee02c2aae7a196359e5db7a9835ba0ea9))
+
+Stacked on #320.
+
+## What - Voice runtime deps (pinned, cp314 wheels): `aiortc`, `sounddevice`, `websockets`, `numpy`,
+  `pywebrtc-audio` + `licenses.json`/licensecheck updates. - `call/media.py` — `MicrophoneTrack`
+  (sounddevice → aiortc, 48 kHz/mono/int16, bounded queue) and `SpeakerPlayer` (resample + drain to
+  the device). - `call/client.py` — `run_call()`: aiortc peer connection, SDP offer/answer + inbound
+  ICE over the signaling WS, races the loop against a connection-failure event.
+
+## Depends on `CallSession` (#319) + signaling (#320). Lazy-imported, so other commands don't load
+  the WebRTC/audio stack.
+
+## Tests `media_test.py` (frame round-trip) + `client_test.py` (ICE-candidate parse,
+  connection-failure handling) — extras-guarded.
+
+## Stack
+
+- [x] 1. #319 — model + bootstrap - [x] 2. #320 — signaling protocol - [x] 3. **WebRTC transport ←
+  this PR** - [ ] 4. \`poly call\` CLI - [ ] 5. echo cancellation
+
+## Related https://linear.app/poly-ai/issue/DEVP-703/feature-ad-call
+
+---------
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+### Features
+
+- **call**: Agent Studio link, graceful hang-up, simpler options
+  ([#325](https://github.com/polyai/adk/pull/325),
+  [`b2a9f06`](https://github.com/polyai/adk/commit/b2a9f06c4ab6eff36257179de9a0058b4c4d16de))
+
+## Summary
+
+Hardening and UX polish for the shipped `poly call` command — adds a review link, makes Ctrl+C
+  clean, and removes --mode as an option in the CLI.
+
+## Motivation
+
+`poly call` works, but had some rough edges: no easy way to open the call afterwards, a `Task was
+  destroyed but it is pending!` warning on Ctrl+C, and a `--mode` flag the gateway ignores (it
+  resolves the mode from LLeMur config).
+
+## Changes
+
+- **Agent Studio link** — print a direct link to the call. No dependency on the (not-yet-available)
+  rich in-call metadata. - **Graceful hang-up** — `_hangup_on_signal` context manager bridges Ctrl+C
+  to a stop event, terminating the running loop gracefully and without resurfacing KeywordInterrupt.
+  - **Drop `--mode`** — removed the flag and its plumbing (`create_call_session` no longer takes
+  `mode`). The OFFER now always sends `end-to-end` to match the in-browser call panel; the gateway
+  resolves the effective mode from LLeMur regardless. - **`build_offer_message` tidy** — `call_sid`
+  is now required. - **Docs** — new `reference/cli/call.md`, registered in `mkdocs.yml` nav and the
+  `cli.md` index.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly call`) - [x] Tested against a live
+  Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Notes
+
+- Scoped to draft/branch calling (deployed environments are separate, in-progress work). - Merging
+  this as `feat:` cuts a minor release; retitle the squash commit to `build(call):`/`fix(call):` to
+  defer if you want to batch.
+
+---------
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+
 ## v0.59.0 (2026-09-15)
 
 ### Features
