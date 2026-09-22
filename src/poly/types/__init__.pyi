@@ -1,1 +1,0 @@
-# Copyright PolyAI Limited

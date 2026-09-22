@@ -27,8 +27,7 @@ exclude = [
     "*.md",
 ]
 "poly.types" = [
-    "*.pyi",
-    "**/*.pyi",
+    "*.json",
 ]
 
 [tool.ruff]

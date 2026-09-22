@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 """Sync type stubs from genai_lambda_runtime into src/poly/types/.
 
-Uses mypy's ``stubgen`` to generate .pyi stubs, then post-processes them:
+Uses mypy's ``stubgen`` to generate stubs, then post-processes them into
+runtime-safe ``.py`` modules — the committed files are byte-identical to what
+``save_imports`` later copies into a user project's ``_gen/`` package, so
+review and CI validate exactly what ships:
 - Rewrites ``runtime.`` / ``utils.`` imports to relative
-- Injects ``__all__`` from imports.json and adds the copyright header
+- Injects ``__all__`` from imports.json
 - Drops imports of internal-only modules, erasing their names to ``Any``
-- Verifies every relative import resolves inside the stub tree, and runs
-  ruff over the output so generated stubs always pass CI
+- Binds module-level annotation-only declarations (``X: T`` → ``X: T = ...``)
+  and adds ``from __future__ import annotations`` so the stubs import cleanly
+  at runtime (user files execute ``from _gen import *``)
+- Prepends the copyright + linter-suppression header
+- Writes ``_manifest.json`` recording the runtime commit the stubs came from
+- Validates the output by importing every generated module in a subprocess,
+  then runs targeted ruff checks and ``ruff format``
 
 Two lists control what ships beyond ``imports.json``:
 - ``imports.json`` (in the runtime repo) is the public surface — it decides
@@ -30,13 +38,25 @@ import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 STUB_DIR = Path(__file__).resolve().parent.parent / "src" / "poly" / "types"
 
-STUB_HEADER = """\
-# Copyright PolyAI Limited
-"""
+# Stub conventions (forward references, ellipsis bodies) are not lint-clean as
+# plain .py, and these files ship verbatim into user projects — suppress
+# linters in the files themselves; the sync validates with --ignore-noqa.
+# (Escaped \n form so ruff does not read the directives as this file's own.)
+STUB_HEADER = "# Copyright PolyAI Limited\n# flake8: noqa\n# ruff: noqa\n# type: ignore\n"
+
+FUTURE_IMPORT = "from __future__ import annotations\n\n"
+
+# Third-party modules imported by stubs that are not polyai-adk dependencies;
+# faked during import validation (and by the _gen test harness).
+FAKE_IMPORT_MODULES = {"pydantic": {"BaseModel": "object"}}
+
+# Matches module-level annotation-only declarations e.g. "SupportedLanguageCodes: Any"
+_MODULE_ANNOTATION_RE = re.compile(r"^([A-Za-z_]\w*: [^=\n]+?)\s*$", re.MULTILINE)
 
 # Regex patterns for import rewriting
 _FROM_RUNTIME_RE = re.compile(r"^from runtime\.(\S+)", re.MULTILINE)
@@ -146,10 +166,66 @@ def _ensure_any_imported(source: str) -> str:
     return "from typing import Any\n" + source
 
 
-def _postprocess(source: str, rel_path: str, all_names: list[str] | None = None) -> str:
+def _drop_private_reexports(source: str) -> str:
+    """Drop re-exports of private names (``from .x import _y as z``).
+
+    stubgen omits private module-level variables, so such aliases can never
+    resolve within the stub tree; drop the alias and its ``__all__`` entry.
+    """
+    dropped: list[str] = []
+
+    def _clean_import(m: re.Match) -> str:
+        prefix, names = m.group(1), m.group(2)
+        kept = []
+        for part in names.split(","):
+            part = part.strip()
+            alias_match = re.fullmatch(r"_\w+ as (\w+)", part)
+            if alias_match:
+                dropped.append(alias_match.group(1))
+            elif part:
+                kept.append(part)
+        return f"{prefix}{', '.join(kept)}\n" if kept else ""
+
+    source = re.sub(r"^(from \S+ import )(?!\()(.+)\n", _clean_import, source, flags=re.MULTILINE)
+    for name in dropped:
+        source = re.sub(rf"['\"]{name}['\"],?\s*", "", source)
+    return source
+
+
+def _guard_relative_imports(source: str) -> str:
+    """Move a stub's relative imports into an ``if TYPE_CHECKING:`` block.
+
+    Applied to closure stubs only: a public stub may import them back, and
+    stubgen promotes TYPE_CHECKING imports to unconditional ones, so leaving
+    the back-edge unguarded makes the generated ``_gen`` package circular and
+    unimportable at runtime. Safe because closure stubs use these names only
+    in annotations, which PEP 649 never evaluates.
+    """
+    lines = source.splitlines(keepends=True)
+    kept: list[str] = []
+    guarded: list[str] = []
+    last_import = -1
+    for line in lines:
+        if line.startswith("from ."):
+            guarded.append("    " + line)
+        else:
+            if line.startswith(("from ", "import ")):
+                last_import = len(kept)
+            kept.append(line)
+    if not guarded:
+        return source
+    block = ["from typing import TYPE_CHECKING\n", "\n", "if TYPE_CHECKING:\n", *guarded, "\n"]
+    kept[last_import + 1 : last_import + 1] = block
+    return "".join(kept)
+
+
+def _postprocess(
+    source: str, rel_path: str, all_names: list[str] | None = None, is_closure: bool = False
+) -> str:
     """Apply all post-processing to a stubgen output file."""
     # Drop imports from modules we don't ship
     source = _DROP_IMPORT_RE.sub("", source)
+    source = _drop_private_reexports(source)
     # Replace unresolvable types and Incomplete with Any
     needs_any = False
     for pattern in (_INCOMPLETE_RE, _UNRESOLVABLE_TYPES):
@@ -160,6 +236,12 @@ def _postprocess(source: str, rel_path: str, all_names: list[str] | None = None)
         source = _ensure_any_imported(source)
     # Relativize runtime/utils imports
     source = _relativize_imports(source, rel_path)
+    if is_closure:
+        source = _guard_relative_imports(source)
+    # In a stub "X: int" is complete, but these modules are imported at
+    # runtime (via _gen), where an unassigned annotation binds nothing and
+    # breaks "from _gen.x import X" — give module-level declarations a value.
+    source = _MODULE_ANNOTATION_RE.sub(r"\1 = ...", source)
     # Inject __all__ from imports.json, filtered to names available in the stub
     if all_names:
         tree = ast.parse(source)
@@ -180,9 +262,25 @@ def _postprocess(source: str, rel_path: str, all_names: list[str] | None = None)
         if filtered:
             all_line = "__all__ = " + repr(filtered) + "\n\n"
             source = all_line + source
-    # Add header
-    source = STUB_HEADER + source
+    # __future__ must precede everything but comments/docstrings (incl. __all__)
+    source = STUB_HEADER + FUTURE_IMPORT + source
     return source
+
+
+def _git(repo: Path, *args: str) -> str:
+    """Run a git command in *repo* and return stdout, exiting on failure."""
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(
+            f"Error: git {' '.join(args)} failed in {repo}:\n{result.stderr}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return result.stdout.strip()
 
 
 def _check_runtime_up_to_date(python_root: Path) -> None:
@@ -191,24 +289,9 @@ def _check_runtime_up_to_date(python_root: Path) -> None:
     Stubs are committed to this repo, so generating them from a stale or
     dirty runtime checkout would silently bake in wrong types.
     """
-
-    def _git(*args: str) -> str:
-        result = subprocess.run(
-            ["git", "-C", str(python_root), *args],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print(
-                f"Error: git {' '.join(args)} failed in {python_root}:\n{result.stderr}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        return result.stdout.strip()
-
-    _git("fetch", "--quiet", "origin", "main")
-    head = _git("rev-parse", "HEAD")
-    origin_main = _git("rev-parse", "origin/main")
+    _git(python_root, "fetch", "--quiet", "origin", "main")
+    head = _git(python_root, "rev-parse", "HEAD")
+    origin_main = _git(python_root, "rev-parse", "origin/main")
     if head != origin_main:
         print(
             f"Error: runtime checkout is not on origin/main "
@@ -218,7 +301,7 @@ def _check_runtime_up_to_date(python_root: Path) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
-    dirty = _git("status", "--porcelain")
+    dirty = _git(python_root, "status", "--porcelain")
     if dirty:
         print(
             f"Error: runtime checkout has uncommitted changes:\n{dirty}\n"
@@ -228,35 +311,62 @@ def _check_runtime_up_to_date(python_root: Path) -> None:
         sys.exit(1)
 
 
-def _unresolved_relative_imports(stub_dir: Path) -> list[str]:
-    """Return one error string per relative import that does not resolve in the tree.
+_VALIDATE_SNIPPET = """
+import importlib, json, pkgutil, sys, types
 
-    Catches the silent failure mode where a stub references a module we do not
-    ship (e.g. ``from ..deferred_logger import X``): ruff's F821 only sees
-    undefined *names*, not imports of nonexistent modules.
+for name, attrs in json.loads(sys.argv[1]).items():
+    try:
+        importlib.import_module(name)
+    except ModuleNotFoundError:
+        fake = types.ModuleType(name)
+        for attr, value in attrs.items():
+            setattr(fake, attr, eval(value))
+        sys.modules[name] = fake
+
+import poly.types
+
+errors = []
+names = [poly.types.__name__] + [
+    m.name for m in pkgutil.walk_packages(poly.types.__path__, "poly.types.")
+]
+for module_name in names:
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as e:
+        errors.append(f"{module_name}: import failed: {e!r}")
+        continue
+    for export in getattr(module, "__all__", []):
+        if not hasattr(module, export):
+            errors.append(f"{module_name}: __all__ name {export!r} is unbound")
+if errors:
+    print("\\n".join(errors), file=sys.stderr)
+    sys.exit(1)
+print(f"  validated {len(names)} modules importable, all __all__ names bound")
+"""
+
+
+def _validate_generated_stubs() -> None:
+    """Import every generated module in a subprocess; fail on any error.
+
+    This is the invariant that matters: user projects execute these files
+    (via ``from _gen import *``), so "valid stub" means "importable module".
+    Catches unresolved imports, cycles, and unbound ``__all__`` names.
     """
-    errors: list[str] = []
-    for pyi_file in sorted(stub_dir.rglob("*.pyi")):
-        tree = ast.parse(pyi_file.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ImportFrom) or not node.level:
-                continue
-            base = pyi_file.parent
-            for _ in range(node.level - 1):
-                base = base.parent
-            if node.module:
-                targets = [(base.joinpath(*node.module.split(".")), node.module)]
-            else:
-                targets = [(base / alias.name, alias.name) for alias in node.names]
-            for target, shown in targets:
-                if not (
-                    target.is_dir()
-                    or target.with_suffix(".pyi").is_file()
-                    or target.with_suffix(".py").is_file()
-                ):
-                    rel = pyi_file.relative_to(stub_dir)
-                    errors.append(f"{rel}: 'from {'.' * node.level}{shown} ...' does not resolve")
-    return errors
+    result = subprocess.run(
+        ["uv", "run", "python", "-c", _VALIDATE_SNIPPET, json.dumps(FAKE_IMPORT_MODULES)],
+        capture_output=True,
+        text=True,
+        cwd=str(STUB_DIR.parent.parent.parent),
+    )
+    if result.returncode != 0:
+        print(
+            "Generated stubs failed import validation — add the module to CLOSURE_SOURCES, "
+            "erase the names via the drop/Any rules, or fake the third-party import in "
+            f"FAKE_IMPORT_MODULES:\n{result.stdout}{result.stderr}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(result.stdout.strip())
 
 
 def main() -> None:
@@ -335,26 +445,38 @@ def main() -> None:
 
                 source = pyi_file.read_text(encoding="utf-8")
                 all_names = imports_map.get(rel_py)
-                processed = _postprocess(source, rel_py, all_names)
+                is_closure = f"{pkg}/{rel_py}" in CLOSURE_SOURCES
+                processed = _postprocess(source, rel_py, all_names, is_closure=is_closure)
 
-                dest = STUB_DIR / rel
+                dest = STUB_DIR / rel.with_suffix(".py")
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_text(processed, encoding="utf-8")
-                print(f"  OK   {rel}")
+                print(f"  OK   {rel_py}")
                 updated += 1
 
-    unresolved = _unresolved_relative_imports(STUB_DIR)
-    if unresolved:
-        print(
-            "Unresolved imports in generated stubs — add the module to CLOSURE_SOURCES "
-            "or erase the names via the drop/Any rules:\n  " + "\n  ".join(unresolved),
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    # One format: any leftover .pyi is from a previous generation scheme
+    stale = list(STUB_DIR.rglob("*.pyi"))
+    for stale_file in stale:
+        stale_file.unlink()
+    if stale:
+        print(f"  removed {len(stale)} stale .pyi files")
 
-    # Make generated stubs pass the project's lint/format checks
+    manifest = {
+        "runtime_sha": _git(python_root, "rev-parse", "HEAD"),
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "modules": updated,
+    }
+    (STUB_DIR / "_manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+
+    _validate_generated_stubs()
+
+    # The baked-in "# ruff: noqa" would hide real problems from plain ruff, so
+    # check with --ignore-noqa for the classes of error a stub must not have
+    # (undefined names / unbound __all__ entries), then normalize formatting.
     for cmd in (
-        ["uv", "run", "ruff", "check", "--fix", str(STUB_DIR)],
+        ["uv", "run", "ruff", "check", "--ignore-noqa", "--select", "F821,F822", str(STUB_DIR)],
         ["uv", "run", "ruff", "format", str(STUB_DIR)],
     ):
         result = subprocess.run(cmd, capture_output=True, text=True)

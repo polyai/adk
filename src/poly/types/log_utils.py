@@ -1,0 +1,14 @@
+# Copyright PolyAI Limited
+# flake8: noqa
+# ruff: noqa
+# type: ignore
+from __future__ import annotations
+
+__all__ = ["ConversationLogger"]
+
+
+class ConversationLogger:
+    def __init__(self) -> None: ...
+    def info(self, content: str, is_pii: bool = False, **kwargs): ...
+    def warning(self, content: str, is_pii: bool = False, **kwargs): ...
+    def error(self, content: str, is_pii: bool = False, **kwargs): ...

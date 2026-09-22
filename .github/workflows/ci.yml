@@ -84,9 +84,33 @@ jobs:
         uv run pip-licenses
         git diff --exit-code licenses.json
 
+  wheel-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.14"
+
+    # Deliberately no editable install: this verifies the built wheel ships
+    # everything save_imports needs, which an editable install cannot catch.
+    - name: Verify built wheel
+      run: python scripts/verify_wheel.py
+
   lint-and-test:
     name: lint-and-test
-    needs: [test]
+    needs: [test, wheel-check]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -94,6 +118,10 @@ jobs:
       run: |
         if [ "${{ needs.test.result }}" != "success" ]; then
           echo "test failed: ${{ needs.test.result }}"
+          exit 1
+        fi
+        if [ "${{ needs.wheel-check.result }}" != "success" ]; then
+          echo "wheel-check failed: ${{ needs.wheel-check.result }}"
           exit 1
         fi
         echo "All CI jobs passed"

@@ -2,6 +2,10 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
-from .integration import Integration as Integration, _registry as registry
+from __future__ import annotations
 
-__all__ = ["Integration", "registry"]
+from .integration import Integration as Integration
+
+__all__ = [
+    "Integration",
+]
