@@ -6,7 +6,6 @@ Copyright PolyAI Limited
 import copy
 import importlib
 import importlib.resources
-import json
 import pkgutil
 import re
 import sys
@@ -325,18 +324,6 @@ class GeneratedTypeStubPackageTests(unittest.TestCase):
                 first_lines = path.read_text(encoding="utf-8").splitlines()[:4]
                 for header_line in expected_header:
                     self.assertIn(header_line, first_lines)
-
-    def test_init_records_the_runtime_commit_the_stubs_came_from(self):
-        """The provenance line makes a stale _gen diagnosable."""
-        manifest = json.loads(
-            importlib.resources.files("poly.types")
-            .joinpath("_manifest.json")
-            .read_text(encoding="utf-8")
-        )
-        contents = (self.gen_dir / "__init__.py").read_text(encoding="utf-8")
-
-        self.assertIn("# generated from genai_lambda_runtime @ ", contents)
-        self.assertIn(str(manifest["runtime_sha"])[:12], contents)
 
     def test_init_advertises_public_types_but_not_typing_closure_modules(self):
         """__all__ lists the types users write against; api_connector only closes annotations."""

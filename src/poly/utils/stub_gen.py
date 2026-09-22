@@ -9,9 +9,7 @@ Copyright PolyAI Limited
 """
 
 import ast
-import importlib.metadata
 import importlib.resources
-import json
 import os
 from importlib.resources.abc import Traversable
 
@@ -20,24 +18,6 @@ _TYPES_PACKAGE = "poly.types"
 # Header for the files save_imports itself generates (__init__.py); copied
 # stub modules carry their own committed header.
 _GEN_FILE_HEADER = "# flake8: noqa\n# ruff: noqa\n# type: ignore\n# <AUTO GENERATED>\n"
-
-
-def _provenance_line() -> str:
-    """One comment line recording which runtime commit the stubs came from."""
-    try:
-        manifest = json.loads(
-            importlib.resources.files(_TYPES_PACKAGE)
-            .joinpath("_manifest.json")
-            .read_text(encoding="utf-8")
-        )
-        sha = str(manifest.get("runtime_sha", "unknown"))[:12]
-    except (OSError, ValueError):
-        return ""
-    try:
-        version = importlib.metadata.version("polyai-adk")
-    except importlib.metadata.PackageNotFoundError:
-        version = "unknown"
-    return f"# generated from genai_lambda_runtime @ {sha} by polyai-adk {version}\n"
 
 
 def _read_all_from_stub(source: str) -> list[str] | None:
@@ -90,10 +70,9 @@ def _gen_import_statements() -> str:
 
 def create_import_file_contents() -> str:
     """Return the contents that would be written to _gen/__init__.py."""
-    header = _GEN_FILE_HEADER + _provenance_line()
     all_names = [n for names in _load_file_class_maps().values() for n in names]
     all_line = "__all__ = [\n    " + ",\n    ".join(f'"{n}"' for n in all_names) + "\n]\n\n"
-    return header + all_line + _gen_import_statements()
+    return _GEN_FILE_HEADER + all_line + _gen_import_statements()
 
 
 def _copy_types_tree(pkg: Traversable, dest_dir: str) -> None:
@@ -142,8 +121,7 @@ def save_imports(base_path: str) -> None:
             else "from .decorators import *\n"
         )
 
-    header = _GEN_FILE_HEADER + _provenance_line()
     all_line = "__all__ = [\n    " + ",\n    ".join(f'"{n}"' for n in all_names) + "\n]\n\n"
 
     with open(os.path.join(gen_dir, "__init__.py"), "w", encoding="utf-8") as f:
-        f.write(header + all_line + _gen_import_statements() + decorator_import)
+        f.write(_GEN_FILE_HEADER + all_line + _gen_import_statements() + decorator_import)

@@ -61,8 +61,6 @@ manifest = json.loads(
     importlib.resources.files("poly.types").joinpath("_manifest.json").read_text(encoding="utf-8")
 )
 sha = str(manifest["runtime_sha"])[:12]
-if sha not in (gen / "__init__.py").read_text(encoding="utf-8"):
-    errors.append("provenance line with runtime sha missing from _gen/__init__.py")
 
 copied = len(py_files) - 1  # decorators.py is generated, not copied
 if copied != manifest["modules"]:
