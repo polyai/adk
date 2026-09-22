@@ -24,24 +24,43 @@ Examples:
 ~~~bash
 poly conversations list
 poly conversations list --limit 20 --offset 10
+poly conversations list --cursor <cursor>
+poly conversations list --in-progress
 poly conversations list --json
 ~~~
 
-The default table view shows conversation ID (rendered as a clickable Agent Studio link), start time, duration, caller number, channel, variant (when present), handoff status, and a short summary heading.
+The default table view shows conversation ID (rendered as a clickable Agent Studio link), start time, duration, caller number, channel, variant (when present), and handoff status.
+
+In `us-1`, `uk-1`, `euw-1`, and `dev`, this command uses the v3 conversations API, which doesn't
+return a summary, tags, PolyScore, note, deployment ID, direction, or language for list results —
+fetch those per-conversation with [`poly conversations get`](#poly-conversations-get) instead.
+`studio` (and `staging`, until it gets a v3 route) still uses the deprecated v1 endpoint, so its
+list output currently retains those fields.
 
 | Flag | Description |
 |---|---|
 | `--limit` | Max number of conversations to return. Defaults to `50`. |
-| `--offset` | Number of conversations to skip. Defaults to `0`. |
+| `--offset` | Number of conversations to skip. Defaults to `0`. Prefer `--cursor` where available. |
+| `--cursor` | Pagination cursor from a previous response's `cursor` field. `us-1`/`uk-1`/`euw-1`/`dev` only. |
+| `--in-progress` / `--no-in-progress` | Filter to only in-progress, or only finished, conversations. `us-1`/`uk-1`/`euw-1`/`dev` only. |
 
-`--json` output shape:
+`--json` passes through the raw API response, so its shape follows the same regional split as the
+table above. In `us-1`/`uk-1`/`euw-1`/`dev` (v3):
 
 ~~~json
 {
-  "conversations": [{ "id": "...", "startedAt": "...", "...": "..." }],
-  "count": 0,
-  "limit": 50,
-  "offset": 0
+  "conversations": [{ "id": "...", "started_at": "...", "...": "..." }],
+  "next_offset": null,
+  "cursor": null
+}
+~~~
+
+In `studio`/`staging` (v1, unchanged from before this migration):
+
+~~~json
+{
+  "conversations": [{ "conversationId": "...", "startedAt": "...", "...": "..." }],
+  "next_offset": null
 }
 ~~~
 
