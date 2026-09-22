@@ -7,6 +7,7 @@
 from typing import Any, Literal, NewType
 from .external_events import GenericExternalEvent, SMSReceived
 from .agentic_dial import AgenticDialData
+from .cxone import CxOne
 from .entity_validator import EntityValidationResult
 from .history import AgentResponse, UserInput
 from .integrations.integrations import Integrations
@@ -586,6 +587,10 @@ class Conversation:
     @property
     def sip_headers(self) -> dict[str, str]:
         """Dict mapping header names to values"""
+
+    @property
+    def cxone(self) -> CxOne:
+        """NICE CXone Signal API, for handing the call back to CXone"""
 
     @property
     def integration_attributes(self) -> dict[str, Any] | None:
