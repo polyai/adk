@@ -140,6 +140,11 @@ commit_message = "chore(release): {version}"
 build_command = "pip install build && python -m build"
 tag_format = "v{version}"
 
+[tool.semantic_release.changelog]
+# templates/.release_notes.md.j2 prepends a "Getting started" block to every
+# GitHub release (DEVP-790); CHANGELOG.md generation is unaffected.
+template_dir = "templates"
+
 
 
 

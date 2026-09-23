@@ -1,0 +1,28 @@
+{#
+    Unmodified vendored copy of python-semantic-release's default CHANGELOG.md.j2
+    (pinned to the v9.21.x "angular" md templates, matching the version this repo's
+    release workflow installs). Required verbatim: once any file lives in this
+    template_dir, PSR stops falling back to its built-in CHANGELOG.md template, so
+    without this copy `chore(release)` commits would stop updating CHANGELOG.md.
+    See templates/.release_notes.md.j2 for the actual DEVP-790 customisation.
+
+    This changelog template controls which changelog creation occurs
+    based on which mode is provided.
+
+    Modes:
+        - init: Initialize a full changelog from scratch
+        - update: Insert new version details where the placeholder exists in the current changelog
+
+#}{%  set insertion_flag = ctx.changelog_insertion_flag
+%}{%  set unreleased_commits = ctx.history.unreleased | dictsort
+%}{%  set releases = ctx.history.released.values() | list
+%}{#
+#}{%  if ctx.changelog_mode == "init"
+%}{%    include ".components/changelog_init.md.j2"
+%}{#
+#}{%  elif ctx.changelog_mode == "update"
+%}{%    set prev_changelog_file = ctx.prev_changelog_file
+%}{%    include ".components/changelog_update.md.j2"
+%}{#
+#}{%  endif
+%}
