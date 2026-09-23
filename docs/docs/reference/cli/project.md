@@ -140,6 +140,8 @@ Run with no arguments and `poly project duplicate` walks you through interactive
 
 `poly project duplicate` only calls the platform's duplicate API — unlike `poly project create`, it does **not** pull the new project down locally afterwards. Run [`poly init`](./init.md) against the new project ID to work on it locally.
 
+After duplicating, the command copies the source project's deployment mode (Simple, Branches, or Sub-branches) onto the new project. New projects always start in the account's default deployment mode, so this step ensures the duplicate matches the source. If copying the mode fails, the duplicate still exists and the command reports a warning rather than failing — the mode can be set manually in Agent Studio.
+
 | Flag | Description |
 |---|---|
 | `--region` | Region of the project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. |
@@ -159,5 +161,16 @@ Run with no arguments and `poly project duplicate` walks you through interactive
   "success": true,
   "project_id": "my-copy",
   "agent_name": "my-copy"
+}
+~~~
+
+If the deployment mode could not be copied to the duplicate, a `deployment_mode_error` key is added:
+
+~~~json
+{
+  "success": true,
+  "project_id": "my-copy",
+  "agent_name": "my-copy",
+  "deployment_mode_error": "..."
 }
 ~~~
