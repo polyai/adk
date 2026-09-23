@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import datetime
 import os
+import tempfile
 import unittest
 
 import yaml
@@ -6235,6 +6236,214 @@ class MultiResourceYamlResourceCacheTests(unittest.TestCase):
             self.assertEqual(r2.text, "Second", "After mtime change, read should see new content")
 
 
+class MultiResourceYamlResourceIndexTests(unittest.TestCase):
+    """Name lookups in a multi-resource file, against real files on disk."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.base_path = tmpdir.name
+        self.variants_file = os.path.join(self.base_path, "config", "variant_attributes.yaml")
+        self.keyphrases_file = os.path.join(
+            self.base_path, "voice", "speech_recognition", "keyphrase_boosting.yaml"
+        )
+
+    @staticmethod
+    def _write(file_path: str, content: str) -> None:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    @staticmethod
+    def _read_disk(file_path: str) -> dict:
+        with open(file_path, encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    def _variant_path(self, clean_name: str) -> str:
+        return os.path.join(self.variants_file, "variants", clean_name)
+
+    def _attribute_path(self, clean_name: str) -> str:
+        return os.path.join(self.variants_file, "attributes", clean_name)
+
+    def _keyphrase_path(self, clean_name: str) -> str:
+        return os.path.join(self.keyphrases_file, "keyphrases", clean_name)
+
+    def test_first_entry_wins_when_clean_names_collide(self):
+        """Read, save and delete all act on the first entry sharing a clean name."""
+        self._write(
+            self.variants_file,
+            "variants:\n"
+            "  - name: Site A\n"
+            "    is_default: true\n"
+            "  - name: Site-A\n"
+            "  - name: other\n",
+        )
+
+        self.assertEqual(
+            Variant._read_yaml_dict(self._variant_path("Site_A")),
+            {"name": "Site A", "is_default": True},
+        )
+
+        Variant(resource_id="v1", name="Site A").save(self.base_path)
+        self.assertEqual(
+            self._read_disk(self.variants_file)["variants"],
+            [{"name": "Site A"}, {"name": "Site-A"}, {"name": "other"}],
+        )
+
+        Variant.delete_resource(self._variant_path("Site_A"))
+        self.assertEqual(
+            self._read_disk(self.variants_file)["variants"],
+            [{"name": "Site-A"}, {"name": "other"}],
+        )
+        self.assertEqual(
+            Variant._read_yaml_dict(self._variant_path("Site_A")), {"name": "Site-A"}
+        )
+
+    def test_delete_then_append_keeps_every_lookup_pointing_at_its_entry(self):
+        """Deleting shifts later entries down; a following append lands at the end."""
+        self._write(
+            self.variants_file,
+            "variants:\n  - name: alpha\n  - name: beta\n  - name: gamma\n",
+        )
+        Variant._read_yaml_dict(self._variant_path("alpha"))
+
+        Variant.delete_resource(self._variant_path("beta"))
+        Variant(resource_id="v4", name="delta").save(self.base_path)
+        Variant(resource_id="v3", name="gamma", is_default=True).save(self.base_path)
+
+        self.assertEqual(
+            self._read_disk(self.variants_file)["variants"],
+            [{"name": "alpha"}, {"name": "gamma", "is_default": True}, {"name": "delta"}],
+        )
+        for name, expected in (
+            ("alpha", {"name": "alpha"}),
+            ("gamma", {"name": "gamma", "is_default": True}),
+            ("delta", {"name": "delta"}),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(Variant._read_yaml_dict(self._variant_path(name)), expected)
+        with self.assertRaises(FileNotFoundError):
+            Variant._read_yaml_dict(self._variant_path("beta"))
+
+    def test_save_that_changes_an_entry_name_moves_its_lookup(self):
+        """Replacing an entry under a new name finds it by the new name only."""
+        self._write(
+            self.keyphrases_file,
+            "keyphrases:\n"
+            "  - keyphrase: old phrase\n"
+            "    level: default\n"
+            "  - keyphrase: kept\n"
+            "    level: default\n",
+        )
+        KeyphraseBoosting._read_yaml_dict(self._keyphrase_path("old_phrase"))
+
+        KeyphraseBoosting(
+            resource_id="kp-1", name="old phrase", keyphrase="new phrase", level="boosted"
+        ).save(self.base_path)
+
+        self.assertEqual(
+            KeyphraseBoosting._read_yaml_dict(self._keyphrase_path("new_phrase")),
+            {"keyphrase": "new phrase", "level": "boosted"},
+        )
+        self.assertEqual(
+            KeyphraseBoosting._read_yaml_dict(self._keyphrase_path("kept"))["keyphrase"], "kept"
+        )
+        with self.assertRaises(FileNotFoundError):
+            KeyphraseBoosting._read_yaml_dict(self._keyphrase_path("old_phrase"))
+
+    def test_numeric_and_boolean_keyphrases_do_not_break_lookups(self):
+        """A bare `2024` or `true` keyphrase is found by its text, as are entries after it."""
+        self._write(
+            self.keyphrases_file,
+            "keyphrases:\n"
+            "  - keyphrase: 2024\n"
+            "    level: boosted\n"
+            "  - keyphrase: true\n"
+            "    level: default\n"
+            "  - keyphrase: PolyAI\n"
+            "    level: maximum\n",
+        )
+
+        discovered = KeyphraseBoosting.discover_resources(self.base_path)
+        self.assertEqual(
+            discovered,
+            [self._keyphrase_path(name) for name in ("2024", "true", "PolyAI")],
+        )
+        for path, expected in zip(discovered, ("2024", "true", "PolyAI")):
+            with self.subTest(keyphrase=expected):
+                keyphrase = KeyphraseBoosting.read_local_resource(
+                    file_path=path, resource_id="kp", resource_name=expected
+                )
+                self.assertEqual(keyphrase.keyphrase, expected)
+
+    def test_external_edit_is_seen_after_the_file_changes_on_disk(self):
+        """A rewritten file is reloaded, and lookups follow its new entries."""
+        self._write(self.variants_file, "variants:\n  - name: alpha\n  - name: beta\n")
+        self.assertEqual(
+            Variant._read_yaml_dict(self._variant_path("alpha")), {"name": "alpha"}
+        )
+
+        self._write(self.variants_file, "variants:\n  - name: gamma\n  - name: beta\n")
+        mtime = os.path.getmtime(self.variants_file) + 10
+        os.utime(self.variants_file, (mtime, mtime))
+
+        self.assertEqual(
+            Variant._read_yaml_dict(self._variant_path("gamma")), {"name": "gamma"}
+        )
+        with self.assertRaises(FileNotFoundError):
+            Variant._read_yaml_dict(self._variant_path("alpha"))
+
+    def test_variants_and_attributes_in_one_file_are_looked_up_independently(self):
+        """Interleaved lookups and saves across both lists each find their own entries."""
+        self._write(
+            self.variants_file,
+            "variants:\n"
+            "  - name: shared\n"
+            "    is_default: true\n"
+            "  - name: second\n"
+            "attributes:\n"
+            "  - name: shared\n"
+            "    values: {}\n"
+            "  - name: colour\n"
+            "    values: {}\n",
+        )
+
+        self.assertEqual(
+            Variant._read_yaml_dict(self._variant_path("shared")),
+            {"name": "shared", "is_default": True},
+        )
+        self.assertEqual(
+            VariantAttribute._read_yaml_dict(self._attribute_path("shared")),
+            {"name": "shared", "values": {}},
+        )
+
+        VariantAttribute(resource_id="a3", name="size", mappings={}).save(self.base_path)
+        Variant(resource_id="v3", name="third").save(self.base_path)
+        VariantAttribute.delete_resource(self._attribute_path("shared"))
+
+        self.assertEqual(
+            Variant._read_yaml_dict(self._variant_path("second")), {"name": "second"}
+        )
+        self.assertEqual(
+            Variant._read_yaml_dict(self._variant_path("third")), {"name": "third"}
+        )
+        self.assertEqual(
+            VariantAttribute._read_yaml_dict(self._attribute_path("colour"))["name"], "colour"
+        )
+        self.assertEqual(
+            VariantAttribute._read_yaml_dict(self._attribute_path("size"))["name"], "size"
+        )
+        with self.assertRaises(FileNotFoundError):
+            VariantAttribute._read_yaml_dict(self._attribute_path("shared"))
+        on_disk = self._read_disk(self.variants_file)
+        self.assertEqual(
+            [v["name"] for v in on_disk["variants"]], ["shared", "second", "third"]
+        )
+        self.assertEqual([a["name"] for a in on_disk["attributes"]], ["colour", "size"])
+
+
 class ChannelSettingsDictFormatTests(unittest.TestCase):
     """Tests that channel greeting/style prompt save as dict format, not list format."""
 
@@ -7265,6 +7474,58 @@ class AsrSettingsTests(unittest.TestCase):
         self.assertEqual(result.resource_id, "asr-123")
         self.assertTrue(result.barge_in)
         self.assertEqual(result.interaction_style, "precise")
+
+
+class PronunciationReadByIndexTests(unittest.TestCase):
+    """Reading a pronunciation rule by its index, against a real file on disk."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.file_path = os.path.join(
+            tmpdir.name, "voice", "response_control", "pronunciations.yaml"
+        )
+        os.makedirs(os.path.dirname(self.file_path))
+        with open(self.file_path, "w", encoding="utf-8") as f:
+            f.write(
+                "pronunciations:\n"
+                "  - regex: first\n"
+                "    replacement: one\n"
+                "  - regex: second\n"
+                "    replacement: two\n"
+                "  - regex: third\n"
+                "    replacement: three\n"
+            )
+
+    def _path(self, index: str) -> str:
+        return os.path.join(self.file_path, "pronunciations", index)
+
+    def test_read_from_file_returns_the_rule_at_the_index(self):
+        """read_from_file dumps the rule at the path's index."""
+        contents = Pronunciation.read_from_file(self._path("1"))
+        self.assertEqual(yaml.safe_load(contents), {"regex": "second", "replacement": "two"})
+
+    def test_read_local_resource_returns_the_rule_and_its_position(self):
+        """read_local_resource builds the rule at the index and records that position."""
+        rule = Pronunciation.read_local_resource(
+            file_path=self._path("2"), resource_id="pr-3", resource_name=""
+        )
+        self.assertEqual(rule.regex, "third")
+        self.assertEqual(rule.replacement, "three")
+        self.assertEqual(rule.position, 2)
+
+    def test_out_of_range_index_is_not_found(self):
+        """An index past either end of the list raises FileNotFoundError."""
+        for index in ("3", "-1"):
+            with self.subTest(index=index):
+                with self.assertRaises(FileNotFoundError):
+                    Pronunciation.read_from_file(self._path(index))
+                with self.assertRaises(FileNotFoundError):
+                    Pronunciation.read_local_resource(
+                        file_path=self._path(index), resource_id="pr", resource_name=""
+                    )
 
 
 class KeyphraseBoostingTests(unittest.TestCase):

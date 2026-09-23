@@ -143,9 +143,11 @@ class AgentStudioProject:
                 self.project_id,
                 self.branch_id,
             )
-        self.branch_id = self._api_handler.branch_id
-        if self.branch_id:
-            self.save_config()  # To save branch if it changed (e.g. deleted in remote)
+        handler_branch_id = self._api_handler.branch_id
+        if handler_branch_id != self.branch_id:
+            self.branch_id = handler_branch_id
+            if self.branch_id:
+                self.save_config()  # To save branch if it changed (e.g. deleted in remote)
         return self._api_handler
 
     def build_project_config(self) -> dict:
@@ -3365,7 +3367,7 @@ class AgentStudioProject:
                 path = resource.file_path
                 branch_by_path[path] = (resource_type, resource_id, resource)
 
-        slim_mappings = self.slim_resources
+        resource_mappings = [*self.slim_resources, *sync_mappings]
         new_state: ResourceMap = {}
         for mapping in sync_mappings:
             relative_file_path = os.path.relpath(mapping.file_path, self.root_path)
@@ -3374,7 +3376,7 @@ class AgentStudioProject:
             parent_resource = parent_resource_lookup.get(relative_file_path, branch_resource)
             local_resource = self.read_local_resource(
                 resource=mapping,
-                resource_mappings=[*slim_mappings, *sync_mappings],
+                resource_mappings=resource_mappings,
                 original_resource=parent_resource,
             )
 

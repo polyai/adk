@@ -130,22 +130,26 @@ class Pronunciation(MultiResourceYamlResource):
         """Return the pretty dictionary."""
         return d
 
+    @staticmethod
+    def _item_at(yaml_list: list, resource_clean_name: str) -> Optional[dict]:
+        """Return the rule at the index named by the path, or None when out of range."""
+        if not yaml_list:
+            return None
+        index = int(resource_clean_name)
+        return yaml_list[index] if 0 <= index < len(yaml_list) else None
+
     @classmethod
     def read_from_file(cls, file_path: str) -> str:
         true_file_path, segments = _parse_multi_resource_path(file_path)
         top_level_name = segments[0]
         resource_clean_name = segments[-1]
         top_level_yaml_dict = cls._get_top_level_data(true_file_path)
-        # list() preserves document order from the YAML file
-        yaml_list = list(top_level_yaml_dict.get(top_level_name, []))
+        yaml_list = top_level_yaml_dict.get(top_level_name, [])
 
         if not isinstance(yaml_list, list):
             raise ValueError(f"Top level YAML data is not a list: {top_level_yaml_dict}")
 
-        matching_resource = next(
-            (r for i, r in enumerate(yaml_list) if i == int(resource_clean_name)),
-            None,
-        )
+        matching_resource = cls._item_at(yaml_list, resource_clean_name)
         if not matching_resource:
             raise FileNotFoundError(
                 f"Resource with name {resource_clean_name} not found in {true_file_path}"
@@ -162,24 +166,23 @@ class Pronunciation(MultiResourceYamlResource):
         top_level_name = segments[0]
         resource_clean_name = segments[-1]
         top_level_yaml_dict = cls._get_top_level_data(true_file_path)
-        # list() preserves document order from the YAML file
-        yaml_list = list(top_level_yaml_dict.get(top_level_name, []))
+        yaml_list = top_level_yaml_dict.get(top_level_name, [])
 
-        position = 0
-        yaml_dict = None
-        for i, item in enumerate(yaml_list):
-            if i == int(resource_clean_name):
-                position = i
-                yaml_dict = item
-                break
+        if not isinstance(yaml_list, list):
+            raise ValueError(f"Top level YAML data is not a list: {top_level_yaml_dict}")
 
+        yaml_dict = cls._item_at(yaml_list, resource_clean_name)
         if yaml_dict is None:
             raise FileNotFoundError(
                 f"Resource with name {resource_clean_name} not found in {true_file_path}"
             )
 
         instance = cls.from_yaml_dict(
-            yaml_dict, resource_id=resource_id, name="", position=position, **kwargs
+            yaml_dict,
+            resource_id=resource_id,
+            name="",
+            position=int(resource_clean_name),
+            **kwargs,
         )
         utils.check_yaml_field_types(instance)
         return instance

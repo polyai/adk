@@ -19,11 +19,13 @@ from dataclasses import fields, is_dataclass
 from difflib import unified_diff
 from enum import Enum
 from io import StringIO
-from typing import TYPE_CHECKING, Callable, Optional, Union
+from typing import TYPE_CHECKING, Callable, Optional, TypeVar, Union
 
 import ruamel.yaml as yaml
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 if TYPE_CHECKING:
     from poly.resources.flows import BaseFlowStep
@@ -301,6 +303,59 @@ def validate_references(
     return len(invalid_references) == 0, invalid_references
 
 
+# (mappings, len(mappings), {key: table}) for the last mappings list seen by memo_for_mappings.
+_mappings_memo: tuple[Optional[list], int, dict] = (None, 0, {})
+
+
+def memo_for_mappings(
+    mappings: list["ResourceMapping"], key: typing.Hashable, build: Callable[[], _T]
+) -> _T:
+    """Return build(), reusing the result while the same mappings list is passed again.
+
+    A table derived from the mappings is cached under `key` for as long as calls pass the
+    same list object at the same length; any other list starts a fresh cache. A mappings
+    list may be extended between calls but must not be edited in place, and callers must not
+    mutate the returned table.
+
+    Args:
+        mappings: The resource mappings the table is derived from.
+        key: Identifies the table among those derived from the same mappings.
+        build: Builds the table from the mappings.
+
+    Returns:
+        The table built by build(), possibly from an earlier call.
+    """
+    global _mappings_memo
+    if not mappings or not isinstance(mappings, list):
+        return build()
+    memo = _mappings_memo
+    if memo[0] is not mappings or memo[1] != len(mappings):
+        memo = (mappings, len(mappings), {})
+        _mappings_memo = memo
+    tables = memo[2]
+    if key not in tables:
+        tables[key] = build()
+    return tables[key]
+
+
+def _build_reference_lookup(
+    resource_mappings: list["ResourceMapping"],
+    flow_folder_name: Optional[str],
+    names_to_ids: bool,
+) -> dict[tuple[str, str], str]:
+    """Build the (prefix, from) -> to lookup used by _build_reference_replacer."""
+    lookup: dict[tuple[str, str], str] = {}
+    for rm in resource_mappings:
+        if rm.flow_name and clean_name(rm.flow_name) not in (None, flow_folder_name):
+            continue
+        if rm.resource_prefix:
+            if names_to_ids:
+                lookup[(rm.resource_prefix, rm.resource_name)] = rm.resource_id
+            else:
+                lookup[(rm.resource_prefix, rm.resource_id)] = rm.resource_name
+    return lookup
+
+
 def _build_reference_replacer(
     resource_mappings: list["ResourceMapping"],
     flow_folder_name: str = None,
@@ -314,16 +369,11 @@ def _build_reference_replacer(
         flow_folder_name: Restricts flow-scoped mappings to the current flow.
         names_to_ids: When True, map names -> ids; when False, ids -> names.
     """
-    # Build dict for O(1) lookups: (prefix, from) -> to
-    lookup: dict[tuple[str, str], str] = {}
-    for rm in resource_mappings:
-        if rm.flow_name and clean_name(rm.flow_name) not in (None, flow_folder_name):
-            continue
-        if rm.resource_prefix:
-            if names_to_ids:
-                lookup[(rm.resource_prefix, rm.resource_name)] = rm.resource_id
-            else:
-                lookup[(rm.resource_prefix, rm.resource_id)] = rm.resource_name
+    lookup = memo_for_mappings(
+        resource_mappings,
+        ("refs", flow_folder_name, names_to_ids),
+        lambda: _build_reference_lookup(resource_mappings, flow_folder_name, names_to_ids),
+    )
 
     def _replacer(match: re.Match) -> str:
         key = (match.group(1), match.group(2))

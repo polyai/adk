@@ -76,6 +76,49 @@ EMPTY_PROJECT_DATA_LOC = os.path.join(EMPTY_PROJECT_DIR, "empty_project.json")
 EMPTY_PROJECT_DATA = json.loads(open(EMPTY_PROJECT_DATA_LOC, encoding="utf-8").read())
 
 
+class ApiHandlerPropertyTest(unittest.TestCase):
+    """Tests for the api_handler property keeping branch_id in sync with the handler."""
+
+    def setUp(self):
+        self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.project.branch_id = "branch-a"
+        self.handler = MagicMock()
+        self.handler.branch_id = "branch-a"
+        self.project._api_handler = self.handler
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_unchanged_branch_does_not_save(self):
+        """Reading the handler repeatedly while its branch is unchanged writes nothing."""
+        for _ in range(3):
+            self.assertIs(self.project.api_handler, self.handler)
+
+        self.mock_save_config.assert_not_called()
+        self.assertEqual(self.project.branch_id, "branch-a")
+
+    def test_changed_branch_is_adopted_and_saved_once(self):
+        """A branch the handler switched to is adopted and persisted exactly once."""
+        self.project.api_handler
+        self.handler.branch_id = "main"
+
+        for _ in range(3):
+            self.project.api_handler
+
+        self.mock_save_config.assert_called_once()
+        self.assertEqual(self.project.branch_id, "main")
+
+    def test_cleared_branch_is_adopted_without_saving(self):
+        """A handler with no branch clears branch_id but does not persist that."""
+        self.handler.branch_id = None
+
+        self.project.api_handler
+
+        self.mock_save_config.assert_not_called()
+        self.assertIsNone(self.project.branch_id)
+
+
 class InitTest(unittest.TestCase):
     """Tests for the AgentStudioProject class"""
 

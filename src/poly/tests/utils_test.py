@@ -7,6 +7,8 @@ import copy
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Callable
+from unittest.mock import patch
 
 import poly.resources.resource_utils as resource_utils
 from poly import utils
@@ -18,6 +20,7 @@ from poly.resources import (
     ResourceMapping,
     SMSTemplate,
     Variable,
+    Variant,
     VariantAttribute,
 )
 from poly.resources.flows import (
@@ -1097,6 +1100,154 @@ class ReplaceResourceNamesWithIdsInDataTests(unittest.TestCase):
 
         # The flow-scoped {{ft:...}} reference is untouched; the global {{fn:...}} is swapped.
         self.assertEqual(result["prompt"], "Call {{ft:Flow Function}} and {{fn:function-1}}.")
+
+
+class MemoForMappingsTests(unittest.TestCase):
+    """Tests for memo_for_mappings and the tables built through it."""
+
+    @staticmethod
+    def _variant(resource_id: str, name: str) -> ResourceMapping:
+        return ResourceMapping(
+            resource_id=resource_id,
+            resource_type=Variant,
+            resource_name=name,
+            file_path=None,
+            flow_name=None,
+            resource_prefix=None,
+        )
+
+    def _counting_build(self) -> tuple[list[int], Callable[[], dict]]:
+        calls: list[int] = []
+
+        def build() -> dict:
+            calls.append(1)
+            return {"built": len(calls)}
+
+        return calls, build
+
+    def test_same_list_reuses_the_built_table(self):
+        """A second call with the same list returns the first table without rebuilding."""
+        mappings = [self._variant("v1", "one")]
+        calls, build = self._counting_build()
+
+        first = resource_utils.memo_for_mappings(mappings, "key", build)
+        second = resource_utils.memo_for_mappings(mappings, "key", build)
+
+        self.assertIs(first, second)
+        self.assertEqual(len(calls), 1)
+
+    def test_tables_are_kept_per_key(self):
+        """Different keys on the same list build and keep separate tables."""
+        mappings = [self._variant("v1", "one")]
+        calls, build = self._counting_build()
+
+        a = resource_utils.memo_for_mappings(mappings, "a", build)
+        b = resource_utils.memo_for_mappings(mappings, "b", build)
+
+        self.assertIsNot(a, b)
+        self.assertIs(resource_utils.memo_for_mappings(mappings, "a", build), a)
+        self.assertEqual(len(calls), 2)
+
+    def test_extending_the_list_invalidates(self):
+        """Appending to the list rebuilds the table on the next call."""
+        mappings = [self._variant("v1", "one")]
+        calls, build = self._counting_build()
+
+        first = resource_utils.memo_for_mappings(mappings, "key", build)
+        mappings.append(self._variant("v2", "two"))
+        second = resource_utils.memo_for_mappings(mappings, "key", build)
+
+        self.assertIsNot(first, second)
+        self.assertEqual(len(calls), 2)
+
+    def test_a_different_list_of_the_same_length_rebuilds(self):
+        """Only the same list object reuses a table, whatever its length."""
+        calls, build = self._counting_build()
+
+        resource_utils.memo_for_mappings([self._variant("v1", "one")], "key", build)
+        resource_utils.memo_for_mappings([self._variant("v2", "two")], "key", build)
+
+        self.assertEqual(len(calls), 2)
+
+    def test_empty_mappings_are_never_cached(self):
+        """An empty or missing list builds on every call."""
+        for mappings in ([], None):
+            with self.subTest(mappings=mappings):
+                calls, build = self._counting_build()
+                resource_utils.memo_for_mappings(mappings, "key", build)
+                resource_utils.memo_for_mappings(mappings, "key", build)
+                self.assertEqual(len(calls), 2)
+
+    def test_reference_swaps_match_the_unmemoised_lookup(self):
+        """Cached reference lookups give the same swaps for every flow scope and direction."""
+        mappings = list(ResourceMappingTests.TEST_RESOURCE_MAPPINGS)
+        prompt = (
+            "{{fn:Function 1}} {{fn:function-1}} {{ft:Flow Function}} "
+            "{{ft:flow-function-1}} {{ft:flow-function-2}} {{attr:customer_name}} "
+            "{{attr:attr-customer_name}} {{fn:unknown}}"
+        )
+        cases = [(flow, direction) for flow in (None, "flow_1", "flow_2") for direction in (True, False)]
+        expected = {
+            (flow, direction): resource_utils.build_reference_swapper(
+                list(mappings), flow, names_to_ids=direction
+            )(prompt)
+            for flow, direction in cases
+        }
+
+        real_build = resource_utils._build_reference_lookup
+        with patch.object(
+            resource_utils, "_build_reference_lookup", side_effect=real_build
+        ) as build:
+            for _ in range(2):
+                for flow, direction in cases:
+                    with self.subTest(flow=flow, names_to_ids=direction):
+                        swapped = resource_utils.build_reference_swapper(
+                            mappings, flow, names_to_ids=direction
+                        )(prompt)
+                        self.assertEqual(swapped, expected[(flow, direction)])
+
+        self.assertEqual(build.call_count, len(cases))
+        self.assertNotEqual(expected[("flow_1", True)], expected[("flow_2", True)])
+
+    def test_variant_name_clash_is_found_after_the_list_grows(self):
+        """Variant.validate sees a clashing variant appended after an earlier check."""
+        mappings = [self._variant("v1", "north"), self._variant("v2", "south")]
+        variant = Variant(resource_id="v1", name="north")
+
+        variant.validate(resource_mappings=mappings)
+        mappings.append(self._variant("v3", "north"))
+
+        with self.assertRaises(ValueError) as cm:
+            variant.validate(resource_mappings=mappings)
+        self.assertIn("Variant north already exists", str(cm.exception))
+
+    def test_variant_attribute_pretty_round_trip_uses_current_variants(self):
+        """to/from pretty dict map every variant, including one appended between calls."""
+        mappings = [self._variant("v1", "north")]
+        VariantAttribute.to_pretty_dict({"values": {"v1": "a"}}, resource_mappings=mappings)
+        mappings.append(self._variant("v2", "south"))
+
+        pretty = VariantAttribute.to_pretty_dict(
+            {"name": "colour", "values": {"v1": "a", "v2": "b"}}, resource_mappings=mappings
+        )
+        self.assertEqual(pretty["values"], {"north": "a", "south": "b"})
+        self.assertEqual(
+            VariantAttribute.from_pretty_dict(pretty, resource_mappings=mappings)["values"],
+            {"v1": "a", "v2": "b"},
+        )
+
+    def test_variant_attribute_validate_reports_missing_variants_by_name(self):
+        """VariantAttribute.validate checks against every variant in the current list."""
+        mappings = [self._variant("v1", "north")]
+        attribute = VariantAttribute(
+            resource_id="attr-1", name="colour", mappings={"v1": "red"}
+        )
+        attribute.validate(resource_mappings=mappings)
+        mappings.append(self._variant("v2", "south"))
+
+        with self.assertRaises(ValueError) as cm:
+            attribute.validate(resource_mappings=mappings)
+        self.assertIn("Missing variants for variant attribute: ['south']", str(cm.exception))
 
 
 class FlowUtilsTests(unittest.TestCase):
