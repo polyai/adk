@@ -7200,7 +7200,7 @@ class PronunciationTests(unittest.TestCase):
             MultiResourceYamlResource.write_cache_to_file()
         MultiResourceYamlResource._file_cache.clear()
         file_path = os.path.join(base_path, "voice", "response_control", "pronunciations.yaml")
-        with open(file_path, encoding="utf-8", newline="") as f:
+        with open(file_path, encoding="utf-8") as f:
             return f.read()
 
     def test_save_writes_expected_file(self):
@@ -7258,19 +7258,18 @@ class PronunciationTests(unittest.TestCase):
             with self.subTest(batched=batched):
                 self.assertEqual(self._save_to_temp_project(pronunciations, batched), expected)
 
-    def test_save_keeps_crlf_inside_field(self):
-        """A CRLF inside a field is written as-is in a literal block and loads back as LF."""
+    def test_save_writes_crlf_inside_field_as_lf(self):
+        """A CRLF or lone CR inside a multi-line field is saved as LF, on every platform."""
         pronunciation = Pronunciation(
             resource_id="pr-0",
             regex="x",
             replacement="y",
-            description="line one\r\nline two",
+            description="line one\r\nline two\rline three",
             position=0,
         )
 
         contents = self._save_to_temp_project([pronunciation], batched=False)
 
-        self.assertIn("line one\r\n", contents)
         self.assertEqual(
             resource_utils.load_yaml(contents),
             {
@@ -7279,10 +7278,22 @@ class PronunciationTests(unittest.TestCase):
                         "regex": "x",
                         "replacement": "y",
                         "case_sensitive": False,
-                        "description": "line one\nline two",
+                        "description": "line one\nline two\nline three",
                     }
                 ]
             },
+        )
+
+    def test_save_keeps_cr_in_single_line_field(self):
+        """A CR in a single-line field is quoted, not treated as a line break."""
+        pronunciation = Pronunciation(
+            resource_id="pr-0", regex="x", replacement="a\rb", position=0
+        )
+
+        contents = self._save_to_temp_project([pronunciation], batched=False)
+
+        self.assertEqual(
+            resource_utils.load_yaml(contents)["pronunciations"][0]["replacement"], "a\rb"
         )
 
 
