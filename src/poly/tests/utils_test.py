@@ -4,7 +4,13 @@ Copyright PolyAI Limited
 """
 
 import copy
+import importlib
+import importlib.resources
+import pkgutil
+import re
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -32,7 +38,7 @@ from poly.resources.flows import (
     StepType,
     VADConfig,
 )
-from poly.utils import prepush
+from poly.utils import prepush, stub_gen
 
 
 class MergeUtilsTests(unittest.TestCase):
@@ -244,6 +250,164 @@ class ImportUtilsTests(unittest.TestCase):
 
         self.assertIn("# flake8: noqa", contents)
         self.assertIn("# <AUTO GENERATED>", contents)
+
+    def test_create_import_file_contents_exports_and_imports_type_names(self):
+        """The contents advertise each exported type and import it from its module."""
+        contents = utils.create_import_file_contents()
+
+        self.assertIn('"Conversation"', contents)
+        self.assertIn("from .conversation import", contents)
+
+    def test_load_file_class_maps_keys_stub_exports_by_importable_module_name(self):
+        """__all__ is read from the committed .py stub modules, keyed by filename."""
+        file_class_maps = stub_gen._load_file_class_maps()
+
+        self.assertIn("conversation.py", file_class_maps)
+        self.assertIn("Conversation", file_class_maps["conversation.py"])
+
+
+class GeneratedTypeStubPackageTests(unittest.TestCase):
+    """Tests for save_imports turning the poly.types stubs into an importable _gen package.
+
+    These run against the real installed poly.types package, writing _gen into a
+    temporary directory, because the value of _gen is that it works as a package
+    on disk — something only end-to-end generation can show.
+    """
+
+    def setUp(self) -> None:
+        """Generate a real _gen package from the installed poly.types stubs."""
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        self.project_path = tmp_dir.name
+        self.gen_dir = Path(self.project_path) / "_gen"
+
+        self._original_sys_path = list(sys.path)
+        self._original_pydantic = sys.modules.get("pydantic")
+
+        utils.save_imports(self.project_path)
+
+    def tearDown(self) -> None:
+        """Undo the sys.path and sys.modules changes made to import the generated package."""
+        sys.path[:] = self._original_sys_path
+        for module_name in [n for n in sys.modules if n == "_gen" or n.startswith("_gen.")]:
+            del sys.modules[module_name]
+        if self._original_pydantic is None:
+            sys.modules.pop("pydantic", None)
+        else:
+            sys.modules["pydantic"] = self._original_pydantic
+
+    def test_stubs_are_written_out_as_importable_py_modules(self):
+        """_gen holds .py modules only — a .pyi stub is not importable at runtime."""
+        file_names = sorted(path.name for path in self.gen_dir.iterdir() if path.is_file())
+
+        self.assertIn("conversation.py", file_names)
+        self.assertIn("api_connector.py", file_names)
+        self.assertEqual([name for name in file_names if name.endswith(".pyi")], [])
+
+    def test_subpackages_are_generated_with_their_own_modules(self):
+        """Nested stub packages such as connectors/ are copied across, not flattened or dropped."""
+        connector_names = sorted(
+            path.name for path in (self.gen_dir / "connectors").iterdir() if path.is_file()
+        )
+
+        self.assertIn("__init__.py", connector_names)
+        self.assertIn("janus_api_connector.py", connector_names)
+
+    def test_every_generated_file_starts_with_linter_suppression_header(self):
+        """Stub conventions are not lint-clean as plain .py, so every file opts out of linting."""
+        expected_header = ["# flake8: noqa", "# ruff: noqa", "# type: ignore"]
+
+        for path in sorted(self.gen_dir.rglob("*.py")):
+            with self.subTest(path.relative_to(self.gen_dir).as_posix()):
+                # Copied stub modules open with a copyright line; the generated
+                # __init__.py opens with the suppression lines directly.
+                first_lines = path.read_text(encoding="utf-8").splitlines()[:4]
+                for header_line in expected_header:
+                    self.assertIn(header_line, first_lines)
+
+    def test_init_advertises_public_types_but_not_typing_closure_modules(self):
+        """__all__ lists the types users write against; api_connector only closes annotations."""
+        contents = (self.gen_dir / "__init__.py").read_text(encoding="utf-8")
+
+        self.assertIn("# <AUTO GENERATED>", contents)
+        self.assertIn('"Conversation"', contents)
+        self.assertNotIn('"ApiConnector"', contents)
+
+    def test_generated_package_imports_and_binds_every_exported_name(self):
+        """Importing _gen works and every name in its __all__ is bound at runtime.
+
+        This is the regression guard for the ways stub-to-module conversion has
+        broken before: circular imports between modules (conversation and
+        api_connector reference each other), module-level annotation-only
+        declarations (``X: Any`` binds nothing at runtime, so importing X fails),
+        and names re-exported in __all__ that the stubs never defined.
+        """
+        # The stubs import pydantic, which is not a test dependency.
+        fake_pydantic = types.ModuleType("pydantic")
+        fake_pydantic.BaseModel = object
+        sys.modules["pydantic"] = fake_pydantic
+        sys.path.insert(0, self.project_path)
+        importlib.invalidate_caches()
+
+        gen = importlib.import_module("_gen")
+
+        unbound = [name for name in gen.__all__ if not hasattr(gen, name)]
+        self.assertEqual(unbound, [])
+        self.assertIn("Conversation", gen.__all__)
+
+
+class CommittedTypeStubTests(unittest.TestCase):
+    """Tests for the committed poly.types modules themselves.
+
+    Because the committed files are byte-identical to what _gen ships, they
+    must already be importable and self-contained.
+    """
+
+    def setUp(self) -> None:
+        """Fake pydantic (a runtime-only dependency the stubs import)."""
+        self._original_pydantic = sys.modules.get("pydantic")
+        fake_pydantic = types.ModuleType("pydantic")
+        fake_pydantic.BaseModel = object
+        sys.modules["pydantic"] = fake_pydantic
+
+    def tearDown(self) -> None:
+        """Restore pydantic and drop poly.types submodules imported by the walk."""
+        if self._original_pydantic is None:
+            sys.modules.pop("pydantic", None)
+        else:
+            sys.modules["pydantic"] = self._original_pydantic
+        for module_name in [n for n in sys.modules if n.startswith("poly.types.")]:
+            del sys.modules[module_name]
+
+    def test_every_types_module_imports_and_binds_its_exports(self):
+        """Import each committed module directly and check its __all__ binds."""
+        package = importlib.import_module("poly.types")
+        module_names = [
+            module.name for module in pkgutil.walk_packages(package.__path__, "poly.types.")
+        ]
+        self.assertGreater(len(module_names), 30)
+
+        for module_name in module_names:
+            with self.subTest(module_name):
+                module = importlib.import_module(module_name)
+                unbound = [n for n in getattr(module, "__all__", []) if not hasattr(module, n)]
+                self.assertEqual(unbound, [])
+
+    def test_no_stub_contains_absolute_runtime_imports(self):
+        """The sync relativizes runtime./utils. imports; none may survive."""
+        absolute_import = re.compile(r"^(?:from|import) (?:runtime|utils)\b", re.MULTILINE)
+
+        def _walk(pkg):
+            for resource in pkg.iterdir():
+                if resource.is_dir():
+                    yield from _walk(resource)
+                elif resource.name.endswith(".py"):
+                    yield resource
+
+        for resource in _walk(importlib.resources.files("poly.types")):
+            with self.subTest(resource.name):
+                match = absolute_import.search(resource.read_text(encoding="utf-8"))
+                self.assertIsNone(match)
 
 
 class CodeUtilsTests(unittest.TestCase):
@@ -1148,6 +1312,7 @@ class FlowUtilsTests(unittest.TestCase):
         self.assertIsNone(flow_name_none)
 
     # TODO: Test assigning positions to flow steps
+
 
 class ClearUnusedSettingsFromFlowStepTest(unittest.TestCase):
     """Tests for prepush.clear_unused_settings_from_flow_step.
