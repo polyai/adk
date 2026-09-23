@@ -5,6 +5,8 @@ Copyright PolyAI Limited
 
 import datetime
 import os
+import tempfile
+import threading
 import unittest
 
 import yaml
@@ -1053,9 +1055,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         )
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
-        result = Function._swap_latency_control_references(
-            code, mappings, names_to_ids=False
-        )
+        result = Function._swap_latency_control_references(code, mappings, names_to_ids=False)
 
         self.assertIn("{{vrbl:My Variable}}", result)
         self.assertNotIn("{{vrbl:var-1}}", result)
@@ -1069,9 +1069,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         )
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
-        result = Function._swap_latency_control_references(
-            code, mappings, names_to_ids=True
-        )
+        result = Function._swap_latency_control_references(code, mappings, names_to_ids=True)
 
         self.assertIn("{{vrbl:var-1}}", result)
         self.assertNotIn("{{vrbl:My Variable}}", result)
@@ -1085,9 +1083,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         )
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
-        result = Function._swap_latency_control_references(
-            code, mappings, names_to_ids=False
-        )
+        result = Function._swap_latency_control_references(code, mappings, names_to_ids=False)
 
         self.assertIn("{{vrbl:My Variable}}", result)
         body_line = [line for line in result.splitlines() if "msg = " in line][0]
@@ -1107,9 +1103,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
             self._make_translation_mapping("tn-1", "Greeting"),
         ]
 
-        result = Function._swap_latency_control_references(
-            code, mappings, names_to_ids=False
-        )
+        result = Function._swap_latency_control_references(code, mappings, names_to_ids=False)
 
         self.assertIn("{{vrbl:My Variable}}", result)
         self.assertIn("{{tn:Greeting}}", result)
@@ -1119,9 +1113,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         code = "def my_func(conv: Conversation):\n    msg = '{{vrbl:var-1}}'\n"
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
-        result = Function._swap_latency_control_references(
-            code, mappings, names_to_ids=False
-        )
+        result = Function._swap_latency_control_references(code, mappings, names_to_ids=False)
 
         self.assertEqual(result, code)
 
@@ -1134,9 +1126,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         )
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
-        result = Function._swap_latency_control_references(
-            code, mappings, names_to_ids=False
-        )
+        result = Function._swap_latency_control_references(code, mappings, names_to_ids=False)
 
         self.assertEqual(result, code)
 
@@ -1145,9 +1135,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         code = "def broken(:\n"
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
-        result = Function._swap_latency_control_references(
-            code, mappings, names_to_ids=False
-        )
+        result = Function._swap_latency_control_references(code, mappings, names_to_ids=False)
 
         self.assertEqual(result, code)
 
@@ -1160,9 +1148,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         )
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
-        result = Function._swap_latency_control_references(
-            code, mappings, names_to_ids=False
-        )
+        result = Function._swap_latency_control_references(code, mappings, names_to_ids=False)
 
         self.assertIn("{{vrbl:unknown-id}}", result)
 
@@ -1175,9 +1161,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         )
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
-        result = Function._swap_latency_control_references(
-            code, mappings, names_to_ids=False
-        )
+        result = Function._swap_latency_control_references(code, mappings, names_to_ids=False)
 
         self.assertIn("{{vrbl:My Variable}}", result)
         self.assertNotIn("{{vrbl:var-1}}", result)
@@ -1190,9 +1174,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
             "    pass\n"
         )
 
-        result = Function._swap_latency_control_references(
-            code, [], names_to_ids=False
-        )
+        result = Function._swap_latency_control_references(code, [], names_to_ids=False)
 
         self.assertEqual(result, code)
 
@@ -1205,9 +1187,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         )
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
-        result = Function._swap_latency_control_references(
-            code, mappings, names_to_ids=False
-        )
+        result = Function._swap_latency_control_references(code, mappings, names_to_ids=False)
 
         self.assertEqual(result, code)
 
@@ -1220,12 +1200,8 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         )
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
-        pretty = Function._swap_latency_control_references(
-            original, mappings, names_to_ids=False
-        )
-        restored = Function._swap_latency_control_references(
-            pretty, mappings, names_to_ids=True
-        )
+        pretty = Function._swap_latency_control_references(original, mappings, names_to_ids=False)
+        restored = Function._swap_latency_control_references(pretty, mappings, names_to_ids=True)
 
         self.assertEqual(restored, original)
 
@@ -1965,7 +1941,6 @@ example_queries:
             os.path.join("child_topics", "latin_america", "billing_refunds.yaml"),
         )
 
-
     def test_returns_empty_when_child_topics_folder_missing(self):
         """A project with no child_topics folder discovers nothing."""
         self.assertEqual(ChildTopic.discover_resources("/nonexistent"), [])
@@ -2022,7 +1997,6 @@ example_queries:
             discovered = ChildTopic.discover_resources(tmpdir)
 
             self.assertEqual(discovered, [os.path.join(spanish_dir, "opening_hours.yaml")])
-
 
     def test_resolves_variant_from_enclosing_folder(self):
         """The enclosing folder gives the variant; the topic ID is the resource's own ID."""
@@ -2096,7 +2070,6 @@ example_queries:
             "expected filename: opening_hours.yaml",
             str(cm.exception),
         )
-
 
     def test_fully_resolved_child_topic_is_valid(self):
         """A child topic with a resolved variant passes validation."""
@@ -2269,7 +2242,9 @@ example_queries:
         with self.assertRaises(ValueError) as cm:
             child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
 
-        self.assertIn("Invalid references: ['global_functions: FUNCTION-missing']", str(cm.exception))
+        self.assertIn(
+            "Invalid references: ['global_functions: FUNCTION-missing']", str(cm.exception)
+        )
 
     def test_create_proto_targets_own_id_scoped_to_variant(self):
         """The proto carries the child topic's own ID and the variant it is scoped to."""
@@ -5474,7 +5449,9 @@ class TypedVariantAttributeTests(unittest.TestCase):
         attr = self._attribute(AttributeKind.NUMBER, 3.0)
         self.assertEqual(attr.mappings["VARIANT-default"], 3)
         self.assertNotIsInstance(attr.mappings["VARIANT-default"], float)
-        self.assertEqual(self._attribute(AttributeKind.NUMBER, 2.5).mappings["VARIANT-default"], 2.5)
+        self.assertEqual(
+            self._attribute(AttributeKind.NUMBER, 2.5).mappings["VARIANT-default"], 2.5
+        )
 
     def test_validate_accepts_matching_values(self):
         """A value of the declared type passes validation."""
@@ -5694,9 +5671,7 @@ class TypedVariantAttributeYamlTests(unittest.TestCase):
             with self.subTest(kind=kind, value=value):
                 attribute = self._attribute(kind, value, config)
                 read_back = VariantAttribute.from_yaml_dict(
-                    resource_utils.load_yaml(
-                        resource_utils.dump_yaml(attribute.to_yaml_dict())
-                    ),
+                    resource_utils.load_yaml(resource_utils.dump_yaml(attribute.to_yaml_dict())),
                     "attr-test",
                 )
                 self.assertEqual(read_back.mappings, attribute.mappings)
@@ -5752,9 +5727,7 @@ class TypedVariantAttributeYamlTests(unittest.TestCase):
             "VARIANT-d": "0123",
             "VARIANT-e": "1.0",
         }
-        attribute = VariantAttribute(
-            resource_id="attr-test", name="test_attr", mappings=values
-        )
+        attribute = VariantAttribute(resource_id="attr-test", name="test_attr", mappings=values)
 
         read_back = VariantAttribute.from_yaml_dict(
             resource_utils.load_yaml(resource_utils.dump_yaml(attribute.to_yaml_dict())),
@@ -5841,9 +5814,7 @@ class TypedVariantAttributeProjectionTests(unittest.TestCase):
         """The parser itself still tolerates a missing or malformed type."""
         for type_data in (None, {}, "nonsense"):
             with self.subTest(type_data=type_data):
-                self.assertEqual(
-                    _read_attribute_type(type_data), (AttributeKind.STRING, {})
-                )
+                self.assertEqual(_read_attribute_type(type_data), (AttributeKind.STRING, {}))
 
     def test_stale_enum_config_is_dropped_when_the_kind_is_not_enum(self):
         """Changing an attribute away from enum leaves its old config on the platform.
@@ -12374,9 +12345,7 @@ class FlowSettingsSerializationTest(unittest.TestCase):
 
     def test_dtmf_uses_legacy_yaml_key(self):
         """The YAML key stays dtmf_config so existing step files keep working."""
-        settings = self._settings(
-            dtmf=DTMFConfig(is_enabled=True, max_digits=2)
-        )
+        settings = self._settings(dtmf=DTMFConfig(is_enabled=True, max_digits=2))
 
         yaml_dict = settings.to_yaml_dict()
         self.assertIn("dtmf_config", yaml_dict)
@@ -12458,9 +12427,7 @@ class FlowSettingsSerializationTest(unittest.TestCase):
             dtmf=DTMFConfig(is_enabled=True, max_digits=4),
         )
         # Deleting both blocks from the step YAML reads back as disabled sections.
-        updated = FlowSettings.from_yaml_dict(
-            {}, step_id=self.STEP_ID, flow_id=self.FLOW_ID
-        )
+        updated = FlowSettings.from_yaml_dict({}, step_id=self.STEP_ID, flow_id=self.FLOW_ID)
 
         self.assertNotEqual(updated, original)
 
@@ -12904,9 +12871,7 @@ class DeterministicConditionIdTests(unittest.TestCase):
         booking_flow_condition = self._read_condition(flow_name="Booking Flow")
         support_flow_condition = self._read_condition(flow_name="Support Flow")
 
-        self.assertNotEqual(
-            booking_flow_condition.resource_id, support_flow_condition.resource_id
-        )
+        self.assertNotEqual(booking_flow_condition.resource_id, support_flow_condition.resource_id)
 
     def test_same_condition_name_in_another_step_gets_a_different_id(self):
         """Steps within one flow may repeat a condition name, so the step is part of the scope."""
@@ -12988,6 +12953,58 @@ class DeterministicParameterIdTests(unittest.TestCase):
         )
 
         self.assertEqual(parameters[0].id, "param-assigned-by-the-platform")
+
+
+def _run_in_thread(func):
+    """Run func in a new thread and return its result."""
+    result = {}
+
+    def target():
+        result["value"] = func()
+
+    thread = threading.Thread(target=target)
+    thread.start()
+    thread.join()
+    return result.get("value")
+
+
+class MultiResourceFileCacheTests(unittest.TestCase):
+    """Concurrent ADK calls in threads (e.g. a service worker pool) must not share one cache."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+
+    def tearDown(self):
+        MultiResourceYamlResource._file_cache.clear()
+
+    def test_subclasses_share_the_calling_threads_cache(self):
+        """Projects clear via the base class while subclasses write via cls."""
+        self.assertIs(Entity._file_cache, MultiResourceYamlResource._file_cache)
+
+    def test_another_thread_starts_with_an_empty_cache(self):
+        MultiResourceYamlResource._file_cache["/a/entities.yaml"] = (0.0, {"entities": []})
+
+        seen = _run_in_thread(lambda: dict(MultiResourceYamlResource._file_cache))
+
+        self.assertEqual(seen, {})
+
+    def test_clearing_in_another_thread_keeps_this_threads_entries(self):
+        MultiResourceYamlResource._file_cache["/a/entities.yaml"] = (0.0, {"entities": []})
+
+        _run_in_thread(lambda: MultiResourceYamlResource._file_cache.clear())
+
+        self.assertIn("/a/entities.yaml", MultiResourceYamlResource._file_cache)
+
+    def test_flushing_in_another_thread_does_not_write_this_threads_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "entities.yaml")
+            MultiResourceYamlResource._file_cache[path] = (0.0, {"entities": []})
+
+            _run_in_thread(lambda: MultiResourceYamlResource.write_cache_to_file())
+            self.assertFalse(os.path.exists(path))
+
+            MultiResourceYamlResource.write_cache_to_file()
+            self.assertTrue(os.path.exists(path))
 
 
 if __name__ == "__main__":
