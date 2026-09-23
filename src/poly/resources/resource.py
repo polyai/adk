@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import os
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, fields
 from typing import ClassVar, Optional, TypeAlias
@@ -502,12 +503,31 @@ def _parse_multi_resource_path(file_path: str) -> tuple[str, list[str]]:
     return yaml_file_path, segments
 
 
+class _ThreadFileCache(threading.local):
+    """Holds each thread's own multi-resource file cache."""
+
+    def __init__(self) -> None:
+        self.entries: dict[str, tuple[float, dict]] = {}
+
+
+_thread_file_cache = _ThreadFileCache()
+
+
+class _PerThreadFileCache:
+    """Descriptor that resolves to the calling thread's multi-resource file cache."""
+
+    def __get__(self, obj: object, owner: type) -> dict[str, tuple[float, dict]]:
+        return _thread_file_cache.entries
+
+
 @dataclass
 class MultiResourceYamlResource(YamlResource, ABC):
     """Abstract base class for a resource that is stored in a single YAML file with multiple resources."""
 
-    # Class-level cache: true_file_path -> (mtime, top_level_yaml_dict). Invalidated on write; refreshed when mtime differs.
-    _file_cache: ClassVar[dict[str, tuple[float, dict]]] = {}
+    # true_file_path -> (mtime, top_level_yaml_dict). Invalidated on write; refreshed when mtime differs.
+    # One per thread: projects clear and flush the whole cache mid-operation, so threads sharing it
+    # would drop each other's unflushed writes and flush each other's files.
+    _file_cache: ClassVar[_PerThreadFileCache] = _PerThreadFileCache()
 
     # When True, the top-level key maps to a single dict (not a list). Used for singleton resources like VoiceGreeting.
     _singleton: ClassVar[bool] = False
