@@ -186,9 +186,21 @@ tag_format = "v{version}"
 [project]
 name = "polyai-adk"
 version = "0.61.1"
-description = "Agent Development Kit (ADK) — a CLI for managing Agent Studio projects locally"
+description = "Agent Development Kit (ADK) — a CLI for building, testing, and deploying PolyAI voice and chat agents, self-serve"
 readme = "README.md"
 requires-python = ">=3.14.0"
+keywords = [
+    "voice-ai",
+    "conversational-ai",
+    "cli",
+    "agent-development-kit",
+    "voice-agents",
+]
+classifiers = [
+    "Topic :: Communications :: Telephony",
+    "Topic :: Software Development :: Libraries",
+    "Intended Audience :: Developers",
+]
 dependencies = [
     "protobuf>=4.21.0",
     "rich>=13.0.0",
@@ -215,6 +227,12 @@ dependencies = [
 
 [project.license]
 text = "Apache-2.0"
+
+[project.urls]
+Documentation = "https://docs.poly.ai/adk"
+Homepage = "https://docs.poly.ai/adk"
+Source = "https://github.com/polyai/adk"
+Changelog = "https://github.com/polyai/adk/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
