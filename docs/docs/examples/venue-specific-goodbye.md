@@ -1,6 +1,7 @@
 ---
 title: Venue-specific goodbye with clean hangup
 description: End the call with a location-specific closing message without the LLM injecting its own filler before the disconnect.
+canonical_url: https://docs.poly.ai/adk/examples/venue-specific-goodbye
 ---
 
 # Venue-specific goodbye with clean hangup

@@ -1,6 +1,7 @@
 ---
 title: Agent settings
 description: Define the agent's identity, persona, and behavioral rules in the PolyAI ADK.
+canonical_url: https://docs.poly.ai/adk/reference/agent_settings
 ---
 
 # Agent settings

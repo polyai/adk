@@ -1,6 +1,7 @@
 ---
 title: Branches, push, and pull
 description: How the PolyAI ADK handles branches, diffs, reviews, and merging when several people work on the same project.
+noindex: true
 ---
 
 # Branches, push, and pull

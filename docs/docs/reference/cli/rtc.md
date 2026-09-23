@@ -1,6 +1,7 @@
 ---
 title: poly rtc
 description: Reference for the `poly rtc` command.
+noindex: true
 ---
 
 # `poly rtc`

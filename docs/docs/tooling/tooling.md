@@ -1,6 +1,7 @@
 ---
 title: Tooling
 description: Development tools and integrations commonly used with the PolyAI ADK.
+canonical_url: https://docs.poly.ai/adk/reference/tooling
 ---
 
 # Tooling

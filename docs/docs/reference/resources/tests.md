@@ -1,6 +1,7 @@
 ---
 title: Tests
 description: Write and manage simulated conversation test cases in the PolyAI ADK, and understand how testing fits into the local workflow.
+canonical_url: https://docs.poly.ai/adk/reference/tests
 ---
 
 # Tests

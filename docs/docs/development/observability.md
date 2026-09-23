@@ -1,6 +1,7 @@
 ---
 title: Observability
 description: Instrument an agent with logs and metrics so conversations can be understood after the fact, and inspect real calls with poly conversations.
+noindex: true
 ---
 
 # Observability

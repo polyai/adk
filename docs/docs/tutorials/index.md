@@ -1,6 +1,7 @@
 ---
 title: Tutorials
 description: Step-by-step guides for real workflows with the PolyAI ADK.
+canonical_url: https://docs.poly.ai/adk/tutorials
 ---
 
 # Tutorials

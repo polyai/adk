@@ -1,6 +1,7 @@
 ---
 title: Audio caching
 description: How cached TTS audio works in Agent Studio, and how to inspect, retune, and replace what callers actually hear.
+noindex: true
 ---
 
 # Audio caching

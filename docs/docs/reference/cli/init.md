@@ -1,6 +1,7 @@
 ---
 title: poly init
 description: Reference for the `poly init` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly init`

@@ -1,6 +1,7 @@
 ---
 title: Translations
 description: Define localized text strings that an agent can use across its configured languages.
+canonical_url: https://docs.poly.ai/adk/reference/translations
 ---
 
 # Translations

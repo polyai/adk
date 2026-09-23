@@ -1,6 +1,7 @@
 ---
 title: Confirm caller ID before sending SMS
 description: Stash the caller's number at call start, compare the last four digits for confirmation, then send an SMS — or ask for the number if it isn't available.
+canonical_url: https://docs.poly.ai/adk/examples/confirm-caller-id-before-sms
 ---
 
 # Confirm caller ID before sending SMS

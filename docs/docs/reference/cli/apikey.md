@@ -1,6 +1,7 @@
 ---
 title: poly apikey
 description: Reference for the `poly apikey` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly apikey`

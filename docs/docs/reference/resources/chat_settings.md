@@ -1,6 +1,7 @@
 ---
 title: Chat settings
 description: Configure how the agent behaves on the web chat channel.
+canonical_url: https://docs.poly.ai/adk/reference/chat_settings
 ---
 
 # Chat settings

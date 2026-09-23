@@ -1,6 +1,7 @@
 ---
 title: PolyAI ADK Docs
 description: Documentation for the PolyAI Agent Development Kit.
+canonical_url: https://docs.poly.ai/adk
 ---
 
 ![PolyAI ADK](assets/poly-ai-adk.png)

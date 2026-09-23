@@ -1,6 +1,7 @@
 ---
 title: poly setup
 description: Reference for the `poly setup` command.
+noindex: true
 ---
 
 # `poly setup`

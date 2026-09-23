@@ -1,6 +1,7 @@
 ---
 title: poly deployments
 description: Reference for the `poly deployments` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly deployments`

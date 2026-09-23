@@ -1,6 +1,7 @@
 ---
 title: SMS templates
 description: Define reusable SMS messages that the agent can send during a conversation.
+canonical_url: https://docs.poly.ai/adk/reference/sms
 ---
 
 # SMS templates

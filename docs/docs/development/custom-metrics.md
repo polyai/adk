@@ -1,6 +1,7 @@
 ---
 title: Custom metrics
 description: Define and manage the custom metrics an agent writes to, with poly metrics list, add, edit, export, and import.
+noindex: true
 ---
 
 # Custom metrics

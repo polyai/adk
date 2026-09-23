@@ -1,6 +1,7 @@
 ---
 title: Discord
 description: Join the PolyAI ADK Discord server to ask questions, share what you're building, and collaborate with the community.
+canonical_url: https://docs.poly.ai/adk/community/discord
 ---
 
 # Join us on Discord

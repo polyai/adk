@@ -1,6 +1,7 @@
 ---
 title: poly call
 description: Reference for the `poly call` command.
+noindex: true
 ---
 
 # `poly call`

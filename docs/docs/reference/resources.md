@@ -1,6 +1,7 @@
 ---
 title: Resource reference
 description: Index of every resource type the PolyAI ADK manages, with the file it lives in and what it configures.
+noindex: true
 ---
 
 # Resource reference

@@ -1,6 +1,7 @@
 ---
 title: Functions
 description: Add deterministic logic to your agent using global functions, transition functions, function steps, and lifecycle hooks.
+canonical_url: https://docs.poly.ai/adk/reference/functions
 ---
 
 # Functions

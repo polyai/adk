@@ -1,6 +1,7 @@
 ---
 title: poly branch
 description: Reference for the `poly branch` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly branch`

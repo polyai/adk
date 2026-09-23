@@ -1,6 +1,7 @@
 ---
 title: Handoffs
 description: Configure SIP call transfers for voice agents using handoff definitions in the PolyAI ADK.
+canonical_url: https://docs.poly.ai/adk/reference/handoffs
 ---
 
 # Handoffs

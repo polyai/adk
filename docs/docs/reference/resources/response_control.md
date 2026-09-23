@@ -1,6 +1,7 @@
 ---
 title: Response control
 description: Control how voice-agent output is filtered and pronounced before it is spoken to the user.
+canonical_url: https://docs.poly.ai/adk/reference/response_control
 ---
 
 # Response control

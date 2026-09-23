@@ -1,6 +1,7 @@
 ---
 title: poly validate
 description: Reference for the `poly validate` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly validate`

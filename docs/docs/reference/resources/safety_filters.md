@@ -1,6 +1,7 @@
 ---
 title: Safety filters
 description: Configure project-level and per-channel content safety filtering for PolyAI agents.
+canonical_url: https://docs.poly.ai/adk/reference/safety_filters
 ---
 
 # Safety filters

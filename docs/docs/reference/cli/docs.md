@@ -1,6 +1,7 @@
 ---
 title: poly docs
 description: Reference for the `poly docs` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly docs`

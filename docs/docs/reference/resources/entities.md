@@ -1,6 +1,7 @@
 ---
 title: Entities
 description: Define structured data that the agent can collect and use during a conversation.
+canonical_url: https://docs.poly.ai/adk/reference/entities
 ---
 
 # Entities

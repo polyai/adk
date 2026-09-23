@@ -1,6 +1,7 @@
 ---
 title: poly format
 description: Reference for the `poly format` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly format`

@@ -1,6 +1,7 @@
 ---
 title: CLI reference
 description: Index of every command provided by the PolyAI ADK CLI, with the flags shared across all of them.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # CLI reference

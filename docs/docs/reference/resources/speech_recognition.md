@@ -1,6 +1,7 @@
 ---
 title: Speech recognition
 description: Configure how the agent processes spoken input on the voice channel.
+canonical_url: https://docs.poly.ai/adk/reference/speech_recognition
 ---
 
 # Speech recognition

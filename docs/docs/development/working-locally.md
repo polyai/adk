@@ -1,6 +1,7 @@
 ---
 title: Working locally
 description: Understand how the PolyAI ADK maps Agent Studio projects onto a local development workflow.
+canonical_url: https://docs.poly.ai/adk/concepts/working-locally
 ---
 
 # Working locally

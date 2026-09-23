@@ -1,6 +1,7 @@
 ---
 title: Build a restaurant booking agent
 description: A complete walkthrough building a voice agent that takes table reservations — covering flows, entities, functions, and topics.
+canonical_url: https://docs.poly.ai/adk/tutorials/restaurant-booking-agent
 ---
 
 # Build a restaurant booking agent

@@ -1,6 +1,7 @@
 ---
 title: Topics
 description: Define knowledge-base topics that the agent can retrieve and act on through RAG.
+canonical_url: https://docs.poly.ai/adk/reference/topics
 ---
 
 # Topics

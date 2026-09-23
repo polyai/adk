@@ -1,6 +1,7 @@
 ---
 title: Build an agent with the ADK
 description: Follow the end-to-end workflow for going from a blank Agent Studio project to a production-ready voice agent with the PolyAI ADK.
+canonical_url: https://docs.poly.ai/adk/tutorials/build-an-agent
 ---
 
 This guide walks through how to go from a blank slate to a production-ready voice agent using **Agent Studio**, the **PolyAI ADK**, and — optionally — the **PolyAI ADK extension** for **VS Code** or **Cursor**, or a coding agent such as **Claude Code**.

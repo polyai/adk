@@ -1,6 +1,7 @@
 ---
 title: poly metrics
 description: Reference for the `poly metrics` command.
+noindex: true
 ---
 
 # `poly metrics`

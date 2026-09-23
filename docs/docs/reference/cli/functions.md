@@ -1,6 +1,7 @@
 ---
 title: poly functions
 description: Reference for the `poly functions` command.
+noindex: true
 ---
 
 # `poly functions`

@@ -1,6 +1,7 @@
 ---
 title: poly review
 description: Reference for the `poly review` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly review`

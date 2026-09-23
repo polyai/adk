@@ -1,6 +1,7 @@
 ---
 title: poly completion
 description: Reference for the `poly completion` command.
+noindex: true
 ---
 
 # `poly completion`

@@ -1,6 +1,7 @@
 ---
 title: poly project
 description: Reference for the `poly project` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly project`

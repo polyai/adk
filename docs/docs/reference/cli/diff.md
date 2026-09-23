@@ -1,6 +1,7 @@
 ---
 title: poly diff
 description: Reference for the `poly diff` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly diff`

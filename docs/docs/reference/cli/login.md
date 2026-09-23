@@ -1,6 +1,7 @@
 ---
 title: poly login
 description: Reference for the `poly login` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly login`

@@ -1,6 +1,7 @@
 ---
 title: Flows
 description: Define multi-step processes that guide the agent through structured tasks in the PolyAI ADK.
+canonical_url: https://docs.poly.ai/adk/reference/flows
 ---
 
 # Flows

@@ -1,6 +1,7 @@
 ---
 title: Guardrails
 description: Configure platform and custom guardrails that constrain agent behavior during a conversation.
+noindex: true
 ---
 
 # Guardrails

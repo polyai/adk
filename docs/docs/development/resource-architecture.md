@@ -1,6 +1,7 @@
 ---
 title: Resource architecture
 description: What each ADK resource type is for, when it runs, and how the pieces reference each other.
+canonical_url: https://docs.poly.ai/adk/concepts/resource-architecture
 ---
 
 # Resource architecture

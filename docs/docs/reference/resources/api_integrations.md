@@ -1,6 +1,7 @@
 ---
 title: API integrations
 description: Define external HTTP APIs in a project and call them from functions and flows without writing custom request code.
+noindex: true
 ---
 
 # API integrations

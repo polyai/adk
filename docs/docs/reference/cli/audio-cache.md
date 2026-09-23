@@ -1,6 +1,7 @@
 ---
 title: poly audio-cache
 description: Reference for the `poly audio-cache` command.
+noindex: true
 ---
 
 # `poly audio-cache`

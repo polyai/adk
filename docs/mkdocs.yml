@@ -4,6 +4,10 @@ site_url: https://polyai.github.io/adk/
 repo_name: polyai/adk
 repo_url: https://github.com/polyai/adk
 
+# Contributor instructions, not a doc page — keep it out of the built site.
+exclude_docs: |
+  reference/cli/CLAUDE.md
+
 theme:
   name: material
   custom_dir: overrides

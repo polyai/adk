@@ -1,6 +1,7 @@
 ---
 title: poly template
 description: Reference for the `poly template` command.
+noindex: true
 ---
 
 # `poly template`

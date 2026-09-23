@@ -1,6 +1,7 @@
 ---
 title: Experimental config
 description: Enable experimental features and advanced runtime settings for an agent.
+canonical_url: https://docs.poly.ai/adk/reference/experimental_config
 ---
 
 # Experimental config

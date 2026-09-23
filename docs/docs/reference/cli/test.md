@@ -1,6 +1,7 @@
 ---
 title: poly test
 description: Reference for the `poly test` command.
+noindex: true
 ---
 
 # `poly test`

@@ -1,6 +1,7 @@
 ---
 title: Examples
 description: Focused examples for common PolyAI ADK patterns and workflows.
+canonical_url: https://docs.poly.ai/adk/examples
 ---
 
 Small, focused examples that can be copied and adapted when building with the **PolyAI ADK**.

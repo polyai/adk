@@ -1,6 +1,7 @@
 ---
 title: SMS link with transfer fallback
 description: Send an SMS with a link, and transfer to a live agent if SMS cannot be sent or the caller prefers to speak to someone.
+canonical_url: https://docs.poly.ai/adk/examples/sms-or-transfer-fallback
 ---
 
 # SMS link with transfer fallback

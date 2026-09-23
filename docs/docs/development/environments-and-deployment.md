@@ -1,6 +1,7 @@
 ---
 title: Environments and deployment
 description: How merged changes move through sandbox, pre-release, and live, and how to promote and roll back deployments with the PolyAI ADK.
+noindex: true
 ---
 
 # Environments and deployment

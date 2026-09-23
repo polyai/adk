@@ -1,6 +1,7 @@
 ---
 title: 'License acknowledgements'
 description: 'Third-party software licenses used in PolyAI ADK.'
+canonical_url: https://docs.poly.ai/adk/legal/licensing
 ---
 
 PolyAI ADK uses several third-party open source software packages. We gratefully acknowledge the contributions of the open source community. The packages and licensing can be found in [licenses.json](https://github.com/polyai/adk/blob/main/licenses.json){ target="_blank" rel="noopener" }.

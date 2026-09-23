@@ -1,6 +1,7 @@
 ---
 title: Voice settings
 description: Configure how the agent behaves on the voice channel, including greetings, style guidance, and disclaimers.
+canonical_url: https://docs.poly.ai/adk/reference/voice_settings
 ---
 
 # Voice settings

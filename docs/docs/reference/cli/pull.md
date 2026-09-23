@@ -1,6 +1,7 @@
 ---
 title: poly pull
 description: Reference for the `poly pull` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly pull`

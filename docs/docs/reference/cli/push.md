@@ -1,6 +1,7 @@
 ---
 title: poly push
 description: Reference for the `poly push` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly push`

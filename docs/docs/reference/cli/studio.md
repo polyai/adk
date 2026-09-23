@@ -1,6 +1,7 @@
 ---
 title: poly studio
 description: Reference for the `poly studio` command.
+noindex: true
 ---
 
 # `poly studio`

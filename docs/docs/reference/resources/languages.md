@@ -1,6 +1,7 @@
 ---
 title: Languages
 description: Configure the default language and additional languages that a PolyAI agent supports.
+canonical_url: https://docs.poly.ai/adk/reference/languages
 ---
 
 # Languages

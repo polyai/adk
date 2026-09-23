@@ -1,6 +1,7 @@
 ---
 title: Walkthrough Video
 description: Watch a walkthrough of building a production-ready voice agent with the PolyAI ADK.
+canonical_url: https://docs.poly.ai/adk/get-started/walkthrough-video
 ---
 
 This walkthrough shows how to build a production-ready voice agent with the **PolyAI ADK**.

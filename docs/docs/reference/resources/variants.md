@@ -1,6 +1,7 @@
 ---
 title: Variants
 description: Use variant attributes to change agent behavior and content by location, environment, or tenant.
+canonical_url: https://docs.poly.ai/adk/reference/variants
 ---
 
 # Variants

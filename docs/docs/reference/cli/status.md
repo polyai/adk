@@ -1,6 +1,7 @@
 ---
 title: poly status
 description: Reference for the `poly status` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly status`

@@ -1,6 +1,7 @@
 ---
 title: Variables
 description: Understand how state variables are discovered, stored, and referenced in the PolyAI ADK.
+canonical_url: https://docs.poly.ai/adk/reference/variables
 ---
 
 # Variables

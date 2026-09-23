@@ -1,6 +1,7 @@
 ---
 title: Context documents
 description: Markdown files in context/ that carry background knowledge about the project for Studio Assistant, without affecting agent runtime.
+noindex: true
 ---
 
 # Context documents

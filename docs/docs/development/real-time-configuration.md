@@ -1,6 +1,7 @@
 ---
 title: Real-time configuration
 description: Manage per-environment Real-Time Configuration with poly rtc, including drift protection and merge behavior.
+noindex: true
 ---
 
 # Real-time configuration

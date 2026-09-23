@@ -1,6 +1,7 @@
 ---
 title: poly chat
 description: Reference for the `poly chat` command.
+canonical_url: https://docs.poly.ai/adk/reference/cli
 ---
 
 # `poly chat`

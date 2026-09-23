@@ -1,6 +1,7 @@
 ---
 title: Getting started with PolyAI
 description: Go from zero to a working local agent project in minutes using the ADK CLI.
+canonical_url: https://docs.poly.ai/adk/get-started/get-started
 ---
 
 # Getting started

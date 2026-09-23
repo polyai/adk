@@ -1,6 +1,7 @@
 ---
 title: Testing
 description: The ways to verify an agent with the PolyAI ADK — validation, interactive chat, simulated conversation tests, and inspecting real conversations.
+canonical_url: https://docs.poly.ai/adk/reference/tests
 ---
 
 # Testing
