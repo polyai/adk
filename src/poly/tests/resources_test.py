@@ -5,6 +5,8 @@ Copyright PolyAI Limited
 
 import datetime
 import os
+import shutil
+import tempfile
 import unittest
 
 import yaml
@@ -7187,6 +7189,101 @@ class PronunciationTests(unittest.TestCase):
         self.assertEqual(result.replacement, "Doctor")
         self.assertTrue(result.case_sensitive)
         self.assertEqual(result.position, 0)
+
+    def _save_to_temp_project(self, pronunciations: list[Pronunciation], batched: bool) -> str:
+        """Save pronunciations into a new temp project and return the raw file contents."""
+        base_path = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base_path)
+        for pronunciation in pronunciations:
+            pronunciation.save(base_path, save_to_cache=batched)
+        if batched:
+            MultiResourceYamlResource.write_cache_to_file()
+        MultiResourceYamlResource._file_cache.clear()
+        file_path = os.path.join(base_path, "voice", "response_control", "pronunciations.yaml")
+        with open(file_path, encoding="utf-8", newline="") as f:
+            return f.read()
+
+    def test_save_writes_expected_file(self):
+        """Saving pronunciations writes the same file whether saved directly or via the cache."""
+        pronunciations = [
+            Pronunciation(
+                resource_id="pr-0",
+                regex=r"\bNHS\b",
+                replacement="N H S",
+                case_sensitive=True,
+                language_code="en-GB",
+                description="First line\nSecond line",
+                position=0,
+            ),
+            Pronunciation(resource_id="pr-1", regex=r"\bmute\b", replacement="", position=1),
+            Pronunciation(
+                resource_id="pr-2",
+                regex="ratio: #1",
+                replacement="ratio number one",
+                description="  key: value # not a comment  ",
+                position=2,
+            ),
+            Pronunciation(
+                resource_id="pr-3",
+                regex="café",
+                replacement="ca fay",
+                language_code="fr-FR",
+                description="naïve — ünïcödé ✓",
+                position=3,
+            ),
+        ]
+        expected = (
+            "pronunciations:\n"
+            "- regex: \\bNHS\\b\n"
+            "  replacement: N H S\n"
+            "  case_sensitive: true\n"
+            "  language_code: en-GB\n"
+            "  description: |-\n"
+            "    First line\n"
+            "    Second line\n"
+            "- regex: \\bmute\\b\n"
+            "  replacement: ''\n"
+            "  case_sensitive: false\n"
+            "- regex: 'ratio: #1'\n"
+            "  replacement: ratio number one\n"
+            "  case_sensitive: false\n"
+            "  description: 'key: value # not a comment'\n"
+            "- regex: café\n"
+            "  replacement: ca fay\n"
+            "  case_sensitive: false\n"
+            "  language_code: fr-FR\n"
+            "  description: naïve — ünïcödé ✓\n"
+        )
+        for batched in (False, True):
+            with self.subTest(batched=batched):
+                self.assertEqual(self._save_to_temp_project(pronunciations, batched), expected)
+
+    def test_save_keeps_crlf_inside_field(self):
+        """A CRLF inside a field is written as-is in a literal block and loads back as LF."""
+        pronunciation = Pronunciation(
+            resource_id="pr-0",
+            regex="x",
+            replacement="y",
+            description="line one\r\nline two",
+            position=0,
+        )
+
+        contents = self._save_to_temp_project([pronunciation], batched=False)
+
+        self.assertIn("line one\r\n", contents)
+        self.assertEqual(
+            resource_utils.load_yaml(contents),
+            {
+                "pronunciations": [
+                    {
+                        "regex": "x",
+                        "replacement": "y",
+                        "case_sensitive": False,
+                        "description": "line one\nline two",
+                    }
+                ]
+            },
+        )
 
 
 class AsrSettingsTests(unittest.TestCase):
