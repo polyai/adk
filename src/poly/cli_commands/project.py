@@ -821,15 +821,57 @@ class ProjectCommand(BaseCommand):
                     error(f"Failed to duplicate project: {e}")
                 sys.exit(1)
 
-        new_id = result.get("id")
+            new_id = result.get("id")
+            deployment_mode_error = None
+            try:
+                cls._copy_deployment_mode(api_handler, region, account_id, project_id, new_id)
+            except Exception as e:
+                deployment_mode_error = str(e)
+
         new_display = result.get("name", new_name)
 
         if output_json:
-            json_print({"success": True, "project_id": new_id, "agent_name": new_display})
+            output = {"success": True, "project_id": new_id, "agent_name": new_display}
+            if deployment_mode_error:
+                output["deployment_mode_error"] = deployment_mode_error
+            json_print(output)
         else:
             success(
                 f"Duplicated [bold]{display_name}[/bold] → [bold]{new_display}[/bold] ({new_id})"
             )
+            if deployment_mode_error:
+                warning(
+                    f"Could not copy the deployment mode to {new_id}: {deployment_mode_error}\n"
+                    "Set it in Agent Studio."
+                )
+
+    @staticmethod
+    def _copy_deployment_mode(
+        api_handler: AgentStudioInterface,
+        region: str,
+        account_id: str,
+        source_project_id: str,
+        new_project_id: str,
+    ) -> None:
+        """Give a duplicated project the same deployment mode as its source.
+
+        Duplicates start in the account's default deployment mode, like any new project.
+
+        Args:
+            api_handler: The API interface to use.
+            region: The region of both projects.
+            account_id: The account of both projects.
+            source_project_id: The project that was duplicated.
+            new_project_id: The duplicate.
+        """
+        source_project = api_handler.get_project(region, account_id, source_project_id)
+        source_mode = (source_project.get("config") or {}).get("deployment_mode")
+        if not source_mode:
+            return
+
+        new_project = api_handler.get_project(region, account_id, new_project_id)
+        if (new_project.get("config") or {}).get("deployment_mode") != source_mode:
+            api_handler.set_deployment_mode(region, account_id, new_project_id, source_mode)
 
 
 class InitCommand(BaseCommand):
