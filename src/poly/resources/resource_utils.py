@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import types
 import typing
 from dataclasses import fields, is_dataclass
@@ -303,8 +304,15 @@ def validate_references(
     return len(invalid_references) == 0, invalid_references
 
 
-# (mappings, len(mappings), {key: table}) for the last mappings list seen by memo_for_mappings.
-_mappings_memo: tuple[Optional[list], int, dict] = (None, 0, {})
+class _ThreadMappingsMemo(threading.local):
+    """Holds each thread's own memo for memo_for_mappings."""
+
+    def __init__(self) -> None:
+        # (mappings, len(mappings), {key: table}) for the last mappings list this thread passed.
+        self.memo: tuple[Optional[list], int, dict] = (None, 0, {})
+
+
+_thread_mappings_memo = _ThreadMappingsMemo()
 
 
 def memo_for_mappings(
@@ -313,7 +321,8 @@ def memo_for_mappings(
     """Return build(), reusing the result while the same mappings list is passed again.
 
     A table derived from the mappings is cached under `key` for as long as calls pass the
-    same list object at the same length; any other list starts a fresh cache. A mappings
+    same list object at the same length; any other list starts a fresh cache. Each thread
+    keeps its own cache, so threads never share or evict each other's tables. A mappings
     list may be extended between calls but must not be edited in place, and callers must not
     mutate the returned table.
 
@@ -325,13 +334,12 @@ def memo_for_mappings(
     Returns:
         The table built by build(), possibly from an earlier call.
     """
-    global _mappings_memo
     if not mappings or not isinstance(mappings, list):
         return build()
-    memo = _mappings_memo
+    memo = _thread_mappings_memo.memo
     if memo[0] is not mappings or memo[1] != len(mappings):
         memo = (mappings, len(mappings), {})
-        _mappings_memo = memo
+        _thread_mappings_memo.memo = memo
     tables = memo[2]
     if key not in tables:
         tables[key] = build()

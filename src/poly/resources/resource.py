@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import os
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, fields
 from typing import ClassVar, Optional, TypeAlias
@@ -510,6 +511,26 @@ def _first_positions(keys: list[str]) -> dict[str, int]:
     return positions
 
 
+_MatchIndex: TypeAlias = dict[tuple[str, str], tuple[list, list[str], dict[str, int]]]
+
+
+class _ThreadMatchIndex(threading.local):
+    """Holds each thread's own multi-resource match index."""
+
+    def __init__(self) -> None:
+        self.entries: _MatchIndex = {}
+
+
+_thread_match_index = _ThreadMatchIndex()
+
+
+class _PerThreadMatchIndex:
+    """Descriptor that resolves to the calling thread's multi-resource match index."""
+
+    def __get__(self, obj: object, owner: type) -> _MatchIndex:
+        return _thread_match_index.entries
+
+
 @dataclass
 class MultiResourceYamlResource(YamlResource, ABC):
     """Abstract base class for a resource that is stored in a single YAML file with multiple resources."""
@@ -519,8 +540,9 @@ class MultiResourceYamlResource(YamlResource, ABC):
 
     # (top_level_name, resource_key) -> (yaml_list, keys, positions): the clean name of each entry
     # and the index of the first entry per clean name. Only valid for the exact list object it was
-    # built from, so a reload or cache clear (which yields new lists) drops it.
-    _match_index: ClassVar[dict[tuple[str, str], tuple[list, list[str], dict[str, int]]]] = {}
+    # built from, so a reload or cache clear (which yields new lists) drops it. One per thread,
+    # so threads indexing different lists don't evict or edit each other's entries.
+    _match_index: ClassVar[_PerThreadMatchIndex] = _PerThreadMatchIndex()
 
     # When True, the top-level key maps to a single dict (not a list). Used for singleton resources like VoiceGreeting.
     _singleton: ClassVar[bool] = False

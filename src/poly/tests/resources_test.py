@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import datetime
 import os
 import tempfile
+import threading
 import unittest
 
 import yaml
@@ -6269,6 +6270,17 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
 
     def _keyphrase_path(self, clean_name: str) -> str:
         return os.path.join(self.keyphrases_file, "keyphrases", clean_name)
+
+    def test_each_thread_keeps_its_own_index(self):
+        """Indexing a list on another thread doesn't evict this thread's index."""
+        mine = [{"name": "a"}, {"name": "b"}]
+        self.assertEqual(Variant._find_matching(mine, "b"), {"name": "b"})
+
+        thread = threading.Thread(target=Variant._find_matching, args=([{"name": "c"}], "c"))
+        thread.start()
+        thread.join()
+
+        self.assertIs(Variant._match_index[(Variant.top_level_name, Variant.resource_key)][0], mine)
 
     def test_first_entry_wins_when_clean_names_collide(self):
         """Read, save and delete all act on the first entry sharing a clean name."""

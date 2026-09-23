@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import copy
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from typing import Callable
@@ -1177,6 +1178,22 @@ class MemoForMappingsTests(unittest.TestCase):
                 resource_utils.memo_for_mappings(mappings, "key", build)
                 resource_utils.memo_for_mappings(mappings, "key", build)
                 self.assertEqual(len(calls), 2)
+
+    def test_each_thread_keeps_its_own_table(self):
+        """A table built on another thread doesn't evict this thread's cached table."""
+        mappings = [self._variant("v1", "one")]
+        calls, build = self._counting_build()
+        mine = resource_utils.memo_for_mappings(mappings, "key", build)
+
+        thread = threading.Thread(
+            target=resource_utils.memo_for_mappings,
+            args=([self._variant("v2", "two")], "key", build),
+        )
+        thread.start()
+        thread.join()
+
+        self.assertIs(resource_utils.memo_for_mappings(mappings, "key", build), mine)
+        self.assertEqual(len(calls), 2)
 
     def test_reference_swaps_match_the_unmemoised_lookup(self):
         """Cached reference lookups give the same swaps for every flow scope and direction."""
