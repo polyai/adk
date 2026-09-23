@@ -1,6 +1,42 @@
 # CHANGELOG
 
 
+## v0.61.0 (2026-09-23)
+
+### Features
+
+- Carry deployment mode over when duplicating a project
+  ([#330](https://github.com/polyai/adk/pull/330),
+  [`b10d075`](https://github.com/polyai/adk/commit/b10d075691dea4778d2cedaa819b2adf4562ac53))
+
+## Summary
+
+`poly project duplicate` now gives the copy the same deployment mode (Simple, Branches or
+  Sub-branches) as the project it was duplicated from.
+
+## Motivation
+
+Projects duplicated with the ADK always came out in Simple mode, whatever mode the source used, and
+  the only way to change it was in Agent Studio. New projects start in Simple by design, so the ADK
+  now copies the source's mode onto the duplicate itself.
+
+## Changes
+
+- After duplicating, `poly project duplicate` reads `config.deployment_mode` from both projects. If
+  they differ, it updates the copy to match the source. - If that step fails, the duplicate still
+  succeeds: the console shows a warning, and `--json` output gets a `deployment_mode_error` key. -
+  Adds `PlatformAPIHandler.update_project` (`PATCH
+  /adk/v1/accounts/{account_id}/projects/{project_id}`) and
+  `AgentStudioInterface.set_deployment_mode`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.60.0 (2026-09-21)
 
 ### Build System
