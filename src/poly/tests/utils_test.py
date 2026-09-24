@@ -6,11 +6,12 @@ Copyright PolyAI Limited
 import copy
 import datetime
 import platform
-import sys
 import tempfile
 import unittest
+from importlib.metadata import requires
 from pathlib import Path
 
+from packaging.requirements import Requirement
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 from ruamel.yaml.main import CParser
@@ -1401,13 +1402,18 @@ alias: *shared
 """
 
 
-def _libyaml_expected() -> bool:
-    """Mirror the environment marker on the ruamel.yaml.clib dependency."""
-    return (
-        platform.python_implementation() == "CPython"
-        and sys.version_info < (3, 15)
-        and not (sys.platform == "win32" and platform.machine() == "ARM64")
+def _clib_requirement() -> Requirement:
+    """The ruamel.yaml.clib requirement as declared in the installed package metadata."""
+    return next(
+        requirement
+        for requirement in map(Requirement, requires("polyai-adk"))
+        if requirement.name == "ruamel.yaml.clib"
     )
+
+
+def _libyaml_expected() -> bool:
+    """Whether the ruamel.yaml.clib environment marker matches this interpreter and platform."""
+    return _clib_requirement().marker.evaluate()
 
 
 class LoadYamlParserTests(unittest.TestCase):
@@ -1423,6 +1429,20 @@ class LoadYamlParserTests(unittest.TestCase):
     def test_libyaml_parser_is_used(self):
         self.assertIsNotNone(CParser)
         self.assertIs(resource_utils._yaml_loader.Parser, CParser)
+
+    def test_clib_marker_covers_running_python(self):
+        covered = _clib_requirement().marker.evaluate(
+            {
+                "platform_python_implementation": "CPython",
+                "platform_machine": "x86_64",
+                "sys_platform": "linux",
+            }
+        )
+        self.assertTrue(
+            covered,
+            f"ruamel.yaml.clib is excluded on Python {platform.python_version()}; re-pin it to "
+            "a release with prebuilt wheels for this version and widen the marker",
+        )
 
     @unittest.skipIf(CParser is None, "libyaml parser not installed")
     def test_fixture_project_files_load_identically(self):
