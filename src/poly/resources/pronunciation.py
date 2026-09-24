@@ -18,6 +18,7 @@ from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     _parse_multi_resource_path,
+    _strip_strings,
     register_resource,
 )
 
@@ -237,12 +238,18 @@ class Pronunciation(MultiResourceYamlResource):
         self, base_path: str, format: bool = False, save_to_cache: bool = False, **kwargs
     ) -> None:
         """Save the resource; pronunciations are matched by position (index), not by name."""
-        content = self.to_pretty(**kwargs)
+        yaml_content = self.to_pretty_dict(
+            _strip_strings(self.to_yaml_dict()),
+            file_path=self.file_path,
+            **kwargs,
+        )
         if format:
-            content = self.format_resource(content, file_name=str(self.position))
+            content = self.format_resource(
+                utils.dump_yaml(yaml_content), file_name=str(self.position)
+            )
+            yaml_content = utils.load_yaml(content) or {}
         file_path = self.get_path(base_path)
 
-        yaml_content = utils.load_yaml(content) or {}
         true_file_path, segments = _parse_multi_resource_path(file_path)
         resource_clean_name = segments[-1]
         if not os.path.exists(true_file_path):
@@ -252,9 +259,9 @@ class Pronunciation(MultiResourceYamlResource):
                 self._file_cache.setdefault(true_file_path, (0.0, {self.top_level_name: []}))
 
         top_level_yaml_dict = self._get_top_level_data(true_file_path)
-        yaml_list = list(top_level_yaml_dict.get(self.top_level_name, []))
+        yaml_list = top_level_yaml_dict.get(self.top_level_name, [])
         if not isinstance(yaml_list, list):
-            raise ValueError(f"Top level YAML data is not a list: {top_level_yaml_dict}")
+            yaml_list = list(yaml_list)
 
         try:
             matching_idx = int(resource_clean_name)

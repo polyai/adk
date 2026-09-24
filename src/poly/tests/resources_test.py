@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import datetime
 import os
+import shutil
 import tempfile
 import threading
 import unittest
@@ -7158,6 +7159,86 @@ class PronunciationTests(unittest.TestCase):
         self.assertEqual(result.replacement, "Doctor")
         self.assertTrue(result.case_sensitive)
         self.assertEqual(result.position, 0)
+
+    def _save_to_temp_project(self, pronunciations: list[Pronunciation], batched: bool) -> str:
+        """Save pronunciations into a new temp project and return the raw file contents."""
+        base_path = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base_path)
+        for pronunciation in pronunciations:
+            pronunciation.save(base_path, save_to_cache=batched)
+        if batched:
+            MultiResourceYamlResource.write_cache_to_file()
+        MultiResourceYamlResource._file_cache.clear()
+        file_path = os.path.join(base_path, "voice", "response_control", "pronunciations.yaml")
+        with open(file_path, encoding="utf-8") as f:
+            return f.read()
+
+    def test_save_writes_expected_file(self):
+        """Saving pronunciations writes the same file whether saved directly or via the cache."""
+        pronunciations = [
+            Pronunciation(
+                resource_id="pr-0",
+                regex=r"\bNHS\b",
+                replacement="N H S",
+                case_sensitive=True,
+                language_code="en-GB",
+                description="First line\nSecond line",
+                position=0,
+            ),
+            Pronunciation(resource_id="pr-1", regex=r"\bmute\b", replacement="", position=1),
+            Pronunciation(
+                resource_id="pr-2",
+                regex="ratio: #1",
+                replacement="ratio number one",
+                description="  key: value # not a comment  ",
+                position=2,
+            ),
+            Pronunciation(
+                resource_id="pr-3",
+                regex="café",
+                replacement="ca fay",
+                language_code="fr-FR",
+                description="naïve — ünïcödé ✓",
+                position=3,
+            ),
+        ]
+        expected = (
+            "pronunciations:\n"
+            "- regex: \\bNHS\\b\n"
+            "  replacement: N H S\n"
+            "  case_sensitive: true\n"
+            "  language_code: en-GB\n"
+            "  description: |-\n"
+            "    First line\n"
+            "    Second line\n"
+            "- regex: \\bmute\\b\n"
+            "  replacement: ''\n"
+            "  case_sensitive: false\n"
+            "- regex: 'ratio: #1'\n"
+            "  replacement: ratio number one\n"
+            "  case_sensitive: false\n"
+            "  description: 'key: value # not a comment'\n"
+            "- regex: café\n"
+            "  replacement: ca fay\n"
+            "  case_sensitive: false\n"
+            "  language_code: fr-FR\n"
+            "  description: naïve — ünïcödé ✓\n"
+        )
+        for batched in (False, True):
+            with self.subTest(batched=batched):
+                self.assertEqual(self._save_to_temp_project(pronunciations, batched), expected)
+
+    def test_save_keeps_cr_in_single_line_field(self):
+        """A CR in a single-line field is quoted, not treated as a line break."""
+        pronunciation = Pronunciation(
+            resource_id="pr-0", regex="x", replacement="a\rb", position=0
+        )
+
+        contents = self._save_to_temp_project([pronunciation], batched=False)
+
+        self.assertEqual(
+            resource_utils.load_yaml(contents)["pronunciations"][0]["replacement"], "a\rb"
+        )
 
 
 class AsrSettingsTests(unittest.TestCase):
