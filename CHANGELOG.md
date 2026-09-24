@@ -1,6 +1,98 @@
 # CHANGELOG
 
 
+## v0.61.2 (2026-09-24)
+
+### Performance Improvements
+
+- Skip redundant YAML dumps when pulling multi-resource files
+  ([#328](https://github.com/polyai/adk/pull/328),
+  [`8419474`](https://github.com/polyai/adk/commit/8419474ca4f562dabf3394ecfdb1abc356bf4e02))
+
+## Summary
+
+`poly pull` no longer dumps every multi-resource file three times and three-way merges it when at
+  most one side changed it. `Pronunciation.save` stops dumping and re-parsing each entry, and
+  `revert_changes` writes each multi-resource file once instead of once per entry.
+
+## Motivation
+
+On a large production project (about 1,200 variants with 21 attributes each, and about 3,300
+  pronunciation rules), `poly pull` spent most of its time serialising YAML. For every
+  multi-resource file it dumped the original, incoming and local versions of the whole file, then
+  ran a text three-way merge, even when the file was unchanged or only one side had changed it.
+  Pronunciations were also dumped and re-parsed one entry at a time on every save.
+
+This is the second of three performance PRs. It depends on #326 only for
+  `scripts/bench_large_project.py`, which produced the numbers below. The code changes don't depend
+  on it.
+
+## Changes
+
+- `_update_multi_resource_yaml_resources` keeps the original, incoming and local file data as parsed
+  dicts instead of dumping them up front. For each file: - local matches incoming, or only local
+  changed: the file is left alone - only incoming changed: `dump_yaml(incoming)` is written directly
+  - both sides changed: the three versions are dumped and merged with `merge_strings` as before,
+  with the same conflict reporting - force pull, the raw-text fallback for files with no readable
+  local entries, and deleting files that merge to nothing all work as before - New
+  `resource_utils.same_yaml_data(a, b)`. It returns True only when `dump_yaml` is guaranteed to
+  render both sides identically. It compares with `==` and also compares JSON encodings, so
+  differences in key order, `True` vs `1`, `1` vs `1.0` and `-0.0` vs `0.0` count as different. When
+  it returns False, the pull takes the existing merge path. - `Pronunciation.save` builds the entry
+  from `to_yaml_dict()` with `_strip_strings` applied, which is the same data `to_pretty` used to
+  dump. It no longer dumps and re-parses that data, and it updates the cached list in place instead
+  of copying it. `format=True` still formats the entry through a dump and reload. - `revert_changes`
+  saves multi-resource entries to the file cache, then calls `write_cache_to_file()` inside
+  `try/finally`. This is the same pattern `init_project` uses. Other resources still save directly.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+The new tests use real temporary copies of the test project. `PullProjectTest` mocks `save`, so it
+  can't catch changes in output.
+
+- `SameYamlDataTests`: key order (top-level and nested), `True`/`1`, `1`/`1.0`, `-0.0`/`0.0`,
+  `{True: x}`/`{1: x}`, date vs str, int vs str keys, NaN, unserialisable keys, and equal nested
+  data - `MultiResourcePullMergeTest` spies on `merge_strings` and `save_to_file` and checks these
+  cases: - remote-only edit: the file equals `dump_yaml(incoming)` and no merge runs - local-only
+  edit: the file bytes are unchanged and the file isn't written - the same edit on both sides: the
+  file isn't written - different entries edited on each side: the result contains both edits - the
+  same entry edited differently on each side: conflict markers appear and the file is reported -
+  force pull: the local edit is overwritten - file deleted locally: it stays deleted through the
+  text fallback - `PronunciationTests`: a golden file captured on `main` (multiline description,
+  empty replacement, `: #`, unicode), saved both directly and through the cache, plus tests that
+  CRLF and CR in multi-line fields are saved as LF and that a CR in a single-line field is kept -
+  `RevertChangesOnDiskTest`: reverting everything restores every file's bytes, reverting one file
+  leaves local edits in other files alone, and each multi-resource file is written once - Run
+  against `main`, only the assertions specific to this PR fail: "no merge call", "written once". All
+  the assertions about behaviour pass on both. - `bench_large_project.py --digest-out` gives the
+  same per-phase sha256 of every project file before and after this change.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Benchmark: `bench_large_project.py` with the defaults (1,238 variants × 21 attributes, 3,317
+  pronunciations; `variant_attributes.yaml` is 1.42 MB, `pronunciations.yaml` is 0.40 MB). The runs
+  use the pure-Python YAML parser without #326. Each figure is the best of 3 runs. This PR doesn't
+  touch status or push, so their differences are run-to-run noise.
+
+| Phase | Before | After | |---|---|---| | init | 2.59 s | 1.36 s | | force-pull | 6.07 s | 4.33 s |
+  | pull | 14.38 s | 7.38 s | | status | 3.17 s | 2.29 s | | push | 1.71 s | 1.25 s |
+
+`diff before.json after.json` (per-phase file digests) is empty.
+
+After this change, profiling pull shows that about 80% of its time goes to 6 full-file YAML parses.
+  #326 speeds those up by switching to libyaml. The last PR in the series indexes multi-resource
+  lookups.
+
+
 ## v0.61.1 (2026-09-23)
 
 ### Bug Fixes
