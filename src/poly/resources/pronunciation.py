@@ -25,21 +25,6 @@ from poly.resources.resource import (
 logger = logging.getLogger(__name__)
 
 
-def _normalise_line_breaks(data):
-    """Recursively turn CRLF and CR into LF in multi-line strings.
-
-    Multi-line strings are dumped as literal blocks, which read back with LF line breaks,
-    so a raw CR in one would otherwise add a line break on platforms that write CRLF files.
-    """
-    if isinstance(data, dict):
-        return {k: _normalise_line_breaks(v) for k, v in data.items()}
-    if isinstance(data, list):
-        return [_normalise_line_breaks(item) for item in data]
-    if isinstance(data, str) and "\n" in data:
-        return data.replace("\r\n", "\n").replace("\r", "\n")
-    return data
-
-
 @register_resource("pronunciations")
 @dataclass
 class Pronunciation(MultiResourceYamlResource):
@@ -254,7 +239,7 @@ class Pronunciation(MultiResourceYamlResource):
     ) -> None:
         """Save the resource; pronunciations are matched by position (index), not by name."""
         yaml_content = self.to_pretty_dict(
-            _normalise_line_breaks(_strip_strings(self.to_yaml_dict())),
+            _strip_strings(self.to_yaml_dict()),
             file_path=self.file_path,
             **kwargs,
         )

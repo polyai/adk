@@ -7228,32 +7228,6 @@ class PronunciationTests(unittest.TestCase):
             with self.subTest(batched=batched):
                 self.assertEqual(self._save_to_temp_project(pronunciations, batched), expected)
 
-    def test_save_writes_crlf_inside_field_as_lf(self):
-        """A CRLF or lone CR inside a multi-line field is saved as LF, on every platform."""
-        pronunciation = Pronunciation(
-            resource_id="pr-0",
-            regex="x",
-            replacement="y",
-            description="line one\r\nline two\rline three",
-            position=0,
-        )
-
-        contents = self._save_to_temp_project([pronunciation], batched=False)
-
-        self.assertEqual(
-            resource_utils.load_yaml(contents),
-            {
-                "pronunciations": [
-                    {
-                        "regex": "x",
-                        "replacement": "y",
-                        "case_sensitive": False,
-                        "description": "line one\nline two\nline three",
-                    }
-                ]
-            },
-        )
-
     def test_save_keeps_cr_in_single_line_field(self):
         """A CR in a single-line field is quoted, not treated as a line break."""
         pronunciation = Pronunciation(
