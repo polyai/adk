@@ -63,8 +63,9 @@ from poly.resources.flows import (
     StepType,
 )
 from poly.resources.function import FunctionParameters, FunctionType
-from poly.resources.resource import MultiResourceYamlResource
+from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
 from poly.tests.testing_utils import mock_read_from_file
+from poly.utils import merge_strings
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_PROJECT_DIR = os.path.join(DIR, "test_projects")
@@ -3767,6 +3768,90 @@ class RevertChangesTest(unittest.TestCase):
         self.assertEqual(reverted, [])
 
 
+def _copy_test_project(test_case: unittest.TestCase) -> str:
+    """Copy the test project into a temp dir removed after the test, and return its root."""
+    tmp_dir = tempfile.mkdtemp()
+    test_case.addCleanup(shutil.rmtree, tmp_dir)
+    root = os.path.join(tmp_dir, "test_project")
+    shutil.copytree(TEST_DIR, root)
+    return root
+
+
+def _read_tree(root: str) -> dict[str, bytes]:
+    """Return {relative path: bytes} for every file under root."""
+    contents = {}
+    for dir_path, _, file_names in os.walk(root):
+        for file_name in file_names:
+            path = os.path.join(dir_path, file_name)
+            with open(path, "rb") as f:
+                contents[os.path.relpath(path, root)] = f.read()
+    return contents
+
+
+class RevertChangesOnDiskTest(unittest.TestCase):
+    """revert_changes against a real copy of the test project."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        self.root = _copy_test_project(self)
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        self.sms_file = os.path.join(self.root, "config", "sms_templates.yaml")
+        self.entities_file = os.path.join(self.root, "config", "entities.yaml")
+        # Revert once so every file is in the form revert writes
+        self.project.revert_changes()
+        self.clean_tree = _read_tree(self.root)
+
+    def _replace_in_file(self, path: str, old: str, new: str) -> None:
+        with open(path, encoding="utf-8") as f:
+            contents = f.read()
+        self.assertIn(old, contents)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(contents.replace(old, new, 1))
+
+    def test_revert_all_restores_modified_multi_resource_file(self):
+        """Every file is back to its reverted bytes, including the locally edited one."""
+        self._replace_in_file(self.sms_file, "This is a test template", "Edited locally")
+
+        self.project.revert_changes()
+
+        self.assertEqual(_read_tree(self.root), self.clean_tree)
+
+    def test_revert_one_file_leaves_other_edits_alone(self):
+        """Reverting the SMS templates leaves a local edit in another multi-resource file."""
+        self._replace_in_file(self.sms_file, "This is a test template", "Edited locally")
+        self._replace_in_file(self.entities_file, "customer_name", "customer_full_name")
+        entities_edited = _read_tree(self.root)[os.path.relpath(self.entities_file, self.root)]
+        sms_paths = [
+            resource.get_path(self.root)
+            for resource in self.project.resources[SMSTemplate].values()
+        ]
+
+        self.project.revert_changes(file_paths=sms_paths)
+
+        tree = _read_tree(self.root)
+        sms_rel = os.path.relpath(self.sms_file, self.root)
+        entities_rel = os.path.relpath(self.entities_file, self.root)
+        self.assertEqual(tree[sms_rel], self.clean_tree[sms_rel])
+        self.assertEqual(tree[entities_rel], entities_edited)
+
+    def test_revert_writes_each_multi_resource_file_once(self):
+        """Entries sharing a file are batched into a single write of that file."""
+        multi_resource_files = {
+            _parse_multi_resource_path(resource.get_path(self.root))[0]
+            for resource in self.project.all_resources
+            if isinstance(resource, MultiResourceYamlResource)
+        }
+        self.assertIn(self.sms_file, multi_resource_files)
+
+        with patch.object(Resource, "save_to_file", wraps=Resource.save_to_file) as save_spy:
+            self.project.revert_changes()
+
+        written = [call.args[1] for call in save_spy.call_args_list]
+        for path in multi_resource_files:
+            self.assertEqual(written.count(path), 1, path)
+
+
 class GetRemoteResourcesByNameLocalTest(unittest.TestCase):
     """Tests for the 'local' resolution mode of get_remote_resources_by_name."""
 
@@ -4227,6 +4312,151 @@ class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
             [],
             "Should not delete files for resource types in _not_loaded_resources",
         )
+
+
+class MultiResourcePullMergeTest(unittest.TestCase):
+    """Pulling a multi-resource file into a real copy of the test project.
+
+    Uses config/sms_templates.yaml, which holds test_template_1 and test_template_2.
+    """
+
+    TEMPLATE_1_TEXT = "This is a test template"
+    TEMPLATE_2_TEXT = "This is a second test template"
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        patch.object(AgentStudioProject, "save_config").start()
+        patch("poly.utils.save_imports").start()
+        patch("poly.utils.export_decorators").start()
+        self.merge_spy = patch("poly.utils.merge_strings", wraps=merge_strings).start()
+        self.save_spy = patch.object(
+            Resource, "save_to_file", wraps=Resource.save_to_file
+        ).start()
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+
+        self.root = _copy_test_project(self)
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        self.sms_file = os.path.join(self.root, "config", "sms_templates.yaml")
+
+    def _incoming(self, **text_by_name: str) -> dict:
+        """Return the project's resources with the given SMS template texts changed."""
+        incoming = deepcopy(self.project.resources)
+        for template in incoming[SMSTemplate].values():
+            template.text = text_by_name.get(template.name, template.text)
+        return incoming
+
+    def _pull(self, incoming: dict, force: bool = False) -> list[str]:
+        self.mock_api_handler.pull_resources.return_value = (incoming, [], {})
+        files_with_conflicts, _ = self.project.pull_project(force=force)
+        return files_with_conflicts
+
+    def _edit_local(self, old: str, new: str) -> None:
+        contents = self._read_sms_file()
+        self.assertIn(old, contents)
+        with open(self.sms_file, "w", encoding="utf-8") as f:
+            f.write(contents.replace(old, new, 1))
+
+    def _read_sms_file(self) -> str:
+        with open(self.sms_file, encoding="utf-8") as f:
+            return f.read()
+
+    def _expected_sms_file(self, text_1: str, text_2: str) -> str:
+        phone_numbers = {"sandbox": "", "pre_release": "", "live": "+447700102347"}
+        return resource_utils.dump_yaml(
+            {
+                "sms_templates": [
+                    {"name": "test_template_1", "text": text_1, "env_phone_numbers": phone_numbers},
+                    {"name": "test_template_2", "text": text_2, "env_phone_numbers": phone_numbers},
+                ]
+            }
+        )
+
+    def _sms_merge_calls(self) -> list:
+        return [
+            call
+            for call in self.merge_spy.call_args_list
+            if call.args[2].startswith("sms_templates:")
+        ]
+
+    def _sms_writes(self) -> list:
+        return [call for call in self.save_spy.call_args_list if call.args[1] == self.sms_file]
+
+    def test_remote_only_edit_writes_incoming_without_merging(self):
+        conflicts = self._pull(self._incoming(test_template_1="Edited remotely"))
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            self._read_sms_file(), self._expected_sms_file("Edited remotely", self.TEMPLATE_2_TEXT)
+        )
+        self.assertEqual(self._sms_merge_calls(), [])
+
+    def test_local_only_edit_is_left_untouched(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+        local_contents = self._read_sms_file()
+
+        conflicts = self._pull(self._incoming())
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._read_sms_file(), local_contents)
+        self.assertEqual(self._sms_writes(), [])
+        self.assertEqual(self._sms_merge_calls(), [])
+
+    def test_same_edit_on_both_sides_is_not_rewritten(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited on both sides")
+        local_contents = self._read_sms_file()
+
+        conflicts = self._pull(self._incoming(test_template_1="Edited on both sides"))
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._read_sms_file(), local_contents)
+        self.assertEqual(self._sms_writes(), [])
+
+    def test_edits_to_different_entries_are_merged(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+
+        conflicts = self._pull(self._incoming(test_template_2="Edited remotely"))
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(len(self._sms_merge_calls()), 1)
+        self.assertEqual(
+            self._read_sms_file(), self._expected_sms_file("Edited locally", "Edited remotely")
+        )
+
+    def test_conflicting_edits_to_same_entry_are_reported(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+
+        conflicts = self._pull(self._incoming(test_template_1="Edited remotely"))
+
+        self.assertEqual(conflicts, [self.sms_file])
+        contents = self._read_sms_file()
+        self.assertTrue(resource_utils.contains_merge_conflict(contents))
+        self.assertIn("Edited locally", contents)
+        self.assertIn("Edited remotely", contents)
+
+    def test_force_pull_overwrites_local_edit(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+
+        conflicts = self._pull(self._incoming(test_template_1="Edited remotely"), force=True)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            self._read_sms_file(), self._expected_sms_file("Edited remotely", self.TEMPLATE_2_TEXT)
+        )
+        self.assertEqual(self._sms_merge_calls(), [])
+
+    def test_locally_deleted_file_stays_deleted_when_remote_is_unchanged(self):
+        """With no local entries to normalise, the raw file text (empty) is merged instead."""
+        os.remove(self.sms_file)
+
+        conflicts = self._pull(self._incoming())
+
+        self.assertEqual(conflicts, [])
+        self.assertFalse(os.path.exists(self.sms_file))
+        self.assertEqual(len(self._sms_merge_calls()), 1)
 
 
 class MigrateFlowStepResourceIdsTest(unittest.TestCase):

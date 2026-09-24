@@ -3500,6 +3500,7 @@ class DuplicateProjectTest(unittest.TestCase):
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_agents.return_value = {"proj-123": "My Project"}
         mock_iface.duplicate_project.return_value = {"id": "proj-copy", "name": "My Copy"}
+        mock_iface.get_project.return_value = {"config": {"deployment_mode": "releases"}}
 
         ProjectCommand.duplicate_project(
             region="us-1",
@@ -3536,6 +3537,7 @@ class DuplicateProjectTest(unittest.TestCase):
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_agents.return_value = {"proj-123": "My Project"}
         mock_iface.duplicate_project.return_value = {"id": "proj-dup", "name": "My Project (copy)"}
+        mock_iface.get_project.return_value = {"config": {"deployment_mode": "releases"}}
 
         # First text prompt: project name. Second: project id.
         mock_text.return_value.ask.side_effect = ["My Project (copy)", "proj-dup"]
@@ -3580,6 +3582,7 @@ class DuplicateProjectTest(unittest.TestCase):
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_agents.return_value = {"proj-123": "My Project"}
         mock_iface.duplicate_project.return_value = {"id": "proj-dup", "name": "Dup Name"}
+        mock_iface.get_project.return_value = {"config": {"deployment_mode": "releases"}}
 
         ProjectCommand.duplicate_project(
             region="us-1",
@@ -3596,6 +3599,125 @@ class DuplicateProjectTest(unittest.TestCase):
         mock_json_print.assert_called_with(
             {"success": True, "project_id": "proj-dup", "agent_name": "Dup Name"}
         )
+
+
+class DuplicateProjectDeploymentModeTest(unittest.TestCase):
+    """Tests for carrying the source's deployment mode over to a duplicated project.
+
+    The platform creates duplicates in the account's default deployment mode, so
+    `poly project duplicate` sets the source's mode on the new project itself.
+    """
+
+    SOURCE_ID = "proj-123"
+    DUPLICATE_ID = "proj-dup"
+
+    def setUp(self):
+        self.iface_patcher = patch("poly.cli_commands.project.AgentStudioInterface")
+        self.mock_iface = self.iface_patcher.start().return_value
+        self.mock_iface.get_agents.return_value = {self.SOURCE_ID: "My Project"}
+        self.mock_iface.duplicate_project.return_value = {
+            "id": self.DUPLICATE_ID,
+            "name": "My Copy",
+        }
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _set_deployment_modes(self, source: str | None, duplicate: str | None) -> None:
+        """Make get_project report each project's config.deployment_mode (None = not set)."""
+        modes = {self.SOURCE_ID: source, self.DUPLICATE_ID: duplicate}
+
+        def get_project(region: str, account_id: str, project_id: str) -> dict:
+            mode = modes[project_id]
+            return {"id": project_id, "config": {"deployment_mode": mode}} if mode else {}
+
+        self.mock_iface.get_project.side_effect = get_project
+
+    def _duplicate(self, output_json: bool) -> None:
+        """Duplicate the source project with every argument supplied (no prompts)."""
+        ProjectCommand.duplicate_project(
+            region="us-1",
+            account_id="acc-456",
+            project_id=self.SOURCE_ID,
+            new_name="My Copy",
+            new_project_id=self.DUPLICATE_ID,
+            output_json=output_json,
+        )
+
+    @patch("poly.cli_commands.project.json_print")
+    def test_source_mode_is_set_on_the_duplicate_when_they_differ(self, _mock_json_print):
+        """A duplicate created in another mode is switched to the source's mode."""
+        self._set_deployment_modes(source="releases_branches", duplicate="releases")
+
+        self._duplicate(output_json=True)
+
+        self.mock_iface.set_deployment_mode.assert_called_once_with(
+            "us-1", "acc-456", self.DUPLICATE_ID, "releases_branches"
+        )
+
+    @patch("poly.cli_commands.project.json_print")
+    def test_duplicate_already_in_the_source_mode_is_not_updated(self, _mock_json_print):
+        """No update is sent when the platform already gave the duplicate the right mode."""
+        self._set_deployment_modes(source="simple", duplicate="simple")
+
+        self._duplicate(output_json=True)
+
+        self.mock_iface.set_deployment_mode.assert_not_called()
+
+    @patch("poly.cli_commands.project.json_print")
+    def test_source_without_a_mode_leaves_the_duplicate_alone(self, mock_json_print):
+        """With no mode on the source there is nothing to copy, and none is reported."""
+        self._set_deployment_modes(source=None, duplicate="releases")
+
+        self._duplicate(output_json=True)
+
+        self.mock_iface.set_deployment_mode.assert_not_called()
+        mock_json_print.assert_called_once_with(
+            {"success": True, "project_id": self.DUPLICATE_ID, "agent_name": "My Copy"}
+        )
+
+    @patch("poly.cli_commands.project.json_print")
+    def test_failure_to_copy_the_mode_still_reports_a_successful_duplicate(self, mock_json_print):
+        """The duplicate exists either way, so a failed mode update is reported, not fatal."""
+        self._set_deployment_modes(source="simple", duplicate="releases")
+        self.mock_iface.set_deployment_mode.side_effect = ValueError("Forbidden")
+
+        self._duplicate(output_json=True)
+
+        mock_json_print.assert_called_once_with(
+            {
+                "success": True,
+                "project_id": self.DUPLICATE_ID,
+                "agent_name": "My Copy",
+                "deployment_mode_error": "Forbidden",
+            }
+        )
+
+    @patch("poly.output.console.warning")
+    @patch("poly.output.console.success")
+    def test_failure_to_copy_the_mode_warns_after_the_success_message(
+        self, mock_success, mock_warning
+    ):
+        """Console output confirms the duplicate, then warns that the mode was not copied."""
+        self._set_deployment_modes(source="simple", duplicate="releases")
+        self.mock_iface.set_deployment_mode.side_effect = ValueError("Forbidden")
+
+        self._duplicate(output_json=False)
+
+        mock_success.assert_called_once()
+        warning_message = mock_warning.call_args[0][0]
+        self.assertIn(self.DUPLICATE_ID, warning_message)
+        self.assertIn("Forbidden", warning_message)
+        self.assertIn("Agent Studio", warning_message)
+
+    @patch("poly.output.console.warning")
+    def test_successful_copy_prints_no_warning(self, mock_warning):
+        """A clean duplicate in console mode prints no deployment-mode warning."""
+        self._set_deployment_modes(source="simple", duplicate="releases")
+
+        self._duplicate(output_json=False)
+
+        mock_warning.assert_not_called()
 
 
 class ConversationsCommandTest(unittest.TestCase):

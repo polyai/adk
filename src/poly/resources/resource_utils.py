@@ -140,6 +140,26 @@ def load_yaml(content):
     return _yaml_loader.load(content)
 
 
+def same_yaml_data(a, b) -> bool:
+    """Return True if a and b are plain YAML data that dump_yaml renders identically.
+
+    Equality alone is not enough: dicts compare equal regardless of key order, and
+    True == 1 == 1.0, yet each of these dumps differently. Comparing the JSON encodings as
+    well catches those cases. A False result only means the dumps may differ.
+
+    Args:
+        a: Parsed YAML data (dicts, lists and scalars).
+        b: Parsed YAML data (dicts, lists and scalars).
+
+    Returns:
+        bool: True if dump_yaml(a) == dump_yaml(b) is guaranteed.
+    """
+    try:
+        return a == b and json.dumps(a, default=str) == json.dumps(b, default=str)
+    except (TypeError, ValueError):
+        return False
+
+
 def get_diff(original: str, updated: str) -> str:
     """Get the diff between original and updated strings."""
 

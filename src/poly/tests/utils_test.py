@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import copy
+import datetime
 import tempfile
 import threading
 import unittest
@@ -442,6 +443,56 @@ class StringUtilsTests(unittest.TestCase):
 
         mixed_case = "this_is_another_test_name"
         self.assertEqual(resource_utils.to_camel_case(mixed_case), "thisIsAnotherTestName")
+
+
+class SameYamlDataTests(unittest.TestCase):
+    """same_yaml_data is True only when dump_yaml is guaranteed to render both sides the same."""
+
+    def test_equal_data_is_same(self):
+        data = {
+            "entities": [
+                {"name": "a", "enabled": True, "count": 1, "ratio": 0.5, "tags": ["x", "y"]},
+                {"name": "b", "nested": {"list": [[1, 2], [3]], "empty": None}},
+            ]
+        }
+
+        self.assertTrue(resource_utils.same_yaml_data(data, copy.deepcopy(data)))
+
+    def test_values_that_compare_equal_but_dump_differently_are_not_same(self):
+        cases = {
+            "key order": ({"a": 1, "b": 2}, {"b": 2, "a": 1}),
+            "True vs 1": ({"a": True}, {"a": 1}),
+            "1 vs 1.0": ({"a": 1}, {"a": 1.0}),
+            "-0.0 vs 0.0": ({"a": -0.0}, {"a": 0.0}),
+            "True key vs 1 key": ({True: "x"}, {1: "x"}),
+            "nested key order": ({"a": [{"x": 1, "y": 2}]}, {"a": [{"y": 2, "x": 1}]}),
+        }
+        for label, (a, b) in cases.items():
+            with self.subTest(label):
+                self.assertEqual(a, b)
+                self.assertNotEqual(resource_utils.dump_yaml(a), resource_utils.dump_yaml(b))
+                self.assertFalse(resource_utils.same_yaml_data(a, b))
+
+    def test_different_values_are_not_same(self):
+        cases = {
+            "date vs str": ({"a": datetime.date(2024, 1, 1)}, {"a": "2024-01-01"}),
+            "int key vs str key": ({1: "x"}, {"1": "x"}),
+            "nested list item": ({"a": [[1, 2]]}, {"a": [[1, 3]]}),
+            "list length": ({"a": [1]}, {"a": [1, 1]}),
+        }
+        for label, (a, b) in cases.items():
+            with self.subTest(label):
+                self.assertFalse(resource_utils.same_yaml_data(a, b))
+
+    def test_nan_is_never_same(self):
+        self.assertFalse(
+            resource_utils.same_yaml_data({"a": float("nan")}, {"a": float("nan")})
+        )
+
+    def test_unserialisable_keys_are_not_same(self):
+        key = datetime.date(2024, 1, 1)
+
+        self.assertFalse(resource_utils.same_yaml_data({key: "x"}, {key: "x"}))
 
 
 class GenerateSubresourceIdTests(unittest.TestCase):

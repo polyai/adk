@@ -531,12 +531,31 @@ class _PerThreadMatchIndex:
         return _thread_match_index.entries
 
 
+class _ThreadFileCache(threading.local):
+    """Holds each thread's own multi-resource file cache."""
+
+    def __init__(self) -> None:
+        self.entries: dict[str, tuple[float, dict]] = {}
+
+
+_thread_file_cache = _ThreadFileCache()
+
+
+class _PerThreadFileCache:
+    """Descriptor that resolves to the calling thread's multi-resource file cache."""
+
+    def __get__(self, obj: object, owner: type) -> dict[str, tuple[float, dict]]:
+        return _thread_file_cache.entries
+
+
 @dataclass
 class MultiResourceYamlResource(YamlResource, ABC):
     """Abstract base class for a resource that is stored in a single YAML file with multiple resources."""
 
-    # Class-level cache: true_file_path -> (mtime, top_level_yaml_dict). Invalidated on write; refreshed when mtime differs.
-    _file_cache: ClassVar[dict[str, tuple[float, dict]]] = {}
+    # true_file_path -> (mtime, top_level_yaml_dict). Invalidated on write; refreshed when mtime differs.
+    # One per thread: projects clear and flush the whole cache mid-operation, so threads sharing it
+    # would drop each other's unflushed writes and flush each other's files.
+    _file_cache: ClassVar[_PerThreadFileCache] = _PerThreadFileCache()
 
     # (top_level_name, resource_key) -> (yaml_list, keys, positions): the clean name of each entry
     # and the index of the first entry per clean name. Only valid for the exact list object it was
