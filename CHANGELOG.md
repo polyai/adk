@@ -1,6 +1,194 @@
 # CHANGELOG
 
 
+## v0.61.2 (2026-09-24)
+
+### Performance Improvements
+
+- Skip redundant YAML dumps when pulling multi-resource files
+  ([#328](https://github.com/polyai/adk/pull/328),
+  [`8419474`](https://github.com/polyai/adk/commit/8419474ca4f562dabf3394ecfdb1abc356bf4e02))
+
+## Summary
+
+`poly pull` no longer dumps every multi-resource file three times and three-way merges it when at
+  most one side changed it. `Pronunciation.save` stops dumping and re-parsing each entry, and
+  `revert_changes` writes each multi-resource file once instead of once per entry.
+
+## Motivation
+
+On a large production project (about 1,200 variants with 21 attributes each, and about 3,300
+  pronunciation rules), `poly pull` spent most of its time serialising YAML. For every
+  multi-resource file it dumped the original, incoming and local versions of the whole file, then
+  ran a text three-way merge, even when the file was unchanged or only one side had changed it.
+  Pronunciations were also dumped and re-parsed one entry at a time on every save.
+
+This is the second of three performance PRs. It depends on #326 only for
+  `scripts/bench_large_project.py`, which produced the numbers below. The code changes don't depend
+  on it.
+
+## Changes
+
+- `_update_multi_resource_yaml_resources` keeps the original, incoming and local file data as parsed
+  dicts instead of dumping them up front. For each file: - local matches incoming, or only local
+  changed: the file is left alone - only incoming changed: `dump_yaml(incoming)` is written directly
+  - both sides changed: the three versions are dumped and merged with `merge_strings` as before,
+  with the same conflict reporting - force pull, the raw-text fallback for files with no readable
+  local entries, and deleting files that merge to nothing all work as before - New
+  `resource_utils.same_yaml_data(a, b)`. It returns True only when `dump_yaml` is guaranteed to
+  render both sides identically. It compares with `==` and also compares JSON encodings, so
+  differences in key order, `True` vs `1`, `1` vs `1.0` and `-0.0` vs `0.0` count as different. When
+  it returns False, the pull takes the existing merge path. - `Pronunciation.save` builds the entry
+  from `to_yaml_dict()` with `_strip_strings` applied, which is the same data `to_pretty` used to
+  dump. It no longer dumps and re-parses that data, and it updates the cached list in place instead
+  of copying it. `format=True` still formats the entry through a dump and reload. - `revert_changes`
+  saves multi-resource entries to the file cache, then calls `write_cache_to_file()` inside
+  `try/finally`. This is the same pattern `init_project` uses. Other resources still save directly.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+The new tests use real temporary copies of the test project. `PullProjectTest` mocks `save`, so it
+  can't catch changes in output.
+
+- `SameYamlDataTests`: key order (top-level and nested), `True`/`1`, `1`/`1.0`, `-0.0`/`0.0`,
+  `{True: x}`/`{1: x}`, date vs str, int vs str keys, NaN, unserialisable keys, and equal nested
+  data - `MultiResourcePullMergeTest` spies on `merge_strings` and `save_to_file` and checks these
+  cases: - remote-only edit: the file equals `dump_yaml(incoming)` and no merge runs - local-only
+  edit: the file bytes are unchanged and the file isn't written - the same edit on both sides: the
+  file isn't written - different entries edited on each side: the result contains both edits - the
+  same entry edited differently on each side: conflict markers appear and the file is reported -
+  force pull: the local edit is overwritten - file deleted locally: it stays deleted through the
+  text fallback - `PronunciationTests`: a golden file captured on `main` (multiline description,
+  empty replacement, `: #`, unicode), saved both directly and through the cache, plus tests that
+  CRLF and CR in multi-line fields are saved as LF and that a CR in a single-line field is kept -
+  `RevertChangesOnDiskTest`: reverting everything restores every file's bytes, reverting one file
+  leaves local edits in other files alone, and each multi-resource file is written once - Run
+  against `main`, only the assertions specific to this PR fail: "no merge call", "written once". All
+  the assertions about behaviour pass on both. - `bench_large_project.py --digest-out` gives the
+  same per-phase sha256 of every project file before and after this change.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Benchmark: `bench_large_project.py` with the defaults (1,238 variants × 21 attributes, 3,317
+  pronunciations; `variant_attributes.yaml` is 1.42 MB, `pronunciations.yaml` is 0.40 MB). The runs
+  use the pure-Python YAML parser without #326. Each figure is the best of 3 runs. This PR doesn't
+  touch status or push, so their differences are run-to-run noise.
+
+| Phase | Before | After | |---|---|---| | init | 2.59 s | 1.36 s | | force-pull | 6.07 s | 4.33 s |
+  | pull | 14.38 s | 7.38 s | | status | 3.17 s | 2.29 s | | push | 1.71 s | 1.25 s |
+
+`diff before.json after.json` (per-phase file digests) is empty.
+
+After this change, profiling pull shows that about 80% of its time goes to 6 full-file YAML parses.
+  #326 speeds those up by switching to libyaml. The last PR in the series indexes multi-resource
+  lookups.
+
+
+## v0.61.1 (2026-09-23)
+
+### Bug Fixes
+
+- Give each thread its own multi-resource file cache
+  ([#327](https://github.com/polyai/adk/pull/327),
+  [`adadece`](https://github.com/polyai/adk/commit/adadececb81e339e608942ac980315fab81f0908))
+
+## Summary
+
+`MultiResourceYamlResource._file_cache` becomes a thread-local dict instead of one dict shared by
+  the whole process. Every existing call site stays the same, so single-threaded use (CLI, tests)
+  behaves exactly as before.
+
+## Motivation
+
+A service that runs the ADK in-process crashlooped because its handlers ran the ADK inline on the
+  event loop. The fix there moves ADK calls onto a worker thread, but it has to hold them to **one
+  at a time**, because the shared cache isn't safe when two calls run together:
+
+- `project.py` calls `_file_cache.clear()` at 7 points during pull and load. Another thread's writes
+  that were only cached (`save_to_cache=True`) and not yet flushed are dropped. - The merge path
+  builds `original_file_contents` from every cache entry (`project.py:825-828`), so it picks up
+  another thread's files. - `write_cache_to_file()` flushes every entry, including another thread's
+  files, into their temp dirs.
+
+With one cache per thread, callers can run ADK calls in parallel threads safely. It's also a
+  prerequisite for free-threaded Python.
+
+## Changes
+
+- `resource.py`: `_file_cache` is now a small descriptor, `_PerThreadFileCache`, that returns the
+  calling thread's dict. The dict lives in a `threading.local`. - All uses, including
+  `cls._file_cache.get/clear/setdefault`, iteration, subclasses and tests, keep working unchanged. -
+  Subclasses still share the base class's cache within a thread. That matters because projects clear
+  the cache via `MultiResourceYamlResource` while subclasses write via `cls`. - Why
+  `threading.local` and not a `ContextVar`: copied contexts share the same dict object, and on
+  free-threaded 3.14 builds threads inherit their parent's context by default. Either would put the
+  shared cache back. - `resources_test.py`: new `MultiResourceFileCacheTests`. They check that
+  another thread starts with an empty cache, that clearing or flushing in another thread leaves this
+  thread's entries and files alone, and that subclasses share the calling thread's cache.
+
+## Test strategy
+
+- [x] Added/updated unit tests. 3 of the 4 new tests fail on `main` and pass with this change. The
+  fourth, which checks that subclasses share the cache, passes on both. - [ ] Manual CLI testing
+  (`poly <command>`) - [ ] Tested against a live Agent Studio project - [ ] N/A (docs, config, or
+  trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (2052 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.61.0 (2026-09-23)
+
+### Features
+
+- Carry deployment mode over when duplicating a project
+  ([#330](https://github.com/polyai/adk/pull/330),
+  [`b10d075`](https://github.com/polyai/adk/commit/b10d075691dea4778d2cedaa819b2adf4562ac53))
+
+## Summary
+
+`poly project duplicate` now gives the copy the same deployment mode (Simple, Branches or
+  Sub-branches) as the project it was duplicated from.
+
+## Motivation
+
+Projects duplicated with the ADK always came out in Simple mode, whatever mode the source used, and
+  the only way to change it was in Agent Studio. New projects start in Simple by design, so the ADK
+  now copies the source's mode onto the duplicate itself.
+
+## Changes
+
+- After duplicating, `poly project duplicate` reads `config.deployment_mode` from both projects. If
+  they differ, it updates the copy to match the source. - If that step fails, the duplicate still
+  succeeds: the console shows a warning, and `--json` output gets a `deployment_mode_error` key. -
+  Adds `PlatformAPIHandler.update_project` (`PATCH
+  /adk/v1/accounts/{account_id}/projects/{project_id}`) and
+  `AgentStudioInterface.set_deployment_mode`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.60.0 (2026-09-21)
 
 ### Build System
