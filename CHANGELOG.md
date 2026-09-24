@@ -1,6 +1,102 @@
 # CHANGELOG
 
 
+## v0.61.1 (2026-09-23)
+
+### Bug Fixes
+
+- Give each thread its own multi-resource file cache
+  ([#327](https://github.com/polyai/adk/pull/327),
+  [`adadece`](https://github.com/polyai/adk/commit/adadececb81e339e608942ac980315fab81f0908))
+
+## Summary
+
+`MultiResourceYamlResource._file_cache` becomes a thread-local dict instead of one dict shared by
+  the whole process. Every existing call site stays the same, so single-threaded use (CLI, tests)
+  behaves exactly as before.
+
+## Motivation
+
+A service that runs the ADK in-process crashlooped because its handlers ran the ADK inline on the
+  event loop. The fix there moves ADK calls onto a worker thread, but it has to hold them to **one
+  at a time**, because the shared cache isn't safe when two calls run together:
+
+- `project.py` calls `_file_cache.clear()` at 7 points during pull and load. Another thread's writes
+  that were only cached (`save_to_cache=True`) and not yet flushed are dropped. - The merge path
+  builds `original_file_contents` from every cache entry (`project.py:825-828`), so it picks up
+  another thread's files. - `write_cache_to_file()` flushes every entry, including another thread's
+  files, into their temp dirs.
+
+With one cache per thread, callers can run ADK calls in parallel threads safely. It's also a
+  prerequisite for free-threaded Python.
+
+## Changes
+
+- `resource.py`: `_file_cache` is now a small descriptor, `_PerThreadFileCache`, that returns the
+  calling thread's dict. The dict lives in a `threading.local`. - All uses, including
+  `cls._file_cache.get/clear/setdefault`, iteration, subclasses and tests, keep working unchanged. -
+  Subclasses still share the base class's cache within a thread. That matters because projects clear
+  the cache via `MultiResourceYamlResource` while subclasses write via `cls`. - Why
+  `threading.local` and not a `ContextVar`: copied contexts share the same dict object, and on
+  free-threaded 3.14 builds threads inherit their parent's context by default. Either would put the
+  shared cache back. - `resources_test.py`: new `MultiResourceFileCacheTests`. They check that
+  another thread starts with an empty cache, that clearing or flushing in another thread leaves this
+  thread's entries and files alone, and that subclasses share the calling thread's cache.
+
+## Test strategy
+
+- [x] Added/updated unit tests. 3 of the 4 new tests fail on `main` and pass with this change. The
+  fourth, which checks that subclasses share the cache, passes on both. - [ ] Manual CLI testing
+  (`poly <command>`) - [ ] Tested against a live Agent Studio project - [ ] N/A (docs, config, or
+  trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (2052 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.61.0 (2026-09-23)
+
+### Features
+
+- Carry deployment mode over when duplicating a project
+  ([#330](https://github.com/polyai/adk/pull/330),
+  [`b10d075`](https://github.com/polyai/adk/commit/b10d075691dea4778d2cedaa819b2adf4562ac53))
+
+## Summary
+
+`poly project duplicate` now gives the copy the same deployment mode (Simple, Branches or
+  Sub-branches) as the project it was duplicated from.
+
+## Motivation
+
+Projects duplicated with the ADK always came out in Simple mode, whatever mode the source used, and
+  the only way to change it was in Agent Studio. New projects start in Simple by design, so the ADK
+  now copies the source's mode onto the duplicate itself.
+
+## Changes
+
+- After duplicating, `poly project duplicate` reads `config.deployment_mode` from both projects. If
+  they differ, it updates the copy to match the source. - If that step fails, the duplicate still
+  succeeds: the console shows a warning, and `--json` output gets a `deployment_mode_error` key. -
+  Adds `PlatformAPIHandler.update_project` (`PATCH
+  /adk/v1/accounts/{account_id}/projects/{project_id}`) and
+  `AgentStudioInterface.set_deployment_mode`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.60.0 (2026-09-21)
 
 ### Build System
