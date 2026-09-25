@@ -301,6 +301,11 @@
   },
   {
     "License": "MIT License",
+    "Name": "ruamel.yaml.clib",
+    "URL": "https://sourceforge.net/p/ruamel-yaml-clib/code/ci/default/tree/"
+  },
+  {
+    "License": "MIT License",
     "Name": "ruff",
     "URL": "https://docs.astral.sh/ruff"
   },

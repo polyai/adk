@@ -5,9 +5,16 @@ Copyright PolyAI Limited
 
 import copy
 import datetime
+import platform
 import tempfile
 import unittest
+from importlib.metadata import requires
 from pathlib import Path
+
+from packaging.requirements import Requirement
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
+from ruamel.yaml.main import CParser
 
 import poly.resources.resource_utils as resource_utils
 from poly import utils
@@ -1358,6 +1365,105 @@ class JsonIoTests(unittest.TestCase):
             self.assertNotIn("\\u00f4", raw)
 
             self.assertEqual(utils.read_json_file(str(path)), data)
+
+
+TEST_PROJECTS_DIR = Path(__file__).parent / "test_projects"
+
+EDGE_CASE_YAML = """\
+time: 12:30
+time_with_seconds: 09:00:15
+yes_word: yes
+on_word: on
+off_word: off
+leading_zero: 0777
+octal: 0o17
+hex: 0x1F
+underscored: 1_000
+date: 2026-09-23
+timestamp: 2026-09-23T10:00:00Z
+infinity: .inf
+tilde: ~
+scientific: 1e3
+signed: +1
+quoted_number: "42"
+nbsp: "a\u00a0b"
+line_separator: "before\u2028after"
+emoji: "\U0001f600"
+literal: |
+  line one
+  line two
+folded: >
+  folded
+  text
+flow: {a: [1, 2], b: null}
+anchor: &shared
+  key: value
+alias: *shared
+"""
+
+
+def _clib_requirement() -> Requirement:
+    """The ruamel.yaml.clib requirement as declared in the installed package metadata."""
+    return next(
+        requirement
+        for requirement in map(Requirement, requires("polyai-adk"))
+        if requirement.name == "ruamel.yaml.clib"
+    )
+
+
+def _libyaml_expected() -> bool:
+    """Whether the ruamel.yaml.clib environment marker matches this interpreter and platform."""
+    return _clib_requirement().marker.evaluate()
+
+
+class LoadYamlParserTests(unittest.TestCase):
+    """load_yaml reads the same data with the libyaml parser as with the pure-Python one."""
+
+    def setUp(self):
+        self.pure_loader = YAML(typ="safe", pure=True)
+
+    def assert_same_load(self, text: str) -> None:
+        self.assertEqual(repr(resource_utils.load_yaml(text)), repr(self.pure_loader.load(text)))
+
+    @unittest.skipUnless(_libyaml_expected(), "ruamel.yaml.clib is not installed on this platform")
+    def test_libyaml_parser_is_used(self):
+        self.assertIsNotNone(CParser)
+        self.assertIs(resource_utils._yaml_loader.Parser, CParser)
+
+    def test_clib_marker_covers_running_python(self):
+        covered = _clib_requirement().marker.evaluate(
+            {
+                "platform_python_implementation": "CPython",
+                "platform_machine": "x86_64",
+                "sys_platform": "linux",
+            }
+        )
+        self.assertTrue(
+            covered,
+            f"ruamel.yaml.clib is excluded on Python {platform.python_version()}; re-pin it to "
+            "a release with prebuilt wheels for this version and widen the marker",
+        )
+
+    @unittest.skipIf(CParser is None, "libyaml parser not installed")
+    def test_fixture_project_files_load_identically(self):
+        paths = sorted(TEST_PROJECTS_DIR.rglob("*.yaml"))
+        self.assertTrue(paths)
+        for path in paths:
+            with self.subTest(path=str(path.relative_to(TEST_PROJECTS_DIR))):
+                self.assert_same_load(path.read_text(encoding="utf-8"))
+
+    @unittest.skipIf(CParser is None, "libyaml parser not installed")
+    def test_edge_case_scalars_load_identically(self):
+        self.assert_same_load(EDGE_CASE_YAML)
+
+    @unittest.skipIf(CParser is None, "libyaml parser not installed")
+    def test_crlf_and_byte_order_mark_load_identically(self):
+        self.assert_same_load("\ufeffkey: value\r\nlist:\r\n  - one\r\n  - two\r\n")
+
+    def test_invalid_yaml_raises_yaml_error(self):
+        for loader in (resource_utils.load_yaml, self.pure_loader.load):
+            with self.subTest(loader=loader), self.assertRaises(YAMLError):
+                loader("key: [unclosed")
 
 
 if __name__ == "__main__":
