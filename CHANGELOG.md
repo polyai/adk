@@ -1,6 +1,68 @@
 # CHANGELOG
 
 
+## v0.61.4 (2026-09-25)
+
+### Performance Improvements
+
+- Cache function metadata instead of the parsed function
+  ([#337](https://github.com/polyai/adk/pull/337),
+  [`97b41a7`](https://github.com/polyai/adk/commit/97b41a738631e5032bc25a0947ab2a62e1856af8))
+
+## Summary
+
+`Function._get_target_function` now caches a small `FunctionMetadata` (def line number, positional
+  args, decorators) instead of the whole parsed function, so cached entries no longer keep function
+  bodies in memory.
+
+## Motivation
+
+The cache holds up to 2,048 entries, and each one kept the full `ast.FunctionDef` for its function,
+  body included. Measured over real project sources, a full cache held about 116 MiB, and about 33
+  MiB with this change. Long-running processes that reuse the ADK across many requests keep that
+  memory for their whole lifetime. The cache's callers only read the def line number, the positional
+  args and the decorators.
+
+## Changes
+
+- Add a frozen `FunctionMetadata` dataclass holding `lineno`, `args` and `decorator_list`. -
+  `_get_target_function` returns `FunctionMetadata` (or `None`) instead of the AST node. It is still
+  an `lru_cache` of the same size and key. - `_extract_decorators` reads args from
+  `FunctionMetadata.args`. `_generate_raw_output` and `FunctionStep` behave the same.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+The existing decorator, latency control and raw rendering tests cover both callers and pass
+  unchanged.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Memory retained per cache entry, measured with `tracemalloc` over 15,876 distinct function sources
+  from real projects:
+
+| Per cache entry | Mean | Median | p90 | |---|---|---|---| | Key (source string) | 11.9 KiB | 1.7
+  KiB | 24.8 KiB | | Old value (`FunctionDef`) | 46.0 KiB | 19.7 KiB | 106.2 KiB | | New value
+  (`FunctionMetadata`) | 4.7 KiB | 2.7 KiB | 9.9 KiB | | **Old entry** | **57.9 KiB** | 23.9 KiB |
+  133.4 KiB | | **New entry** | **16.6 KiB** | 6.0 KiB | 32.7 KiB |
+
+A full cache (2,048 × mean) goes from about 116 MiB to about 33 MiB. The source-string key is now
+  about 70% of each entry; hashing it would save roughly another 24 MiB, which isn't worth a
+  hand-written cache.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.61.3 (2026-09-25)
 
 ### Performance Improvements
