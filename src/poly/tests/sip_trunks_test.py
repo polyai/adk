@@ -12,7 +12,8 @@ from unittest.mock import MagicMock, patch
 
 from poly.cli import AgentStudioCLI
 from poly.cli_commands.sip_trunks import SIPTrunksCommand
-from poly.handlers.sip_trunking_api import SIPTrunkingAPIHandler
+from poly.handlers.interface import AgentStudioInterface
+from poly.project import AgentStudioProject
 from poly.sip_trunks.config import (
     default_export_path,
     find_manage_file,
@@ -29,8 +30,8 @@ from poly.sip_trunks.reconciler import (
 )
 
 
-class SIPTrunkingAPIHandlerTest(unittest.TestCase):
-    @patch("poly.handlers.sip_trunking_api.PlatformAPIHandler.make_request")
+class SIPTrunkingInterfaceTest(unittest.TestCase):
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_create_trunk_uses_account_endpoint(self, make_request):
         body = {
             "name": "carrier",
@@ -39,7 +40,7 @@ class SIPTrunkingAPIHandlerTest(unittest.TestCase):
         }
         make_request.return_value = {"id": "tr-123"}
 
-        result = SIPTrunkingAPIHandler.create_trunk("euw-1", "acct-123", body)
+        result = AgentStudioInterface.create_sip_trunk("euw-1", "acct-123", body)
 
         self.assertEqual(result, {"id": "tr-123"})
         make_request.assert_called_once_with(
@@ -49,18 +50,18 @@ class SIPTrunkingAPIHandlerTest(unittest.TestCase):
             data=body,
         )
 
-    @patch("poly.handlers.sip_trunking_api.PlatformAPIHandler.make_request")
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_extension_is_url_encoded(self, make_request):
-        SIPTrunkingAPIHandler.get_extension("uk-1", "acct-123", "tr-123", "+44/100")
+        AgentStudioInterface.get_sip_trunk_extension("uk-1", "acct-123", "tr-123", "+44/100")
 
         make_request.assert_called_once_with(
             "uk-1",
             "/v1/accounts/acct-123/telephony/sip-trunks/tr-123/extensions/%2B44%2F100",
         )
 
-    @patch("poly.handlers.sip_trunking_api.PlatformAPIHandler.make_request")
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_delete_extension_uses_delete(self, make_request):
-        SIPTrunkingAPIHandler.delete_extension("us-1", "acct-123", "tr-123", "1000")
+        AgentStudioInterface.delete_sip_trunk_extension("us-1", "acct-123", "tr-123", "1000")
 
         make_request.assert_called_once_with(
             "us-1",
@@ -181,7 +182,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         print_result.assert_called_once_with(result, output_json=False)
 
     @patch.object(SIPTrunksCommand, "_print_list_table")
-    @patch("poly.cli_commands.sip_trunks.export_config")
+    @patch.object(AgentStudioProject, "export_sip_trunks")
     def test_list_displays_table_by_default(self, export_config, print_list_table):
         export = {"account_id": "acct-123", "sip_trunks": []}
         export_config.return_value = export
@@ -202,8 +203,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
         print_list_table.assert_called_once_with(export)
 
     @patch.object(SIPTrunksCommand, "_print_get_table")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.get_trunk")
+    @patch.object(AgentStudioProject, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioProject, "get_sip_trunk")
     def test_get_displays_details_and_extensions_table(
         self, get_trunk, list_extensions, print_get_table
     ):
@@ -230,7 +231,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         print_get_table.assert_called_once_with(trunk, extensions)
 
     @patch.object(SIPTrunksCommand, "_print_result")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_trunk")
+    @patch.object(AgentStudioProject, "delete_sip_trunk")
     def test_delete_returns_machine_readable_success(self, delete_trunk, print_result):
         args = self._parser().parse_args(
             [
@@ -253,7 +254,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             {"success": True, "trunk_id": "tr-123"}, output_json=True
         )
 
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_trunk")
+    @patch.object(AgentStudioProject, "delete_sip_trunk")
     @patch("questionary.confirm")
     def test_delete_aborts_when_not_confirmed(self, confirm, delete_trunk):
         confirm.return_value.ask.return_value = False
@@ -275,7 +276,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         delete_trunk.assert_not_called()
 
     @patch("poly.output.console.success")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_trunk")
+    @patch.object(AgentStudioProject, "delete_sip_trunk")
     @patch("questionary.confirm")
     def test_delete_confirms_and_prints_human_success(self, confirm, delete_trunk, success):
         confirm.return_value.ask.return_value = True
@@ -296,7 +297,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         delete_trunk.assert_called_once_with("uk-1", "acct-123", "tr-123")
         success.assert_called_once_with("Deleted SIP trunk tr-123.")
 
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_trunk")
+    @patch.object(AgentStudioProject, "delete_sip_trunk")
     @patch("questionary.confirm")
     def test_delete_json_requires_yes(self, confirm, delete_trunk):
         args = self._parser().parse_args(
@@ -417,8 +418,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
             os.path.join("root", "account-a", "sip-trunks.yaml"),
         )
 
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_list_export_is_reusable_and_contains_extensions(self, list_trunks, list_extensions):
         list_trunks.return_value = {
             "sip_trunks": [
@@ -592,7 +593,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     @patch("poly.cli_commands.sip_trunks.getpass")
     @patch("poly.sip_trunks.config.read_project_config", return_value=None)
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_preview_validates_extensions_before_prompting_or_writing(
         self, list_trunks, _read_project, prompt
     ):
@@ -627,8 +628,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
         prompt.assert_not_called()
 
     @patch("poly.sip_trunks.config.read_project_config", return_value=None)
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_preview_shows_extension_removed_from_present_list(
         self, list_trunks, list_extensions, _read_project
     ):
@@ -769,8 +770,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         self.assertEqual(patch_data, {"inbound": {"sip_token_auth": {"disable": True}}})
 
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_export_includes_empty_authoritative_extensions_list(
         self, list_trunks, list_extensions
     ):
@@ -830,9 +831,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
             self.assertEqual(result, str(config_file))
 
     @patch("poly.sip_trunks.config.read_project_config", return_value=None)
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.create_trunk")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "create_sip_trunk")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_manage_creates_trunk_and_reports_hostname(
         self, list_trunks, create_trunk, list_extensions, _read_project
     ):
@@ -929,9 +930,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     @patch("poly.cli_commands.sip_trunks.getpass", return_value="rotated-secret")
     @patch("poly.sip_trunks.config.read_project_config", return_value=None)
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.update_trunk")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "update_sip_trunk")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_manage_rotates_auth_only_when_explicitly_requested(
         self, list_trunks, update_trunk, list_extensions, _read_project, prompt
     ):
@@ -987,9 +988,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
         self.assertEqual(result["trunks"][0]["status"], "updated")
 
     @patch("poly.sip_trunks.config.read_project_config", return_value=None)
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_trunk")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.update_trunk")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
+    @patch.object(AgentStudioInterface, "delete_sip_trunk")
+    @patch.object(AgentStudioInterface, "update_sip_trunk")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_manage_updates_declared_trunk_without_deleting_omitted_trunks(
         self, list_trunks, update_trunk, delete_trunk, _read_project
     ):

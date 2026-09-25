@@ -5,18 +5,15 @@ Copyright PolyAI Limited
 
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from getpass import getpass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
-from poly.handlers.sip_trunking_api import SIPTrunkingAPIHandler
 from poly.output.json_output import json_print
+from poly.project import AgentStudioProject
 from poly.sip_trunks import config as sip_trunk_config
-from poly.sip_trunks.reconciler import (
-    ManagePlan,
-    apply_manage_plan,
-    build_manage_plan,
-    export_config,
-)
+
+if TYPE_CHECKING:
+    from poly.sip_trunks.reconciler import ManagePlan
 
 
 class SIPTrunksCommand(BaseCommand):
@@ -203,14 +200,14 @@ class SIPTrunksCommand(BaseCommand):
         return False
 
     @classmethod
-    def _build_manage_plan(cls, args: Namespace) -> ManagePlan:
+    def _build_manage_plan(cls, args: Namespace) -> "ManagePlan":
         loaded = sip_trunk_config.load_manage_config(
             args.path,
             file_path=args.file_path,
             account_id=args.account_id,
             region=args.region,
         )
-        return build_manage_plan(
+        return AgentStudioProject.build_sip_trunk_plan(
             loaded.path,
             loaded.region,
             loaded.account_id,
@@ -220,11 +217,10 @@ class SIPTrunksCommand(BaseCommand):
         )
 
     @classmethod
-    def _apply_manage_plan(cls, plan: ManagePlan) -> dict[str, Any]:
-        return apply_manage_plan(
+    def _apply_manage_plan(cls, plan: "ManagePlan") -> dict[str, Any]:
+        return AgentStudioProject.apply_sip_trunk_plan(
             plan,
             prompt_auth_secret=cls._prompt_auth_secret,
-            persist_trunk_response=sip_trunk_config.persist_trunk_response,
         )
 
     @staticmethod
@@ -408,7 +404,7 @@ class SIPTrunksCommand(BaseCommand):
 
         region, account_id = cls._resolve_context(args)
         if action == "list":
-            result = export_config(region, account_id)
+            result = AgentStudioProject.export_sip_trunks(region, account_id)
             if args.output:
                 output_path = cls._write_export(args, account_id, result)
                 if args.json:
@@ -429,9 +425,9 @@ class SIPTrunksCommand(BaseCommand):
                 cls._print_list_table(result)
             return
         if action == "get":
-            result = SIPTrunkingAPIHandler.get_trunk(region, account_id, args.trunk_id)
+            result = AgentStudioProject.get_sip_trunk(region, account_id, args.trunk_id)
             if not args.json:
-                extension_response = SIPTrunkingAPIHandler.list_extensions(
+                extension_response = AgentStudioProject.list_sip_trunk_extensions(
                     region, account_id, args.trunk_id
                 )
                 extensions = extension_response.get("extensions", [])
@@ -453,7 +449,7 @@ class SIPTrunksCommand(BaseCommand):
 
                     info("Aborted. SIP trunk was not deleted.")
                     return
-            SIPTrunkingAPIHandler.delete_trunk(region, account_id, args.trunk_id)
+            AgentStudioProject.delete_sip_trunk(region, account_id, args.trunk_id)
             result = {"success": True, "trunk_id": args.trunk_id}
             if not args.json:
                 from poly.output.console import success

@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Protocol
 
-from poly.handlers.sip_trunking_api import SIPTrunkingAPIHandler
+from poly.handlers.interface import AgentStudioInterface
 from poly.sip_trunks.config import file_digest
 
 
@@ -492,7 +492,7 @@ def build_manage_plan(
             f"SIP trunk name '{ambiguous_name}' is declared more than once without an ID."
         )
 
-    response = SIPTrunkingAPIHandler.list_trunks(region, account_id)
+    response = AgentStudioInterface.list_sip_trunks(region, account_id)
     existing_items = response.get("sip_trunks", [])
     if not isinstance(existing_items, list):
         raise ValueError("Expected the SIP Trunking API to return a sip_trunks list.")
@@ -580,7 +580,7 @@ def build_manage_plan(
             extension_changes: tuple[PlanChange, ...] = ()
             extensions_total = 0
         else:
-            extension_response = SIPTrunkingAPIHandler.list_extensions(
+            extension_response = AgentStudioInterface.list_sip_trunk_extensions(
                 region, account_id, current_id
             )
             existing_extensions = extension_response.get("extensions", [])
@@ -664,7 +664,7 @@ def apply_manage_plan(
     results: list[dict[str, Any]] = []
     for operation, (desired, payload) in zip(plan.trunks, prepared, strict=True):
         if operation.action == "create":
-            current = SIPTrunkingAPIHandler.create_trunk(plan.region, plan.account_id, payload)
+            current = AgentStudioInterface.create_sip_trunk(plan.region, plan.account_id, payload)
             if not current.get("id"):
                 raise ValueError(
                     f"Created SIP trunk '{operation.local_name}', but the API returned no trunk ID."
@@ -672,7 +672,7 @@ def apply_manage_plan(
             status = "created"
         elif operation.action == "update":
             assert operation.current is not None
-            current = SIPTrunkingAPIHandler.update_trunk(
+            current = AgentStudioInterface.update_sip_trunk(
                 plan.region,
                 plan.account_id,
                 operation.current["id"],
@@ -695,7 +695,7 @@ def apply_manage_plan(
         for extension_operation in operation.extension_operations:
             if extension_operation.action == "create":
                 assert extension_operation.payload is not None
-                SIPTrunkingAPIHandler.create_extension(
+                AgentStudioInterface.create_sip_trunk_extension(
                     plan.region,
                     plan.account_id,
                     trunk_id,
@@ -703,7 +703,7 @@ def apply_manage_plan(
                 )
             elif extension_operation.action == "update":
                 assert extension_operation.payload is not None
-                SIPTrunkingAPIHandler.update_extension(
+                AgentStudioInterface.update_sip_trunk_extension(
                     plan.region,
                     plan.account_id,
                     trunk_id,
@@ -711,7 +711,7 @@ def apply_manage_plan(
                     deepcopy(extension_operation.payload),
                 )
             else:
-                SIPTrunkingAPIHandler.delete_extension(
+                AgentStudioInterface.delete_sip_trunk_extension(
                     plan.region,
                     plan.account_id,
                     trunk_id,
@@ -748,7 +748,7 @@ def apply_manage_plan(
 
 def export_config(region: str, account_id: str) -> dict[str, Any]:
     """Build reusable YAML configuration from all live account trunks."""
-    response = SIPTrunkingAPIHandler.list_trunks(region, account_id)
+    response = AgentStudioInterface.list_sip_trunks(region, account_id)
     trunks = response.get("sip_trunks", [])
     if not isinstance(trunks, list):
         raise ValueError("Expected the SIP Trunking API to return a sip_trunks list.")
@@ -784,7 +784,9 @@ def export_config(region: str, account_id: str) -> dict[str, Any]:
         else:
             config["inbound_auth"] = {"type": "none"}
 
-        extension_response = SIPTrunkingAPIHandler.list_extensions(region, account_id, trunk_id)
+        extension_response = AgentStudioInterface.list_sip_trunk_extensions(
+            region, account_id, trunk_id
+        )
         extension_items = extension_response.get("extensions", [])
         if not isinstance(extension_items, list):
             raise ValueError("Expected the SIP Trunking API to return an extensions list.")
