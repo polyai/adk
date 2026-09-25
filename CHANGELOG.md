@@ -1,6 +1,114 @@
 # CHANGELOG
 
 
+## v0.62.0 (2026-09-25)
+
+### Features
+
+- Add PyPI metadata to pyproject.toml (DEVP-789) ([#334](https://github.com/polyai/adk/pull/334),
+  [`071520b`](https://github.com/polyai/adk/commit/071520bdbe94fb1361676e9c3413406386f8b5ca))
+
+## Summary
+
+Adds `project.urls`, `keywords`, and `classifiers` to `pyproject.toml`, and rewrites the package
+  summary so the PyPI listing for `polyai-adk` points back to real docs instead of showing a generic
+  description with no outbound links.
+
+## Motivation
+
+The `polyai-adk` PyPI listing is among the first results for "poly apikey" and ADK-related queries,
+  but had no `project.urls`, no `keywords`, and no classifiers — nothing pointing back to real docs.
+
+Linear: https://linear.app/poly-ai/issue/DEVP-789/add-pypi-metadata-to-pyprojecttoml
+
+Supersedes #332 (closed by a branch rename)
+
+## Changes
+
+- `description`: rewritten to state what ADK builds — a CLI for PolyAI voice/chat agents, self-serve
+  - `keywords`: voice-ai, conversational-ai, cli, agent-development-kit, voice-agents -
+  `classifiers`: `Topic :: Communications :: Telephony`, `Topic :: Software Development ::
+  Libraries`, `Intended Audience :: Developers` (no existing classifiers to conflict with) -
+  `[project.urls]`: Documentation/Homepage → `docs.poly.ai/adk`, Source → `github.com/polyai/adk`,
+  Changelog → `github.com/polyai/adk/blob/main/CHANGELOG.md` (confirmed this file exists)
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Verified `pyproject.toml` parses correctly (`tomllib.load`) and builds successfully (`uv build
+  --sdist`).
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  conventional commits
+
+## Screenshots / Logs
+
+These fields ship on PyPI automatically with the next release — no separate publish action needed.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+- **release**: Add getting-started block to release notes
+  ([#335](https://github.com/polyai/adk/pull/335),
+  [`5a4b1ab`](https://github.com/polyai/adk/commit/5a4b1ab799818e09ef0841e9d03796e2d56f5289))
+
+## Summary
+
+Adds a "Getting started" block (sign up at studio.poly.ai, install via `uv tool install polyai-adk`,
+  `poly setup`) to every future GitHub release on this repo, generated automatically instead of a
+  manual one-off addition.
+
+## Motivation
+
+GitHub release pages on `polyai/adk` rank for command-name searches (e.g. "poly apikey") but carry
+  no onboarding guidance today — just changelog entries.
+
+Closes DEVP-790
+
+## Changes
+
+- `templates/.release_notes.md.j2` — overrides python-semantic-release's release-notes template to
+  prepend the block; everything below it reproduces the default template's behavior verbatim. -
+  `templates/CHANGELOG.md.j2` + `templates/.components/*` — unmodified vendored copies of PSR's
+  built-in "angular" md templates. These are required: once *any* file exists in a custom
+  `template_dir`, PSR stops falling back to its own default templates for both `{% include %}`
+  resolution and `CHANGELOG.md` generation. Without vendoring these, `CHANGELOG.md` would silently
+  stop updating on release. - `pyproject.toml` — adds `[tool.semantic_release.changelog]
+  template_dir = "templates"`.
+
+## Test strategy
+
+Verified end-to-end in a disposable venv against `python-semantic-release==9.21.2` (the version
+  `.github/workflows/release.yaml`'s `@v9` action resolves to today), covering: - First release
+  notes rendering - Subsequent release notes rendering (including the "Detailed Changes" compare
+  link) - `CHANGELOG.md` generation (byte-identical to default output aside from the new block in
+  release notes)
+
+- [ ] Manual CLI testing (`poly <command>`) — N/A, no CLI change - [x] N/A for pytest — no Python
+  source changed; not covered by `ruff`/`pytest`
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (no Python files changed) - [x] `pytest`
+  passes (no Python files changed) - [x] No breaking changes to the `poly` CLI interface - [x]
+  Commit messages follow conventional commits
+
+**Needs release-process owner sign-off before merge**, per this ticket's acceptance criteria — this
+  changes release automation on a live repo.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
 ## v0.61.4 (2026-09-25)
 
 ### Performance Improvements

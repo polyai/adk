@@ -190,7 +190,7 @@ template_dir = "templates"
 
 [project]
 name = "polyai-adk"
-version = "0.61.4"
+version = "0.62.0"
 description = "Agent Development Kit (ADK) — a CLI for building, testing, and deploying PolyAI voice and chat agents, self-serve"
 readme = "README.md"
 requires-python = ">=3.14.0"
