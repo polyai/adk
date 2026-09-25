@@ -7,6 +7,7 @@ so a string the dumper leaves bare can come back as a different type entirely.
 import yaml as pyyaml
 
 from poly.resources.resource_utils import dump_yaml
+from poly.resources.test_suite import FunctionCallArgumentAssertion
 
 
 class TestYaml11SafeQuoting:
@@ -52,3 +53,35 @@ class TestYaml11SafeQuoting:
             "name": "hello",
         }
         assert pyyaml.safe_load(dump_yaml(data)) == data
+
+
+class TestExpectedValueWireEncoding:
+    """Pulled native values must re-encode to the string the platform decodes.
+
+    Agent Studio decodes expected_value by value_type (parseInt / parseFloat /
+    raw === "true"), so these assert the inverse of that decoder.
+    """
+
+    def test_integer_encodes_for_parseint(self):
+        assert FunctionCallArgumentAssertion("party_size", 15, "integer").expected_value == "15"
+
+    def test_float_encodes_for_parsefloat(self):
+        assert FunctionCallArgumentAssertion("total", 12.5, "float").expected_value == "12.5"
+
+    def test_booleans_encode_lowercase(self):
+        # "True" would decode to false on the platform side.
+        assert FunctionCallArgumentAssertion("ok", True, "boolean").expected_value == "true"
+        assert FunctionCallArgumentAssertion("ok", False, "boolean").expected_value == "false"
+
+    def test_strings_and_none_are_untouched(self):
+        assert FunctionCallArgumentAssertion("t", "19:00", "string").expected_value == "19:00"
+        assert FunctionCallArgumentAssertion("t", None, "string").expected_value is None
+
+    def test_pulled_native_value_survives_to_proto(self):
+        proto = FunctionCallArgumentAssertion("party_size", 15, "integer").to_proto()
+        assert proto.expected_value == "15"
+
+    def test_round_trip_is_stable_in_yaml(self):
+        arg = FunctionCallArgumentAssertion("party_size", 15, "integer")
+        assert dump_yaml(arg.to_yaml_dict()).splitlines()[0] == "parameter_name: party_size"
+        assert "expected_value: '15'" in dump_yaml(arg.to_yaml_dict())
