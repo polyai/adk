@@ -1,6 +1,85 @@
 # CHANGELOG
 
 
+## v0.61.3 (2026-09-25)
+
+### Performance Improvements
+
+- Use the libyaml parser for YAML loads and add a large-project benchmark
+  ([#326](https://github.com/polyai/adk/pull/326),
+  [`c1ea86b`](https://github.com/polyai/adk/commit/c1ea86b80436890a0d0bce25b41620c94f1f2ae2))
+
+## Summary
+
+YAML loads now use ruamel's libyaml-backed parser, and a new offline benchmark measures pull, status
+  and push on a large multi-resource project. In the benchmark, total sync time falls by about 38%
+  and files on disk come out byte-for-byte the same.
+
+## Motivation
+
+A large production project, with a 1.4 MB `variant_attributes.yaml` (about 1,200 variants) and a 400
+  KB `pronunciations.yaml` (about 3,300 rules), spends tens of seconds per pull or push parsing and
+  dumping YAML in pure Python. On a CPU-limited service that was long enough to fail health checks.
+
+Since ruamel.yaml 0.19, its C extension is an optional extra, so we have been running the
+  pure-Python parser. This is the first of three perf changes. It also adds the benchmark the next
+  two use to prove their output is unchanged.
+
+## Changes
+
+- Add `ruamel.yaml.clib` as a runtime dependency. `load_yaml` (`YAML(typ="safe")`) picks up the C
+  parser automatically and keeps YAML 1.2 value resolution, so `yes`, `on`, `12:30` and `0777` read
+  exactly as before. `dump_yaml` is unchanged: the round-trip emitter has no C implementation. - The
+  environment marker installs the extension only on architectures with prebuilt cp314 wheels:
+  CPython on x86_64, AMD64, arm64 and aarch64 (macOS, Linux glibc and musl, Windows x64). It is
+  skipped elsewhere (Windows on ARM, 32-bit, armv7l, ppc64le and similar) and on Python 3.15 or
+  later until wheels ship. Where it is missing, ruamel falls back to pure Python, so installs never
+  need a compiler. Free-threaded 3.14t builds can't be excluded with a marker and would build from
+  source. - Add `scripts/bench_large_project.py`. It builds a synthetic projection at production
+  scale and runs init, force pull, pull with a remote edit, status after a local edit, and a dry-run
+  push. Everything runs offline through the real code paths. `--digest-out` records a sha256 of
+  every file after each phase, and `--profile PHASE` prints a cProfile report. - Add
+  `LoadYamlParserTests`. It checks that every fixture YAML file and an edge-case document (implicit
+  types, dates, ` `, NBSP, emoji, anchors, CRLF, BOM) load identically with the C and pure-Python
+  parsers. It also checks that the C parser is actually in use wherever the marker (read from the
+  installed package metadata) installs it, and fails when the running Python is outside the marker's
+  version bound, so moving CI to 3.15 prompts a re-pin. - Regenerate `uv.lock` and `licenses.json`.
+  Both gain one new MIT entry. The lock also catches up with the 0.60.0 version bump.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+I compared benchmark digests with and without `ruamel.yaml.clib` installed, and every file after
+  every phase is identical. I also built the wheel, installed it into a fresh venv, and confirmed it
+  resolves the extension and uses `CParser`.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`uv run python scripts/bench_large_project.py`: 1,238 variants × 21 attributes (1.42 MB), 3,317
+  pronunciations (0.40 MB). Best of two runs on an M-series laptop:
+
+| Phase | Pure Python | libyaml parser | |---|---|---| | init | 2.44 s | 2.08 s | | force pull |
+  5.63 s | 3.05 s | | pull (one remote edit) | 12.91 s | 7.79 s | | status (one local edit) | 2.62 s
+  | 1.17 s | | dry-run push | 1.27 s | 1.31 s | | **total** | **24.87 s** | **15.45 s** |
+
+Most of the remaining pull time is per-rule dump→load round trips in `Pronunciation.save`, which the
+  next PR removes.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.61.2 (2026-09-24)
 
 ### Performance Improvements
