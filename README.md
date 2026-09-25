@@ -8,22 +8,29 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Develop with Claude Code](https://img.shields.io/badge/Develop%20with-Claude%20Code-DC9E63?logo=claude)](https://claude.ai/download)
 
-A CLI and Python package for managing [Agent Studio](https://studio.us.poly.ai) projects locally. It provides a Git-like workflow for synchronizing project configurations between your local filesystem and the Agent Studio platform.
+A CLI for building, testing, and deploying PolyAI voice and chat agents.
 
-**[Documentation](https://polyai.github.io/adk/)**
+Sign up at [studio.poly.ai](https://studio.poly.ai) and start free.
 
 ## Installation
 
+Via [UV](https://docs.astral.sh/uv/):
+```bash
+uv tool install polyai-adk
+```
 
 Via Pip:
 ```bash
 pip install polyai-adk
 ```
 
-Via [UV](https://docs.astral.sh/uv/):
+Get an API key for the PolyAI APIs / Dialog RSN:
+
 ```bash
-uv tool install polyai-adk
+poly apikey --region studio
 ```
+
+**Documentation:** [guides on docs.poly.ai](https://docs.poly.ai/adk) · [full CLI reference](https://polyai.github.io/adk/)
 
 Once installed, use the `poly` command to manage your projects:
 
