@@ -207,21 +207,24 @@ dependencies = [
     "langcodes==3.5.1",
     "posthog==7.35.4",
     "packaging>=24.0",
-    # Voice calling (`poly call`): WebRTC transport, audio I/O, and WebRTC APM / AEC3
-    # (echo cancellation). Native deps — pinned to versions with confirmed prebuilt
-    # cp314 wheels so a future release can't break installs.
-    "aiortc==1.15.0",
-    "sounddevice==0.5.6",
-    "websockets==17.1",
-    "numpy==2.5.3",
-    "pywebrtc-audio==0.2.0",
 ]
 
 [project.license]
 text = "Apache-2.0"
 
 [project.optional-dependencies]
+# Voice calling (`poly call`): WebRTC transport, audio I/O, and WebRTC APM / AEC3
+# (echo cancellation). Native deps — pinned to versions with confirmed prebuilt
+# cp314 wheels so a future release can't break installs.
+call = [
+    "aiortc==1.15.0",
+    "sounddevice==0.5.6",
+    "websockets==17.1",
+    "numpy==2.5.3",
+    "pywebrtc-audio==0.2.0",
+]
 dev = [
+    "polyai-adk[call]",
     "pre-commit>=3.0.0",
     "pytest>=8.0.0",
     "pytest-cov>=6.0.0",

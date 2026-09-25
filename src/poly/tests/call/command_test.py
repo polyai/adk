@@ -9,10 +9,14 @@ Copyright PolyAI Limited
 import sys
 import types
 import unittest
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
+from rich.console import Console
+
 from poly.call.session import CallSession
-from poly.cli_commands.call import CallCommand
+from poly.cli_commands.call import _CALL_EXTRA_INSTALL_COMMANDS, CallCommand, voice_deps_hint
+from poly.cli_commands.update import UpdateCommand
 
 
 def make_project(branch: str = "feature-x") -> MagicMock:
@@ -136,6 +140,42 @@ class CallCommandTest(unittest.TestCase):
                 CallCommand.call("/path", aec=False)
 
     @patch("poly.cli_commands.call.load_project")
+    def test_missing_voice_deps_fail_before_loading_project(self, mock_load):
+        """Without the call extra, the command exits before touching the project."""
+        with patch.dict(sys.modules, {"poly.call.client": None}):
+            with self.assertRaises(SystemExit):
+                CallCommand.call("/path")
+
+        mock_load.assert_not_called()
+
+    @patch("poly.cli_commands.call.load_project")
+    def test_missing_voice_deps_skip_push_before_call(self, mock_load):
+        """'--push' is not honoured when the call could never start, so nothing is pushed."""
+        project = make_project(branch="feature-x")
+        mock_load.return_value = project
+
+        with patch.dict(sys.modules, {"poly.call.client": None}):
+            with self.assertRaises(SystemExit):
+                CallCommand.call("/path", push_before_call=True)
+
+        project.push_project.assert_not_called()
+
+    @patch.object(UpdateCommand, "_detect_install_method", return_value="pip")
+    def test_missing_voice_deps_hint_shows_call_extra_literally(self, _mock_method):
+        """'[call]' in the install hint is printed as text, not swallowed as Rich markup."""
+        stderr = StringIO()
+        test_console = Console(file=stderr, width=200)
+
+        with (
+            patch("poly.output.console.err_console", test_console),
+            patch.dict(sys.modules, {"poly.call.client": None}),
+        ):
+            with self.assertRaises(SystemExit):
+                CallCommand.call("/path")
+
+        self.assertIn('pip install "polyai-adk[call]"', stderr.getvalue())
+
+    @patch("poly.cli_commands.call.load_project")
     def test_push_failure_aborts_before_calling(self, mock_load):
         project = make_project(branch="feature-x")
         project.push_project.return_value = (False, "boom", None)
@@ -145,6 +185,49 @@ class CallCommandTest(unittest.TestCase):
             CallCommand.call("/path", push_before_call=True)
 
         project.create_call_session.assert_not_called()
+
+
+class VoiceDepsHintTest(unittest.TestCase):
+    """Tests for voice_deps_hint, which says how to add the call extra to this install."""
+
+    def _hint_for(self, method: str) -> str:
+        """Build the hint as it would appear for the given install method."""
+        with patch.object(UpdateCommand, "_detect_install_method", return_value=method):
+            return voice_deps_hint()
+
+    def test_every_install_method_has_a_command(self):
+        """Each method _detect_install_method can return has an install command."""
+        detectable_methods = {"editable", "ephemeral", "uv-tool", "pipx", "uv-pip", "pip"}
+
+        self.assertEqual(set(_CALL_EXTRA_INSTALL_COMMANDS), detectable_methods)
+
+    def test_editable_checkout_installs_extra_from_source(self):
+        """A dev checkout adds the extra to its own editable install."""
+        self.assertIn('uv pip install -e ".[call]"', self._hint_for("editable"))
+
+    def test_ephemeral_environment_reruns_with_extra(self):
+        """A uvx run has nothing to install into, so the hint reruns with the extra."""
+        self.assertIn('uvx --from "polyai-adk[call]" poly call', self._hint_for("ephemeral"))
+
+    def test_uv_tool_reinstalls_with_extra(self):
+        """A uv tool install is reinstalled with the extra requested."""
+        self.assertIn('uv tool install "polyai-adk[call]"', self._hint_for("uv-tool"))
+
+    def test_pipx_force_reinstalls_with_extra(self):
+        """pipx refuses to reinstall an existing tool without --force."""
+        self.assertIn('pipx install --force "polyai-adk[call]"', self._hint_for("pipx"))
+
+    def test_uv_pip_installs_extra_into_venv(self):
+        """A uv-managed venv installs the extra with uv pip."""
+        self.assertIn('uv pip install "polyai-adk[call]"', self._hint_for("uv-pip"))
+
+    def test_pip_installs_extra_into_venv(self):
+        """A plain venv installs the extra with pip."""
+        self.assertIn('pip install "polyai-adk[call]"', self._hint_for("pip"))
+
+    def test_hint_explains_why_the_extra_is_needed(self):
+        """The hint names the call extra so the user knows what is missing."""
+        self.assertIn("`call` extra", self._hint_for("pip"))
 
 
 if __name__ == "__main__":

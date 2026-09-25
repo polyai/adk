@@ -609,71 +609,79 @@ wheels = [
 
 [[package]]
 name = "polyai-adk"
-version = "0.61.2"
+version = "0.61.4"
 source = { editable = "." }
 dependencies = [
-    { name = "aiortc" },
     { name = "argcomplete" },
     { name = "jsonschema" },
     { name = "langcodes" },
-    { name = "numpy" },
     { name = "packaging" },
     { name = "posthog" },
     { name = "protobuf" },
     { name = "python-dateutil" },
-    { name = "pywebrtc-audio" },
     { name = "questionary" },
     { name = "requests" },
     { name = "rich" },
     { name = "ruamel-yaml" },
     { name = "ruamel-yaml-clib", marker = "(python_full_version < '3.15' and platform_machine == 'AMD64' and platform_python_implementation == 'CPython') or (python_full_version < '3.15' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython') or (python_full_version < '3.15' and platform_machine == 'arm64' and platform_python_implementation == 'CPython') or (python_full_version < '3.15' and platform_machine == 'x86_64' and platform_python_implementation == 'CPython')" },
     { name = "ruff" },
-    { name = "sounddevice" },
     { name = "ty" },
-    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
+call = [
+    { name = "aiortc" },
+    { name = "numpy" },
+    { name = "pywebrtc-audio" },
+    { name = "sounddevice" },
+    { name = "websockets" },
+]
 dev = [
+    { name = "aiortc" },
     { name = "coverage" },
     { name = "licensecheck" },
+    { name = "numpy" },
     { name = "pip-licenses" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "pywebrtc-audio" },
+    { name = "sounddevice" },
     { name = "tomli-w" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "aiortc", specifier = "==1.15.0" },
+    { name = "aiortc", marker = "extra == 'call'", specifier = "==1.15.0" },
     { name = "argcomplete", specifier = ">=3.0.0" },
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "jsonschema", specifier = ">=4.20.0" },
     { name = "langcodes", specifier = "==3.5.1" },
     { name = "licensecheck", marker = "extra == 'dev'", specifier = ">=2024.3" },
-    { name = "numpy", specifier = "==2.5.3" },
+    { name = "numpy", marker = "extra == 'call'", specifier = "==2.5.3" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "pip-licenses", marker = "extra == 'dev'", specifier = ">=5.5.1" },
+    { name = "polyai-adk", extras = ["call"], marker = "extra == 'dev'" },
     { name = "posthog", specifier = "==7.35.4" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.0.0" },
     { name = "protobuf", specifier = ">=4.21.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "python-dateutil", specifier = "==2.8.2" },
-    { name = "pywebrtc-audio", specifier = "==0.2.0" },
+    { name = "pywebrtc-audio", marker = "extra == 'call'", specifier = "==0.2.0" },
     { name = "questionary", specifier = "==2.1.1" },
     { name = "requests", specifier = "==2.31.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruamel-yaml", specifier = ">=0.18.0" },
     { name = "ruamel-yaml-clib", marker = "(python_full_version < '3.15' and platform_machine == 'AMD64' and platform_python_implementation == 'CPython') or (python_full_version < '3.15' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython') or (python_full_version < '3.15' and platform_machine == 'arm64' and platform_python_implementation == 'CPython') or (python_full_version < '3.15' and platform_machine == 'x86_64' and platform_python_implementation == 'CPython')", specifier = "==0.2.15" },
     { name = "ruff", specifier = ">=0.14.0" },
-    { name = "sounddevice", specifier = "==0.5.6" },
+    { name = "sounddevice", marker = "extra == 'call'", specifier = "==0.5.6" },
     { name = "tomli-w", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "ty" },
-    { name = "websockets", specifier = "==17.1" },
+    { name = "websockets", marker = "extra == 'call'", specifier = "==17.1" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["call", "dev"]
 
 [[package]]
 name = "posthog"
