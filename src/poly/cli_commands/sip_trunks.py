@@ -7,7 +7,7 @@ from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParser
 from getpass import getpass
 from typing import Any
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.handlers.sip_trunking_api import SIPTrunkingAPIHandler
 from poly.output.json_output import json_print
 from poly.sip_trunks import config as sip_trunk_config
@@ -23,6 +23,7 @@ class SIPTrunksCommand(BaseCommand):
     """Manage account-level SIP trunks and their extensions."""
 
     command = "sip-trunks"
+    group = BUILDER_API_GROUP
 
     @staticmethod
     def _add_context_arguments(parser: ArgumentParser) -> None:
