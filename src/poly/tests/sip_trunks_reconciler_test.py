@@ -8,7 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
-from poly.handlers.sip_trunking_api import SIPTrunkingAPIHandler
+from poly.handlers.interface import AgentStudioInterface
 from poly.sip_trunks.config import file_digest
 from poly.sip_trunks.reconciler import (
     apply_manage_plan,
@@ -19,13 +19,13 @@ from poly.sip_trunks.reconciler import (
 
 
 class SIPTrunkReconcilerTest(unittest.TestCase):
-    @patch.object(SIPTrunkingAPIHandler, "delete_extension")
-    @patch.object(SIPTrunkingAPIHandler, "update_extension")
-    @patch.object(SIPTrunkingAPIHandler, "create_extension")
-    @patch.object(SIPTrunkingAPIHandler, "list_extensions")
-    @patch.object(SIPTrunkingAPIHandler, "update_trunk")
-    @patch.object(SIPTrunkingAPIHandler, "create_trunk")
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks")
+    @patch.object(AgentStudioInterface, "delete_sip_trunk_extension")
+    @patch.object(AgentStudioInterface, "update_sip_trunk_extension")
+    @patch.object(AgentStudioInterface, "create_sip_trunk_extension")
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "update_sip_trunk")
+    @patch.object(AgentStudioInterface, "create_sip_trunk")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_apply_executes_the_previewed_snapshot_without_listing_again(
         self,
         list_trunks,
@@ -105,8 +105,8 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
         prompt.assert_not_called()
         self.assertEqual(result["trunks"][0]["extensions_deleted"], 1)
 
-    @patch.object(SIPTrunkingAPIHandler, "list_extensions")
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_unchanged_authoritative_extensions_are_counted(self, list_trunks, list_extensions):
         list_trunks.return_value = {
             "sip_trunks": [
@@ -156,8 +156,8 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
         self.assertEqual(plan.trunks[0].extensions_total, 1)
         self.assertEqual(plan.trunks[0].extension_operations, ())
 
-    @patch.object(SIPTrunkingAPIHandler, "list_extensions")
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_omitted_extensions_leave_remote_extensions_unmanaged(
         self, list_trunks, list_extensions
     ):
@@ -176,7 +176,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
         self.assertEqual(plan.trunks[0].extension_operations, ())
         self.assertEqual(plan.trunks[0].extensions_total, 0)
 
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_all_local_entries_are_validated_before_remote_discovery(self, list_trunks):
         desired = [
             {
@@ -197,7 +197,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
 
         list_trunks.assert_not_called()
 
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks", return_value={"sip_trunks": []})
+    @patch.object(AgentStudioInterface, "list_sip_trunks", return_value={"sip_trunks": []})
     def test_plan_requires_but_never_contains_a_digest_password(self, _list_trunks):
         plan = build_manage_plan(
             "/account/sip-trunks.yaml",
@@ -246,7 +246,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                         create=False,
                     )
 
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_duplicate_trunk_ids_are_rejected_before_remote_discovery(self, list_trunks):
         desired = [
             {"id": "tr-123", "name": "First"},
@@ -258,7 +258,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
 
         list_trunks.assert_not_called()
 
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_duplicate_idless_trunk_names_are_rejected_before_remote_discovery(self, list_trunks):
         desired = [
             {
@@ -278,7 +278,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
 
         list_trunks.assert_not_called()
 
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks", return_value={"sip_trunks": []})
+    @patch.object(AgentStudioInterface, "list_sip_trunks", return_value={"sip_trunks": []})
     def test_unknown_remote_trunk_id_explains_how_to_update_config(self, _list_trunks):
         with self.assertRaises(ValueError) as context:
             build_manage_plan(
@@ -294,7 +294,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
             "If the trunk was deleted, remove its entry from sip-trunks.yaml.",
         )
 
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_remote_trunk_cannot_be_targeted_by_id_and_old_name(self, list_trunks):
         list_trunks.return_value = {
             "sip_trunks": [{"id": "tr-123", "name": "Old name", "inbound": {}}]
@@ -315,8 +315,8 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                 ],
             )
 
-    @patch.object(SIPTrunkingAPIHandler, "list_extensions")
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks")
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_malformed_remote_extension_is_rejected(self, list_trunks, list_extensions):
         list_trunks.return_value = {
             "sip_trunks": [{"id": "tr-123", "name": "Primary carrier", "inbound": {}}]
@@ -337,8 +337,8 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                 ],
             )
 
-    @patch.object(SIPTrunkingAPIHandler, "create_trunk")
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks", return_value={"sip_trunks": []})
+    @patch.object(AgentStudioInterface, "create_sip_trunk")
+    @patch.object(AgentStudioInterface, "list_sip_trunks", return_value={"sip_trunks": []})
     def test_apply_rejects_yaml_changed_since_preview(self, _list_trunks, create_trunk):
         with TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "sip-trunks.yaml"
@@ -367,8 +367,8 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
 
         create_trunk.assert_not_called()
 
-    @patch.object(SIPTrunkingAPIHandler, "create_trunk")
-    @patch.object(SIPTrunkingAPIHandler, "list_trunks", return_value={"sip_trunks": []})
+    @patch.object(AgentStudioInterface, "create_sip_trunk")
+    @patch.object(AgentStudioInterface, "list_sip_trunks", return_value={"sip_trunks": []})
     def test_all_credentials_are_collected_before_remote_mutation(self, _list_trunks, create_trunk):
         plan = build_manage_plan(
             "/account/sip-trunks.yaml",
