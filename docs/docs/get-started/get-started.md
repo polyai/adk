@@ -29,6 +29,14 @@ Confirm it worked:
 poly --help
 ```
 
+!!! tip "Optional — voice calling"
+
+    To call your agent with [`poly call`](../reference/cli/call.md), install the `call` extra instead. It adds the audio and WebRTC dependencies, which are left out of the default install to keep it small:
+
+    ```bash
+    uv tool install "polyai-adk[call]"
+    ```
+
 !!! tip "Optional — install the VS Code / Cursor extension"
 
     If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../tooling/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.

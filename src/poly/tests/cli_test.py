@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -16,6 +17,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
+from rich.console import Console
 
 from poly.cli import AgentStudioCLI
 from poly.cli_commands.audio_cache import AudioCacheCommand
@@ -5371,6 +5373,12 @@ class GetAvailableVersionsTest(unittest.TestCase):
 class UpgradeCommandTest(unittest.TestCase):
     """Tests for UpdateCommand._upgrade_command across install methods."""
 
+    def setUp(self):
+        """Install without the call extra, so the spec is the bare package name."""
+        patcher = patch.object(UpdateCommand, "_package_spec", return_value="polyai-adk")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_uv_tool_latest_upgrades_in_place(self):
         """Without a target version, a uv tool install is upgraded to the latest."""
         command = UpdateCommand._upgrade_command("uv-tool", None)
@@ -5426,6 +5434,123 @@ class UpgradeCommandTest(unittest.TestCase):
         for method in ("uv-tool", "pipx", "uv-pip", "pip"):
             with self.subTest(method=method):
                 self.assertNotIn("--upgrade", UpdateCommand._upgrade_command(method, "0.52.0"))
+
+
+class PackageSpecTest(unittest.TestCase):
+    """Tests for UpdateCommand._package_spec, which keeps the call extra across updates."""
+
+    def test_voice_deps_installed_keeps_call_extra(self):
+        """When aiortc is importable the call extra is installed, so the spec requests it."""
+        with patch("poly.cli_commands.update.importlib.util.find_spec", return_value=MagicMock()):
+            self.assertEqual(UpdateCommand._package_spec(), "polyai-adk[call]")
+
+    def test_voice_deps_missing_uses_bare_package(self):
+        """Without aiortc the extra was never installed, so the bare package is requested."""
+        with patch("poly.cli_commands.update.importlib.util.find_spec", return_value=None):
+            self.assertEqual(UpdateCommand._package_spec(), "polyai-adk")
+
+
+class UpgradeCommandWithCallExtraTest(unittest.TestCase):
+    """Tests for UpdateCommand._upgrade_command when the call extra is installed."""
+
+    def setUp(self):
+        """Install with the call extra, so the spec carries it."""
+        patcher = patch.object(UpdateCommand, "_package_spec", return_value="polyai-adk[call]")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_uv_tool_latest_upgrades_by_tool_name(self):
+        """'uv tool upgrade' takes the tool name and reapplies the recorded extras itself."""
+        command = UpdateCommand._upgrade_command("uv-tool", None)
+
+        self.assertEqual(command, ["uv", "tool", "upgrade", "polyai-adk"])
+
+    def test_uv_tool_pinned_reinstall_keeps_call_extra(self):
+        """A forced reinstall replaces uv's record of the extras, so the spec must carry it."""
+        command = UpdateCommand._upgrade_command("uv-tool", "0.52.0")
+
+        self.assertEqual(command, ["uv", "tool", "install", "--force", "polyai-adk[call]==0.52.0"])
+
+    def test_pipx_latest_upgrades_by_tool_name(self):
+        """'pipx upgrade' takes the tool name and reapplies the recorded extras itself."""
+        command = UpdateCommand._upgrade_command("pipx", None)
+
+        self.assertEqual(command, ["pipx", "upgrade", "polyai-adk"])
+
+    def test_pipx_pinned_reinstall_keeps_call_extra(self):
+        """A forced pipx reinstall must request the extra again or the voice deps are lost."""
+        command = UpdateCommand._upgrade_command("pipx", "0.52.0")
+
+        self.assertEqual(command, ["pipx", "install", "--force", "polyai-adk[call]==0.52.0"])
+
+    def test_uv_pip_latest_keeps_call_extra(self):
+        """An upgrade in a uv-managed venv also upgrades the voice deps."""
+        command = UpdateCommand._upgrade_command("uv-pip", None)
+
+        self.assertEqual(command, ["uv", "pip", "install", "--upgrade", "polyai-adk[call]"])
+
+    def test_uv_pip_pinned_keeps_call_extra(self):
+        """A pinned install in a uv-managed venv requests the extra at that version."""
+        command = UpdateCommand._upgrade_command("uv-pip", "0.52.0")
+
+        self.assertEqual(command, ["uv", "pip", "install", "polyai-adk[call]==0.52.0"])
+
+    def test_pip_latest_keeps_call_extra(self):
+        """An upgrade via pip also upgrades the voice deps."""
+        command = UpdateCommand._upgrade_command("pip", None)
+
+        self.assertEqual(
+            command, [sys.executable, "-m", "pip", "install", "--upgrade", "polyai-adk[call]"]
+        )
+
+    def test_pip_pinned_keeps_call_extra(self):
+        """A pinned install via pip requests the extra at that version."""
+        command = UpdateCommand._upgrade_command("pip", "0.52.0")
+
+        self.assertEqual(
+            command, [sys.executable, "-m", "pip", "install", "polyai-adk[call]==0.52.0"]
+        )
+
+
+class PerformUpdateFailureTest(unittest.TestCase):
+    """Tests for how UpdateCommand.perform_update reports a failed install."""
+
+    def setUp(self):
+        """Simulate a uv tool install with the call extra whose installer fails."""
+        for name, return_value in (
+            ("_detect_install_method", "uv-tool"),
+            ("_package_spec", "polyai-adk[call]"),
+        ):
+            patcher = patch.object(UpdateCommand, name, return_value=return_value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch(
+            "poly.cli_commands.update.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "uv"),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_error_shows_call_extra_literally(self):
+        """'[call]' in the failed command is printed as text, not swallowed as Rich markup."""
+        stderr = StringIO()
+        test_console = Console(file=stderr, width=200)
+
+        with patch("poly.output.console.err_console", test_console):
+            with self.assertRaises(SystemExit):
+                UpdateCommand.perform_update(output_json=False, target_version="0.52.0")
+
+        self.assertIn("uv tool install --force polyai-adk[call]==0.52.0", stderr.getvalue())
+
+    @patch("poly.cli_commands.update.json_print")
+    def test_json_error_is_not_markup_escaped(self, mock_json_print):
+        """JSON output is not rendered by Rich, so the command appears without escapes."""
+        with self.assertRaises(SystemExit):
+            UpdateCommand.perform_update(output_json=True, target_version="0.52.0")
+
+        payload = mock_json_print.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("uv tool install --force polyai-adk[call]==0.52.0", payload["error"])
 
 
 class CheckVersionExistsTest(unittest.TestCase):
