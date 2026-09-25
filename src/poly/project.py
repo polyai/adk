@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
-from typing import Any, Optional, TypeAlias
+from typing import TYPE_CHECKING, Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
 
@@ -58,6 +58,9 @@ from poly.resources.resource import (
 )
 from poly.utils import prepush
 from poly.utils.commands import queue_set_default_commands
+
+if TYPE_CHECKING:
+    from poly.sip_trunks.reconciler import AuthPrompt, ManagePlan
 
 logger = logging.getLogger(__name__)
 
@@ -4048,6 +4051,66 @@ class AgentStudioProject:
             ]
         except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
             return [f"Invalid schema: {e}"]
+
+    # SIP trunks belong to an account and region. Accept the resolved scope
+    # explicitly so these operations also work without a local project and do
+    # not initialize branch synchronization through self.api_handler.
+
+    @staticmethod
+    def build_sip_trunk_plan(
+        config_path: str,
+        region: str,
+        account_id: str,
+        desired_trunks: list[dict[str, Any]],
+        *,
+        rotate_auth: str | None = None,
+        source_digest: str | None = None,
+    ) -> "ManagePlan":
+        """Preview account-level SIP trunk and extension changes."""
+        from poly.sip_trunks.reconciler import build_manage_plan
+
+        return build_manage_plan(
+            config_path,
+            region,
+            account_id,
+            desired_trunks,
+            rotate_auth=rotate_auth,
+            source_digest=source_digest,
+        )
+
+    @staticmethod
+    def apply_sip_trunk_plan(plan: "ManagePlan", *, prompt_auth_secret: "AuthPrompt") -> dict:
+        """Apply a reviewed plan and persist the returned trunk metadata."""
+        from poly.sip_trunks.config import persist_trunk_response
+        from poly.sip_trunks.reconciler import apply_manage_plan
+
+        return apply_manage_plan(
+            plan,
+            prompt_auth_secret=prompt_auth_secret,
+            persist_trunk_response=persist_trunk_response,
+        )
+
+    @staticmethod
+    def export_sip_trunks(region: str, account_id: str) -> dict:
+        """Export account trunks with all extension routes, across projects."""
+        from poly.sip_trunks.reconciler import export_config
+
+        return export_config(region, account_id)
+
+    @staticmethod
+    def get_sip_trunk(region: str, account_id: str, trunk_id: str) -> dict:
+        """Get a SIP trunk belonging to the selected account."""
+        return AgentStudioInterface.get_sip_trunk(region, account_id, trunk_id)
+
+    @staticmethod
+    def list_sip_trunk_extensions(region: str, account_id: str, trunk_id: str) -> dict:
+        """List every extension on a trunk, including routes to other projects."""
+        return AgentStudioInterface.list_sip_trunk_extensions(region, account_id, trunk_id)
+
+    @staticmethod
+    def delete_sip_trunk(region: str, account_id: str, trunk_id: str) -> dict:
+        """Delete a SIP trunk from the selected account."""
+        return AgentStudioInterface.delete_sip_trunk(region, account_id, trunk_id)
 
     def get_custom_metrics(self) -> list[dict]:
         """List all custom metrics for the project.
