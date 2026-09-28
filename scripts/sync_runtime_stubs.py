@@ -118,11 +118,7 @@ def _relativize_imports(source: str, rel_path: str) -> str:
     # Also handle from utils.X imports
     source = re.sub(
         r"^from utils\.(\S+)",
-        lambda m: _rewrite_from(
-            type(m)(m.re, f"runtime.{m.group(1)}", m.string, m.start(), m.end())
-        )
-        if False
-        else f"from {'.' * (depth + 1)}{m.group(1)}",
+        lambda m: f"from {'.' * (depth + 1)}{m.group(1)}",
         source,
         flags=re.MULTILINE,
     )
@@ -472,7 +468,7 @@ def main() -> None:
 
     _validate_generated_stubs()
 
-    # The baked-in "# ruff: noqa" would hide real problems from plain ruff, so
+    # The baked-in file-level ruff noqa header would hide real problems from plain ruff, so
     # check with --ignore-noqa for the classes of error a stub must not have
     # (undefined names / unbound __all__ entries), then normalize formatting.
     for cmd in (
