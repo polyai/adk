@@ -33,6 +33,14 @@ This is the right tool for exploring a change and the wrong tool for confirming 
 
 `poly call` is the spoken counterpart to `poly chat`: it places a real WebRTC voice call to the agent using your microphone and speaker, so you can judge speech, timing, and barge-in by ear — things reading a transcript can't tell you. Press `Ctrl+C` to hang up; the command prints a link to the conversation in Agent Studio to review afterwards.
 
+`poly call` requires the `call` extra, which is not included in the default install:
+
+```bash
+uv tool install "polyai-adk[call]"   # or: pip install "polyai-adk[call]"
+```
+
+If the extra is missing, `poly call` exits immediately and prints the install command for your install method.
+
 Unlike chat, calling only targets the current branch's **draft** build, so you must be on a non-main branch — push first, or pass `--push`. Echo cancellation is on by default so the agent doesn't hear itself on a laptop speaker. See the [`poly call` reference](../reference/cli/call.md).
 
 ## Simulated conversation tests
