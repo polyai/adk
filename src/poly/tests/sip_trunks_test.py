@@ -145,7 +145,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         self.assertTrue(args.yes)
 
     @patch.object(SIPTrunksCommand, "_apply_manage_plan")
-    @patch.object(SIPTrunksCommand, "_print_manage_diff")
+    @patch("poly.output.console.print_sip_trunk_changes")
     @patch.object(SIPTrunksCommand, "_build_manage_plan")
     @patch("questionary.confirm")
     def test_manage_displays_diff_and_aborts_when_not_confirmed(
@@ -165,9 +165,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
         )
         apply_plan.assert_not_called()
 
-    @patch.object(SIPTrunksCommand, "_print_manage_result")
+    @patch("poly.output.console.print_sip_trunk_manage_result")
     @patch.object(SIPTrunksCommand, "_apply_manage_plan")
-    @patch.object(SIPTrunksCommand, "_print_manage_diff")
+    @patch("poly.output.console.print_sip_trunk_changes")
     @patch.object(SIPTrunksCommand, "_build_manage_plan")
     @patch("questionary.confirm")
     def test_manage_applies_changes_after_confirmation(
@@ -185,11 +185,11 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         print_diff.assert_called_once_with(changes)
         apply_plan.assert_called_once_with(plan)
-        print_result.assert_called_once_with(result, output_json=False)
+        print_result.assert_called_once_with(result)
 
     @patch("poly.cli_commands.sip_trunks.json_print")
     @patch.object(SIPTrunksCommand, "_apply_manage_plan")
-    @patch.object(SIPTrunksCommand, "_print_manage_diff")
+    @patch("poly.output.console.print_sip_trunk_changes")
     @patch.object(SIPTrunksCommand, "_build_manage_plan")
     @patch("questionary.confirm")
     def test_manage_json_applies_without_confirmation(
@@ -210,7 +210,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     @patch("poly.cli_commands.sip_trunks.json_print")
     @patch.object(SIPTrunksCommand, "_apply_manage_plan")
-    @patch.object(SIPTrunksCommand, "_print_manage_diff")
+    @patch("poly.output.console.print_sip_trunk_changes")
     @patch.object(SIPTrunksCommand, "_build_manage_plan")
     @patch("questionary.confirm")
     def test_manage_json_with_no_changes_does_not_apply(
@@ -226,7 +226,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         apply_plan.assert_not_called()
         json_print.assert_called_once_with({"success": True, "changed": False, "trunks": []})
 
-    @patch.object(SIPTrunksCommand, "_print_list_table")
+    @patch("poly.output.console.print_sip_trunks")
     @patch.object(AgentStudioProject, "export_sip_trunks")
     def test_list_displays_table_by_default(self, export_config, print_list_table):
         export = {"account_id": "acct-123", "sip_trunks": []}
@@ -247,7 +247,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         export_config.assert_called_once_with("uk-1", "acct-123")
         print_list_table.assert_called_once_with(export)
 
-    @patch.object(SIPTrunksCommand, "_print_get_table")
+    @patch("poly.output.console.print_sip_trunk_detail")
     @patch.object(AgentStudioProject, "list_sip_trunk_extensions")
     @patch.object(AgentStudioProject, "get_sip_trunk")
     def test_get_displays_details_and_extensions_table(
@@ -275,7 +275,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         list_extensions.assert_called_once_with("uk-1", "acct-123", "tr-123")
         print_get_table.assert_called_once_with(trunk, extensions)
 
-    @patch.object(SIPTrunksCommand, "_print_result")
+    @patch("poly.cli_commands.sip_trunks.json_print")
     @patch.object(AgentStudioProject, "delete_sip_trunk")
     def test_delete_returns_machine_readable_success(self, delete_trunk, print_result):
         args = self._parser().parse_args(
@@ -296,7 +296,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         delete_trunk.assert_called_once_with("us-1", "acct-123", "tr-123")
         print_result.assert_called_once_with(
-            {"success": True, "trunk_id": "tr-123"}, output_json=True
+            {"success": True, "trunk_id": "tr-123"}
         )
 
     @patch.object(AgentStudioProject, "delete_sip_trunk")
@@ -865,7 +865,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
     @patch("poly.output.console.console")
     @patch("poly.output.console.info")
     def test_manage_prints_nothing_changed_without_table(self, info, console):
-        SIPTrunksCommand._print_manage_result(
+        from poly.output.console import print_sip_trunk_manage_result
+
+        print_sip_trunk_manage_result(
             {
                 "config_file": "/account/sip-trunks.yaml",
                 "trunks": [
@@ -881,7 +883,6 @@ class SIPTrunksCommandTest(unittest.TestCase):
                     }
                 ],
             },
-            output_json=False,
         )
 
         info.assert_called_once_with("Nothing changed.")

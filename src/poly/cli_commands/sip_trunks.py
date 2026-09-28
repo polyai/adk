@@ -227,148 +227,6 @@ class SIPTrunksCommand(BaseCommand):
             prompt_auth_secret=cls._prompt_auth_secret,
         )
 
-    @staticmethod
-    def _print_manage_diff(changes: list[dict[str, str]]) -> None:
-        from rich import box
-        from rich.table import Table
-
-        from poly.output.console import console
-
-        table = Table(title="SIP trunk changes", box=box.SIMPLE, header_style="bold")
-        table.add_column("Action")
-        table.add_column("Resource")
-        table.add_column("Diff")
-        for change in changes:
-            table.add_row(change["action"], change["resource"], change["diff"])
-        console.print(table)
-
-    @staticmethod
-    def _print_result(result: dict[str, Any], *, output_json: bool) -> None:
-        if output_json:
-            json_print(result)
-            return
-        from poly.output.console import console
-
-        console.print_json(data=result)
-
-    @staticmethod
-    def _print_manage_result(result: dict[str, Any], *, output_json: bool) -> None:
-        if output_json:
-            json_print(result)
-            return
-        from rich import box
-        from rich.table import Table
-
-        from poly.output.console import console, info
-
-        changed_trunks = [trunk for trunk in result["trunks"] if trunk["status"] != "unchanged"]
-        if not changed_trunks:
-            info("Nothing changed.")
-            return
-
-        info(f"Managed SIP trunks from {result['config_file']}")
-        table = Table(box=box.SIMPLE, header_style="bold")
-        table.add_column("Key")
-        table.add_column("Status")
-        table.add_column("Trunk ID")
-        table.add_column("Hostname")
-        table.add_column("Extensions")
-        table.add_column("Changes")
-        for trunk in changed_trunks:
-            extension_changes = (
-                trunk["extensions_created"]
-                + trunk["extensions_updated"]
-                + trunk.get("extensions_deleted", 0)
-            )
-            table.add_row(
-                trunk["key"],
-                trunk["status"],
-                trunk["id"] or "—",
-                trunk["hostname"] or "—",
-                str(trunk["extensions_total"]),
-                str(extension_changes),
-            )
-        console.print(table)
-
-    @staticmethod
-    def _auth_summary(inbound: dict[str, Any]) -> str:
-        sip_auth = inbound.get("sip_auth") or {}
-        token_auth = inbound.get("sip_token_auth") or {}
-        if sip_auth.get("enabled"):
-            username = sip_auth.get("username")
-            return f"digest ({username})" if username else "digest"
-        if token_auth.get("enabled"):
-            return "token"
-        return "none"
-
-    @classmethod
-    def _print_list_table(cls, config: dict[str, Any]) -> None:
-        from rich import box
-        from rich.table import Table
-
-        from poly.output.console import console
-
-        table = Table(box=box.SIMPLE, header_style="bold")
-        table.add_column("Name")
-        table.add_column("Trunk ID")
-        table.add_column("Hostname")
-        table.add_column("Encrypted")
-        table.add_column("Auth")
-        table.add_column("Extensions", justify="right")
-        for trunk in config["sip_trunks"]:
-            auth = trunk.get("inbound_auth") or {"type": "none"}
-            auth_summary = str(auth.get("type", "none"))
-            if auth_summary == "digest" and auth.get("username"):
-                auth_summary += f" ({auth['username']})"
-            table.add_row(
-                trunk.get("name") or "—",
-                trunk.get("id") or "—",
-                trunk.get("hostname") or "—",
-                "yes" if trunk.get("encrypted") else "no",
-                auth_summary,
-                str(len(trunk.get("extensions") or [])),
-            )
-        console.print(table)
-
-    @classmethod
-    def _print_get_table(cls, trunk: dict[str, Any], extensions: list[dict[str, Any]]) -> None:
-        from rich import box
-        from rich.table import Table
-
-        from poly.output.console import console
-
-        inbound = trunk.get("inbound") or {}
-        details = Table(box=box.SIMPLE, show_header=False)
-        details.add_column("Field", style="bold")
-        details.add_column("Value")
-        details.add_row("Name", str(trunk.get("name") or "—"))
-        details.add_row("Trunk ID", str(trunk.get("id") or "—"))
-        details.add_row("Hostname", str(inbound.get("hostname") or "—"))
-        details.add_row("Encrypted", "yes" if trunk.get("encrypted") else "no")
-        details.add_row("Authentication", cls._auth_summary(inbound))
-        details.add_row("SIP CIDRs", ", ".join(trunk.get("sip_cidr") or []) or "—")
-        details.add_row("RTP CIDRs", ", ".join(trunk.get("rtp_cidr") or []) or "—")
-        details.add_row("Created", str(trunk.get("created_at") or "—"))
-        details.add_row("Updated", str(trunk.get("updated_at") or "—"))
-        console.print(details)
-
-        extension_table = Table(
-            title="Extensions", box=box.SIMPLE, header_style="bold", title_justify="left"
-        )
-        extension_table.add_column("Extension")
-        extension_table.add_column("Agent ID")
-        extension_table.add_column("Environment")
-        extension_table.add_column("Variant")
-        for extension in extensions:
-            agent = extension.get("agent") or {}
-            extension_table.add_row(
-                str(extension.get("extension") or "—"),
-                str(agent.get("agent_id") or "—"),
-                str(agent.get("client_env") or "—"),
-                str(agent.get("variant_id") or "—"),
-            )
-        console.print(extension_table)
-
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to a SIP trunk API operation."""
@@ -387,7 +245,9 @@ class SIPTrunksCommand(BaseCommand):
                     info("Nothing changed.")
                 return
             if not args.json:
-                cls._print_manage_diff(changes)
+                from poly.output.console import print_sip_trunk_changes
+
+                print_sip_trunk_changes(changes)
             if not args.json and not args.yes:
                 import questionary
 
@@ -400,7 +260,12 @@ class SIPTrunksCommand(BaseCommand):
                     info("Aborted. No changes were applied.")
                     return
             result = cls._apply_manage_plan(plan)
-            cls._print_manage_result(result, output_json=args.json)
+            if args.json:
+                json_print(result)
+            else:
+                from poly.output.console import print_sip_trunk_manage_result
+
+                print_sip_trunk_manage_result(result)
             return
 
         region, account_id = cls._resolve_context(args)
@@ -423,7 +288,9 @@ class SIPTrunksCommand(BaseCommand):
             elif args.json:
                 json_print(result)
             else:
-                cls._print_list_table(result)
+                from poly.output.console import print_sip_trunks
+
+                print_sip_trunks(result)
             return
         if action == "get":
             result = AgentStudioProject.get_sip_trunk(region, account_id, args.trunk_id)
@@ -434,7 +301,9 @@ class SIPTrunksCommand(BaseCommand):
                 extensions = extension_response.get("extensions", [])
                 if not isinstance(extensions, list):
                     raise ValueError("Expected the SIP Trunking API to return an extensions list.")
-                cls._print_get_table(result, extensions)
+                from poly.output.console import print_sip_trunk_detail
+
+                print_sip_trunk_detail(result, extensions)
                 return
         else:
             if not args.json and not args.yes:
@@ -458,4 +327,4 @@ class SIPTrunksCommand(BaseCommand):
                 success(f"Deleted SIP trunk {args.trunk_id}.")
                 return
 
-        cls._print_result(result, output_json=args.json)
+        json_print(result)
