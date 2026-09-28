@@ -8,7 +8,6 @@ import stat
 import tempfile
 from dataclasses import dataclass
 from hashlib import sha256
-from io import StringIO
 from typing import Any
 
 ACCOUNT_DEFAULT_OUTPUT = "__account_default__"
@@ -88,9 +87,8 @@ def infer_account_context(
     region: str | None = None,
 ) -> AccountContext:
     """Infer an account's region from project metadata below its directory."""
-    from ruamel.yaml import YAML
+    from poly.resources.resource_utils import load_yaml
 
-    yaml = YAML(typ="safe")
     discovered: list[tuple[str, str, str]] = []
     if current_project:
         discovered.append(
@@ -109,7 +107,7 @@ def infer_account_context(
             if not os.path.isfile(project_path):
                 continue
             with open(project_path, encoding="utf-8") as project_file:
-                project_data = yaml.load(project_file) or {}
+                project_data = load_yaml(project_file) or {}
             if not isinstance(project_data, dict):
                 continue
             project_account = project_data.get("account_id")
@@ -183,15 +181,13 @@ def load_manage_config(
     region: str | None = None,
 ) -> LoadedManageConfig:
     """Load a SIP trunk YAML file and resolve its account context."""
-    from ruamel.yaml import YAML
-
     from poly.cli_commands.shared import read_project_config
+    from poly.resources.resource_utils import load_yaml
 
     config_path = find_manage_file(path, file_path)
-    yaml = YAML(typ="safe")
     with open(config_path, "rb") as config_file:
         source = config_file.read()
-    config = yaml.load(source.decode("utf-8"))
+    config = load_yaml(source.decode("utf-8"))
     source_digest = sha256(source).hexdigest()
     if config is None:
         config = []
@@ -232,6 +228,7 @@ def persist_trunk_response(
     """Save useful API-generated fields while preserving YAML formatting and comments."""
     from ruamel.yaml import YAML
 
+    # Round-trip YAML retains comments and quotes when updating the user's file.
     yaml = YAML()
     yaml.preserve_quotes = True
     yaml.indent(mapping=2, sequence=4, offset=2)
@@ -296,17 +293,6 @@ def persist_trunk_response(
     return True
 
 
-def yaml_string(data: Any) -> str:
-    """Serialize SIP trunk configuration as block-style YAML."""
-    from ruamel.yaml import YAML
-
-    yaml = YAML()
-    yaml.default_flow_style = False
-    stream = StringIO()
-    yaml.dump(data, stream)
-    return stream.getvalue()
-
-
 def default_export_path(path: str, account_id: str) -> str:
     """Return the account-level default path for a SIP trunk export."""
     from poly.cli_commands.shared import read_project_config
@@ -332,6 +318,8 @@ def write_export(
     force: bool = False,
 ) -> str:
     """Write an API export in the reusable top-level-list YAML format."""
+    from poly.resources.resource_utils import dump_yaml
+
     output_path = (
         default_export_path(path, account_id)
         if output in {None, ACCOUNT_DEFAULT_OUTPUT}
@@ -343,5 +331,5 @@ def write_export(
     if not os.path.isdir(parent):
         raise FileNotFoundError(f"Output directory does not exist: {parent}")
     with open(output_path, "w", encoding="utf-8") as output_file:
-        output_file.write(yaml_string(data["sip_trunks"]))
+        dump_yaml(data["sip_trunks"], output_file)
     return output_path

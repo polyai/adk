@@ -17,7 +17,6 @@ from poly.sip_trunks.config import (
     resolve_account_context,
     validate_sip_trunk_region,
     write_export,
-    yaml_string,
 )
 
 __all__ = [
@@ -34,5 +33,4 @@ __all__ = [
     "resolve_account_context",
     "validate_sip_trunk_region",
     "write_export",
-    "yaml_string",
 ]
