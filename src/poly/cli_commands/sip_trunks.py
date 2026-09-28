@@ -30,9 +30,9 @@ class SIPTrunksCommand(BaseCommand):
         )
         parser.add_argument(
             "--region",
-            type=sip_trunk_config.normalize_sip_trunk_region,
+            type=str,
             choices=sip_trunk_config.SIP_TRUNK_REGIONS,
-            help="Account region (eu, uk, or us). Defaults to the current project's region.",
+            help="Account region (euw-1, uk-1, or us-1). Defaults to the current project's region.",
         )
 
     @classmethod
