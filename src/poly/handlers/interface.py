@@ -166,6 +166,25 @@ class AgentStudioInterface:
         return PlatformAPIHandler.get_project(region, account_id, project_id)
 
     @staticmethod
+    def set_deployment_mode(
+        region: str, account_id: str, project_id: str, deployment_mode: str
+    ) -> dict[str, Any]:
+        """Set the deployment mode of a project.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_id (str): The project ID
+            deployment_mode (str): One of "simple", "releases" or "releases_branches"
+
+        Returns:
+            dict[str, Any]: The updated project's details
+        """
+        return PlatformAPIHandler.update_project(
+            region, account_id, project_id, {"config": {"deployment_mode": deployment_mode}}
+        )
+
+    @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
         """Get the projects for a given account.
 

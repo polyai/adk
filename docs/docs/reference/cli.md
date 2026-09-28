@@ -23,7 +23,7 @@ Commands are listed under section headers so related ones stay together:
 | Section | Commands |
 |---|---|
 | Getting started | `init`, `setup`, `login`, `apikey`, `studio`, `project` |
-| Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch`, `test`, `rtc`, `chat` |
+| Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch`, `test`, `rtc`, `chat`, `call` |
 | Builder API | `deployments`, `metrics`, `conversations`, `audio-cache`, `functions` |
 | Other | `template`, `docs`, `completion` |
 
@@ -75,6 +75,7 @@ poly push --help
 | Command | Purpose |
 |---|---|
 | [`poly chat`](./cli/chat.md) | Talk to the agent interactively |
+| [`poly call`](./cli/call.md) | Voice-call the agent using your microphone and speaker |
 | [`poly test`](./cli/test.md) | Run and inspect simulated conversation tests |
 | [`poly conversations`](./cli/conversations.md) | List and inspect real conversations |
 | [`poly metrics`](./cli/metrics.md) | Define and manage the project's custom metrics |

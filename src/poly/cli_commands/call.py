@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import asyncio
 import os
 import sys
+import uuid
 from argparse import (
     ArgumentParser,
     BooleanOptionalAction,
@@ -15,15 +16,34 @@ from argparse import (
 )
 from typing import Optional
 
-from poly.call.session import DEFAULT_CALL_MODE
 from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
-from poly.cli_commands.shared import load_project
+from poly.cli_commands.shared import CALL_EXTRA_SPEC, load_project
 
-# Shown if the voice dependencies fail to import (a broken install — they ship with ADK).
-_VOICE_DEPS_HINT = (
-    "Voice calling dependencies failed to load. Reinstall ADK with:\n"
-    "    pip install --force-reinstall polyai-adk"
-)
+# How to add the call extra, keyed by UpdateCommand._detect_install_method.
+_CALL_EXTRA_INSTALL_COMMANDS = {
+    "editable": 'uv pip install -e ".[call]"',
+    "ephemeral": f'uvx --from "{CALL_EXTRA_SPEC}" poly call',
+    "uv-tool": f'uv tool install "{CALL_EXTRA_SPEC}"',
+    "pipx": f'pipx install --force "{CALL_EXTRA_SPEC}"',
+    "uv-pip": f'uv pip install "{CALL_EXTRA_SPEC}"',
+    "pip": f'pip install "{CALL_EXTRA_SPEC}"',
+}
+
+
+def voice_deps_hint() -> str:
+    """Explain how to install the voice calling dependencies for this install method."""
+    from poly.cli_commands.update import UpdateCommand
+
+    command = _CALL_EXTRA_INSTALL_COMMANDS[UpdateCommand._detect_install_method()]
+    return (
+        "`poly call` needs the voice calling dependencies, which are installed with the "
+        f"`call` extra. Install them with:\n    {command}"
+    )
+
+
+def new_call_sid() -> str:
+    """Generate a unique call SID."""
+    return f"ADK-{uuid.uuid4()}"
 
 
 class CallCommand(BaseCommand):
@@ -49,7 +69,6 @@ class CallCommand(BaseCommand):
                 "  poly call\n"
                 "  poly call --push\n"
                 "  poly call --variant my-variant\n"
-                "  poly call --mode echo   # gateway echoes your audio (media self-test)\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -63,8 +82,8 @@ class CallCommand(BaseCommand):
             "--environment",
             "-e",
             type=str,
-            default="branch",
-            choices=["branch", "draft"],
+            default="draft",
+            choices=["draft"],
             help="Environment to call. Only the current branch's draft build is supported.",
         )
         call_parser.add_argument(
@@ -72,13 +91,6 @@ class CallCommand(BaseCommand):
             type=str,
             default=None,
             help="Name of variant to use for the call.",
-        )
-        call_parser.add_argument(
-            "--mode",
-            type=str,
-            default=DEFAULT_CALL_MODE,
-            choices=["end-to-end", "traditional", "echo"],
-            help="Call mode. 'echo' has the gateway echo your audio back (media self-test).",
         )
         call_parser.add_argument(
             "--push",
@@ -101,7 +113,6 @@ class CallCommand(BaseCommand):
             args.path,
             environment=args.environment,
             variant=args.variant,
-            mode=args.mode,
             push_before_call=args.push,
             aec=args.aec,
         )
@@ -110,29 +121,28 @@ class CallCommand(BaseCommand):
     def call(
         cls,
         base_path: str,
-        environment: str = "branch",
+        environment: str = "draft",
         variant: Optional[str] = None,
-        mode: str = DEFAULT_CALL_MODE,
         push_before_call: bool = False,
         aec: bool = True,
     ) -> None:
         """Start an interactive voice call with the agent's draft build."""
+        from rich.markup import escape
+
         from poly.output.console import error, info, success, warning
 
-        project = load_project(base_path)
+        # Import the voice stack lazily so other commands don't load the WebRTC/audio stack.
+        try:
+            from poly.call.client import CallError, run_call
+        except ImportError:
+            error(escape(voice_deps_hint()))
+            sys.exit(1)
 
-        # Only draft/branch calls are supported: the current branch must be a
-        # non-main branch (deployed-environment calling is not yet available).
+        project = load_project(base_path)
         branch_label = project.get_current_branch() or project.branch_id
-        if environment in ("branch", "draft"):
-            if not project.branch_id or branch_label == "main":
-                error(
-                    "`poly call` supports only draft/branch calls. "
-                    "Switch to a non-main branch first."
-                )
-                sys.exit(1)
-        else:
-            error("`poly call` supports only draft/branch calls.")
+
+        if environment != "draft" or not project.branch_id or branch_label == "main":
+            error("`poly call` supports only draft calls.")
             sys.exit(1)
 
         if push_before_call:
@@ -145,13 +155,6 @@ class CallCommand(BaseCommand):
                 sys.exit(1)
             success("Project pushed.")
 
-        # Import the voice stack lazily so other commands don't load the WebRTC/audio stack.
-        try:
-            from poly.call.client import CallError, run_call
-        except ImportError:
-            error(_VOICE_DEPS_HINT)
-            sys.exit(1)
-
         # AEC is on by default; if the WebRTC APM isn't available, warn and continue
         # without it rather than blocking the call.
         if aec:
@@ -162,31 +165,35 @@ class CallCommand(BaseCommand):
                 EchoCanceller(SAMPLE_RATE)
             except Exception:
                 warning(
-                    "Echo cancellation unavailable (reinstall ADK to restore it); "
+                    "Echo cancellation unavailable (reinstall ADK with the `call` extra to "
+                    "restore it); "
                     "continuing without it."
                 )
                 aec = False
 
         try:
-            session = project.create_call_session("draft", variant=variant, mode=mode)
+            session = project.create_call_session("draft", variant=variant)
         except (ValueError, NotImplementedError) as exc:
             error(str(exc))
             sys.exit(1)
 
         caller = os.environ.get("ADK_COMMAND_USER_OVERRIDE") or "adk-user"
+        call_sid = new_call_sid()
+        call_url = project.get_conversation_url(call_sid)
         info(
             f"Calling [bold]{project.account_id}/{project.project_id}[/bold] "
-            f"branch=[bold]{branch_label}[/bold] "
-            f"(mode={mode}, echo cancellation {'on' if aec else 'off'}). "
+            f"on branch [bold]{branch_label}[/bold]. "
             "Press Ctrl+C to hang up."
         )
 
         try:
-            asyncio.run(run_call(session, caller, aec=aec))
+            asyncio.run(run_call(session, caller, aec=aec, call_sid=call_sid))
         except CallError as exc:
             error(f"Call failed: {exc}")
             sys.exit(1)
         except KeyboardInterrupt:
+            # Fallback
             pass
 
         success("Call ended.")
+        info(f"Review this call in Agent Studio: [link={call_url}]{call_url}[/link]")

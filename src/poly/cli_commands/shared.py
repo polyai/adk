@@ -16,6 +16,8 @@ from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
 
 PACKAGE_NAME = "polyai-adk"
+# The optional extra carrying the voice calling (`poly call`) dependencies.
+CALL_EXTRA_SPEC = f"{PACKAGE_NAME}[call]"
 PYPI_JSON_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
 # Deliberately generous: this only runs when the user explicitly asks for an update,
 # so waiting is expected. A check on the CLI's startup path would need to be far

@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import json
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -439,6 +440,27 @@ class CustomMetricErrorTranslation(unittest.TestCase):
             )
 
         self.assertIn("Failed to update metric", str(ctx.exception))
+
+
+class SetDeploymentModeInterface(unittest.TestCase):
+    """Tests for AgentStudioInterface.set_deployment_mode."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_patches_only_the_deployment_mode_in_the_project_config(
+        self, mock_request, _mock_key
+    ):
+        """The mode is sent nested under config, so no other project fields are touched."""
+        mock_request.return_value = make_mock_response(200, json_body={"id": "proj1"})
+
+        AgentStudioInterface.set_deployment_mode("studio", "acc1", "proj1", "releases_branches")
+
+        sent = mock_request.call_args.kwargs
+        self.assertEqual(sent["method"], "PATCH")
+        self.assertTrue(sent["url"].endswith("/adk/v1/accounts/acc1/projects/proj1"))
+        self.assertEqual(
+            json.loads(sent["data"]), {"config": {"deployment_mode": "releases_branches"}}
+        )
 
 
 class GetBranchCallInfoInterface(unittest.TestCase):

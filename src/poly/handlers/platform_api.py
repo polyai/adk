@@ -315,6 +315,24 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.make_request(region, endpoint, "GET")
 
     @staticmethod
+    def update_project(region: str, account_id: str, project_id: str, patch: dict) -> dict:
+        """Update a project's name or project-level config.
+
+        Config keys are merged into the project's existing config server-side.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_id (str): The project ID
+            patch (dict): The fields to update, e.g. ``{"config": {"deployment_mode": "simple"}}``
+
+        Returns:
+            dict: The updated project details
+        """
+        endpoint = PROJECT_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=patch)
+
+    @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
         """Get the projects for a given account.
 

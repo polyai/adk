@@ -354,6 +354,51 @@ class GetProjects(unittest.TestCase):
         self.assertEqual(projects, {"p1": "Project One", "p2": "Project Two"})
 
 
+class UpdateProject(unittest.TestCase):
+    """Tests for PlatformAPIHandler.update_project."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_patches_the_project_with_the_given_fields(self, mock_request, _mock_key):
+        """The patch is sent as the JSON body of a PATCH to the project's URL."""
+        mock_request.return_value = make_mock_response(200, json_body={"id": "proj1"})
+
+        PlatformAPIHandler.update_project(
+            "studio", "acc1", "proj1", {"config": {"deployment_mode": "simple"}}
+        )
+
+        sent = mock_request.call_args.kwargs
+        self.assertEqual(sent["method"], "PATCH")
+        self.assertEqual(
+            sent["url"], "https://api.studio.poly.ai/adk/v1/accounts/acc1/projects/proj1"
+        )
+        self.assertEqual(json.loads(sent["data"]), {"config": {"deployment_mode": "simple"}})
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_returns_the_updated_project(self, mock_request, _mock_key):
+        """The platform's response body is returned to the caller."""
+        updated = {"id": "proj1", "config": {"deployment_mode": "simple"}}
+        mock_request.return_value = make_mock_response(200, json_body=updated)
+
+        result = PlatformAPIHandler.update_project(
+            "studio", "acc1", "proj1", {"config": {"deployment_mode": "simple"}}
+        )
+
+        self.assertEqual(result, updated)
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_rejected_update_raises_http_error(self, mock_request, _mock_key):
+        """A refused update (e.g. no permission) propagates as requests.HTTPError."""
+        mock_request.return_value = make_mock_response(403, json_body={"error": "forbidden"})
+
+        with self.assertRaises(requests.HTTPError):
+            PlatformAPIHandler.update_project(
+                "studio", "acc1", "proj1", {"config": {"deployment_mode": "simple"}}
+            )
+
+
 class GetConversationAudio(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_conversation_audio."""
 

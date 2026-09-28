@@ -55,7 +55,7 @@ class BuildOfferMessageTest(unittest.TestCase):
     def test_draft_offer_shape(self):
         session = make_session()
 
-        offer = build_offer_message(session, sdp="v=0...", caller="dev@poly.ai")
+        offer = build_offer_message(session, sdp="v=0...", caller="dev@poly.ai", call_sid="ADK-x")
 
         self.assertEqual(offer["type"], SignalingMessageType.OFFER.value)
         self.assertEqual(offer["sessionId"], "")
@@ -70,20 +70,18 @@ class BuildOfferMessageTest(unittest.TestCase):
             {"artifactVersion": "artifact-v1", "lambdaDeploymentVersion": "lambda-v1"},
         )
 
-    def test_generated_call_sid_is_prefixed(self):
-        offer = build_offer_message(make_session(), sdp="s", caller="c")
-        self.assertTrue(offer["callSid"].startswith("ADK-"))
-
-    def test_explicit_call_sid_is_used(self):
+    def test_call_sid_is_used(self):
         offer = build_offer_message(make_session(), sdp="s", caller="c", call_sid="ADK-fixed")
         self.assertEqual(offer["callSid"], "ADK-fixed")
 
     def test_variant_id_omitted_when_empty(self):
-        offer = build_offer_message(make_session(variant_id=""), sdp="s", caller="c")
+        offer = build_offer_message(make_session(variant_id=""), sdp="s", caller="c", call_sid="ADK-x")
         self.assertNotIn("variantId", offer)
 
     def test_variant_id_included_when_set(self):
-        offer = build_offer_message(make_session(variant_id="VARIANT-x"), sdp="s", caller="c")
+        offer = build_offer_message(
+            make_session(variant_id="VARIANT-x"), sdp="s", caller="c", call_sid="ADK-x"
+        )
         self.assertEqual(offer["variantId"], "VARIANT-x")
 
 

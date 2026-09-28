@@ -25,6 +25,13 @@ Via [UV](https://docs.astral.sh/uv/):
 uv tool install polyai-adk
 ```
 
+Voice calling (`poly call`) needs extra audio and WebRTC dependencies, which are left out of the default install to keep it small for CI. Install them with the `call` extra:
+
+```bash
+pip install "polyai-adk[call]"
+uv tool install "polyai-adk[call]"
+```
+
 Once installed, use the `poly` command to manage your projects:
 
 ```bash

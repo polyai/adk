@@ -1,0 +1,44 @@
+{#
+  Overrides python-semantic-release's default release-notes template to prepend a
+  "Getting started" block to every GitHub release (DEVP-790). Everything below the
+  block reproduces the default `.release_notes.md.j2` behaviour verbatim, so changelog
+  content/formatting is unaffected — only this file needs to change on future PSR
+  upgrades if the upstream default template's structure changes.
+#}{#  # Set line width to 1000 to avoid wrapping as GitHub will handle it
+#}{%  set max_line_width = max_line_width | default(1000)
+%}{%  set hanging_indent = hanging_indent | default(2)
+%}{%  set license_name = license_name | default("", True)
+%}{%  set releases = context.history.released.values() | list
+%}{%  set curr_release_index = releases.index(release)
+%}### Getting started
+
+1. Sign up free at [studio.poly.ai](https://studio.poly.ai)
+2. Install: `uv tool install polyai-adk`
+3. Set up: `poly setup` (signs you in, saves an API key, installs shell completion and AI coding-agent skills)
+
+---
+
+{#
+#}{%  if mask_initial_release and curr_release_index == releases | length - 1
+%}{#    # On a first release, generate our special message
+#}{%    include ".components/first_release.md.j2"
+%}{%  else
+%}{#    # Not the first release so generate notes normally
+#}{%    include ".components/versioned_changes.md.j2"
+-%}{#
+#}{%    set prev_release_index = curr_release_index + 1
+%}{#
+#}{%    if 'compare_url' is filter and prev_release_index < releases | length
+%}{%      set prev_version_tag = releases[prev_release_index].version.as_tag()
+%}{%      set new_version_tag = release.version.as_tag()
+%}{%      set version_compare_url = prev_version_tag | compare_url(new_version_tag)
+%}{%      set detailed_changes_link = '[{}...{}]({})'.format(
+            prev_version_tag, new_version_tag, version_compare_url
+          )
+%}{{      "\n"
+}}{{      "---\n"
+}}{{      "\n"
+}}{{      "**Detailed Changes**: %s" | format(detailed_changes_link)
+}}{%    endif
+%}{%  endif
+%}

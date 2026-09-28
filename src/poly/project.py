@@ -21,7 +21,7 @@ from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
-from poly.call.session import DEFAULT_CALL_MODE, CallSession
+from poly.call.session import CallSession
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
@@ -762,6 +762,17 @@ class AgentStudioProject:
                     )
                 seen_paths.add(file_path)
 
+    @staticmethod
+    def _snapshot_multi_resource_file_cache() -> dict[str, dict]:
+        """Return {file path: top-level YAML data} for every file in the multi-resource cache.
+
+        The data is not copied; clearing the cache afterwards leaves it intact.
+        """
+        return {
+            file: top_level_yaml_dict
+            for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
+        }
+
     def _update_multi_resource_yaml_resources(
         self,
         original_resources: ResourceMap,
@@ -785,8 +796,8 @@ class AgentStudioProject:
         files_with_conflicts = []
 
         # Merge MultiResourceYaml:
-        # Compute original file contents
-        original_file_contents = {}
+        # Compute original file data
+        original_file_data: dict[str, dict] = {}
         local_file_paths: dict[type[Resource], list[str]] = {}
         if not force:
             # Get file for original resources
@@ -822,13 +833,9 @@ class AgentStudioProject:
 
                 local_file_paths[resource_type] = local_resources_file_paths
 
-            original_file_contents = {
-                file: resource_utils.dump_yaml(top_level_yaml_dict)
-                for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
-            }
+            original_file_data = self._snapshot_multi_resource_file_cache()
 
-        # Compute incoming file contents
-        incoming_file_contents = {}
+        # Compute incoming file data
         MultiResourceYamlResource._file_cache.clear()
         for resource_type, resources in incoming_resources.items():
             if not issubclass(resource_type, MultiResourceYamlResource):
@@ -867,14 +874,12 @@ class AgentStudioProject:
             if on_save:
                 on_save(progress_offset, progress_total)
 
-        incoming_file_contents = {
-            file: resource_utils.dump_yaml(top_level_yaml_dict)
-            for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
-        }
+        incoming_file_data = self._snapshot_multi_resource_file_cache()
 
         # Normalise local resources through resource classes to ensure
         # serialization differences don't cause merge conflicts
-        local_file_contents = {}
+        local_file_data: dict[str, dict] = {}
+        local_file_text: dict[str, str] = {}
         MultiResourceYamlResource._file_cache.clear()
         if not force:
             for resource_type, resources in incoming_resources.items():
@@ -897,30 +902,52 @@ class AgentStudioProject:
                     except (FileNotFoundError, ValueError, TypeError):
                         continue
 
-            local_file_contents = {
-                file: resource_utils.dump_yaml(top_level_yaml_dict)
-                for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
-            }
+            local_file_data = self._snapshot_multi_resource_file_cache()
 
-            for file in incoming_file_contents:
-                if file not in local_file_contents:
+            for file in incoming_file_data:
+                if file not in local_file_data:
                     try:
                         contents = Resource.read_from_file(file)
                         if format:
                             contents = MultiResourceYamlResource.format_resource(
                                 contents, file_name=file
                             )
-                        local_file_contents[file] = contents
+                        local_file_text[file] = contents
                     except FileNotFoundError:
-                        local_file_contents[file] = ""
+                        local_file_text[file] = ""
 
         # Save and compute merges
-        for file, incoming_content in incoming_file_contents.items():
+        for file, incoming_data in incoming_file_data.items():
             if force:
-                MultiResourceYamlResource.save_to_file(incoming_content, file)
+                MultiResourceYamlResource.save_to_file(
+                    resource_utils.dump_yaml(incoming_data), file
+                )
                 continue
-            original_content = original_file_contents.get(file, "")
-            local_content = local_file_contents.get(file, "")
+            original_data = original_file_data.get(file)
+            local_data = local_file_data.get(file)
+            if local_data is not None:
+                # Local already matches incoming, or only local changed: keep local
+                if resource_utils.same_yaml_data(local_data, incoming_data) or (
+                    original_data is not None
+                    and resource_utils.same_yaml_data(original_data, incoming_data)
+                ):
+                    continue
+                # Only incoming changed: take incoming
+                if original_data is not None and resource_utils.same_yaml_data(
+                    original_data, local_data
+                ):
+                    incoming_content = resource_utils.dump_yaml(incoming_data)
+                    if resource_utils.contains_merge_conflict(incoming_content):
+                        files_with_conflicts.append(file)
+                    MultiResourceYamlResource.save_to_file(incoming_content, file)
+                    continue
+                local_content = resource_utils.dump_yaml(local_data)
+            else:
+                local_content = local_file_text.get(file, "")
+            original_content = (
+                resource_utils.dump_yaml(original_data) if original_data is not None else ""
+            )
+            incoming_content = resource_utils.dump_yaml(incoming_data)
             merged_contents = utils.merge_strings(original_content, local_content, incoming_content)
 
             if not merged_contents and os.path.exists(file):
@@ -1547,6 +1574,9 @@ class AgentStudioProject:
         If new flow has function step as start step, create referencing a dummy default step.
         Then update the flow config to use the new step.
 
+        A renamed test case (same scenario, new file) is pushed as an update of
+        the saved case, keeping its id, rather than a delete and a create.
+
         When deleting a flow, only send a command to delete the flow config,
         not the steps/functions.
 
@@ -1585,6 +1615,7 @@ class AgentStudioProject:
             # as a side effect) if a webchat command is actually queued
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
+        prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
         prepush.fix_orphaned_variables(
             state,
             new_resources,
@@ -1705,12 +1736,22 @@ class AgentStudioProject:
         reverted_files = []
         resource_mappings = self._make_resource_mappings(self.resources)
         all_files = not file_paths
-        for resource in self.all_resources:
-            if not all_files and resource.get_path(self.root_path) not in file_paths:
-                continue
+        MultiResourceYamlResource._file_cache.clear()
+        try:
+            for resource in self.all_resources:
+                if not all_files and resource.get_path(self.root_path) not in file_paths:
+                    continue
 
-            resource.save(self.root_path, resource_mappings=resource_mappings)
-            reverted_files.append(resource.get_path(self.root_path))
+                resource.save(
+                    self.root_path,
+                    resource_mappings=resource_mappings,
+                    save_to_cache=isinstance(resource, MultiResourceYamlResource),
+                )
+                reverted_files.append(resource.get_path(self.root_path))
+
+            MultiResourceYamlResource.write_cache_to_file()
+        finally:
+            MultiResourceYamlResource._file_cache.clear()
 
         return reverted_files
 
@@ -2714,7 +2755,6 @@ class AgentStudioProject:
         self,
         environment: str,
         variant: Optional[str] = None,
-        mode: str = DEFAULT_CALL_MODE,
     ) -> CallSession:
         """Bootstrap a WebRTC voice call session against a branch draft build.
 
@@ -2725,7 +2765,6 @@ class AgentStudioProject:
         Args:
             environment (str): The environment to call. Only "draft" is supported.
             variant (ty.Optional[str]): The variant ID to call, if any.
-            mode (str): The call mode (see ``DEFAULT_CALL_MODE``).
 
         Returns:
             CallSession: Parameters for opening the WebRTC call.
@@ -2762,7 +2801,6 @@ class AgentStudioProject:
             lambda_deployment_version=fields["lambdaDeploymentVersion"],
             auth_token=fields["authToken"],
             gateway_ws_url=fields["gatewayWsUrl"],
-            mode=mode,
         )
 
     def send_message(

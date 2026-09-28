@@ -6,7 +6,6 @@ signaling protocol.
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -33,10 +32,7 @@ def signaling_url(gateway_ws_url: str) -> str:
 
 
 def build_offer_message(
-    session: CallSession,
-    sdp: str,
-    caller: str,
-    call_sid: str | None = None,
+    session: CallSession, sdp: str, caller: str, call_sid: str
 ) -> dict[str, Any]:
     """Build the signaling OFFER for a draft call.
 
@@ -44,7 +40,7 @@ def build_offer_message(
         session: The bootstrapped call session.
         sdp: The local SDP offer produced by the peer connection.
         caller: An identifier for the caller (e.g. the user's email).
-        call_sid: Optional call SID; a unique ``ADK-<uuid>`` is generated if omitted.
+        call_sid: The call SID (also the Agent Studio conversation ID).
 
     Returns:
         The OFFER message as a JSON-serialisable dict.
@@ -53,7 +49,7 @@ def build_offer_message(
         "type": SignalingMessageType.OFFER.value,
         "sessionId": "",
         "data": {"type": "offer", "sdp": sdp},
-        "callSid": call_sid or f"ADK-{uuid.uuid4()}",
+        "callSid": call_sid,
         "caller": caller,
         "mode": session.mode,
         "authToken": session.auth_token,
