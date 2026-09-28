@@ -247,9 +247,9 @@ region are inferred from project metadata unless `--account-id` and `--region` a
 Place the declarative configuration in the account directory, alongside project folders:
 
 ```text
-pod-point-uk/
+my-account/
 ├── sip-trunks.yaml
-└── pod-ukp/
+└── my-project/
     └── project.yaml
 ```
 
@@ -266,13 +266,13 @@ until the API creates the trunk:
     username: carrier-user
   extensions:
     - extension: "1000"
-      agent_id: pod-ukp
+      agent_id: my-project
       client_env: live
 ```
 
 ```bash
 poly sip-trunks manage
-poly sip-trunks manage --yes                    # apply without confirmation
+poly sip-trunks manage --force               # apply without confirmation
 poly sip-trunks manage --rotate-auth <trunk_id>
 poly sip-trunks manage --file ../sip-trunks.yaml
 poly sip-trunks list                         # display a summary table
@@ -280,13 +280,14 @@ poly sip-trunks list --output                # write account-level sip-trunks.ya
 poly sip-trunks list --output export.yaml
 poly sip-trunks get <trunk_id>
 poly sip-trunks delete <trunk_id>             # confirm before deleting
-poly sip-trunks delete <trunk_id> --yes       # delete without prompting
+poly sip-trunks delete <trunk_id> --force     # delete without prompting
 ```
 
 `manage` creates or updates entries in the YAML and prints every managed trunk's generated
 hostname when it changes. Before writing, it validates the complete file, displays a diff,
-and asks for confirmation. Use `--yes` for trusted automation; `--json` also requires
-`--yes` when changes exist. When everything already matches, it prints `Nothing changed.`
+and asks for confirmation. Use `--force` (or `-f`) to skip confirmation. With `--json`,
+confirmation is skipped automatically and `--force` is not required. When everything
+already matches, it prints `Nothing changed.`
 After a new trunk is created successfully, `manage` adds its generated `id` (the trunk ID)
 and `hostname` to the same YAML entry. It also saves the digest `realm` returned by the API.
 These fields are informational and ignored when constructing API writes. Formatting and
@@ -294,19 +295,18 @@ comments are preserved, while creation and update timestamps are intentionally o
 Entries omitted from the file are not deleted; use `delete` explicitly for trunks. When an
 `extensions` list is present, it is authoritative: removing an entry schedules that
 extension for deletion in the confirmation diff. Omitting the entire `extensions` key
-leaves the trunk's extensions unmanaged. The older `sip_trunks:` wrapper remains readable
-for migration.
+leaves the trunk's extensions unmanaged. The configuration uses the top-level list shown above.
 
 `list` displays a table by default. With `--output`, it exports trunk IDs, hostnames,
 CIDRs, authentication state, and extensions in the same schema consumed by `manage`.
-Existing files are protected unless `--force` is used.
+Existing files are protected unless `--force` is used, including with `--json`.
 API responses never contain SIP passwords or tokens, so exported files do not contain
 secrets. `inbound_auth.type` is `digest`, `token`, or `none`. `manage` securely prompts
 when a secret is required to create a trunk or change its authentication. Normal updates
 never resend existing credentials; use `--rotate-auth <trunk_id>` to rotate them explicitly.
-`delete` asks for confirmation by default and prints a concise success message. Use `--yes`
-to skip confirmation; deletion with `--json` requires `--yes`. Use `--json` for
-machine-readable output.
+`delete` asks for confirmation by default and prints a concise success message. Use `--force`
+(or `-f`) to skip confirmation. With `--json`, confirmation is skipped automatically and
+the result is printed as JSON.
 
 The account region is not stored in `sip-trunks.yaml`. ADK reads it from the current
 project or from project directories immediately below the account directory. If no project
