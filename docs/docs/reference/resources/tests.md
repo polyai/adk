@@ -212,6 +212,7 @@ Each function call assertion checks that a function was called and, optionally, 
 |---|---|
 | `name` | Function name. Must match a global function in `functions/` or a flow function in `flows/<flow>/functions/`. |
 | `arguments` | List of argument assertions. May be empty to check only that the function was called. |
+| `is_asserted` | Whether to actively check this assertion during the test run. Defaults to `true`. Set to `false` to record the call without asserting it. |
 
 Argument assertion fields:
 
@@ -234,6 +235,30 @@ function_call_assertions:
 ~~~
 
 Only function name and argument values are asserted. The function does not have to be the only call in the conversation, and the order of calls is not checked.
+
+### `is_asserted`
+
+By default, every function call assertion in a YAML file is **actively checked** during a test run. The `is_asserted` key only needs to appear in the file when you want to explicitly opt a call out of checking:
+
+~~~yaml
+function_call_assertions:
+  - name: lookup_booking
+    arguments:
+      - parameter_name: booking_reference
+        expected_value: "ABC123"
+        value_type: string
+  - name: log_event
+    arguments: []
+    is_asserted: false   # recorded but not checked during the run
+~~~
+
+An omitted `is_asserted` key is the same as `is_asserted: true` — the assertion is checked.
+
+!!! info "Migration: assertions pushed before this fix"
+
+    Function call assertions pushed to Agent Studio before this fix were stored as **not asserted** (because the proto3 default for a bool field is `false`, and the ADK never set the flag). A `poly pull` on an existing project will write `is_asserted: false` on any assertion stored that way.
+
+    To turn checking on, delete the `is_asserted: false` line from the YAML and push again. From that point the assertion is actively evaluated on every test run.
 
 ## Example
 
