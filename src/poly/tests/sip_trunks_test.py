@@ -134,15 +134,20 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         self.assertEqual(args.rotate_auth, "tr-123")
 
-    def test_parser_registers_yes_for_non_interactive_manage(self):
-        args = self._parser().parse_args(["sip-trunks", "manage", "--yes"])
+    def test_parser_registers_force_for_non_interactive_manage(self):
+        for flag in ("--force", "-f"):
+            with self.subTest(flag=flag):
+                args = self._parser().parse_args(
+                    ["sip-trunks", "manage", "--file", "custom.yaml", flag]
+                )
+                self.assertTrue(args.force)
+                self.assertEqual(args.file_path, "custom.yaml")
 
-        self.assertTrue(args.yes)
-
-    def test_parser_registers_yes_for_non_interactive_delete(self):
-        args = self._parser().parse_args(["sip-trunks", "delete", "tr-123", "--yes"])
-
-        self.assertTrue(args.yes)
+    def test_parser_registers_force_for_non_interactive_delete(self):
+        for flag in ("--force", "-f"):
+            with self.subTest(flag=flag):
+                args = self._parser().parse_args(["sip-trunks", "delete", "tr-123", flag])
+                self.assertTrue(args.force)
 
     @patch.object(SIPTrunksCommand, "_apply_manage_plan")
     @patch("poly.output.console.print_sip_trunk_changes")
@@ -184,6 +189,27 @@ class SIPTrunksCommandTest(unittest.TestCase):
         SIPTrunksCommand.run(args)
 
         print_diff.assert_called_once_with(changes)
+        apply_plan.assert_called_once_with(plan)
+        print_result.assert_called_once_with(result)
+
+    @patch("poly.output.console.print_sip_trunk_manage_result")
+    @patch.object(SIPTrunksCommand, "_apply_manage_plan")
+    @patch("poly.output.console.print_sip_trunk_changes")
+    @patch.object(SIPTrunksCommand, "_build_manage_plan")
+    @patch("questionary.confirm")
+    def test_manage_force_applies_without_confirmation(
+        self, confirm, build_plan, print_diff, apply_plan, print_result
+    ):
+        plan = MagicMock(changes=(PlanChange("create", "trunk Example", "+ trunk"),))
+        result = {"success": True, "trunks": []}
+        build_plan.return_value = plan
+        apply_plan.return_value = result
+        args = self._parser().parse_args(["sip-trunks", "manage", "--force"])
+
+        SIPTrunksCommand.run(args)
+
+        confirm.assert_not_called()
+        print_diff.assert_called_once_with([change.as_dict() for change in plan.changes])
         apply_plan.assert_called_once_with(plan)
         print_result.assert_called_once_with(result)
 
@@ -287,7 +313,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 "acct-123",
                 "--region",
                 "us-1",
-                "--yes",
+                "--force",
                 "--json",
             ]
         )
@@ -339,6 +365,23 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         SIPTrunksCommand.run(args)
 
+        delete_trunk.assert_called_once_with("uk-1", "acct-123", "tr-123")
+        success.assert_called_once_with("Deleted SIP trunk tr-123.")
+
+    @patch("poly.output.console.success")
+    @patch.object(AgentStudioProject, "delete_sip_trunk")
+    @patch("questionary.confirm")
+    def test_delete_force_deletes_without_confirmation(self, confirm, delete_trunk, success):
+        args = self._parser().parse_args(
+            [
+                "sip-trunks", "delete", "tr-123", "--account-id", "acct-123",
+                "--region", "uk-1", "-f",
+            ]
+        )
+
+        SIPTrunksCommand.run(args)
+
+        confirm.assert_not_called()
         delete_trunk.assert_called_once_with("uk-1", "acct-123", "tr-123")
         success.assert_called_once_with("Deleted SIP trunk tr-123.")
 
@@ -526,20 +569,26 @@ class SIPTrunksCommandTest(unittest.TestCase):
             },
         )
 
-    def test_export_refuses_to_overwrite_without_force(self):
+    @patch.object(AgentStudioProject, "export_sip_trunks")
+    def test_export_refuses_to_overwrite_without_force(self, export_config):
+        export_config.return_value = {"account_id": "acct-123", "sip_trunks": []}
         with TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "sip-trunks.yaml"
             output.write_text("existing", encoding="utf-8")
-            args = Namespace(output=str(output), force=False, path=temp_dir)
+            for flags in ([], ["--json"]):
+                with self.subTest(flags=flags):
+                    args = self._parser().parse_args(
+                        [
+                            "sip-trunks", "list", "--account-id", "acct-123",
+                            "--region", "uk-1", "--path", temp_dir,
+                            "--output", str(output), *flags,
+                        ]
+                    )
 
-            with self.assertRaisesRegex(FileExistsError, "Refusing to overwrite"):
-                SIPTrunksCommand._write_export(
-                    args,
-                    "pod-point-uk",
-                    {"account_id": "pod-point-uk", "sip_trunks": {}},
-                )
+                    with self.assertRaisesRegex(FileExistsError, "Refusing to overwrite"):
+                        SIPTrunksCommand.run(args)
 
-            self.assertEqual(output.read_text(encoding="utf-8"), "existing")
+                    self.assertEqual(output.read_text(encoding="utf-8"), "existing")
 
     def test_exported_yaml_can_be_loaded_by_manage(self):
         data = {

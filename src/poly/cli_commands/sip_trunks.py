@@ -85,7 +85,6 @@ class SIPTrunksCommand(BaseCommand):
         )
         cls._add_context_arguments(manage_parser)
         manage_parser.add_argument(
-            "-f",
             "--file",
             dest="file_path",
             help=(
@@ -102,8 +101,8 @@ class SIPTrunksCommand(BaseCommand):
             ),
         )
         manage_parser.add_argument(
-            "-y",
-            "--yes",
+            "--force",
+            "-f",
             action="store_true",
             help="Apply the displayed changes without prompting for confirmation.",
         )
@@ -118,8 +117,8 @@ class SIPTrunksCommand(BaseCommand):
         cls._add_context_arguments(delete_parser)
         delete_parser.add_argument("trunk_id", help="SIP trunk ID.")
         delete_parser.add_argument(
-            "-y",
-            "--yes",
+            "--force",
+            "-f",
             action="store_true",
             help="Delete without prompting for confirmation.",
         )
@@ -248,7 +247,7 @@ class SIPTrunksCommand(BaseCommand):
                 from poly.output.console import print_sip_trunk_changes
 
                 print_sip_trunk_changes(changes)
-            if not args.json and not args.yes:
+            if not args.json and not args.force:
                 import questionary
 
                 confirmed = questionary.confirm(
@@ -306,7 +305,7 @@ class SIPTrunksCommand(BaseCommand):
                 print_sip_trunk_detail(result, extensions)
                 return
         else:
-            if not args.json and not args.yes:
+            if not args.json and not args.force:
                 import questionary
 
                 confirmed = questionary.confirm(
