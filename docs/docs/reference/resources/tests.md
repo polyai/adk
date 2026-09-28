@@ -301,6 +301,16 @@ Test cases follow the standard ADK lifecycle:
 
     Tests are pushed to the current branch and run against that branch's agent. Use a branch per scenario when iterating on flows or topics so test results map cleanly to the change under review.
 
+### Renaming a test case
+
+A test case's filename is derived from its `name`, so renaming a test case moves the file. `poly push` detects this as a rename — not a delete and a create — when the old and new scenario text match exactly and there is no ambiguity (no other test case shares the same scenario). In that case the push sends an update that keeps the original ID and run history intact.
+
+If the scenario also changed alongside the name, or if more than one existing test case shares the same scenario, the push falls back to treating it as a delete and a create, minting a fresh ID.
+
+!!! info "Only unambiguous renames are paired"
+
+    The pairing relies solely on the `scenario` field matching exactly. Change the scenario text at the same time as the name and the run history will not be preserved — the old case is deleted and a new one is created.
+
 ## What to cover
 
 Good coverage of a project usually includes:
