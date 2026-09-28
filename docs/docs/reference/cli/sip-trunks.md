@@ -30,14 +30,14 @@ poly sip-trunks list
 poly sip-trunks list --output
 poly sip-trunks list --output export.yaml
 poly sip-trunks list --output --force
-poly sip-trunks list --account-id example-account --region uk --json
+poly sip-trunks list --account-id my-account --region uk --json
 ~~~
 
 The export includes trunk IDs, hostnames, CIDRs, readable authentication state (including the digest realm), and all extension bindings. Creation and update timestamps are omitted. The file can be passed directly back to `manage`. SIP passwords and tokens are never returned by the API and therefore cannot appear in the export.
 
 The export uses a top-level list and does not store a region. ADK infers the region from the account's `project.yaml` metadata. If projects for the account disagree, the command stops with an error. Use `--region` when no project metadata is available.
 
-When `--output` is passed without a filename, the export goes to the account-level `sip-trunks.yaml`. For a project at `example-account/support-agent`, this is `example-account/sip-trunks.yaml`. An explicit output filename selects a custom location.
+When `--output` is passed without a filename, the export goes to the account-level `sip-trunks.yaml`. For a project at `my-account/my-project`, this is `my-account/sip-trunks.yaml`. An explicit output filename selects a custom location.
 
 | Flag | Description |
 |---|---|
@@ -50,7 +50,7 @@ When `--output` is passed without a filename, the export goes to the account-lev
 
 ~~~json
 {
-  "account_id": "example-account",
+  "account_id": "my-account",
   "sip_trunks": [
     {
       "id": "tr-example",
@@ -67,7 +67,7 @@ When `--output` is passed without a filename, the export goes to the account-lev
       "extensions": [
         {
           "extension": "1000",
-          "agent_id": "support-agent",
+          "agent_id": "my-project",
           "client_env": "live"
         }
       ]
@@ -81,7 +81,7 @@ With `--output`, the JSON response describes the written file:
 ~~~json
 {
   "success": true,
-  "output_path": "/workspace/example-account/sip-trunks.yaml",
+  "output_path": "/path/to/projects/my-account/sip-trunks.yaml",
   "trunk_count": 1
 }
 ~~~
@@ -100,7 +100,7 @@ poly sip-trunks manage --rotate-auth <trunk_id>
 poly sip-trunks manage --yes --json
 ~~~
 
-The preferred workflow uses an account-level `sip-trunks.yaml`. Given a project at `example-account/support-agent`, place the file at `example-account/sip-trunks.yaml`:
+The preferred workflow uses an account-level `sip-trunks.yaml`. Given a project at `my-account/my-project`, place the file at `my-account/sip-trunks.yaml`:
 
 ~~~yaml
 - id: tr-example
@@ -117,7 +117,7 @@ The preferred workflow uses an account-level `sip-trunks.yaml`. Given a project 
     realm: sbc.sip.uk.poly.ai
   extensions:
     - extension: "1000"
-      agent_id: support-agent
+      agent_id: my-project
       client_env: live
 ~~~
 
@@ -165,8 +165,8 @@ Use `type: none` to explicitly disable the trunk's current inbound authenticatio
 ~~~json
 {
   "success": true,
-  "config_file": "/workspace/example-account/sip-trunks.yaml",
-  "account_id": "example-account",
+  "config_file": "/path/to/projects/my-account/sip-trunks.yaml",
+  "account_id": "my-account",
   "region": "uk-1",
   "trunks": [
     {
