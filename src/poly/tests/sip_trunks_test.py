@@ -17,9 +17,9 @@ from poly.project import AgentStudioProject
 from poly.sip_trunks.config import (
     default_export_path,
     find_manage_file,
-    infer_account_context,
     load_manage_config,
     persist_trunk_response,
+    resolve_account_context,
     validate_sip_trunk_region,
 )
 from poly.sip_trunks.reconciler import (
@@ -71,6 +71,15 @@ class SIPTrunkingInterfaceTest(unittest.TestCase):
 
 
 class SIPTrunksCommandTest(unittest.TestCase):
+    @staticmethod
+    def _write_project_config(path, account_id="acct-123", region="uk-1"):
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "project.yaml").write_text(
+            f"project_id: {path.name}\naccount_id: {account_id}\nregion: {region}\n",
+            encoding="utf-8",
+        )
+        return path
+
     def _parser(self):
         cli = AgentStudioCLI()
         cli.register_commands()
@@ -413,97 +422,185 @@ class SIPTrunksCommandTest(unittest.TestCase):
         read_project_config.return_value = MagicMock(
             account_id="acct-123", region="euw-1", root_path="/account/project"
         )
-        args = Namespace(account_id=None, region=None, path="/project", json=False)
+        args = Namespace(account_id=None, region=None, path="relative-project", json=False)
 
         result = SIPTrunksCommand._resolve_context(args)
 
         self.assertEqual(result, ("euw-1", "acct-123"))
         read_project_config.assert_called_once_with(os.path.abspath(args.path))
 
-    def test_context_is_inferred_from_account_child_projects(self):
+    def test_current_project_context_ignores_sibling_accounts_and_regions(self):
         with TemporaryDirectory() as temp_dir:
-            account_dir = Path(temp_dir) / "acct-123"
-            project_dir = account_dir / "project-one"
-            project_dir.mkdir(parents=True)
-            (project_dir / "project.yaml").write_text(
-                "project_id: project-one\naccount_id: acct-123\nregion: uk-1\n",
-                encoding="utf-8",
+            parent = Path(temp_dir) / "unrelated-folder-name"
+            project_dir = self._write_project_config(parent / "current-project")
+            self._write_project_config(parent / "same-account", region="us-1")
+            self._write_project_config(
+                parent / "other-account", account_id="acct-other", region="euw-1"
             )
+            (parent / "sip-trunks.yaml").write_text("[]\n", encoding="utf-8")
 
-            context = infer_account_context(str(account_dir))
+            context = resolve_account_context(str(project_dir))
+            loaded = load_manage_config(str(project_dir))
 
         self.assertEqual((context.region, context.account_id), ("uk-1", "acct-123"))
+        self.assertEqual((loaded.region, loaded.account_id), ("uk-1", "acct-123"))
 
-    def test_conflicting_account_project_regions_are_rejected(self):
+    def test_context_does_not_infer_account_from_directory_or_child_projects(self):
         with TemporaryDirectory() as temp_dir:
             account_dir = Path(temp_dir) / "acct-123"
-            for project_id, region in (("one", "uk-1"), ("two", "us-1")):
-                project_dir = account_dir / project_id
-                project_dir.mkdir(parents=True)
-                (project_dir / "project.yaml").write_text(
-                    f"project_id: {project_id}\naccount_id: acct-123\nregion: {region}\n",
-                    encoding="utf-8",
-                )
+            self._write_project_config(account_dir / "child-project")
 
-            with self.assertRaisesRegex(ValueError, "disagree on region"):
-                infer_account_context(str(account_dir))
+            for overrides in ({}, {"account_id": "acct-123"}, {"region": "uk-1"}):
+                with self.subTest(overrides=overrides):
+                    with self.assertRaisesRegex(ValueError, "pass both --account-id and --region"):
+                        resolve_account_context(str(account_dir), **overrides)
+
+            context = resolve_account_context(
+                str(account_dir), account_id="explicit-account", region="us-1"
+            )
+
+        self.assertEqual((context.region, context.account_id), ("us-1", "explicit-account"))
+
+    def test_explicit_scope_overrides_only_the_supplied_project_fields(self):
+        with TemporaryDirectory() as temp_dir:
+            project_dir = self._write_project_config(Path(temp_dir) / "project")
+            for overrides, expected in (
+                ({"account_id": "acct-other"}, ("uk-1", "acct-other")),
+                ({"region": "us-1"}, ("us-1", "acct-123")),
+                ({"account_id": "acct-other", "region": "euw-1"}, ("euw-1", "acct-other")),
+            ):
+                with self.subTest(overrides=overrides):
+                    context = resolve_account_context(str(project_dir), **overrides)
+                    self.assertEqual((context.region, context.account_id), expected)
 
     def test_noncanonical_project_region_is_rejected(self):
         with TemporaryDirectory() as temp_dir:
-            account_dir = Path(temp_dir) / "acct-123"
-            for project_id, region in (("one", "uk-1"), ("two", "uk")):
-                project_dir = account_dir / project_id
-                project_dir.mkdir(parents=True)
-                (project_dir / "project.yaml").write_text(
-                    f"project_id: {project_id}\naccount_id: acct-123\nregion: {region}\n",
-                    encoding="utf-8",
-                )
+            project_dir = self._write_project_config(Path(temp_dir) / "project", region="uk")
 
             with self.assertRaisesRegex(ValueError, "Unsupported SIP Trunking region: uk$"):
-                infer_account_context(str(account_dir))
+                resolve_account_context(str(project_dir))
 
-    @patch("poly.cli_commands.shared.read_project_config")
-    def test_explicit_file_from_another_account_does_not_use_current_project(
-        self, read_project_config
-    ):
+    def test_explicit_file_from_another_account_keeps_current_project_context(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            current_project_dir = root / "account-b" / "project-b"
-            current_project_dir.mkdir(parents=True)
+            current_project_dir = self._write_project_config(
+                root / "account-b" / "project-b", account_id="account-b", region="us-1"
+            )
             account_a = root / "account-a"
-            project_a = account_a / "project-a"
-            project_a.mkdir(parents=True)
-            (project_a / "project.yaml").write_text(
-                "project_id: project-a\naccount_id: account-a\nregion: uk-1\n",
-                encoding="utf-8",
+            self._write_project_config(
+                account_a / "project-a", account_id="account-a", region="uk-1"
             )
             config_path = account_a / "sip-trunks.yaml"
             config_path.write_text("[]\n", encoding="utf-8")
-            read_project_config.return_value = MagicMock(
-                account_id="account-b",
-                region="us-1",
-                root_path=str(current_project_dir),
-            )
 
             loaded = load_manage_config(str(current_project_dir), file_path=str(config_path))
 
-        self.assertEqual(loaded.account_id, "account-a")
-        self.assertEqual(loaded.region, "uk-1")
+        self.assertEqual(loaded.path, str(config_path))
+        self.assertEqual(loaded.account_id, "account-b")
+        self.assertEqual(loaded.region, "us-1")
 
-    @patch("poly.cli_commands.shared.read_project_config")
-    def test_default_export_for_another_account_uses_its_sibling_directory(
-        self, read_project_config
+    def test_explicit_file_is_relative_to_cwd_and_bypasses_discovery(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project_dir = self._write_project_config(root / "project")
+            (project_dir / "sip-trunks.yaml").write_text("[]\n", encoding="utf-8")
+            selected = root / "selected.yaml"
+            selected.write_text("- name: Selected carrier\n", encoding="utf-8")
+
+            loaded = load_manage_config(
+                str(project_dir), file_path=os.path.relpath(selected, os.getcwd())
+            )
+
+        self.assertEqual(loaded.path, str(selected))
+        self.assertEqual(loaded.trunks, [{"name": "Selected carrier"}])
+        self.assertEqual((loaded.region, loaded.account_id), ("uk-1", "acct-123"))
+
+    def test_standalone_manage_requires_explicit_file_and_context(self):
+        with TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "sip-trunks.yaml"
+            config_path.write_text("[]\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "pass --file"):
+                load_manage_config(temp_dir, account_id="acct-123", region="uk-1")
+            with self.assertRaisesRegex(ValueError, "pass both --account-id and --region"):
+                load_manage_config(temp_dir, file_path=str(config_path))
+
+            loaded = load_manage_config(
+                temp_dir, file_path=str(config_path), account_id="acct-123", region="uk-1"
+            )
+
+        self.assertEqual(loaded.path, str(config_path))
+        self.assertEqual((loaded.region, loaded.account_id), ("uk-1", "acct-123"))
+
+    def test_default_export_uses_project_root_from_nested_directory(self):
+        with TemporaryDirectory() as temp_dir:
+            project_dir = self._write_project_config(Path(temp_dir) / "project")
+            nested_dir = project_dir / "flows" / "greeting"
+            nested_dir.mkdir(parents=True)
+
+            result = default_export_path(str(nested_dir))
+
+        self.assertEqual(result, str(project_dir / "sip-trunks.yaml"))
+
+    def test_default_export_requires_a_project(self):
+        with TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "--output FILE"):
+                default_export_path(temp_dir)
+
+    @patch("poly.cli_commands.sip_trunks.json_print")
+    @patch.object(AgentStudioProject, "export_sip_trunks")
+    def test_list_default_export_uses_project_root_with_explicit_scope(
+        self, export_config, json_print
     ):
-        read_project_config.return_value = MagicMock(
-            account_id="account-b",
-            root_path=os.path.join("root", "account-b", "project-b"),
+        export_config.return_value = {"account_id": "acct-other", "sip_trunks": []}
+        with TemporaryDirectory() as temp_dir:
+            project_dir = self._write_project_config(Path(temp_dir) / "project")
+            nested_dir = project_dir / "flows"
+            nested_dir.mkdir()
+            args = self._parser().parse_args(
+                [
+                    "sip-trunks", "list", "--path", str(nested_dir),
+                    "--account-id", "acct-other", "--region", "us-1", "--output", "--json",
+                ]
+            )
+
+            SIPTrunksCommand.run(args)
+
+            output = project_dir / "sip-trunks.yaml"
+            self.assertEqual(output.read_text(encoding="utf-8"), "[]\n")
+            self.assertFalse((Path(temp_dir) / "sip-trunks.yaml").exists())
+
+        export_config.assert_called_once_with("us-1", "acct-other")
+        json_print.assert_called_once_with(
+            {"success": True, "output_path": str(output), "trunk_count": 0}
         )
 
-        result = default_export_path(os.path.join("root", "account-b", "project-b"), "account-a")
+    @patch("poly.cli_commands.sip_trunks.json_print")
+    @patch.object(AgentStudioProject, "export_sip_trunks")
+    def test_standalone_list_export_requires_an_explicit_output_path(
+        self, export_config, json_print
+    ):
+        export_config.return_value = {"account_id": "acct-123", "sip_trunks": []}
+        with TemporaryDirectory() as temp_dir:
+            command = [
+                "sip-trunks", "list", "--path", temp_dir,
+                "--account-id", "acct-123", "--region", "uk-1", "--json", "--output",
+            ]
+            args = self._parser().parse_args(command)
+            with self.assertRaisesRegex(ValueError, "--output FILE"):
+                SIPTrunksCommand.run(args)
+            export_config.assert_not_called()
+            self.assertEqual(list(Path(temp_dir).iterdir()), [])
 
-        self.assertEqual(
-            result,
-            os.path.join("root", "account-a", "sip-trunks.yaml"),
+            output = Path(temp_dir) / "selected.yaml"
+            args = self._parser().parse_args([*command, str(output)])
+            SIPTrunksCommand.run(args)
+
+            self.assertEqual(output.read_text(encoding="utf-8"), "[]\n")
+
+        export_config.assert_called_once_with("uk-1", "acct-123")
+        json_print.assert_called_once_with(
+            {"success": True, "output_path": str(output), "trunk_count": 0}
         )
 
     @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
@@ -623,10 +720,10 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
             output = account_dir / "sip-trunks.yaml"
             args = Namespace(output=str(output), force=False, path=str(account_dir))
-            SIPTrunksCommand._write_export(args, "pod-point-uk", data)
+            SIPTrunksCommand._write_export(args, data)
             exported_text = output.read_text(encoding="utf-8")
             manage_args = Namespace(
-                path=str(account_dir),
+                path=str(project_dir),
                 file_path=None,
                 account_id=None,
                 region=None,
@@ -653,7 +750,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             config_file.write_text("region: uk-1\nsip_trunks: []\n", encoding="utf-8")
             args = Namespace(
                 path=temp_dir,
-                file_path=None,
+                file_path=str(config_file),
                 account_id="acct-123",
                 region="uk-1",
                 json=False,
@@ -684,7 +781,10 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 with self.subTest(source=source):
                     config_file.write_text(source, encoding="utf-8")
                     with self.assertRaisesRegex(ValueError, "top-level list of SIP trunk mappings"):
-                        load_manage_config(temp_dir, account_id="acct-123", region="uk-1")
+                        load_manage_config(
+                            temp_dir, file_path=str(config_file),
+                            account_id="acct-123", region="uk-1",
+                        )
 
     def test_empty_manage_files_declare_no_trunks(self):
         with TemporaryDirectory() as temp_dir:
@@ -692,7 +792,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
             for source in ("", "# No trunks managed\n", "[]\n"):
                 with self.subTest(source=source):
                     config_file.write_text(source, encoding="utf-8")
-                    loaded = load_manage_config(temp_dir, account_id="acct-123", region="uk-1")
+                    loaded = load_manage_config(
+                        temp_dir, file_path=str(config_file), account_id="acct-123", region="uk-1"
+                    )
                     self.assertEqual(loaded.trunks, [])
 
     def test_environment_secret_reference_is_rejected(self):
@@ -733,7 +835,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
             args = Namespace(
                 path=temp_dir,
-                file_path=None,
+                file_path=str(config_file),
                 account_id="acct-123",
                 region="uk-1",
                 json=False,
@@ -792,7 +894,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
             args = Namespace(
                 path=temp_dir,
-                file_path=None,
+                file_path=str(Path(temp_dir) / "sip-trunks.yaml"),
                 account_id="acct-123",
                 region="uk-1",
                 json=False,
@@ -937,17 +1039,41 @@ class SIPTrunksCommandTest(unittest.TestCase):
         info.assert_called_once_with("Nothing changed.")
         console.print.assert_not_called()
 
-    def test_manage_file_is_discovered_at_account_level(self):
+    def test_manage_file_is_discovered_in_project_parent(self):
         with TemporaryDirectory() as temp_dir:
-            account_dir = Path(temp_dir) / "pod-point-uk"
-            project_dir = account_dir / "charging-support"
-            project_dir.mkdir(parents=True)
-            config_file = account_dir / "sip-trunks.yaml"
+            parent = Path(temp_dir) / "shared-projects"
+            project_dir = self._write_project_config(parent / "project")
+            config_file = parent / "sip-trunks.yaml"
             config_file.write_text("[]\n", encoding="utf-8")
 
             result = find_manage_file(str(project_dir), None)
 
             self.assertEqual(result, str(config_file))
+
+    def test_manage_discovery_anchors_nested_paths_to_project_root(self):
+        with TemporaryDirectory() as temp_dir:
+            parent = Path(temp_dir) / "shared-projects"
+            project_dir = self._write_project_config(parent / "project")
+            nested_dir = project_dir / "flows" / "greeting"
+            nested_dir.mkdir(parents=True)
+            for directory in (parent, project_dir, nested_dir):
+                (directory / "sip-trunks.yaml").write_text("[]\n", encoding="utf-8")
+
+            self.assertEqual(
+                find_manage_file(str(nested_dir), None), str(project_dir / "sip-trunks.yaml")
+            )
+            (project_dir / "sip-trunks.yaml").unlink()
+            self.assertEqual(
+                find_manage_file(str(nested_dir), None), str(parent / "sip-trunks.yaml")
+            )
+
+    def test_manage_discovery_does_not_search_above_project_parent(self):
+        with TemporaryDirectory() as temp_dir:
+            project_dir = self._write_project_config(Path(temp_dir) / "parent" / "project")
+            (Path(temp_dir) / "sip-trunks.yaml").write_text("[]\n", encoding="utf-8")
+
+            with self.assertRaises(FileNotFoundError):
+                find_manage_file(str(project_dir), None)
 
     @patch("poly.cli_commands.shared.read_project_config", return_value=None)
     @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
@@ -980,8 +1106,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
             args = Namespace(
                 path=str(account_dir),
-                file_path=None,
-                account_id=None,
+                file_path=str(config_file),
+                account_id="pod-point-uk",
                 region="uk-1",
                 json=False,
             )
@@ -1102,8 +1228,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
             args = Namespace(
                 path=str(account_dir),
-                file_path=None,
-                account_id=None,
+                file_path=str(account_dir / "sip-trunks.yaml"),
+                account_id="pod-point-uk",
                 region="uk-1",
                 json=False,
                 rotate_auth="tr-123",
@@ -1171,8 +1297,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
             args = Namespace(
                 path=str(account_dir),
-                file_path=None,
-                account_id=None,
+                file_path=str(config_file),
+                account_id="pod-point-uk",
                 region="uk-1",
                 json=False,
             )
