@@ -13,11 +13,6 @@ from typing import Any
 
 ACCOUNT_DEFAULT_OUTPUT = "__account_default__"
 SIP_TRUNK_REGIONS = ("us-1", "euw-1", "uk-1")
-SIP_TRUNK_REGION_ALIASES = {
-    "us": "us-1",
-    "eu": "euw-1",
-    "uk": "uk-1",
-}
 
 
 @dataclass(frozen=True)
@@ -39,13 +34,11 @@ class LoadedManageConfig:
     source_digest: str
 
 
-def normalize_sip_trunk_region(region: str) -> str:
-    """Normalize a region supported by the SIP Trunking API."""
-    candidate = region.strip().lower()
-    normalized = SIP_TRUNK_REGION_ALIASES.get(candidate, candidate)
-    if normalized not in SIP_TRUNK_REGIONS:
+def validate_sip_trunk_region(region: str) -> str:
+    """Validate a canonical ADK region supported by the SIP Trunking API."""
+    if region not in SIP_TRUNK_REGIONS:
         raise ValueError(f"Unsupported SIP Trunking region: {region}")
-    return normalized
+    return region
 
 
 def file_digest(path: str) -> str:
@@ -139,7 +132,7 @@ def infer_account_context(
 
     if region is None:
         matching_regions = {
-            normalize_sip_trunk_region(item[1]) for item in discovered if item[0] == account_id
+            validate_sip_trunk_region(item[1]) for item in discovered if item[0] == account_id
         }
         if len(matching_regions) > 1:
             regions = ", ".join(sorted(matching_regions))
@@ -155,8 +148,7 @@ def infer_account_context(
                 "its projects or pass --region."
             )
 
-    normalized_region = normalize_sip_trunk_region(region)
-    return AccountContext(region=normalized_region, account_id=account_id)
+    return AccountContext(region=validate_sip_trunk_region(region), account_id=account_id)
 
 
 def find_manage_file(base_path: str, file_path: str | None) -> str:
