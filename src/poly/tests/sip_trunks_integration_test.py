@@ -22,10 +22,6 @@ def sip_args(path, action, *extra):
             action,
             "--path",
             str(path),
-            "--account-id",
-            "acct-123",
-            "--region",
-            "uk-1",
             "--json",
             *extra,
         ]
@@ -33,6 +29,16 @@ def sip_args(path, action, *extra):
 
 
 def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys):
+    project_dir = tmp_path / "current-project"
+    project_dir.mkdir()
+    (project_dir / "project.yaml").write_text(
+        "project_id: project-1\naccount_id: acct-123\nregion: uk-1\n"
+    )
+    sibling_dir = tmp_path / "sibling-project"
+    sibling_dir.mkdir()
+    (sibling_dir / "project.yaml").write_text(
+        "project_id: project-2\naccount_id: acct-123\nregion: us-1\n"
+    )
     config_path = tmp_path / "sip-trunks.yaml"
     config_path.write_text(
         "- name: Shared carrier\n"
@@ -61,7 +67,7 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys):
         patch("poly.handlers.interface.SyncClientHandler") as sync_client,
         patch("questionary.confirm") as confirm,
     ):
-        SIPTrunksCommand.run(sip_args(tmp_path, "manage"))
+        SIPTrunksCommand.run(sip_args(project_dir, "manage"))
 
     assert request.call_args_list == [
         call("uk-1", endpoint),
@@ -102,6 +108,9 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys):
     assert [route["agent_id"] for route in saved[0]["extensions"]] == ["project-1", "project-3"]
     result = json.loads(capsys.readouterr().out)
     assert result["success"] is True
+    assert result["account_id"] == "acct-123"
+    assert result["region"] == "uk-1"
+    assert result["config_file"] == str(config_path)
     assert result["trunks"][0]["extensions_created"] == 2
 
 
@@ -128,7 +137,9 @@ def test_list_preserves_routes_to_multiple_projects(tmp_path, capsys):
         ) as request,
         patch("poly.handlers.interface.SyncClientHandler") as sync_client,
     ):
-        SIPTrunksCommand.run(sip_args(tmp_path, "list"))
+        SIPTrunksCommand.run(
+            sip_args(tmp_path, "list", "--account-id", "acct-123", "--region", "uk-1")
+        )
 
     assert request.call_args_list == [
         call("uk-1", "/v1/accounts/acct-123/telephony/sip-trunks"),

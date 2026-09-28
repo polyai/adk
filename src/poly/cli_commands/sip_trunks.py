@@ -62,10 +62,11 @@ class SIPTrunksCommand(BaseCommand):
             "-o",
             "--output",
             nargs="?",
-            const=sip_trunk_config.ACCOUNT_DEFAULT_OUTPUT,
+            const=sip_trunk_config.PROJECT_DEFAULT_OUTPUT,
             help=(
-                "Write reusable YAML to FILE. When passed without FILE, writes "
-                "sip-trunks.yaml in the account directory."
+                "Write reusable YAML to FILE, relative to the current working directory. "
+                "When passed without FILE, writes "
+                "sip-trunks.yaml in the project root."
             ),
         )
         list_parser.add_argument(
@@ -88,8 +89,9 @@ class SIPTrunksCommand(BaseCommand):
             "--file",
             dest="file_path",
             help=(
-                "Configuration file. Defaults to the nearest sip-trunks.yaml "
-                "found from --path towards the filesystem root."
+                "Configuration file, relative to the current working directory. "
+                "Defaults to sip-trunks.yaml in the project root "
+                "or its immediate parent, in that order."
             ),
         )
         manage_parser.add_argument(
@@ -133,10 +135,9 @@ class SIPTrunksCommand(BaseCommand):
         return context.region, context.account_id
 
     @staticmethod
-    def _write_export(args: Namespace, account_id: str, data: dict[str, Any]) -> str:
+    def _write_export(args: Namespace, data: dict[str, Any]) -> str:
         return sip_trunk_config.write_export(
             args.path,
-            account_id,
             data,
             output=args.output,
             force=args.force,
@@ -281,9 +282,11 @@ class SIPTrunksCommand(BaseCommand):
         from poly.project import AgentStudioProject
 
         region, account_id = cls._resolve_context(args)
+        if args.output == sip_trunk_config.PROJECT_DEFAULT_OUTPUT:
+            args.output = sip_trunk_config.default_export_path(args.path)
         result = AgentStudioProject.export_sip_trunks(region, account_id)
         if args.output:
-            output_path = cls._write_export(args, account_id, result)
+            output_path = cls._write_export(args, result)
             if args.json:
                 json_print(
                     {

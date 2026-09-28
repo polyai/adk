@@ -8,9 +8,12 @@ import stat
 import tempfile
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-ACCOUNT_DEFAULT_OUTPUT = "__account_default__"
+if TYPE_CHECKING:
+    from poly.project import AgentStudioProject
+
+PROJECT_DEFAULT_OUTPUT = "__project_default__"
 SIP_TRUNK_REGIONS = ("us-1", "euw-1", "uk-1")
 
 
@@ -46,15 +49,14 @@ def file_digest(path: str) -> str:
         return sha256(source_file.read()).hexdigest()
 
 
-def _is_within(path: str, directory: str) -> bool:
-    """Return whether path is inside directory on the current platform."""
-    normalized_path = os.path.normcase(os.path.abspath(path))
-    normalized_directory = os.path.normcase(os.path.abspath(directory))
-    try:
-        return os.path.commonpath((normalized_path, normalized_directory)) == normalized_directory
-    except ValueError:
-        # Windows paths on different drives have no common path.
-        return False
+def _read_project_config(path: str) -> "AgentStudioProject | None":
+    """Use the shared project lookup from an absolute directory path."""
+    from poly.cli_commands.shared import read_project_config
+
+    base_path = os.path.abspath(path)
+    if os.path.isfile(base_path):
+        base_path = os.path.dirname(base_path)
+    return read_project_config(base_path)
 
 
 def resolve_account_context(
@@ -63,113 +65,46 @@ def resolve_account_context(
     account_id: str | None = None,
     region: str | None = None,
 ) -> AccountContext:
-    """Resolve account context from the current project or account directory."""
-    from poly.cli_commands.shared import read_project_config
-
-    base_path = os.path.abspath(path)
-    if os.path.isfile(base_path):
-        base_path = os.path.dirname(base_path)
-    project = read_project_config(base_path)
-    account_dir = os.path.dirname(project.root_path) if project else base_path
-    return infer_account_context(
-        account_dir,
-        current_project=project,
-        account_id=account_id,
-        region=region,
-    )
-
-
-def infer_account_context(
-    account_dir: str,
-    *,
-    current_project: Any = None,
-    account_id: str | None = None,
-    region: str | None = None,
-) -> AccountContext:
-    """Infer an account's region from project metadata below its directory."""
-    from poly.resources.resource_utils import load_yaml
-
-    discovered: list[tuple[str, str, str]] = []
-    if current_project:
-        discovered.append(
-            (
-                str(current_project.account_id),
-                str(current_project.region),
-                current_project.root_path,
+    """Resolve explicit overrides or account and region from the current project."""
+    if account_id is None or region is None:
+        project = _read_project_config(path)
+        if project is None:
+            raise ValueError(
+                "No project configuration found. Run from an ADK project or pass both "
+                "--account-id and --region."
             )
-        )
+        if account_id is None:
+            account_id = project.account_id
+        if region is None:
+            region = project.region
 
-    if os.path.isdir(account_dir):
-        for entry in os.scandir(account_dir):
-            if not entry.is_dir():
-                continue
-            project_path = os.path.join(entry.path, "project.yaml")
-            if not os.path.isfile(project_path):
-                continue
-            with open(project_path, encoding="utf-8") as project_file:
-                project_data = load_yaml(project_file) or {}
-            if not isinstance(project_data, dict):
-                continue
-            project_account = project_data.get("account_id")
-            project_region = project_data.get("region")
-            if project_account and project_region:
-                context = (str(project_account), str(project_region), entry.path)
-                if context not in discovered:
-                    discovered.append(context)
-
-    discovered_accounts = {item[0] for item in discovered}
-    if account_id is None:
-        if current_project:
-            account_id = str(current_project.account_id)
-        elif len(discovered_accounts) == 1:
-            account_id = discovered_accounts.pop()
-        else:
-            account_id = os.path.basename(os.path.abspath(account_dir))
     if not account_id:
         raise ValueError("An account ID is required.")
-
-    if region is None:
-        matching_regions = {
-            validate_sip_trunk_region(item[1]) for item in discovered if item[0] == account_id
-        }
-        if len(matching_regions) > 1:
-            regions = ", ".join(sorted(matching_regions))
-            raise ValueError(
-                f"Projects for account '{account_id}' disagree on region ({regions}). "
-                "Fix their project.yaml files or pass --region explicitly."
-            )
-        if matching_regions:
-            region = matching_regions.pop()
-        else:
-            raise ValueError(
-                f"Could not infer the region for account '{account_id}'. Run from one of "
-                "its projects or pass --region."
-            )
-
     return AccountContext(region=validate_sip_trunk_region(region), account_id=account_id)
 
 
 def find_manage_file(base_path: str, file_path: str | None) -> str:
-    """Find the explicitly selected or nearest account-level SIP trunk file."""
+    """Find an explicit file, or check the project root and its immediate parent."""
     if file_path:
         resolved = os.path.abspath(file_path)
         if not os.path.isfile(resolved):
             raise FileNotFoundError(f"SIP trunk configuration not found: {resolved}")
         return resolved
 
-    current = os.path.abspath(base_path)
-    if os.path.isfile(current):
-        current = os.path.dirname(current)
-    while True:
-        candidate = os.path.join(current, "sip-trunks.yaml")
+    project = _read_project_config(base_path)
+    if project is None:
+        raise ValueError(
+            "No project configuration found. Run from an ADK project or pass --file "
+            "to select the SIP trunk configuration explicitly."
+        )
+    project_root = os.path.abspath(project.root_path)
+    for directory in (project_root, os.path.dirname(project_root)):
+        candidate = os.path.join(directory, "sip-trunks.yaml")
         if os.path.isfile(candidate):
             return candidate
-        parent = os.path.dirname(current)
-        if parent == current:
-            break
-        current = parent
     raise FileNotFoundError(
-        "No sip-trunks.yaml found. Create it in the account directory or pass --file."
+        "No sip-trunks.yaml found in the project root or its immediate parent. "
+        "Create it there or pass --file."
     )
 
 
@@ -181,9 +116,9 @@ def load_manage_config(
     region: str | None = None,
 ) -> LoadedManageConfig:
     """Load a SIP trunk YAML file and resolve its account context."""
-    from poly.cli_commands.shared import read_project_config
     from poly.resources.resource_utils import load_yaml
 
+    context = resolve_account_context(path, account_id=account_id, region=region)
     config_path = find_manage_file(path, file_path)
     with open(config_path, "rb") as config_file:
         source = config_file.read()
@@ -193,23 +128,12 @@ def load_manage_config(
         config = []
     if isinstance(config, dict) and "region" in config:
         raise ValueError(
-            "Do not set 'region' in sip-trunks.yaml; it is inferred from account project "
-            "metadata. Remove it; use --region only to override the inferred value."
+            "Do not set 'region' in sip-trunks.yaml; it is read from the current project. "
+            "Remove it; use --region only to override the project region."
         )
     if not isinstance(config, list) or not all(isinstance(trunk, dict) for trunk in config):
         raise ValueError("sip-trunks.yaml must contain a top-level list of SIP trunk mappings.")
 
-    project = read_project_config(path)
-    if project and not _is_within(config_path, os.path.dirname(project.root_path)):
-        # An explicit file from another account must not inherit the current
-        # project's account or region.
-        project = None
-    context = infer_account_context(
-        os.path.dirname(config_path),
-        current_project=project,
-        account_id=account_id,
-        region=region,
-    )
     return LoadedManageConfig(
         path=config_path,
         region=context.region,
@@ -293,36 +217,29 @@ def persist_trunk_response(
     return True
 
 
-def default_export_path(path: str, account_id: str) -> str:
-    """Return the account-level default path for a SIP trunk export."""
-    from poly.cli_commands.shared import read_project_config
-
-    project = read_project_config(path)
-    if project and str(project.account_id) == account_id:
-        return os.path.join(os.path.dirname(project.root_path), "sip-trunks.yaml")
-    if project:
-        accounts_root = os.path.dirname(os.path.dirname(project.root_path))
-        return os.path.join(accounts_root, account_id, "sip-trunks.yaml")
-    base_path = os.path.abspath(path)
-    if os.path.basename(base_path) != account_id:
-        base_path = os.path.join(base_path, account_id)
-    return os.path.join(base_path, "sip-trunks.yaml")
+def default_export_path(path: str) -> str:
+    """Return the default SIP trunk export path in the current project root."""
+    project = _read_project_config(path)
+    if project is None:
+        raise ValueError(
+            "No project configuration found. Run from an ADK project or pass --output FILE."
+        )
+    return os.path.join(os.path.abspath(project.root_path), "sip-trunks.yaml")
 
 
 def write_export(
     path: str,
-    account_id: str,
     data: dict[str, Any],
     *,
-    output: str | None = ACCOUNT_DEFAULT_OUTPUT,
+    output: str | None = PROJECT_DEFAULT_OUTPUT,
     force: bool = False,
 ) -> str:
     """Write an API export in the reusable top-level-list YAML format."""
     from poly.resources.resource_utils import dump_yaml
 
     output_path = (
-        default_export_path(path, account_id)
-        if output in {None, ACCOUNT_DEFAULT_OUTPUT}
+        default_export_path(path)
+        if output in {None, PROJECT_DEFAULT_OUTPUT}
         else os.path.abspath(output)
     )
     if os.path.exists(output_path) and not force:
