@@ -19,8 +19,8 @@ from poly.sip_trunks.config import (
     find_manage_file,
     infer_account_context,
     load_manage_config,
-    normalize_sip_trunk_region,
     persist_trunk_response,
+    validate_sip_trunk_region,
 )
 from poly.sip_trunks.reconciler import (
     PlanChange,
@@ -84,7 +84,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 "--account-id",
                 "acct-123",
                 "--region",
-                "eu",
+                "euw-1",
                 "--output",
                 "export.yaml",
                 "--force",
@@ -96,29 +96,35 @@ class SIPTrunksCommandTest(unittest.TestCase):
         self.assertEqual(args.output, "export.yaml")
         self.assertTrue(args.force)
 
-    def test_parser_normalizes_all_supported_region_spellings(self):
-        spellings = {
-            "us": "us-1",
-            "US-1": "us-1",
-            "eu": "euw-1",
-            "EUW-1": "euw-1",
-            "uk": "uk-1",
-            "UK-1": "uk-1",
-        }
-        for supplied, expected in spellings.items():
-            with self.subTest(region=supplied):
-                args = self._parser().parse_args(["sip-trunks", "list", "--region", supplied])
-                self.assertEqual(args.region, expected)
+    def test_parser_accepts_canonical_regions_for_all_actions(self):
+        parser = self._parser()
+        for action in (["list"], ["manage"], ["get", "tr-123"], ["delete", "tr-123"]):
+            for region in ("us-1", "euw-1", "uk-1"):
+                with self.subTest(action=action[0], region=region):
+                    args = parser.parse_args(["sip-trunks", *action, "--region", region])
+                    self.assertEqual(args.region, region)
 
-    def test_sip_region_normalization_rejects_non_sip_regions(self):
-        for region in ("studio", "staging", "dev", "unknown"):
+    def test_parser_rejects_noncanonical_and_unsupported_regions(self):
+        parser = self._parser()
+        for action in (["list"], ["manage"], ["get", "tr-123"], ["delete", "tr-123"]):
+            for region in ("eu", "uk", "us", "EUW-1", "UK-1", "US-1", "studio", "staging", "dev"):
+                with self.subTest(action=action[0], region=region), patch("sys.stderr"):
+                    with self.assertRaises(SystemExit) as error:
+                        parser.parse_args(["sip-trunks", *action, "--region", region])
+                    self.assertEqual(error.exception.code, 2)
+
+    def test_sip_region_validation_rejects_noncanonical_and_unsupported_regions(self):
+        regions = (
+            "eu", "uk", "us", "EUW-1", "UK-1", "US-1", "studio", "staging", "dev", "unknown"
+        )
+        for region in regions:
             with self.subTest(region=region):
                 with self.assertRaisesRegex(ValueError, "Unsupported SIP Trunking region"):
-                    normalize_sip_trunk_region(region)
+                    validate_sip_trunk_region(region)
 
     def test_parser_accepts_legacy_account_id_spelling(self):
         args = self._parser().parse_args(
-            ["sip-trunks", "list", "--account_id", "acct-123", "--region", "uk"]
+            ["sip-trunks", "list", "--account_id", "acct-123", "--region", "uk-1"]
         )
 
         self.assertEqual(args.account_id, "acct-123")
@@ -232,7 +238,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 "--account-id",
                 "acct-123",
                 "--region",
-                "uk",
+                "uk-1",
             ]
         )
 
@@ -259,7 +265,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 "--account-id",
                 "acct-123",
                 "--region",
-                "uk",
+                "uk-1",
             ]
         )
 
@@ -280,7 +286,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 "--account-id",
                 "acct-123",
                 "--region",
-                "us",
+                "us-1",
                 "--yes",
                 "--json",
             ]
@@ -305,7 +311,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 "--account-id",
                 "acct-123",
                 "--region",
-                "uk",
+                "uk-1",
             ]
         )
 
@@ -327,7 +333,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 "--account-id",
                 "acct-123",
                 "--region",
-                "uk",
+                "uk-1",
             ]
         )
 
@@ -348,7 +354,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 "--account-id",
                 "acct-123",
                 "--region",
-                "uk",
+                "uk-1",
                 "--json",
             ]
         )
@@ -399,10 +405,10 @@ class SIPTrunksCommandTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "disagree on region"):
                 infer_account_context(str(account_dir))
 
-    def test_equivalent_account_project_region_aliases_do_not_conflict(self):
+    def test_noncanonical_project_region_is_rejected(self):
         with TemporaryDirectory() as temp_dir:
             account_dir = Path(temp_dir) / "acct-123"
-            for project_id, region in (("one", "uk"), ("two", "UK-1")):
+            for project_id, region in (("one", "uk-1"), ("two", "uk")):
                 project_dir = account_dir / project_id
                 project_dir.mkdir(parents=True)
                 (project_dir / "project.yaml").write_text(
@@ -410,9 +416,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-            context = infer_account_context(str(account_dir))
-
-        self.assertEqual((context.region, context.account_id), ("uk-1", "acct-123"))
+            with self.assertRaisesRegex(ValueError, "Unsupported SIP Trunking region: uk$"):
+                infer_account_context(str(account_dir))
 
     @patch("poly.cli_commands.shared.read_project_config")
     def test_explicit_file_from_another_account_does_not_use_current_project(
@@ -588,12 +593,12 @@ class SIPTrunksCommandTest(unittest.TestCase):
     def test_manage_rejects_region_in_yaml(self):
         with TemporaryDirectory() as temp_dir:
             config_file = Path(temp_dir) / "sip-trunks.yaml"
-            config_file.write_text("region: uk\nsip_trunks: []\n", encoding="utf-8")
+            config_file.write_text("region: uk-1\nsip_trunks: []\n", encoding="utf-8")
             args = Namespace(
                 path=temp_dir,
                 file_path=None,
                 account_id="acct-123",
-                region="uk",
+                region="uk-1",
                 json=False,
             )
 
@@ -622,7 +627,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 with self.subTest(source=source):
                     config_file.write_text(source, encoding="utf-8")
                     with self.assertRaisesRegex(ValueError, "top-level list of SIP trunk mappings"):
-                        load_manage_config(temp_dir, account_id="acct-123", region="uk")
+                        load_manage_config(temp_dir, account_id="acct-123", region="uk-1")
 
     def test_empty_manage_files_declare_no_trunks(self):
         with TemporaryDirectory() as temp_dir:
@@ -630,7 +635,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             for source in ("", "# No trunks managed\n", "[]\n"):
                 with self.subTest(source=source):
                     config_file.write_text(source, encoding="utf-8")
-                    loaded = load_manage_config(temp_dir, account_id="acct-123", region="uk")
+                    loaded = load_manage_config(temp_dir, account_id="acct-123", region="uk-1")
                     self.assertEqual(loaded.trunks, [])
 
     def test_environment_secret_reference_is_rejected(self):
@@ -673,7 +678,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 path=temp_dir,
                 file_path=None,
                 account_id="acct-123",
-                region="uk",
+                region="uk-1",
                 json=False,
                 rotate_auth=None,
             )
@@ -732,7 +737,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 path=temp_dir,
                 file_path=None,
                 account_id="acct-123",
-                region="uk",
+                region="uk-1",
                 json=False,
                 rotate_auth=None,
             )
@@ -919,7 +924,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 path=str(account_dir),
                 file_path=None,
                 account_id=None,
-                region="uk",
+                region="uk-1",
                 json=False,
             )
 
@@ -1041,7 +1046,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 path=str(account_dir),
                 file_path=None,
                 account_id=None,
-                region="uk",
+                region="uk-1",
                 json=False,
                 rotate_auth="tr-123",
             )
@@ -1110,7 +1115,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 path=str(account_dir),
                 file_path=None,
                 account_id=None,
-                region="uk",
+                region="uk-1",
                 json=False,
             )
 

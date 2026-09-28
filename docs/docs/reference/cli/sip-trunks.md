@@ -17,7 +17,7 @@ poly sip-trunks get <trunk_id>
 poly sip-trunks delete <trunk_id>
 ~~~
 
-By default, the command reads the account and region from the current ADK project or from project metadata immediately below the account directory. To run it without project metadata, pass `--account-id` and `--region` (`eu`, `uk`, or `us`).
+By default, the command reads the account and region from the current ADK project or from project metadata immediately below the account directory. To run it without project metadata, pass `--account-id` and `--region` (`euw-1`, `uk-1`, or `us-1`).
 
 ## `poly sip-trunks list`
 
@@ -30,7 +30,7 @@ poly sip-trunks list
 poly sip-trunks list --output
 poly sip-trunks list --output export.yaml
 poly sip-trunks list --output --force
-poly sip-trunks list --account-id my-account --region uk --json
+poly sip-trunks list --account-id my-account --region uk-1 --json
 ~~~
 
 The export includes trunk IDs, hostnames, CIDRs, readable authentication state (including the digest realm), and all extension bindings. Creation and update timestamps are omitted. The file can be passed directly back to `manage`. SIP passwords and tokens are never returned by the API and therefore cannot appear in the export.
@@ -42,7 +42,7 @@ When `--output` is passed without a filename, the export goes to the account-lev
 | Flag | Description |
 |---|---|
 | `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account or account-directory metadata. |
-| `--region` | Account region: `eu`, `uk`, or `us`; `euw-1`, `uk-1`, and `us-1` are also accepted. Defaults to project metadata. |
+| `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
 | `-o`, `--output [FILE]` | Write reusable YAML to `FILE`. Without `FILE`, write `sip-trunks.yaml` in the account directory. |
 | `--force` | Overwrite an existing output file. |
 
@@ -151,7 +151,7 @@ Use `type: none` to explicitly disable the trunk's current inbound authenticatio
 | Flag | Description |
 |---|---|
 | `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account or account-directory metadata. |
-| `--region` | Account region: `eu`, `uk`, or `us`; `euw-1`, `uk-1`, and `us-1` are also accepted. Defaults to project metadata. |
+| `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
 | `-f`, `--file` | Configuration file. Defaults to the nearest `sip-trunks.yaml` found from the base path towards the filesystem root. |
 | `--rotate-auth TRUNK_ID` | Prompt for and rotate credentials for this YAML-declared trunk. |
 | `-y`, `--yes` | Apply the planned changes without prompting for confirmation. |
@@ -212,7 +212,7 @@ poly sip-trunks get <trunk_id> --json
 | Flag | Description |
 |---|---|
 | `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account or account-directory metadata. |
-| `--region` | Account region: `eu`, `uk`, or `us`; `euw-1`, `uk-1`, and `us-1` are also accepted. Defaults to project metadata. |
+| `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
 
 `--json` output shape:
 
@@ -262,7 +262,7 @@ poly sip-trunks delete <trunk_id> --json
 | Flag | Description |
 |---|---|
 | `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account or account-directory metadata. |
-| `--region` | Account region: `eu`, `uk`, or `us`; `euw-1`, `uk-1`, and `us-1` are also accepted. Defaults to project metadata. |
+| `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
 | `-y`, `--yes` | Delete without prompting for confirmation. |
 
 `--json` output shape:
