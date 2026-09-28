@@ -359,7 +359,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         delete_trunk.assert_called_once_with("uk-1", "acct-123", "tr-123")
         json_print.assert_called_once_with({"success": True, "trunk_id": "tr-123"})
 
-    @patch("poly.sip_trunks.config.read_project_config")
+    @patch("poly.cli_commands.shared.read_project_config")
     def test_context_defaults_to_current_project(self, read_project_config):
         read_project_config.return_value = MagicMock(
             account_id="acct-123", region="euw-1", root_path="/account/project"
@@ -414,7 +414,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         self.assertEqual((context.region, context.account_id), ("uk-1", "acct-123"))
 
-    @patch("poly.sip_trunks.config.read_project_config")
+    @patch("poly.cli_commands.shared.read_project_config")
     def test_explicit_file_from_another_account_does_not_use_current_project(
         self, read_project_config
     ):
@@ -442,7 +442,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         self.assertEqual(loaded.account_id, "account-a")
         self.assertEqual(loaded.region, "uk-1")
 
-    @patch("poly.sip_trunks.config.read_project_config")
+    @patch("poly.cli_commands.shared.read_project_config")
     def test_default_export_for_another_account_uses_its_sibling_directory(
         self, read_project_config
     ):
@@ -647,8 +647,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 create=False,
             )
 
-    @patch("poly.cli_commands.sip_trunks.getpass")
-    @patch("poly.sip_trunks.config.read_project_config", return_value=None)
+    @patch("getpass.getpass")
+    @patch("poly.cli_commands.shared.read_project_config", return_value=None)
     @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_preview_validates_extensions_before_prompting_or_writing(
         self, list_trunks, _read_project, prompt
@@ -683,7 +683,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         prompt.assert_not_called()
 
-    @patch("poly.sip_trunks.config.read_project_config", return_value=None)
+    @patch("poly.cli_commands.shared.read_project_config", return_value=None)
     @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
     @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_preview_shows_extension_removed_from_present_list(
@@ -750,7 +750,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             changes,
         )
 
-    @patch("poly.cli_commands.sip_trunks.getpass", return_value="secret")
+    @patch("getpass.getpass", return_value="secret")
     def test_new_digest_auth_prompts_for_password(self, prompt):
         desired = managed_trunk_data(
             "Primary carrier",
@@ -774,7 +774,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         )
         prompt.assert_called_once_with("SIP password for Primary carrier: ")
 
-    @patch("poly.cli_commands.sip_trunks.getpass")
+    @patch("getpass.getpass")
     def test_existing_digest_auth_does_not_prompt_or_resend_password(self, prompt):
         desired = managed_trunk_data(
             "tr-123",
@@ -792,7 +792,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         self.assertNotIn("password", desired["inbound"]["sip_auth"])
         prompt.assert_not_called()
 
-    @patch("poly.cli_commands.sip_trunks.getpass", return_value="rotated")
+    @patch("getpass.getpass", return_value="rotated")
     def test_explicit_rotation_prompts_for_existing_digest_auth(self, prompt):
         desired = managed_trunk_data(
             "tr-123",
@@ -886,7 +886,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
             self.assertEqual(result, str(config_file))
 
-    @patch("poly.sip_trunks.config.read_project_config", return_value=None)
+    @patch("poly.cli_commands.shared.read_project_config", return_value=None)
     @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
     @patch.object(AgentStudioInterface, "create_sip_trunk")
     @patch.object(AgentStudioInterface, "list_sip_trunks")
@@ -999,8 +999,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
         self.assertNotIn("created_at", saved)
         self.assertNotIn("updated_at", saved)
 
-    @patch("poly.cli_commands.sip_trunks.getpass", return_value="rotated-secret")
-    @patch("poly.sip_trunks.config.read_project_config", return_value=None)
+    @patch("getpass.getpass", return_value="rotated-secret")
+    @patch("poly.cli_commands.shared.read_project_config", return_value=None)
     @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
     @patch.object(AgentStudioInterface, "update_sip_trunk")
     @patch.object(AgentStudioInterface, "list_sip_trunks")
@@ -1057,7 +1057,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         )
         self.assertEqual(result["trunks"][0]["status"], "updated")
 
-    @patch("poly.sip_trunks.config.read_project_config", return_value=None)
+    @patch("poly.cli_commands.shared.read_project_config", return_value=None)
     @patch.object(AgentStudioInterface, "delete_sip_trunk")
     @patch.object(AgentStudioInterface, "update_sip_trunk")
     @patch.object(AgentStudioInterface, "list_sip_trunks")

@@ -4,12 +4,10 @@ Copyright PolyAI Limited
 """
 
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
-from getpass import getpass
 from typing import TYPE_CHECKING, Any
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.output.json_output import json_print
-from poly.project import AgentStudioProject
 from poly.sip_trunks import config as sip_trunk_config
 
 if TYPE_CHECKING:
@@ -154,6 +152,8 @@ class SIPTrunksCommand(BaseCommand):
         rotate: bool,
     ) -> bool:
         """Prompt and add a secret only when the planned operation requires one."""
+        from getpass import getpass
+
         desired_inbound = desired.get("inbound")
         if not desired_inbound:
             if rotate:
@@ -201,6 +201,8 @@ class SIPTrunksCommand(BaseCommand):
 
     @classmethod
     def _build_manage_plan(cls, args: Namespace) -> "ManagePlan":
+        from poly.project import AgentStudioProject
+
         loaded = sip_trunk_config.load_manage_config(
             args.path,
             file_path=args.file_path,
@@ -218,6 +220,8 @@ class SIPTrunksCommand(BaseCommand):
 
     @classmethod
     def _apply_manage_plan(cls, plan: "ManagePlan") -> dict[str, Any]:
+        from poly.project import AgentStudioProject
+
         return AgentStudioProject.apply_sip_trunk_plan(
             plan,
             prompt_auth_secret=cls._prompt_auth_secret,
@@ -368,6 +372,8 @@ class SIPTrunksCommand(BaseCommand):
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to a SIP trunk API operation."""
+        from poly.project import AgentStudioProject
+
         action = args.sip_trunks_subcommand
         if action == "manage":
             plan = cls._build_manage_plan(args)

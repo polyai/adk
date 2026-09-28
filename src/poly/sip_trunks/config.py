@@ -11,10 +11,6 @@ from hashlib import sha256
 from io import StringIO
 from typing import Any
 
-from ruamel.yaml import YAML
-
-from poly.cli_commands.shared import read_project_config
-
 ACCOUNT_DEFAULT_OUTPUT = "__account_default__"
 SIP_TRUNK_REGIONS = ("us-1", "euw-1", "uk-1")
 SIP_TRUNK_REGION_ALIASES = {
@@ -76,6 +72,8 @@ def resolve_account_context(
     region: str | None = None,
 ) -> AccountContext:
     """Resolve account context from the current project or account directory."""
+    from poly.cli_commands.shared import read_project_config
+
     base_path = os.path.abspath(path)
     if os.path.isfile(base_path):
         base_path = os.path.dirname(base_path)
@@ -97,6 +95,8 @@ def infer_account_context(
     region: str | None = None,
 ) -> AccountContext:
     """Infer an account's region from project metadata below its directory."""
+    from ruamel.yaml import YAML
+
     yaml = YAML(typ="safe")
     discovered: list[tuple[str, str, str]] = []
     if current_project:
@@ -191,6 +191,10 @@ def load_manage_config(
     region: str | None = None,
 ) -> LoadedManageConfig:
     """Load a SIP trunk YAML file and resolve its account context."""
+    from ruamel.yaml import YAML
+
+    from poly.cli_commands.shared import read_project_config
+
     config_path = find_manage_file(path, file_path)
     yaml = YAML(typ="safe")
     with open(config_path, "rb") as config_file:
@@ -234,6 +238,8 @@ def persist_trunk_response(
     trunk: dict[str, Any],
 ) -> bool:
     """Save useful API-generated fields while preserving YAML formatting and comments."""
+    from ruamel.yaml import YAML
+
     yaml = YAML()
     yaml.preserve_quotes = True
     yaml.indent(mapping=2, sequence=4, offset=2)
@@ -300,6 +306,8 @@ def persist_trunk_response(
 
 def yaml_string(data: Any) -> str:
     """Serialize SIP trunk configuration as block-style YAML."""
+    from ruamel.yaml import YAML
+
     yaml = YAML()
     yaml.default_flow_style = False
     stream = StringIO()
@@ -309,6 +317,8 @@ def yaml_string(data: Any) -> str:
 
 def default_export_path(path: str, account_id: str) -> str:
     """Return the account-level default path for a SIP trunk export."""
+    from poly.cli_commands.shared import read_project_config
+
     project = read_project_config(path)
     if project and str(project.account_id) == account_id:
         return os.path.join(os.path.dirname(project.root_path), "sip-trunks.yaml")
