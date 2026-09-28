@@ -228,102 +228,127 @@ class SIPTrunksCommand(BaseCommand):
 
     @classmethod
     def run(cls, args: Namespace) -> None:
-        """Dispatch to a SIP trunk API operation."""
-        from poly.project import AgentStudioProject
-
+        """Dispatch to the matching SIP trunk action."""
         action = args.sip_trunks_subcommand
         if action == "manage":
-            plan = cls._build_manage_plan(args)
-            changes = [change.as_dict() for change in plan.changes]
-            if not changes:
-                if args.json:
-                    json_print({"success": True, "changed": False, "trunks": []})
-                else:
-                    from poly.output.console import info
+            cls.sip_trunks_manage(args)
+        elif action == "list":
+            cls.sip_trunks_list(args)
+        elif action == "get":
+            cls.sip_trunks_get(args)
+        elif action == "delete":
+            cls.sip_trunks_delete(args)
 
-                    info("Nothing changed.")
-                return
-            if not args.json:
-                from poly.output.console import print_sip_trunk_changes
-
-                print_sip_trunk_changes(changes)
-            if not args.json and not args.force:
-                import questionary
-
-                confirmed = questionary.confirm(
-                    "Apply these SIP trunk changes?", default=False, auto_enter=False
-                ).ask()
-                if not confirmed:
-                    from poly.output.console import info
-
-                    info("Aborted. No changes were applied.")
-                    return
-            result = cls._apply_manage_plan(plan)
+    @classmethod
+    def sip_trunks_manage(cls, args: Namespace) -> None:
+        """Preview and apply the SIP trunks declared in a YAML file."""
+        plan = cls._build_manage_plan(args)
+        changes = [change.as_dict() for change in plan.changes]
+        if not changes:
             if args.json:
-                json_print(result)
+                json_print({"success": True, "changed": False, "trunks": []})
             else:
-                from poly.output.console import print_sip_trunk_manage_result
+                from poly.output.console import info
 
-                print_sip_trunk_manage_result(result)
+                info("Nothing changed.")
             return
+        if not args.json:
+            from poly.output.console import print_sip_trunk_changes
+
+            print_sip_trunk_changes(changes)
+        if not args.json and not args.force:
+            import questionary
+
+            confirmed = questionary.confirm(
+                "Apply these SIP trunk changes?", default=False, auto_enter=False
+            ).ask()
+            if not confirmed:
+                from poly.output.console import info
+
+                info("Aborted. No changes were applied.")
+                return
+        result = cls._apply_manage_plan(plan)
+        if args.json:
+            json_print(result)
+        else:
+            from poly.output.console import print_sip_trunk_manage_result
+
+            print_sip_trunk_manage_result(result)
+
+    @classmethod
+    def sip_trunks_list(cls, args: Namespace) -> None:
+        """List account SIP trunks or export their configuration to YAML."""
+        from poly.project import AgentStudioProject
 
         region, account_id = cls._resolve_context(args)
-        if action == "list":
-            result = AgentStudioProject.export_sip_trunks(region, account_id)
-            if args.output:
-                output_path = cls._write_export(args, account_id, result)
-                if args.json:
-                    json_print(
-                        {
-                            "success": True,
-                            "output_path": output_path,
-                            "trunk_count": len(result["sip_trunks"]),
-                        }
-                    )
-                else:
-                    from poly.output.console import success
-
-                    success(f"Wrote {len(result['sip_trunks'])} SIP trunk(s) to {output_path}")
-            elif args.json:
-                json_print(result)
-            else:
-                from poly.output.console import print_sip_trunks
-
-                print_sip_trunks(result)
-            return
-        if action == "get":
-            result = AgentStudioProject.get_sip_trunk(region, account_id, args.trunk_id)
-            if not args.json:
-                extension_response = AgentStudioProject.list_sip_trunk_extensions(
-                    region, account_id, args.trunk_id
+        result = AgentStudioProject.export_sip_trunks(region, account_id)
+        if args.output:
+            output_path = cls._write_export(args, account_id, result)
+            if args.json:
+                json_print(
+                    {
+                        "success": True,
+                        "output_path": output_path,
+                        "trunk_count": len(result["sip_trunks"]),
+                    }
                 )
-                extensions = extension_response.get("extensions", [])
-                if not isinstance(extensions, list):
-                    raise ValueError("Expected the SIP Trunking API to return an extensions list.")
-                from poly.output.console import print_sip_trunk_detail
-
-                print_sip_trunk_detail(result, extensions)
-                return
-        else:
-            if not args.json and not args.force:
-                import questionary
-
-                confirmed = questionary.confirm(
-                    f"Delete SIP trunk {args.trunk_id}?",
-                    default=False,
-                    auto_enter=False,
-                ).ask()
-                if not confirmed:
-                    from poly.output.console import info
-
-                    info("Aborted. SIP trunk was not deleted.")
-                    return
-            AgentStudioProject.delete_sip_trunk(region, account_id, args.trunk_id)
-            result = {"success": True, "trunk_id": args.trunk_id}
-            if not args.json:
+            else:
                 from poly.output.console import success
 
-                success(f"Deleted SIP trunk {args.trunk_id}.")
+                success(f"Wrote {len(result['sip_trunks'])} SIP trunk(s) to {output_path}")
+        elif args.json:
+            json_print(result)
+        else:
+            from poly.output.console import print_sip_trunks
+
+            print_sip_trunks(result)
+
+    @classmethod
+    def sip_trunks_get(cls, args: Namespace) -> None:
+        """Show a SIP trunk and its extension routing."""
+        from poly.project import AgentStudioProject
+
+        region, account_id = cls._resolve_context(args)
+        result = AgentStudioProject.get_sip_trunk(region, account_id, args.trunk_id)
+        if not args.json:
+            extension_response = AgentStudioProject.list_sip_trunk_extensions(
+                region, account_id, args.trunk_id
+            )
+            extensions = extension_response.get("extensions", [])
+            if not isinstance(extensions, list):
+                raise ValueError("Expected the SIP Trunking API to return an extensions list.")
+            from poly.output.console import print_sip_trunk_detail
+
+            print_sip_trunk_detail(result, extensions)
+            return
+
+        json_print(result)
+
+    @classmethod
+    def sip_trunks_delete(cls, args: Namespace) -> None:
+        """Delete a SIP trunk after confirmation when required."""
+        from poly.project import AgentStudioProject
+
+        region, account_id = cls._resolve_context(args)
+        if not args.json and not args.force:
+            import questionary
+
+            confirmed = questionary.confirm(
+                f"Delete SIP trunk {args.trunk_id}?",
+                default=False,
+                auto_enter=False,
+            ).ask()
+            if not confirmed:
+                from poly.output.console import info
+
+                info("Aborted. SIP trunk was not deleted.")
                 return
+        AgentStudioProject.delete_sip_trunk(region, account_id, args.trunk_id)
+        result = {"success": True, "trunk_id": args.trunk_id}
+        if not args.json:
+            from poly.output.console import success
+
+            success(f"Deleted SIP trunk {args.trunk_id}.")
+            return
 
         json_print(result)
