@@ -8947,6 +8947,29 @@ class TestCaseTests(unittest.TestCase):
         self.assertEqual(test_case.channel, "chat.polyai")
         self.assertEqual(test_case.language, "en-GB")
         self.assertEqual(test_case.tags.tags, ["booking", "smoke"])
+        calls = {call.name: call for call in test_case.assertions.function_calls}
+        self.assertTrue(calls["test_function"].is_asserted)
+        self.assertFalse(calls["test_function_with_parameters"].is_asserted)
+
+    def test_function_call_assertion_is_asserted_by_default(self):
+        call = self._sample_test_case().assertions.function_calls[0]
+        proto = call.to_proto()
+        self.assertTrue(proto.is_asserted)
+        self.assertTrue(MessageToDict(proto).get("isAsserted"))
+        self.assertNotIn("is_asserted", call.to_yaml_dict())
+
+    def test_unasserted_function_call_round_trips(self):
+        call = FunctionCallAssertion(
+            name="test_function",
+            arguments=[
+                FunctionCallArgumentAssertion(
+                    parameter_name="param1", expected_value="hello", value_type="string"
+                )
+            ],
+            is_asserted=False,
+        )
+        self.assertIs(call.to_yaml_dict()["is_asserted"], False)
+        self.assertFalse(call.to_proto().is_asserted)
 
     def test_read_local_resource_filename_mismatch_raises(self):
         file_path = os.path.join("test_suite", "greeting_flow_test.yaml")
@@ -13091,32 +13114,3 @@ class MultiResourceFileCacheTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
-
-class FunctionCallAssertionAssertedTests(unittest.TestCase):
-    """A function call written in YAML is checked; Studio's unasserted calls survive a round trip."""
-
-    def _call(self, **kwargs):
-        return FunctionCallAssertion(
-            name="handoff",
-            arguments=[
-                {
-                    "parameter_name": "handoff_reason",
-                    "expected_value": "REWARDS_CLUB",
-                    "value_type": "string",
-                }
-            ],
-            **kwargs,
-        )
-
-    def test_yaml_call_is_asserted_on_the_wire(self):
-        proto = self._call().to_proto()
-        self.assertTrue(proto.is_asserted)
-        self.assertTrue(MessageToDict(proto).get("isAsserted"))
-
-    def test_asserted_call_writes_no_flag_to_yaml(self):
-        self.assertNotIn("is_asserted", self._call().to_yaml_dict())
-
-    def test_unasserted_call_round_trips(self):
-        call = self._call(is_asserted=False)
-        self.assertEqual(call.to_yaml_dict()["is_asserted"], False)
-        self.assertFalse(call.to_proto().is_asserted)

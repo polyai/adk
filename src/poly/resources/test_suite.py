@@ -119,9 +119,6 @@ class FunctionCallArgumentAssertion:
 class FunctionCallAssertion:
     name: str
     arguments: list[FunctionCallArgumentAssertion]
-    # A function call written in YAML is there to be checked. Studio can also
-    # record a call without asserting it; that state round-trips as
-    # `is_asserted: false` and is the only time the key is written.
     is_asserted: bool = True
 
     def __init__(
