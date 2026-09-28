@@ -2221,6 +2221,44 @@ class PushProjectTest(unittest.TestCase):
         self.assertIn(Function, deleted_resources)
         self.assertIn("FUNCTION-extra_function", deleted_resources[Function])
 
+    def test_push_project_renamed_test_case_is_an_update(self):
+        """A test case renamed locally keeps its id: one update, no delete and create."""
+        project_data = deepcopy(PROJECT_DATA)
+        # Saved under an older name, so its file path differs from the local file's.
+        project_data["resources"]["test_cases"]["TEST-greeting_flow"]["name"] = "Old greeting name"
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        kwargs = self.mock_api_handler.queue_resources.call_args.kwargs
+        self.assertNotIn(TestCase, kwargs["new_resources"])
+        self.assertNotIn(TestCase, kwargs["deleted_resources"])
+        updated = kwargs["updated_resources"][TestCase]
+        self.assertEqual(list(updated), ["TEST-greeting_flow"])
+        self.assertEqual(updated["TEST-greeting_flow"].name, "Greeting flow test")
+
+    def test_push_project_ambiguous_rename_stays_delete_and_create(self):
+        """Two saved cases share the local file's scenario: no pairing is guessed."""
+        project_data = deepcopy(PROJECT_DATA)
+        cases = project_data["resources"]["test_cases"]
+        cases["TEST-greeting_flow"]["name"] = "Old greeting name"
+        twin = deepcopy(cases["TEST-greeting_flow"])
+        twin["resource_id"] = "TEST-greeting_twin"
+        twin["name"] = "Another old greeting name"
+        cases["TEST-greeting_twin"] = twin
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        kwargs = self.mock_api_handler.queue_resources.call_args.kwargs
+        self.assertIn(TestCase, kwargs["new_resources"])
+        self.assertEqual(
+            set(kwargs["deleted_resources"][TestCase]),
+            {"TEST-greeting_flow", "TEST-greeting_twin"},
+        )
+
     def test_push_project_force_does_not_delete_remote_only_resources(self):
         """push --force with load_project: variant_attributes exist remotely but not locally.
         Must NOT push them as deleted (fix for spurious deletions of new resource types).
