@@ -11,7 +11,7 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
@@ -1321,9 +1321,6 @@ class AgentStudioProject:
                 parent_lookup=parent_branch_paths_to_resource,
             )
         )
-        self._pair_renamed_test_cases(
-            new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
-        )
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
         # Slim resources have no file to read - they exist only so that references
         # to them still resolve to a name. Keep them out of the list we iterate,
@@ -1577,6 +1574,9 @@ class AgentStudioProject:
         If new flow has function step as start step, create referencing a dummy default step.
         Then update the flow config to use the new step.
 
+        A renamed test case (same scenario, new file) is pushed as an update of
+        the saved case, keeping its id, rather than a delete and a create.
+
         When deleting a flow, only send a command to delete the flow config,
         not the steps/functions.
 
@@ -1615,6 +1615,7 @@ class AgentStudioProject:
             # as a side effect) if a webchat command is actually queued
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
+        prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
         prepush.fix_orphaned_variables(
             state,
             new_resources,
@@ -2294,59 +2295,6 @@ class AgentStudioProject:
             ) from e
 
         return resource
-
-    def _pair_renamed_test_cases(
-        self,
-        new_mappings: list[ResourceMapping],
-        kept_mappings: list[ResourceMapping],
-        deleted_mappings: list[ResourceMapping],
-    ) -> None:
-        """Treat a renamed test case as the same case, not a delete and a create.
-
-        A test case's file name comes from its name, so renaming it moves the file:
-        the old path reads as deleted and the new one as new, and the case would get
-        a fresh id and lose its run history. A new test case file whose scenario
-        matches exactly one deleted test case (and no other new file) takes that
-        case's id and becomes a kept resource, so the push sends an update carrying
-        the new name. Anything ambiguous is left as a delete and a create.
-
-        Mutates the three lists in place.
-        """
-        deleted_cases = [m for m in deleted_mappings if m.resource_type is TestCase]
-        new_cases = [m for m in new_mappings if m.resource_type is TestCase]
-        if not deleted_cases or not new_cases:
-            return
-
-        def key(scenario: Any) -> str:
-            return str(scenario or "").strip()
-
-        old_by_key: dict[str, list[ResourceMapping]] = {}
-        for mapping in deleted_cases:
-            original = self.resources.get(TestCase, {}).get(mapping.resource_id)
-            if original is not None and key(original.scenario):
-                old_by_key.setdefault(key(original.scenario), []).append(mapping)
-
-        new_by_key: dict[str, list[ResourceMapping]] = {}
-        for mapping in new_cases:
-            path = mapping.file_path
-            if path and not os.path.isabs(path):
-                path = os.path.join(self.root_path, path)
-            try:
-                with open(path, encoding="utf-8") as f:
-                    data = resource_utils.load_yaml(f) or {}
-            except Exception:  # noqa: BLE001 - an unreadable file just stays a new resource
-                continue
-            if isinstance(data, dict) and key(data.get("scenario")):
-                new_by_key.setdefault(key(data.get("scenario")), []).append(mapping)
-
-        for scenario, olds in old_by_key.items():
-            news = new_by_key.get(scenario, [])
-            if len(olds) != 1 or len(news) != 1:
-                continue
-            old, new = olds[0], news[0]
-            new_mappings.remove(new)
-            deleted_mappings.remove(old)
-            kept_mappings.append(replace(new, resource_id=old.resource_id))
 
     def find_new_kept_deleted(
         self,

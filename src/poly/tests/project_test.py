@@ -2237,6 +2237,27 @@ class PushProjectTest(unittest.TestCase):
         updated = kwargs["updated_resources"][TestCase]
         self.assertEqual(list(updated), ["TEST-greeting_flow"])
         self.assertEqual(updated["TEST-greeting_flow"].name, "Greeting flow test")
+        # Only the name changed, so no sub-resource commands are sent.
+        self.assertNotIn(TestCaseAssertion, kwargs["updated_resources"])
+        self.assertNotIn(TestCaseTags, kwargs["updated_resources"])
+        self.assertEqual(
+            set(project.resources[TestCase]), {"TEST-greeting_flow", "TEST-webchat_smoke"}
+        )
+
+    def test_push_project_renamed_test_case_diffs_sub_resources_against_saved_case(self):
+        """A rename with changed tags sends the tags update under the kept id."""
+        project_data = deepcopy(PROJECT_DATA)
+        saved = project_data["resources"]["test_cases"]["TEST-greeting_flow"]
+        saved["name"] = "Old greeting name"
+        saved["tags"]["tags"] = ["booking"]
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        kwargs = self.mock_api_handler.queue_resources.call_args.kwargs
+        self.assertEqual(list(kwargs["updated_resources"][TestCaseTags]), ["TEST-greeting_flow"])
+        self.assertNotIn(TestCaseAssertion, kwargs["updated_resources"])
 
     def test_push_project_ambiguous_rename_stays_delete_and_create(self):
         """Two saved cases share the local file's scenario: no pairing is guessed."""
