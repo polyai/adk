@@ -88,12 +88,15 @@ def reject_yaml_secret(config: dict[str, Any], field: str) -> None:
             )
 
 
-def managed_trunk_data(
-    local_name: str, config: dict[str, Any], *, create: bool
-) -> tuple[dict[str, Any], bool]:
+def managed_trunk_data(local_name: str, config: dict[str, Any], *, create: bool) -> dict[str, Any]:
     """Translate one YAML trunk entry to a secret-free API payload."""
     if not isinstance(config, dict):
         raise ValueError(f"SIP trunk '{local_name}' must contain a mapping.")
+    if "inbound" in config:
+        raise ValueError(
+            f"SIP trunk '{local_name}' must use 'inbound_auth' instead of 'inbound' "
+            "in sip-trunks.yaml."
+        )
     data: dict[str, Any] = {}
     for field in ("name", "sip_cidr", "rtp_cidr", "encrypted"):
         if field in config:
@@ -127,40 +130,7 @@ def managed_trunk_data(
             raise ValueError(
                 f"SIP trunk '{local_name}' inbound_auth.type must be digest, token, or none."
             )
-    else:
-        # Backwards-compatible reader for the initial preview schema.
-        inbound = config.get("inbound")
-        if inbound is not None:
-            if not isinstance(inbound, dict):
-                raise ValueError(
-                    f"SIP trunk '{local_name}' inbound configuration must be a mapping."
-                )
-            reject_yaml_secret(inbound, "password")
-            reject_yaml_secret(inbound, "token")
-            digest = inbound.get("sip_auth")
-            token_auth = inbound.get("sip_token_auth")
-            if digest is not None and token_auth is not None:
-                raise ValueError(
-                    f"SIP trunk '{local_name}' cannot use SIP digest and token auth together."
-                )
-            if digest is not None:
-                if not isinstance(digest, dict):
-                    raise ValueError("'sip_auth' must be a mapping.")
-                reject_yaml_secret(digest, "password")
-                reject_yaml_secret(digest, "token")
-                username = digest.get("username")
-                if not username:
-                    raise ValueError(f"SIP trunk '{local_name}' digest auth requires a username.")
-                data["inbound"] = {"sip_auth": {"username": username}}
-            elif token_auth is not None:
-                if not isinstance(token_auth, dict):
-                    raise ValueError("'sip_token_auth' must be a mapping.")
-                reject_yaml_secret(token_auth, "password")
-                reject_yaml_secret(token_auth, "token")
-                data["inbound"] = {"sip_token_auth": {}}
-    # Kept in the return type for compatibility with the original helper. YAML
-    # secrets are always rejected, so this is necessarily false during planning.
-    return data, False
+    return data
 
 
 def managed_agent_data(local_name: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -186,12 +156,6 @@ def normalized_extensions(desired_extensions: Any) -> list[dict[str, Any]] | Non
     """Validate extensions, preserving omitted versus an authoritative empty list."""
     if desired_extensions is None:
         return None
-    if isinstance(desired_extensions, dict):
-        if not all(isinstance(config, dict) for config in desired_extensions.values()):
-            raise ValueError("Every extension value must be a mapping.")
-        desired_extensions = [
-            {"extension": extension, **config} for extension, config in desired_extensions.items()
-        ]
     if not isinstance(desired_extensions, list) or not all(
         isinstance(config, dict) for config in desired_extensions
     ):
@@ -470,7 +434,7 @@ def build_manage_plan(
         local_name = str(
             trunk_config.get("id") or trunk_config.get("name") or f"sip_trunks[{index}]"
         )
-        desired, _ = managed_trunk_data(local_name, trunk_config, create=False)
+        desired = managed_trunk_data(local_name, trunk_config, create=False)
         extensions = normalized_extensions(trunk_config.get("extensions"))
         configured_id = trunk_config.get("id")
         if configured_id:
@@ -530,7 +494,7 @@ def build_manage_plan(
                 "to rotate credentials."
             )
         if current is None:
-            create_data, _ = managed_trunk_data(local_name, trunk_config, create=True)
+            create_data = managed_trunk_data(local_name, trunk_config, create=True)
             create_data.pop("_disable_auth", None)
             needs_credential = credential_required(None, create_data, rotate=False)
             extension_operations, extension_changes = _extension_plan(

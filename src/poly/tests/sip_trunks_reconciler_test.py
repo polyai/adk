@@ -218,9 +218,83 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
         self.assertEqual(operation.payload["inbound"]["sip_auth"], {"username": "alice"})
         self.assertNotIn("password", repr(plan))
 
-    def test_legacy_extension_mapping_rejects_non_mapping_values(self):
-        with self.assertRaisesRegex(ValueError, "Every extension value must be a mapping"):
-            normalized_extensions({"1000": "agent-one"})
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
+    def test_legacy_inbound_auth_is_rejected_before_remote_discovery(self, list_trunks):
+        configs = [
+            {"inbound": {"sip_auth": {"username": "alice"}}},
+            {"inbound": {"sip_token_auth": {}}},
+            {"inbound": {}},
+            {"inbound": None},
+            {
+                "inbound": {"sip_auth": {"username": "alice"}},
+                "inbound_auth": {"type": "none"},
+            },
+        ]
+        for config in configs:
+            with self.subTest(config=config):
+                with self.assertRaisesRegex(
+                    ValueError, "must use 'inbound_auth' instead of 'inbound'"
+                ):
+                    build_manage_plan(
+                        "/account/sip-trunks.yaml",
+                        "uk-1",
+                        "acct-123",
+                        [{"name": "Primary carrier", **config}],
+                    )
+                list_trunks.assert_not_called()
+
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
+    def test_extension_mappings_are_rejected_before_remote_discovery(self, list_trunks):
+        for extensions in (
+            {"1000": {"agent_id": "agent-one", "client_env": "live"}},
+            {"1000": "agent-one"},
+            {},
+        ):
+            with self.subTest(extensions=extensions):
+                with self.assertRaisesRegex(
+                    ValueError, "'extensions' must be a list of extension mappings"
+                ):
+                    build_manage_plan(
+                        "/account/sip-trunks.yaml",
+                        "uk-1",
+                        "acct-123",
+                        [{"name": "Primary carrier", "extensions": extensions}],
+                    )
+                list_trunks.assert_not_called()
+
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
+    def test_empty_extension_list_schedules_all_bindings_for_deletion(
+        self, list_trunks, list_extensions
+    ):
+        list_trunks.return_value = {
+            "sip_trunks": [{"id": "tr-123", "name": "Primary carrier", "inbound": {}}]
+        }
+        list_extensions.return_value = {
+            "extensions": [
+                {
+                    "extension": extension,
+                    "agent": {"agent_id": "agent-one", "client_env": "live"},
+                }
+                for extension in ("1000", "2000")
+            ]
+        }
+
+        plan = build_manage_plan(
+            "/account/sip-trunks.yaml",
+            "uk-1",
+            "acct-123",
+            [{"id": "tr-123", "name": "Primary carrier", "extensions": []}],
+        )
+
+        self.assertEqual(
+            [
+                (operation.action, operation.extension)
+                for operation in plan.trunks[0].extension_operations
+            ],
+            [("delete", "1000"), ("delete", "2000")],
+        )
+        self.assertEqual(plan.trunks[0].extensions_total, 0)
 
     def test_extension_number_must_not_be_null_blank_or_boolean(self):
         for extension in (None, "", "  ", False, True):
