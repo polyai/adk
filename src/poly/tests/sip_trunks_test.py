@@ -605,17 +605,33 @@ class SIPTrunksCommandTest(unittest.TestCase):
                     region=args.region,
                 )
 
-    def test_legacy_trunk_mapping_rejects_non_mapping_values(self):
+    def test_manage_rejects_wrapped_and_non_list_formats(self):
         with TemporaryDirectory() as temp_dir:
             config_file = Path(temp_dir) / "sip-trunks.yaml"
-            config_file.write_text("sip_trunks:\n  Primary carrier: invalid\n", encoding="utf-8")
+            sources = (
+                "sip_trunks:\n  - name: Primary carrier\n",
+                "sip_trunks:\n  Primary carrier:\n    sip_cidr: [203.0.113.0/24]\n",
+                "account_id: acct-123\nsip_trunks: []\n",
+                "sip_trunks: {}\n",
+                "{}\n",
+                "false\n",
+                "0\n",
+                "- invalid\n",
+            )
+            for source in sources:
+                with self.subTest(source=source):
+                    config_file.write_text(source, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "top-level list of SIP trunk mappings"):
+                        load_manage_config(temp_dir, account_id="acct-123", region="uk")
 
-            with self.assertRaisesRegex(ValueError, "Every SIP trunk value must be a mapping"):
-                load_manage_config(
-                    temp_dir,
-                    account_id="acct-123",
-                    region="uk",
-                )
+    def test_empty_manage_files_declare_no_trunks(self):
+        with TemporaryDirectory() as temp_dir:
+            config_file = Path(temp_dir) / "sip-trunks.yaml"
+            for source in ("", "# No trunks managed\n", "[]\n"):
+                with self.subTest(source=source):
+                    config_file.write_text(source, encoding="utf-8")
+                    loaded = load_manage_config(temp_dir, account_id="acct-123", region="uk")
+                    self.assertEqual(loaded.trunks, [])
 
     def test_environment_secret_reference_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "password_env.*prompted"):
@@ -736,7 +752,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     @patch("poly.cli_commands.sip_trunks.getpass", return_value="secret")
     def test_new_digest_auth_prompts_for_password(self, prompt):
-        desired, _ = managed_trunk_data(
+        desired = managed_trunk_data(
             "Primary carrier",
             {
                 "name": "Primary carrier",
@@ -760,7 +776,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     @patch("poly.cli_commands.sip_trunks.getpass")
     def test_existing_digest_auth_does_not_prompt_or_resend_password(self, prompt):
-        desired, _ = managed_trunk_data(
+        desired = managed_trunk_data(
             "tr-123",
             {"inbound_auth": {"type": "digest", "username": "alice"}},
             create=False,
@@ -778,7 +794,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     @patch("poly.cli_commands.sip_trunks.getpass", return_value="rotated")
     def test_explicit_rotation_prompts_for_existing_digest_auth(self, prompt):
-        desired, _ = managed_trunk_data(
+        desired = managed_trunk_data(
             "tr-123",
             {"inbound_auth": {"type": "digest", "username": "alice"}},
             create=False,
@@ -795,7 +811,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         prompt.assert_called_once()
 
     def test_auth_type_none_disables_current_auth(self):
-        desired, _ = managed_trunk_data("tr-123", {"inbound_auth": {"type": "none"}}, create=False)
+        desired = managed_trunk_data("tr-123", {"inbound_auth": {"type": "none"}}, create=False)
         patch_data = trunk_patch(
             {
                 "name": "tr-123",
@@ -864,7 +880,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             project_dir = account_dir / "charging-support"
             project_dir.mkdir(parents=True)
             config_file = account_dir / "sip-trunks.yaml"
-            config_file.write_text("sip_trunks: []\n", encoding="utf-8")
+            config_file.write_text("[]\n", encoding="utf-8")
 
             result = find_manage_file(str(project_dir), None)
 
@@ -926,6 +942,21 @@ class SIPTrunksCommandTest(unittest.TestCase):
         self.assertIn("hostname: tr-123.sbc.sip.uk.poly.ai", saved_config)
         self.assertNotIn("created_at", saved_config)
         self.assertNotIn("updated_at", saved_config)
+
+    def test_persist_trunk_response_rejects_wrapped_formats_without_modifying_file(self):
+        with TemporaryDirectory() as temp_dir:
+            config_file = Path(temp_dir) / "sip-trunks.yaml"
+            for source in (
+                "sip_trunks:\n  - name: Primary carrier\n",
+                "sip_trunks:\n  Primary carrier: {}\n",
+            ):
+                with self.subTest(source=source):
+                    config_file.write_text(source, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "top-level list of SIP trunk mappings"):
+                        persist_trunk_response(
+                            str(config_file), 0, "Primary carrier", {"id": "tr-123"}
+                        )
+                    self.assertEqual(config_file.read_text(encoding="utf-8"), source)
 
     def test_persist_trunk_response_preserves_comments_and_adds_useful_fields(self):
         with TemporaryDirectory() as temp_dir:
@@ -995,15 +1026,14 @@ class SIPTrunksCommandTest(unittest.TestCase):
             account_dir = Path(temp_dir) / "pod-point-uk"
             account_dir.mkdir()
             (account_dir / "sip-trunks.yaml").write_text(
-                """sip_trunks:
-  - id: tr-123
-    name: Primary carrier
-    sip_cidr: [203.0.113.0/24]
-    rtp_cidr: [198.51.100.0/24]
-    encrypted: true
-    inbound_auth:
-      type: digest
-      username: alice
+                """- id: tr-123
+  name: Primary carrier
+  sip_cidr: [203.0.113.0/24]
+  rtp_cidr: [198.51.100.0/24]
+  encrypted: true
+  inbound_auth:
+    type: digest
+    username: alice
 """,
                 encoding="utf-8",
             )
@@ -1068,12 +1098,11 @@ class SIPTrunksCommandTest(unittest.TestCase):
             account_dir.mkdir()
             config_file = account_dir / "sip-trunks.yaml"
             config_file.write_text(
-                """sip_trunks:
-  - id: tr-managed
-    name: Primary carrier
-    sip_cidr: [203.0.113.0/24]
-    rtp_cidr: [198.51.100.0/24]
-    encrypted: false
+                """- id: tr-managed
+  name: Primary carrier
+  sip_cidr: [203.0.113.0/24]
+  rtp_cidr: [198.51.100.0/24]
+  encrypted: false
 """,
                 encoding="utf-8",
             )

@@ -195,13 +195,17 @@ def load_manage_config(
     yaml = YAML(typ="safe")
     with open(config_path, "rb") as config_file:
         source = config_file.read()
-    config = yaml.load(source.decode("utf-8")) or {}
+    config = yaml.load(source.decode("utf-8"))
     source_digest = sha256(source).hexdigest()
+    if config is None:
+        config = []
     if isinstance(config, dict) and "region" in config:
         raise ValueError(
             "Do not set 'region' in sip-trunks.yaml; it is inferred from account project "
             "metadata. Remove it; use --region only to override the inferred value."
         )
+    if not isinstance(config, list) or not all(isinstance(trunk, dict) for trunk in config):
+        raise ValueError("sip-trunks.yaml must contain a top-level list of SIP trunk mappings.")
 
     project = read_project_config(path)
     if project and not _is_within(config_path, os.path.dirname(project.root_path)):
@@ -211,29 +215,14 @@ def load_manage_config(
     context = infer_account_context(
         os.path.dirname(config_path),
         current_project=project,
-        account_id=account_id or (config.get("account_id") if isinstance(config, dict) else None),
+        account_id=account_id,
         region=region,
     )
-
-    if isinstance(config, list):
-        trunks = config
-    elif isinstance(config, dict):
-        # Read the initial wrapped format as a migration convenience.
-        trunks = config.get("sip_trunks", [])
-    else:
-        raise ValueError("sip-trunks.yaml must contain a list of SIP trunk mappings.")
-    if isinstance(trunks, dict):
-        # Read the initial preview format as a migration convenience.
-        if not all(isinstance(trunk, dict) for trunk in trunks.values()):
-            raise ValueError("Every SIP trunk value must be a mapping.")
-        trunks = [{"name": local_name, **trunk} for local_name, trunk in trunks.items()]
-    if not isinstance(trunks, list) or not all(isinstance(trunk, dict) for trunk in trunks):
-        raise ValueError("sip-trunks.yaml must contain a list of SIP trunk mappings.")
     return LoadedManageConfig(
         path=config_path,
         region=context.region,
         account_id=context.account_id,
-        trunks=trunks,
+        trunks=config,
         source_digest=source_digest,
     )
 
@@ -250,25 +239,11 @@ def persist_trunk_response(
     yaml.indent(mapping=2, sequence=4, offset=2)
     with open(config_path, encoding="utf-8") as config_file:
         config = yaml.load(config_file)
-    if isinstance(config, list):
-        trunks = config
-        if trunk_index >= len(trunks) or not isinstance(trunks[trunk_index], dict):
-            raise ValueError(f"Could not find SIP trunk '{local_name}' to save metadata.")
-        entry = trunks[trunk_index]
-    elif isinstance(config, dict) and isinstance(config.get("sip_trunks"), list):
-        # Preserve the initial wrapped schema when updating an existing file.
-        trunks = config["sip_trunks"]
-        if trunk_index >= len(trunks) or not isinstance(trunks[trunk_index], dict):
-            raise ValueError(f"Could not find SIP trunk '{local_name}' to save metadata.")
-        entry = trunks[trunk_index]
-    elif isinstance(config, dict) and isinstance(config.get("sip_trunks"), dict):
-        trunks = config["sip_trunks"]
-        keys = list(trunks)
-        if trunk_index >= len(keys) or not isinstance(trunks[keys[trunk_index]], dict):
-            raise ValueError(f"Could not find SIP trunk '{local_name}' to save metadata.")
-        entry = trunks[keys[trunk_index]]
-    else:
-        raise ValueError("sip-trunks.yaml must contain a list of SIP trunk mappings.")
+    if not isinstance(config, list):
+        raise ValueError("sip-trunks.yaml must contain a top-level list of SIP trunk mappings.")
+    if trunk_index >= len(config) or not isinstance(config[trunk_index], dict):
+        raise ValueError(f"Could not find SIP trunk '{local_name}' to save metadata.")
+    entry = config[trunk_index]
 
     changed = False
     trunk_id = trunk.get("id")
