@@ -24,6 +24,7 @@ __all__ = [
     "HumeVoice",
     "XaiVoice",
     "GradiumVoice",
+    "HamsaVoice",
     "VoiceType",
     "VoiceWeighting",
     "UnknownNamedVoice",
@@ -40,7 +41,6 @@ __all__ = [
 
 import requests
 from . import external_events as external_events
-from collections.abc import Callable as Callable
 from dataclasses import dataclass, field
 from .agentic_dial import AgenticDial, AgenticDialData
 from .attachment import Attachment as Attachment
@@ -170,7 +170,7 @@ class CartesiaVoice(TTSVoice):
         provider_voice_id: str,
         speed: float | None = 0,
         emotions: list[Emotion] | None = None,
-        model_id: str | None = "sonic",
+        model_id: str | None = "sonic-3.6",
         volume: float | None = None,
         emotion: str | None = None,
         language: str | None = None,
@@ -269,6 +269,15 @@ class GradiumVoice(TTSVoice):
     def __init__(self, provider_voice_id: str, model_name: str | None = None) -> None: ...
 
 
+class HamsaVoice(TTSVoice):
+    def __init__(
+        self,
+        provider_voice_id: str,
+        dialect: str | None = None,
+        expressiveness: float | None = None,
+    ) -> None: ...
+
+
 VoiceType = (
     CustomVoice
     | ElevenLabsVoice
@@ -280,6 +289,7 @@ VoiceType = (
     | GoogleVoice
     | XaiVoice
     | GradiumVoice
+    | HamsaVoice
 )
 
 
