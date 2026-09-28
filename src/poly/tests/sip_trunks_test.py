@@ -552,6 +552,14 @@ class SIPTrunksCommandTest(unittest.TestCase):
                     "rtp_cidr": ["198.51.100.0/24"],
                     "encrypted": True,
                     "hostname": "tr-123.sbc.sip.uk.poly.ai",
+                    "extensions": [
+                        {
+                            "extension": extension,
+                            "agent_id": "charging-support",
+                            "client_env": "live",
+                        }
+                        for extension in ("0010", "1000", "+44/2000", "*123", "true")
+                    ],
                 }
             ],
         }
@@ -585,7 +593,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         self.assertEqual(loaded.region, "uk-1")
         self.assertEqual(loaded.account_id, "pod-point-uk")
-        self.assertEqual(loaded.trunks[0]["id"], "tr-123")
+        self.assertEqual(loaded.trunks, data["sip_trunks"])
         self.assertTrue(exported_text.startswith("- id: tr-123\n"))
         self.assertNotIn("sip_trunks:", exported_text)
         self.assertNotIn("account_id:", exported_text)
