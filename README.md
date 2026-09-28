@@ -242,12 +242,15 @@ carrier-level SIP behaviour.
 ### `poly sip-trunks`
 
 Manage account-level SIP trunks and route dialled extensions to agents. The account and
-region are inferred from project metadata unless `--account-id` and `--region` are supplied.
+API region default to the current ADK project, including when running from a project
+subdirectory. `--account-id` (or `--account_id`) and `--region` each override the corresponding
+project value. Supplying both lets you run without a project.
 
-Place the declarative configuration in the account directory, alongside project folders:
+Place `sip-trunks.yaml` in the project root or its immediate parent. The parent is a
+convenient shared location for projects using the same account and region:
 
 ```text
-my-account/
+projects/
 ├── sip-trunks.yaml
 └── my-project/
     └── project.yaml
@@ -276,12 +279,18 @@ poly sip-trunks manage --force               # apply without confirmation
 poly sip-trunks manage --rotate-auth <trunk_id>
 poly sip-trunks manage --file ../sip-trunks.yaml
 poly sip-trunks list                         # display a summary table
-poly sip-trunks list --output                # write account-level sip-trunks.yaml
+poly sip-trunks list --output                # write project-root sip-trunks.yaml
+poly sip-trunks list --output ../sip-trunks.yaml  # shared export, run from project root
 poly sip-trunks list --output export.yaml
 poly sip-trunks get <trunk_id>
 poly sip-trunks delete <trunk_id>             # confirm before deleting
 poly sip-trunks delete <trunk_id> --force     # delete without prompting
 ```
+
+`manage` searches for `sip-trunks.yaml` in the project root, then its immediate parent,
+and stops there. `--file` selects a file relative to the current working directory without
+changing the account or region. Without a project, `manage` requires `--account-id`,
+`--region`, and `--file`.
 
 `manage` creates or updates entries in the YAML and prints every managed trunk's generated
 hostname when it changes. Before writing, it validates the complete file, displays a diff,
@@ -299,7 +308,9 @@ leaves the trunk's extensions unmanaged. The configuration uses the top-level li
 
 `list` displays a table by default. With `--output`, it exports trunk IDs, hostnames,
 CIDRs, authentication state, and extensions in the same schema consumed by `manage`.
-Existing files are protected unless `--force` is used, including with `--json`.
+Without a filename, `--output` writes `sip-trunks.yaml` in the project root. An explicit
+filename is relative to the current working directory and is required for export without
+a project. Existing files are protected unless `--force` is used, including with `--json`.
 API responses never contain SIP passwords or tokens, so exported files do not contain
 secrets. `inbound_auth.type` is `digest`, `token`, or `none`. `manage` securely prompts
 when a secret is required to create a trunk or change its authentication. Normal updates
@@ -308,9 +319,10 @@ never resend existing credentials; use `--rotate-auth <trunk_id>` to rotate them
 (or `-f`) to skip confirmation. With `--json`, confirmation is skipped automatically and
 the result is printed as JSON.
 
-The account region is not stored in `sip-trunks.yaml`. ADK reads it from the current
-project or from project directories immediately below the account directory. If no project
-metadata is available, pass `--region`; inconsistent project regions are rejected.
+The YAML contains neither account nor region fields. Each file describes trunks for one
+account and region, including their extension routes to any agents; the current project
+does not filter those routes. Only the current project's metadata supplies defaults,
+regardless of the YAML location or parent directory name.
 
 ### `poly docs`
 

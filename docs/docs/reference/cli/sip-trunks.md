@@ -17,7 +17,9 @@ poly sip-trunks get <trunk_id>
 poly sip-trunks delete <trunk_id>
 ~~~
 
-By default, the command reads the account and region from the current ADK project or from project metadata immediately below the account directory. To run it without project metadata, pass `--account-id` and `--region` (`euw-1`, `uk-1`, or `us-1`).
+By default, the command reads the account and canonical API region from the current ADK project. It finds the project by walking up from the current working directory, or from `--path` when supplied, so commands also work from project subdirectories. Defaults come only from that project, never from sibling projects or directory names.
+
+`--account-id` (or `--account_id`) and `--region` (`euw-1`, `uk-1`, or `us-1`) each override the corresponding project value. Supplying both lets you run without a project. Standalone `manage` also requires `--file`, and standalone export requires an explicit output filename.
 
 ## `poly sip-trunks list`
 
@@ -28,6 +30,7 @@ Examples:
 ~~~bash
 poly sip-trunks list
 poly sip-trunks list --output
+poly sip-trunks list --output ../sip-trunks.yaml  # shared export, run from project root
 poly sip-trunks list --output export.yaml
 poly sip-trunks list --output --force
 poly sip-trunks list --account-id my-account --region uk-1 --json
@@ -35,15 +38,15 @@ poly sip-trunks list --account-id my-account --region uk-1 --json
 
 The export includes trunk IDs, hostnames, CIDRs, readable authentication state (including the digest realm), and all extension bindings. Creation and update timestamps are omitted. The file can be passed directly back to `manage`. SIP passwords and tokens are never returned by the API and therefore cannot appear in the export.
 
-The export uses a top-level list and does not store a region. ADK infers the region from the account's `project.yaml` metadata. If projects for the account disagree, the command stops with an error. Use `--region` when no project metadata is available.
+The export uses a top-level list without account or region fields. Each file describes trunks for one account and region, including all their extension bindings; the current project does not filter routes by agent.
 
-When `--output` is passed without a filename, the export goes to the account-level `sip-trunks.yaml`. For a project at `my-account/my-project`, this is `my-account/sip-trunks.yaml`. An explicit output filename selects a custom location. Overwriting an existing file requires `--force`, including with `--json`.
+When `--output` is passed without a filename, the export goes to `sip-trunks.yaml` in the project root, even when run from a project subdirectory. An explicit output filename is relative to the current working directory and works with or without a project. Exporting without a project requires both context flags and an explicit output filename. Overwriting an existing file requires `--force`, including with `--json`.
 
 | Flag | Description |
 |---|---|
-| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account or account-directory metadata. |
+| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account. |
 | `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
-| `-o`, `--output [FILE]` | Write reusable YAML to `FILE`. Without `FILE`, write `sip-trunks.yaml` in the account directory. |
+| `-o`, `--output [FILE]` | Write reusable YAML to `FILE`. Without `FILE`, write `sip-trunks.yaml` in the project root. Explicit paths are relative to the current working directory. |
 | `--force` | Overwrite an existing output file. |
 
 `--json` output shape:
@@ -81,14 +84,14 @@ With `--output`, the JSON response describes the written file:
 ~~~json
 {
   "success": true,
-  "output_path": "/path/to/projects/my-account/sip-trunks.yaml",
+  "output_path": "/path/to/projects/my-project/sip-trunks.yaml",
   "trunk_count": 1
 }
 ~~~
 
 ## `poly sip-trunks manage`
 
-Create or update SIP trunks and reconcile extension bindings from an account-level YAML file.
+Create or update SIP trunks and reconcile extension bindings from a YAML file for one account and region.
 
 Examples:
 
@@ -100,7 +103,7 @@ poly sip-trunks manage --rotate-auth <trunk_id>
 poly sip-trunks manage --json
 ~~~
 
-The preferred workflow uses an account-level `sip-trunks.yaml`. Given a project at `my-account/my-project`, place the file at `my-account/sip-trunks.yaml`:
+Place `sip-trunks.yaml` in the project root or its immediate parent. The parent is a convenient shared location for projects using the same account and region. The file uses a top-level list:
 
 ~~~yaml
 - id: tr-example
@@ -121,7 +124,9 @@ The preferred workflow uses an account-level `sip-trunks.yaml`. Given a project 
       client_env: live
 ~~~
 
-From a project directory, `manage` searches parent directories for the nearest `sip-trunks.yaml`. Use `--file` to select a file explicitly.
+`manage` searches the project root for `sip-trunks.yaml`, then its immediate parent, and stops there. This search is the same when running from a project subdirectory. `--file` selects a file relative to the current working directory; it does not change the account or region. Without a project, supply `--account-id`, `--region`, and `--file`.
+
+The YAML contains neither account nor region fields. All entries use the selected account and region, and extension routes are not filtered by the current project's agent.
 
 `manage` first validates the complete file and calculates a diff without writing or prompting for credentials. By default, it displays the planned trunk, extension, credential-rotation, and local metadata changes, then asks whether to continue. After confirmation it creates missing trunks and extensions and patches changed ones. Use `--force` to skip confirmation. With `--json`, it automatically skips confirmation, applies the planned changes, and prints the result as JSON.
 
@@ -150,9 +155,9 @@ Use `type: none` to explicitly disable the trunk's current inbound authenticatio
 
 | Flag | Description |
 |---|---|
-| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account or account-directory metadata. |
+| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account. |
 | `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
-| `--file` | Configuration file. Defaults to the nearest `sip-trunks.yaml` found from the base path towards the filesystem root. |
+| `--file` | Configuration file, relative to the current working directory. Defaults to `sip-trunks.yaml` in the project root, then its immediate parent. |
 | `--rotate-auth TRUNK_ID` | Prompt for and rotate credentials for this YAML-declared trunk. |
 | `-f`, `--force` | Apply the planned changes without prompting for confirmation. |
 
@@ -165,7 +170,7 @@ Use `type: none` to explicitly disable the trunk's current inbound authenticatio
 ~~~json
 {
   "success": true,
-  "config_file": "/path/to/projects/my-account/sip-trunks.yaml",
+  "config_file": "/path/to/projects/sip-trunks.yaml",
   "account_id": "my-account",
   "region": "uk-1",
   "trunks": [
@@ -211,7 +216,7 @@ poly sip-trunks get <trunk_id> --json
 
 | Flag | Description |
 |---|---|
-| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account or account-directory metadata. |
+| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account. |
 | `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
 
 `--json` output shape:
@@ -261,7 +266,7 @@ poly sip-trunks delete <trunk_id> --json
 
 | Flag | Description |
 |---|---|
-| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account or account-directory metadata. |
+| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account. |
 | `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
 | `-f`, `--force` | Delete without prompting for confirmation. |
 
