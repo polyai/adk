@@ -380,11 +380,9 @@ class SIPTrunksCommand(BaseCommand):
 
                     info("Nothing changed.")
                 return
-            if args.json and not args.yes:
-                raise ValueError("sip-trunks manage --json requires --yes when changes exist.")
             if not args.json:
                 cls._print_manage_diff(changes)
-            if not args.yes:
+            if not args.json and not args.yes:
                 import questionary
 
                 confirmed = questionary.confirm(
@@ -398,9 +396,6 @@ class SIPTrunksCommand(BaseCommand):
             result = cls._apply_manage_plan(plan)
             cls._print_manage_result(result, output_json=args.json)
             return
-
-        if action == "delete" and args.json and not args.yes:
-            raise ValueError("sip-trunks delete --json requires --yes.")
 
         region, account_id = cls._resolve_context(args)
         if action == "list":
@@ -436,7 +431,7 @@ class SIPTrunksCommand(BaseCommand):
                 cls._print_get_table(result, extensions)
                 return
         else:
-            if not args.yes:
+            if not args.json and not args.yes:
                 import questionary
 
                 confirmed = questionary.confirm(
