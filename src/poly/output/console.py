@@ -1120,6 +1120,121 @@ def print_audio_cache_entries(entries: list[dict[str, Any]]) -> None:
     console.print(table)
 
 
+def print_sip_trunk_changes(changes: list[dict[str, str]]) -> None:
+    """Print the planned SIP trunk and extension changes."""
+    table = Table(title="SIP trunk changes", box=box.SIMPLE, header_style="bold")
+    table.add_column("Action")
+    table.add_column("Resource")
+    table.add_column("Diff")
+    for change in changes:
+        table.add_row(change["action"], change["resource"], change["diff"])
+    console.print(table)
+
+
+def print_sip_trunk_manage_result(result: dict[str, Any]) -> None:
+    """Print the changed SIP trunks and their extension change counts."""
+    changed_trunks = [trunk for trunk in result["trunks"] if trunk["status"] != "unchanged"]
+    if not changed_trunks:
+        info("Nothing changed.")
+        return
+
+    info(f"Managed SIP trunks from {result['config_file']}")
+    table = Table(box=box.SIMPLE, header_style="bold")
+    table.add_column("Key")
+    table.add_column("Status")
+    table.add_column("Trunk ID")
+    table.add_column("Hostname")
+    table.add_column("Extensions")
+    table.add_column("Changes")
+    for trunk in changed_trunks:
+        extension_changes = (
+            trunk["extensions_created"]
+            + trunk["extensions_updated"]
+            + trunk.get("extensions_deleted", 0)
+        )
+        table.add_row(
+            trunk["key"],
+            trunk["status"],
+            trunk["id"] or "—",
+            trunk["hostname"] or "—",
+            str(trunk["extensions_total"]),
+            str(extension_changes),
+        )
+    console.print(table)
+
+
+def _sip_trunk_auth_summary(inbound: dict[str, Any]) -> str:
+    """Summarize inbound SIP authentication without exposing credentials."""
+    sip_auth = inbound.get("sip_auth") or {}
+    token_auth = inbound.get("sip_token_auth") or {}
+    if sip_auth.get("enabled"):
+        username = sip_auth.get("username")
+        return f"digest ({username})" if username else "digest"
+    if token_auth.get("enabled"):
+        return "token"
+    return "none"
+
+
+def print_sip_trunks(config: dict[str, Any]) -> None:
+    """Print a table of SIP trunks and extension counts."""
+    table = Table(box=box.SIMPLE, header_style="bold")
+    table.add_column("Name")
+    table.add_column("Trunk ID")
+    table.add_column("Hostname")
+    table.add_column("Encrypted")
+    table.add_column("Auth")
+    table.add_column("Extensions", justify="right")
+    for trunk in config["sip_trunks"]:
+        auth = trunk.get("inbound_auth") or {"type": "none"}
+        auth_summary = str(auth.get("type", "none"))
+        if auth_summary == "digest" and auth.get("username"):
+            auth_summary += f" ({auth['username']})"
+        table.add_row(
+            trunk.get("name") or "—",
+            trunk.get("id") or "—",
+            trunk.get("hostname") or "—",
+            "yes" if trunk.get("encrypted") else "no",
+            auth_summary,
+            str(len(trunk.get("extensions") or [])),
+        )
+    console.print(table)
+
+
+def print_sip_trunk_detail(trunk: dict[str, Any], extensions: list[dict[str, Any]]) -> None:
+    """Print SIP trunk details and extension routing."""
+    inbound = trunk.get("inbound") or {}
+    details = Table(box=box.SIMPLE, show_header=False)
+    details.add_column("Field", style="bold")
+    details.add_column("Value")
+    details.add_row("Name", str(trunk.get("name") or "—"))
+    details.add_row("Trunk ID", str(trunk.get("id") or "—"))
+    details.add_row("Hostname", str(inbound.get("hostname") or "—"))
+    details.add_row("Encrypted", "yes" if trunk.get("encrypted") else "no")
+    details.add_row("Authentication", _sip_trunk_auth_summary(inbound))
+    details.add_row("SIP CIDRs", ", ".join(trunk.get("sip_cidr") or []) or "—")
+    details.add_row("RTP CIDRs", ", ".join(trunk.get("rtp_cidr") or []) or "—")
+    details.add_row("Created", str(trunk.get("created_at") or "—"))
+    details.add_row("Updated", str(trunk.get("updated_at") or "—"))
+    console.print(details)
+
+    extension_table = Table(
+        title="Extensions", box=box.SIMPLE, header_style="bold", title_justify="left"
+    )
+    extension_table.add_column("Extension")
+    extension_table.add_column("Agent ID")
+    extension_table.add_column("Environment")
+    extension_table.add_column("Variant")
+    for extension in extensions:
+        agent = extension.get("agent") or {}
+        extension_table.add_row(
+            str(extension.get("extension") or "—"),
+            str(agent.get("agent_id") or "—"),
+            str(agent.get("client_env") or "—"),
+            str(agent.get("variant_id") or "—"),
+        )
+    console.print(extension_table)
+
+
 def print_function_validation_issues(valid: bool, issues: list[dict[str, Any]]) -> None:
     """Print the result of validating a branch's functions.
 
