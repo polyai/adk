@@ -59,8 +59,9 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys):
             ],
         ) as request,
         patch("poly.handlers.interface.SyncClientHandler") as sync_client,
+        patch("questionary.confirm") as confirm,
     ):
-        SIPTrunksCommand.run(sip_args(tmp_path, "manage", "--yes"))
+        SIPTrunksCommand.run(sip_args(tmp_path, "manage"))
 
     assert request.call_args_list == [
         call("uk-1", endpoint),
@@ -93,6 +94,7 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys):
             },
         ),
     ]
+    confirm.assert_not_called()
     sync_client.assert_not_called()
     saved = YAML(typ="safe").load(config_path)
     assert saved[0]["id"] == "tr-123"

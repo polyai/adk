@@ -97,7 +97,7 @@ poly sip-trunks manage
 poly sip-trunks manage --yes
 poly sip-trunks manage --file ../sip-trunks.yaml
 poly sip-trunks manage --rotate-auth <trunk_id>
-poly sip-trunks manage --yes --json
+poly sip-trunks manage --json
 ~~~
 
 The preferred workflow uses an account-level `sip-trunks.yaml`. Given a project at `my-account/my-project`, place the file at `my-account/sip-trunks.yaml`:
@@ -123,7 +123,7 @@ The preferred workflow uses an account-level `sip-trunks.yaml`. Given a project 
 
 From a project directory, `manage` searches parent directories for the nearest `sip-trunks.yaml`. Use `--file` to select a file explicitly.
 
-`manage` first validates the complete file and calculates a diff without writing or prompting for credentials. It displays the planned trunk, extension, credential-rotation, and local metadata changes, then asks whether to continue. After confirmation it creates missing trunks and extensions and patches changed ones. Use `--yes` to skip confirmation.
+`manage` first validates the complete file and calculates a diff without writing or prompting for credentials. By default, it displays the planned trunk, extension, credential-rotation, and local metadata changes, then asks whether to continue. After confirmation it creates missing trunks and extensions and patches changed ones. Use `--yes` to skip confirmation. With `--json`, it automatically skips confirmation, applies the planned changes, and prints the result as JSON.
 
 The human-readable output reports changed trunks, including their generated IDs and hostnames. If the YAML already matches the backend, it prints `Nothing changed.` After reconciling a trunk, `manage` writes the returned `id`, `hostname`, and digest `realm` back into the YAML using an atomic, formatting-preserving update. These generated fields are not sent in create or update request bodies. Creation and update timestamps are intentionally omitted. The older mapping format with a `sip_trunks:` wrapper remains readable for migration, but new exports use the top-level list.
 
@@ -156,9 +156,9 @@ Use `type: none` to explicitly disable the trunk's current inbound authenticatio
 | `--rotate-auth TRUNK_ID` | Prompt for and rotate credentials for this YAML-declared trunk. |
 | `-y`, `--yes` | Apply the planned changes without prompting for confirmation. |
 
-!!! info "JSON changes require confirmation to be skipped"
+!!! info "JSON mode skips confirmation"
 
-    `poly sip-trunks manage --json` requires `--yes` when changes exist. Required credential prompts still apply.
+    `poly sip-trunks manage --json` applies changes without asking for confirmation; `--yes` is not required. Required credential prompts still apply.
 
 `--json` output shape after applying changes:
 
@@ -250,10 +250,10 @@ Examples:
 ~~~bash
 poly sip-trunks delete <trunk_id>
 poly sip-trunks delete <trunk_id> --yes
-poly sip-trunks delete <trunk_id> --yes --json
+poly sip-trunks delete <trunk_id> --json
 ~~~
 
-`delete` asks for confirmation and prints a human-readable success message by default. Use `--yes` to skip confirmation.
+`delete` asks for confirmation and prints a human-readable success message by default. Use `--yes` to skip confirmation. With `--json`, it automatically skips confirmation, deletes the trunk, and prints the result as JSON.
 
 | Argument | Description |
 |---|---|
@@ -264,10 +264,6 @@ poly sip-trunks delete <trunk_id> --yes --json
 | `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account or account-directory metadata. |
 | `--region` | Account region: `eu`, `uk`, or `us`; `euw-1`, `uk-1`, and `us-1` are also accepted. Defaults to project metadata. |
 | `-y`, `--yes` | Delete without prompting for confirmation. |
-
-!!! info "JSON deletion requires confirmation to be skipped"
-
-    `poly sip-trunks delete --json` requires `--yes`.
 
 `--json` output shape:
 
