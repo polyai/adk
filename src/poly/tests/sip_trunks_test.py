@@ -181,6 +181,45 @@ class SIPTrunksCommandTest(unittest.TestCase):
         apply_plan.assert_called_once_with(plan)
         print_result.assert_called_once_with(result, output_json=False)
 
+    @patch("poly.cli_commands.sip_trunks.json_print")
+    @patch.object(SIPTrunksCommand, "_apply_manage_plan")
+    @patch.object(SIPTrunksCommand, "_print_manage_diff")
+    @patch.object(SIPTrunksCommand, "_build_manage_plan")
+    @patch("questionary.confirm")
+    def test_manage_json_applies_without_confirmation(
+        self, confirm, build_plan, print_diff, apply_plan, json_print
+    ):
+        plan = MagicMock(changes=(PlanChange("create", "trunk Example", "+ trunk"),))
+        result = {"success": True, "trunks": []}
+        build_plan.return_value = plan
+        apply_plan.return_value = result
+        args = self._parser().parse_args(["sip-trunks", "manage", "--json"])
+
+        SIPTrunksCommand.run(args)
+
+        confirm.assert_not_called()
+        print_diff.assert_not_called()
+        apply_plan.assert_called_once_with(plan)
+        json_print.assert_called_once_with(result)
+
+    @patch("poly.cli_commands.sip_trunks.json_print")
+    @patch.object(SIPTrunksCommand, "_apply_manage_plan")
+    @patch.object(SIPTrunksCommand, "_print_manage_diff")
+    @patch.object(SIPTrunksCommand, "_build_manage_plan")
+    @patch("questionary.confirm")
+    def test_manage_json_with_no_changes_does_not_apply(
+        self, confirm, build_plan, print_diff, apply_plan, json_print
+    ):
+        build_plan.return_value = MagicMock(changes=())
+        args = self._parser().parse_args(["sip-trunks", "manage", "--json"])
+
+        SIPTrunksCommand.run(args)
+
+        confirm.assert_not_called()
+        print_diff.assert_not_called()
+        apply_plan.assert_not_called()
+        json_print.assert_called_once_with({"success": True, "changed": False, "trunks": []})
+
     @patch.object(SIPTrunksCommand, "_print_list_table")
     @patch.object(AgentStudioProject, "export_sip_trunks")
     def test_list_displays_table_by_default(self, export_config, print_list_table):
@@ -297,9 +336,10 @@ class SIPTrunksCommandTest(unittest.TestCase):
         delete_trunk.assert_called_once_with("uk-1", "acct-123", "tr-123")
         success.assert_called_once_with("Deleted SIP trunk tr-123.")
 
+    @patch("poly.cli_commands.sip_trunks.json_print")
     @patch.object(AgentStudioProject, "delete_sip_trunk")
     @patch("questionary.confirm")
-    def test_delete_json_requires_yes(self, confirm, delete_trunk):
+    def test_delete_json_deletes_without_confirmation(self, confirm, delete_trunk, json_print):
         args = self._parser().parse_args(
             [
                 "sip-trunks",
@@ -313,11 +353,11 @@ class SIPTrunksCommandTest(unittest.TestCase):
             ]
         )
 
-        with self.assertRaisesRegex(ValueError, "delete --json requires --yes"):
-            SIPTrunksCommand.run(args)
+        SIPTrunksCommand.run(args)
 
         confirm.assert_not_called()
-        delete_trunk.assert_not_called()
+        delete_trunk.assert_called_once_with("uk-1", "acct-123", "tr-123")
+        json_print.assert_called_once_with({"success": True, "trunk_id": "tr-123"})
 
     @patch("poly.sip_trunks.config.read_project_config")
     def test_context_defaults_to_current_project(self, read_project_config):
