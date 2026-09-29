@@ -11,6 +11,8 @@ from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from ruamel.yaml import YAML
+
     from poly.project import AgentStudioProject
 
 PROJECT_DEFAULT_OUTPUT = "__project_default__"
@@ -136,10 +138,8 @@ def persist_trunk_response(
     trunk: dict[str, Any],
 ) -> bool:
     """Save useful API-generated fields while preserving YAML formatting and comments."""
-    from ruamel.yaml import YAML
-
     # Round-trip YAML retains comments and quotes when updating the user's file.
-    yaml = YAML()
+    yaml = _sip_trunk_yaml()
     yaml.preserve_quotes = True
     yaml.indent(mapping=2, sequence=4, offset=2)
     with open(config_path, encoding="utf-8") as config_file:
@@ -213,6 +213,20 @@ def default_export_path(path: str) -> str:
     return os.path.join(os.path.abspath(project.root_path), "sip-trunks.yaml")
 
 
+def _sip_trunk_yaml() -> "YAML":
+    """Create a round-trip writer that spells disabled settings as null."""
+    from ruamel.yaml import YAML
+    from ruamel.yaml.representer import SafeRepresenter
+
+    yaml = YAML()
+    # Keep the override local; add_representer would modify the shared class.
+    yaml.representer.yaml_representers = {
+        **yaml.representer.yaml_representers,
+        type(None): SafeRepresenter.represent_none,
+    }
+    return yaml
+
+
 def write_export(
     path: str,
     data: dict[str, Any],
@@ -238,6 +252,10 @@ def write_export(
     parent = os.path.dirname(output_path)
     if not os.path.isdir(parent):
         raise FileNotFoundError(f"Output directory does not exist: {parent}")
+    yaml = _sip_trunk_yaml()
+    yaml.default_flow_style = False
+    yaml.preserve_quotes = False
+    yaml.width = 100
     with open(output_path, "w", encoding="utf-8") as output_file:
-        dump_yaml(data["sip_trunks"], output_file)
+        dump_yaml(data["sip_trunks"], output_file, dumper=yaml)
     return output_path

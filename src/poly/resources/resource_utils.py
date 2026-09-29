@@ -105,23 +105,25 @@ def _prepare_yaml_data(data):
     return data
 
 
-def dump_yaml(data, stream=None):
+def dump_yaml(data, stream=None, *, dumper=None):
     """Dump data to YAML format with block style for multiline strings.
 
     Args:
         data: Data structure to dump.
         stream: Optional stream to write to. If None, returns a string.
+        dumper: Optional YAML instance with custom output formatting.
 
     Returns:
         str: YAML string if stream is None, otherwise None.
     """
     data = _prepare_yaml_data(data)
+    dumper = _yaml_dumper if dumper is None else dumper
     if stream is None:
         stream = StringIO()
-        _yaml_dumper.dump(data, stream)
+        dumper.dump(data, stream)
         return stream.getvalue()
     else:
-        _yaml_dumper.dump(data, stream)
+        dumper.dump(data, stream)
         return None
 
 
