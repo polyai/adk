@@ -584,6 +584,56 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
                     self.assertEqual(output.read_text(encoding="utf-8"), "existing")
 
+    @patch("poly.cli_commands.sip_trunks.json_print")
+    @patch.object(AgentStudioProject, "export_sip_trunks")
+    def test_export_rejects_directory_targets_even_with_force(self, export_config, json_print):
+        export_config.return_value = {"account_id": "acct-123", "sip_trunks": []}
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            project_dir = self._write_project_config(root / "project")
+            marker = root / "keep.txt"
+            marker.write_text("keep this file", encoding="utf-8")
+            project_config = (project_dir / "project.yaml").read_bytes()
+            for flags in ([], ["--force"], ["--json"], ["--force", "--json"]):
+                with self.subTest(flags=flags), chdir(project_dir):
+                    args = self._parser().parse_args(
+                        ["sip-trunks", "list", "--output", "..", *flags]
+                    )
+
+                    with self.assertRaisesRegex(ValueError, "Output path is a directory") as error:
+                        SIPTrunksCommand.run(args)
+
+                    self.assertIn(str(root / "sip-trunks.yaml"), str(error.exception))
+                    self.assertNotIn("--force", str(error.exception))
+                    self.assertEqual(sorted(path.name for path in root.iterdir()), ["keep.txt", "project"])
+                    self.assertEqual(marker.read_text(encoding="utf-8"), "keep this file")
+                    self.assertEqual((project_dir / "project.yaml").read_bytes(), project_config)
+                    json_print.assert_not_called()
+
+    @patch("poly.cli_commands.sip_trunks.json_print")
+    @patch.object(AgentStudioProject, "export_sip_trunks")
+    def test_export_accepts_a_filename_in_the_project_parent(self, export_config, _json_print):
+        export_config.return_value = {"account_id": "acct-123", "sip_trunks": []}
+        for flags in ([], ["--json"], ["--force"], ["--force", "--json"]):
+            with self.subTest(flags=flags), TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir).resolve()
+                project_dir = self._write_project_config(root / "project")
+                marker = root / "keep.txt"
+                marker.write_text("keep this file", encoding="utf-8")
+                output = root / "sip-trunks.yaml"
+                if "--force" in flags:
+                    output.write_text("old export", encoding="utf-8")
+                with chdir(project_dir):
+                    args = self._parser().parse_args(
+                        ["sip-trunks", "list", "--output", "../sip-trunks.yaml", *flags]
+                    )
+
+                    SIPTrunksCommand.run(args)
+
+                self.assertEqual(output.read_text(encoding="utf-8"), "[]\n")
+                self.assertEqual(marker.read_text(encoding="utf-8"), "keep this file")
+                self.assertFalse((project_dir / "sip-trunks.yaml").exists())
+
     def test_exported_yaml_can_be_loaded_by_manage(self):
         data = {
             "account_id": "pod-point-uk",
