@@ -507,14 +507,14 @@ class SIPTrunksCommandTest(unittest.TestCase):
             (project_dir / "sip-trunks.yaml").write_text("[]\n", encoding="utf-8")
             selected = root / "selected.yaml"
             selected.write_text(
-                "- name: Selected carrier\n  default_route: null\n", encoding="utf-8"
+                "- name: Selected carrier\n  default_route: null\n  outbound: null\n", encoding="utf-8"
             )
 
             with chdir(root):
                 loaded = load_manage_config(str(project_dir), file_path="selected.yaml")
 
         self.assertEqual(loaded.path, str(selected))
-        self.assertEqual(loaded.trunks, [{"name": "Selected carrier", "default_route": None}])
+        self.assertEqual(loaded.trunks, [{"outbound": None, "name": "Selected carrier", "default_route": None}])
         self.assertEqual((loaded.region, loaded.account_id), ("uk-1", "acct-123"))
 
     def test_standalone_manage_requires_explicit_file_and_context(self):
@@ -701,6 +701,10 @@ class SIPTrunksCommandTest(unittest.TestCase):
                     "encrypted": True,
                     "hostname": "tr-123.sbc.sip.uk.poly.ai",
                     "default_route": {"agent_id": "default-agent", "client_env": "live"},
+                    "outbound": {
+                        "sip_addresses": ["sip:carrier.example.com"],
+                        "default_caller_id": "+442012345678",
+                    },
                     "extensions": [
                         {
                             "extension": extension,
@@ -805,6 +809,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             managed_trunk_data(
                 "tr-123",
                 {
+                    "outbound": None,
                     "default_route": None,
                     "inbound_auth": {
                         "type": "digest",
@@ -827,6 +832,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             config_file.write_text(
                 """- name: Example Trunk
   default_route: null
+  outbound: null
   sip_cidr: [203.0.113.0/24]
   rtp_cidr: [198.51.100.0/24]
   inbound_auth:
@@ -887,6 +893,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 """- id: tr-123
   name: Example Trunk
   default_route: null
+  outbound: null
   hostname: tr-123.example
   sip_cidr: [203.0.113.0/24]
   rtp_cidr: [198.51.100.0/24]
@@ -925,6 +932,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         desired = managed_trunk_data(
             "Primary carrier",
             {
+                "outbound": None,
                 "name": "Primary carrier",
                 "default_route": None,
                 "sip_cidr": ["203.0.113.0/24"],
@@ -949,7 +957,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
     def test_existing_digest_auth_does_not_prompt_or_resend_password(self, prompt):
         desired = managed_trunk_data(
             "tr-123",
-            {"default_route": None, "inbound_auth": {"type": "digest", "username": "alice"}},
+            {"outbound": None, "default_route": None, "inbound_auth": {"type": "digest", "username": "alice"}},
             create=False,
         )
         current = {
@@ -967,7 +975,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
     def test_explicit_rotation_prompts_for_existing_digest_auth(self, prompt):
         desired = managed_trunk_data(
             "tr-123",
-            {"default_route": None, "inbound_auth": {"type": "digest", "username": "alice"}},
+            {"outbound": None, "default_route": None, "inbound_auth": {"type": "digest", "username": "alice"}},
             create=False,
         )
         current = {
@@ -983,7 +991,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     def test_auth_type_none_disables_current_auth(self):
         desired = managed_trunk_data(
-            "tr-123", {"default_route": None, "inbound_auth": {"type": "none"}}, create=False
+            "tr-123", {"outbound": None, "default_route": None, "inbound_auth": {"type": "none"}}, create=False
         )
         patch_data = trunk_patch(
             {
@@ -1022,6 +1030,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         self.assertEqual(result["sip_trunks"][0]["extensions"], [])
         self.assertIsNone(result["sip_trunks"][0]["default_route"])
+        self.assertIsNone(result["sip_trunks"][0]["outbound"])
 
     @patch("poly.output.console.console")
     @patch("poly.output.console.info")
@@ -1110,6 +1119,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             config_file.write_text(
                 """- name: Primary carrier
   default_route: null
+  outbound: null
   sip_cidr: [203.0.113.0/24]
   rtp_cidr: [198.51.100.0/24]
 """,
@@ -1165,6 +1175,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 """# Carrier connection
 - name: "Primary carrier"
   default_route: null
+  outbound: null
   sip_cidr: [203.0.113.0/24]
   rtp_cidr: [198.51.100.0/24]
   inbound_auth:
@@ -1230,6 +1241,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 """- id: tr-123
   name: Primary carrier
   default_route: null
+  outbound: null
   sip_cidr: [203.0.113.0/24]
   rtp_cidr: [198.51.100.0/24]
   encrypted: true
@@ -1303,6 +1315,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 """- id: tr-managed
   name: Primary carrier
   default_route: null
+  outbound: null
   sip_cidr: [203.0.113.0/24]
   rtp_cidr: [198.51.100.0/24]
   encrypted: false
