@@ -59,28 +59,18 @@ def _read_project_config(path: str) -> "AgentStudioProject | None":
     return read_project_config(base_path)
 
 
-def resolve_account_context(
-    path: str,
-    *,
-    account_id: str | None = None,
-    region: str | None = None,
-) -> AccountContext:
-    """Resolve explicit overrides or account and region from the current project."""
-    if account_id is None or region is None:
-        project = _read_project_config(path)
-        if project is None:
-            raise ValueError(
-                "No project configuration found. Run from an ADK project or pass both "
-                "--account-id and --region."
-            )
-        if account_id is None:
-            account_id = project.account_id
-        if region is None:
-            region = project.region
-
-    if not account_id:
-        raise ValueError("An account ID is required.")
-    return AccountContext(region=validate_sip_trunk_region(region), account_id=account_id)
+def resolve_account_context(path: str) -> AccountContext:
+    """Read the account and region from the selected project."""
+    project = _read_project_config(path)
+    if project is None:
+        raise ValueError(
+            "No project configuration found. Run from an ADK project or use --path to select one."
+        )
+    if not project.account_id:
+        raise ValueError("The selected project must have an account ID.")
+    return AccountContext(
+        region=validate_sip_trunk_region(project.region), account_id=project.account_id
+    )
 
 
 def find_manage_file(base_path: str, file_path: str | None) -> str:
@@ -94,8 +84,7 @@ def find_manage_file(base_path: str, file_path: str | None) -> str:
     project = _read_project_config(base_path)
     if project is None:
         raise ValueError(
-            "No project configuration found. Run from an ADK project or pass --file "
-            "to select the SIP trunk configuration explicitly."
+            "No project configuration found. Run from an ADK project or use --path to select one."
         )
     project_root = os.path.abspath(project.root_path)
     for directory in (project_root, os.path.dirname(project_root)):
@@ -112,13 +101,11 @@ def load_manage_config(
     path: str,
     *,
     file_path: str | None = None,
-    account_id: str | None = None,
-    region: str | None = None,
 ) -> LoadedManageConfig:
     """Load a SIP trunk YAML file and resolve its account context."""
     from poly.resources.resource_utils import load_yaml
 
-    context = resolve_account_context(path, account_id=account_id, region=region)
+    context = resolve_account_context(path)
     config_path = find_manage_file(path, file_path)
     with open(config_path, "rb") as config_file:
         source = config_file.read()
@@ -128,8 +115,7 @@ def load_manage_config(
         config = []
     if isinstance(config, dict) and "region" in config:
         raise ValueError(
-            "Do not set 'region' in sip-trunks.yaml; it is read from the current project. "
-            "Remove it; use --region only to override the project region."
+            "Do not set 'region' in sip-trunks.yaml; it is read from the selected project."
         )
     if not isinstance(config, list) or not all(isinstance(trunk, dict) for trunk in config):
         raise ValueError("sip-trunks.yaml must contain a top-level list of SIP trunk mappings.")
@@ -222,7 +208,7 @@ def default_export_path(path: str) -> str:
     project = _read_project_config(path)
     if project is None:
         raise ValueError(
-            "No project configuration found. Run from an ADK project or pass --output FILE."
+            "No project configuration found. Run from an ADK project or use --path to select one."
         )
     return os.path.join(os.path.abspath(project.root_path), "sip-trunks.yaml")
 
