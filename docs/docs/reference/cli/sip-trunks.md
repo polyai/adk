@@ -17,9 +17,9 @@ poly sip-trunks get <trunk_id>
 poly sip-trunks delete <trunk_id>
 ~~~
 
-By default, the command reads the account and canonical API region from the current ADK project. It finds the project by walking up from the current working directory, or from `--path` when supplied, so commands also work from project subdirectories. Defaults come only from that project, never from sibling projects or directory names.
+Every subcommand requires an ADK project, which supplies the account and canonical API region. ADK finds the project by checking the current working directory, or `--path` when supplied, then its parents. Commands therefore work from project subdirectories. If no project is found, use `--path /path/to/project`.
 
-`--account-id` (or `--account_id`) and `--region` (`euw-1`, `uk-1`, or `us-1`) each override the corresponding project value. Supplying both lets you run without a project. Standalone `manage` also requires `--file`, and standalone export requires an explicit output filename.
+Project lookup is separate from YAML discovery: after finding the project, `manage` checks only that project's root and its immediate parent for `sip-trunks.yaml`. `--file` explicitly selects the YAML file; it does not select the project.
 
 ## `poly sip-trunks list`
 
@@ -33,19 +33,18 @@ poly sip-trunks list --output
 poly sip-trunks list --output ../sip-trunks.yaml  # shared export, run from project root
 poly sip-trunks list --output export.yaml
 poly sip-trunks list --output --force
-poly sip-trunks list --account-id my-account --region uk-1 --json
+poly sip-trunks list --path /path/to/project --json
 ~~~
 
 The export includes trunk IDs, hostnames, CIDRs, readable authentication state (including the digest realm), default routes, outbound settings, and all extension bindings. Every exported trunk includes `default_route` and `outbound`, each set to `null` when absent from the API response. Creation and update timestamps are omitted. Export the current configuration, edit the desired settings, then pass the file back to `manage` to apply them. An outbound mapping describes the complete desired outbound configuration. SIP passwords and tokens are never returned by the API and therefore cannot appear in the export.
 
-The export uses a top-level list without account or region fields. Each file describes trunks for one account and region, including all their extension bindings; the current project does not filter routes by agent.
+The export uses a top-level list. A SIP trunk can serve multiple projects in the same account and region, so the export includes all its extension routes, including routes to other projects. `manage` treats an `extensions` list as complete: filtering it to the current project's routes would schedule the other projects' bindings for deletion.
 
-When `--output` is passed without a filename, the export goes to `sip-trunks.yaml` in the project root, even when run from a project subdirectory. An explicit output filename is relative to the current working directory and works with or without a project. Exporting without a project requires both context flags and an explicit output filename. Overwriting an existing file requires `--force`, including with `--json`.
+When `--output` is passed without a filename, the export goes to `sip-trunks.yaml` in the project root, even when run from a project subdirectory. An explicit output filename is relative to the current working directory. Overwriting an existing file requires `--force`, including with `--json`.
 
 | Flag | Description |
 |---|---|
-| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account. |
-| `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
+| `--path PATH` | Starting directory for project lookup. Defaults to the current working directory. |
 | `-o`, `--output [FILE]` | Write reusable YAML to `FILE`. Without `FILE`, write `sip-trunks.yaml` in the project root. Explicit paths are relative to the current working directory. |
 | `--force` | Overwrite an existing output file. |
 
@@ -140,9 +139,9 @@ Place `sip-trunks.yaml` in the project root or its immediate parent. The parent 
       client_env: live
 ~~~
 
-`manage` searches the project root for `sip-trunks.yaml`, then its immediate parent, and stops there. This search is the same when running from a project subdirectory. `--file` selects a file relative to the current working directory; it does not change the account or region. Without a project, supply `--account-id`, `--region`, and `--file`.
+After finding the project, `manage` checks for `sip-trunks.yaml` in that project's root, then its immediate parent, and stops there. This file search is the same when running from a project subdirectory. `--file` selects a YAML file relative to the current working directory; it does not select the project or change its account or region.
 
-The YAML contains neither account nor region fields. All entries use the selected account and region, and routes are not filtered by the current project's agent.
+Use separate YAML files for different accounts or regions, selecting the appropriate file with `--file` when needed.
 
 Every trunk mapping must explicitly include a top-level `default_route` key. A missing or invalid value is rejected before any API calls. Set it to a mapping with required `agent_id` and `client_env` fields, as above. The environment must be `sandbox`, `pre-release`, or `live`. An optional `variant_id` selects a variant; omitting it uses the agent's default variant.
 
@@ -152,7 +151,7 @@ An extension always takes precedence over the default route. Calls to numbers wi
 default_route: null
 ~~~
 
-For a new trunk, `null` creates it without a default route. For an existing trunk, it removes the current route; if the trunk already has no default route, it makes no change.
+For a new trunk, `null` creates it without a default route. For an existing trunk, it removes the current default route; if the trunk already has no default route, it makes no change.
 
 Every trunk mapping must also explicitly include a top-level `outbound` key. A missing or invalid value is rejected before any API calls. To enable outbound calling, use a mapping with:
 
@@ -194,8 +193,7 @@ Use `type: none` to explicitly disable the trunk's current inbound authenticatio
 
 | Flag | Description |
 |---|---|
-| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account. |
-| `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
+| `--path PATH` | Starting directory for project lookup. Defaults to the current working directory. |
 | `--file` | Configuration file, relative to the current working directory. Defaults to `sip-trunks.yaml` in the project root, then its immediate parent. |
 | `--rotate-auth TRUNK_ID` | Prompt for and rotate credentials for this YAML-declared trunk. |
 | `-f`, `--force` | Apply the planned changes without prompting for confirmation. |
@@ -255,8 +253,7 @@ poly sip-trunks get <trunk_id> --json
 
 | Flag | Description |
 |---|---|
-| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account. |
-| `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
+| `--path PATH` | Starting directory for project lookup. Defaults to the current working directory. |
 
 `--json` output shape:
 
@@ -316,8 +313,7 @@ poly sip-trunks delete <trunk_id> --json
 
 | Flag | Description |
 |---|---|
-| `--account-id`, `--account_id` | PolyAI account ID. Defaults to the current project's account. |
-| `--region` | Account region: `euw-1`, `uk-1`, or `us-1`. Defaults to project metadata. |
+| `--path PATH` | Starting directory for project lookup. Defaults to the current working directory. |
 | `-f`, `--force` | Delete without prompting for confirmation. |
 
 `--json` output shape:

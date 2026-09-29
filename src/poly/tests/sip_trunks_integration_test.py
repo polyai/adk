@@ -187,6 +187,11 @@ def test_manage_creates_shared_trunk_and_persists_metadata(
 def test_list_preserves_routes_to_multiple_projects(
     tmp_path, capsys, inbound, expected_default_route, outbound
 ):
+    project_dir = tmp_path / "current-project"
+    project_dir.mkdir()
+    (project_dir / "project.yaml").write_text(
+        "project_id: project-1\naccount_id: acct-123\nregion: uk-1\n"
+    )
     remote_trunk = {"id": "tr-123", "name": "Shared carrier", "inbound": inbound}
     if outbound is not None:
         remote_trunk["outbound"] = outbound
@@ -212,9 +217,7 @@ def test_list_preserves_routes_to_multiple_projects(
         ) as request,
         patch("poly.handlers.interface.SyncClientHandler") as sync_client,
     ):
-        SIPTrunksCommand.run(
-            sip_args(tmp_path, "list", "--account-id", "acct-123", "--region", "uk-1")
-        )
+        SIPTrunksCommand.run(sip_args(project_dir, "list"))
 
     assert request.call_args_list == [
         call("uk-1", "/v1/accounts/acct-123/telephony/sip-trunks"),
