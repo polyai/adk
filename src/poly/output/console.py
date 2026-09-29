@@ -1234,7 +1234,7 @@ def print_sip_trunk_detail(trunk: dict[str, Any], extensions: list[dict[str, Any
     details.add_row(
         "Outbound SIP addresses", ", ".join(outbound.get("sip_addresses") or []) or "none"
     )
-    details.add_row("Default caller ID", outbound.get("default_caller_id") or "none")
+    details.add_row("Outbound Default Caller ID", outbound.get("default_caller_id") or "none")
     details.add_row("Created", str(trunk.get("created_at") or "—"))
     details.add_row("Updated", str(trunk.get("updated_at") or "—"))
     console.print(details)
