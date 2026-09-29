@@ -228,6 +228,11 @@ def write_export(
         if output in {None, PROJECT_DEFAULT_OUTPUT}
         else os.path.abspath(output)
     )
+    if os.path.isdir(output_path):
+        raise ValueError(
+            f"Output path is a directory: {output_path}. Specify a filename, "
+            f"for example: {os.path.join(output_path, 'sip-trunks.yaml')}"
+        )
     if os.path.exists(output_path) and not force:
         raise FileExistsError(f"Refusing to overwrite {output_path}. Pass --force to replace it.")
     parent = os.path.dirname(output_path)
