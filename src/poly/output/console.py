@@ -1194,6 +1194,7 @@ def print_sip_trunks(config: dict[str, Any]) -> None:
     table.add_column("Encrypted")
     table.add_column("Auth")
     table.add_column("Default route")
+    table.add_column("Outbound")
     table.add_column("Extensions", justify="right")
     for trunk in config["sip_trunks"]:
         auth = trunk.get("inbound_auth") or {"type": "none"}
@@ -1207,6 +1208,7 @@ def print_sip_trunks(config: dict[str, Any]) -> None:
             "yes" if trunk.get("encrypted") else "no",
             auth_summary,
             _sip_trunk_route_summary(trunk.get("default_route")),
+            ", ".join((trunk.get("outbound") or {}).get("sip_addresses") or []) or "none",
             str(len(trunk.get("extensions") or [])),
         )
     console.print(table)
@@ -1228,6 +1230,11 @@ def print_sip_trunk_detail(trunk: dict[str, Any], extensions: list[dict[str, Any
     )
     details.add_row("SIP CIDRs", ", ".join(trunk.get("sip_cidr") or []) or "—")
     details.add_row("RTP CIDRs", ", ".join(trunk.get("rtp_cidr") or []) or "—")
+    outbound = trunk.get("outbound") or {}
+    details.add_row(
+        "Outbound SIP addresses", ", ".join(outbound.get("sip_addresses") or []) or "none"
+    )
+    details.add_row("Default caller ID", outbound.get("default_caller_id") or "none")
     details.add_row("Created", str(trunk.get("created_at") or "—"))
     details.add_row("Updated", str(trunk.get("updated_at") or "—"))
     console.print(details)

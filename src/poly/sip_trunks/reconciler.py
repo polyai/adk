@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Protocol
+from urllib.parse import urlsplit
 
 from poly.handlers.interface import AgentStudioInterface
 from poly.sip_trunks.config import file_digest
@@ -103,6 +104,12 @@ def managed_trunk_data(local_name: str, config: dict[str, Any], *, create: bool)
             "Set it to null to disable the default route, or provide an agent mapping."
         )
     default_route = managed_default_route(local_name, config["default_route"])
+    if "outbound" not in config:
+        raise ValueError(
+            f"SIP trunk '{local_name}' is missing required field 'outbound'. "
+            "Set it to null to disable outbound calls, or provide an outbound mapping."
+        )
+    outbound = managed_outbound(local_name, config["outbound"])
     data: dict[str, Any] = {}
     for field in ("name", "sip_cidr", "rtp_cidr", "encrypted"):
         if field in config:
@@ -142,7 +149,64 @@ def managed_trunk_data(local_name: str, config: dict[str, Any], *, create: bool)
     elif not create:
         # Disabling a route is a PATCH operation; new trunks have no route by default.
         data.setdefault("inbound", {})["default_route"] = {"disable": True}
+    if outbound is not None:
+        data["outbound"] = outbound
+    elif not create:
+        # Clearing addresses also clears the default caller ID in the API.
+        data["outbound"] = {"sip_addresses": []}
     return data
+
+
+def managed_outbound(local_name: str, config: Any) -> dict[str, Any] | None:
+    """Validate a complete outbound configuration or an explicit disabled state."""
+    if config is None:
+        return None
+    if not isinstance(config, dict):
+        raise ValueError(f"SIP trunk '{local_name}' outbound must be a mapping or null.")
+    unknown_fields = config.keys() - {"sip_addresses", "default_caller_id"}
+    if unknown_fields:
+        raise ValueError(
+            f"SIP trunk '{local_name}' outbound has unsupported field(s): "
+            f"{', '.join(sorted(map(str, unknown_fields)))}."
+        )
+    addresses = config.get("sip_addresses")
+    if not isinstance(addresses, list) or not 1 <= len(addresses) <= 4:
+        raise ValueError(
+            f"SIP trunk '{local_name}' outbound.sip_addresses must be a list of 1–4 SIP addresses. "
+            "Use outbound: null to disable outbound calls."
+        )
+    for address in addresses:
+        if (
+            not isinstance(address, str)
+            or len(address) > 255
+            or not address.startswith(("sip:", "sips:"))
+            or not address.partition(":")[2].split(";", 1)[0]
+            or any(char in address for char in "@/?#")
+            or any(char.isspace() or not char.isprintable() for char in address)
+        ):
+            raise ValueError(
+                f"SIP trunk '{local_name}' outbound.sip_addresses must contain sip: or sips: "
+                "URIs without a user part, each at most 255 characters."
+            )
+        hostport = address.partition(":")[2].split(";", 1)[0]
+        try:
+            parsed = urlsplit(f"//{hostport}")
+            valid_host = bool(parsed.hostname) and (parsed.port is None or parsed.port > 0)
+        except ValueError:
+            valid_host = False
+        if not valid_host:
+            raise ValueError(
+                f"SIP trunk '{local_name}' outbound.sip_addresses must contain a hostname "
+                "or IP address and an optional port between 1 and 65535."
+            )
+    caller_id = config.get("default_caller_id", "")
+    if not isinstance(caller_id, str) or len(caller_id) > 128:
+        raise ValueError(
+            f"SIP trunk '{local_name}' outbound.default_caller_id must be a string "
+            "of at most 128 characters."
+        )
+    # An omitted caller ID selects no default, including when replacing one.
+    return {"sip_addresses": list(addresses), "default_caller_id": caller_id}
 
 
 def managed_default_route(local_name: str, config: Any) -> dict[str, Any] | None:
@@ -237,6 +301,26 @@ def trunk_patch(
     for field in ("name", "sip_cidr", "rtp_cidr", "encrypted"):
         if field in desired and current.get(field) != desired[field]:
             patch[field] = desired[field]
+
+    if "outbound" in desired:
+        current_outbound = current.get("outbound") or {}
+        desired_outbound = desired["outbound"]
+        if not desired_outbound["sip_addresses"]:
+            if current_outbound.get("sip_addresses") or current_outbound.get("default_caller_id"):
+                patch["outbound"] = {"sip_addresses": []}
+        else:
+            outbound_patch: dict[str, Any] = {}
+            # The API stores destinations as a set and returns them sorted.
+            if set(current_outbound.get("sip_addresses") or []) != set(
+                desired_outbound["sip_addresses"]
+            ):
+                outbound_patch["sip_addresses"] = desired_outbound["sip_addresses"]
+            if (current_outbound.get("default_caller_id") or "") != desired_outbound[
+                "default_caller_id"
+            ]:
+                outbound_patch["default_caller_id"] = desired_outbound["default_caller_id"]
+            if outbound_patch:
+                patch["outbound"] = outbound_patch
 
     current_inbound = current.get("inbound") or {}
     desired_inbound = desired.get("inbound") or {}
@@ -413,6 +497,19 @@ def _trunk_changes(
 ) -> list[PlanChange]:
     changes: list[PlanChange] = []
     for field, value in patch.items():
+        if field == "outbound":
+            current_outbound = current.get("outbound") or {}
+            if value.get("sip_addresses") == []:
+                details = [f"outbound: {current_outbound!r} -> None"]
+            else:
+                details = [
+                    f"outbound.{key}: {current_outbound.get(key)!r} -> {setting!r}"
+                    for key, setting in value.items()
+                ]
+            changes.extend(
+                PlanChange("update", f"trunk {current['id']}", detail) for detail in details
+            )
+            continue
         if field != "inbound":
             detail = f"{field}: {current.get(field)!r} -> {value!r}"
             changes.append(PlanChange("update", f"trunk {current['id']}", detail))
@@ -814,6 +911,16 @@ def export_config(region: str, account_id: str) -> dict[str, Any]:
                 if key in {"agent_id", "client_env", "variant_id"}
             }
             if default_agent is not None
+            else None
+        )
+        outbound = trunk.get("outbound") or {}
+        config["outbound"] = (
+            {
+                key: deepcopy(value)
+                for key, value in outbound.items()
+                if key in {"sip_addresses", "default_caller_id"} and value
+            }
+            if outbound.get("sip_addresses") or outbound.get("default_caller_id")
             else None
         )
         hostname = inbound.get("hostname")

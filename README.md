@@ -241,7 +241,7 @@ carrier-level SIP behaviour.
 
 ### `poly sip-trunks`
 
-Manage account-level SIP trunks and route dialled extensions to agents. The account and
+Manage account-level SIP trunks, inbound routes, and outbound settings. The account and
 API region default to the current ADK project, including when running from a project
 subdirectory. `--account-id` (or `--account_id`) and `--region` each override the corresponding
 project value. Supplying both lets you run without a project.
@@ -265,6 +265,7 @@ until the API creates the trunk:
   rtp_cidr: [198.51.100.0/24]
   encrypted: true
   default_route: null
+  outbound: null
   inbound_auth:
     type: digest
     username: carrier-user
@@ -309,6 +310,14 @@ An extension always takes precedence over the default route. With no default rou
 unmatched calls are rejected. A missing or invalid `default_route` is rejected before
 any API calls.
 
+Every trunk must also declare `outbound`. Use `null` to disable outbound calling and
+clear its destinations and default caller ID. To enable it, provide a mapping with
+`sip_addresses` containing 1–4 `sip:` or `sips:` server URIs without a user part. Address
+order does not affect the configuration. An optional `default_caller_id` sets the caller
+ID; omitting it clears any existing value.
+An empty mapping or address list is invalid. Missing or invalid `outbound` is rejected
+before any API calls.
+
 `manage` creates or updates entries in the YAML and prints every managed trunk's generated
 hostname when it changes. Before writing, it validates the complete file, displays a diff,
 and asks for confirmation. Use `--force` (or `-f`) to skip confirmation. With `--json`,
@@ -323,10 +332,13 @@ Entries omitted from the file are not deleted; use `delete` explicitly for trunk
 extension for deletion in the confirmation diff. Omitting the entire `extensions` key
 leaves the trunk's extensions unmanaged. The configuration uses the top-level list shown above.
 
-`list` and `get` display each trunk's default route. With `--output`, `list` exports trunk
-IDs, hostnames, CIDRs, authentication state, default routes, and extensions in the same
-schema consumed by `manage`. Every exported trunk includes `default_route`, using `null`
-when it is disabled.
+`list` and `get` display each trunk's default route and outbound SIP addresses; `get`
+also displays its default caller ID. With `--output`, `list` exports trunk IDs, hostnames,
+CIDRs, authentication state, default routes, outbound settings, and
+extensions in the same schema consumed by `manage`. Every exported trunk includes
+`default_route` and `outbound`, each using `null` when disabled. Export, edit the desired
+settings, then run `manage` to apply them. An outbound mapping describes the complete
+desired outbound configuration.
 Without a filename, `--output` writes `sip-trunks.yaml` in the project root. An explicit
 filename is relative to the current working directory and is required for export without
 a project. Existing files are protected unless `--force` is used, including with `--json`.
