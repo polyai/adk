@@ -264,6 +264,7 @@ until the API creates the trunk:
   sip_cidr: [203.0.113.0/24]
   rtp_cidr: [198.51.100.0/24]
   encrypted: true
+  default_route: null
   inbound_auth:
     type: digest
     username: carrier-user
@@ -292,6 +293,22 @@ and stops there. `--file` selects a file relative to the current working directo
 changing the account or region. Without a project, `manage` requires `--account-id`,
 `--region`, and `--file`.
 
+Every trunk must explicitly declare `default_route`. Use `null` to disable it: a new
+trunk has no default route, and an existing route is removed. To route calls whose dialled
+number has no extension to an agent, use:
+
+```yaml
+default_route:
+  agent_id: my-project
+  client_env: live
+```
+
+`agent_id` and `client_env` are required; the environment must be `sandbox`, `pre-release`,
+or `live`. An optional `variant_id` selects a variant; omitting it uses the default variant.
+An extension always takes precedence over the default route. With no default route,
+unmatched calls are rejected. A missing or invalid `default_route` is rejected before
+any API calls.
+
 `manage` creates or updates entries in the YAML and prints every managed trunk's generated
 hostname when it changes. Before writing, it validates the complete file, displays a diff,
 and asks for confirmation. Use `--force` (or `-f`) to skip confirmation. With `--json`,
@@ -306,8 +323,10 @@ Entries omitted from the file are not deleted; use `delete` explicitly for trunk
 extension for deletion in the confirmation diff. Omitting the entire `extensions` key
 leaves the trunk's extensions unmanaged. The configuration uses the top-level list shown above.
 
-`list` displays a table by default. With `--output`, it exports trunk IDs, hostnames,
-CIDRs, authentication state, and extensions in the same schema consumed by `manage`.
+`list` and `get` display each trunk's default route. With `--output`, `list` exports trunk
+IDs, hostnames, CIDRs, authentication state, default routes, and extensions in the same
+schema consumed by `manage`. Every exported trunk includes `default_route`, using `null`
+when it is disabled.
 Without a filename, `--output` writes `sip-trunks.yaml` in the project root. An explicit
 filename is relative to the current working directory and is required for export without
 a project. Existing files are protected unless `--force` is used, including with `--json`.
@@ -320,7 +339,7 @@ never resend existing credentials; use `--rotate-auth <trunk_id>` to rotate them
 the result is printed as JSON.
 
 The YAML contains neither account nor region fields. Each file describes trunks for one
-account and region, including their extension routes to any agents; the current project
+account and region, including their routes to any agents; the current project
 does not filter those routes. Only the current project's metadata supplies defaults,
 regardless of the YAML location or parent directory name.
 

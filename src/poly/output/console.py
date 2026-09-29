@@ -1175,6 +1175,16 @@ def _sip_trunk_auth_summary(inbound: dict[str, Any]) -> str:
     return "none"
 
 
+def _sip_trunk_route_summary(agent: dict[str, Any] | None) -> str:
+    """Summarize a trunk's default agent target."""
+    if not agent:
+        return "none"
+    target = f"{agent['agent_id']} ({agent['client_env']})"
+    if agent.get("variant_id"):
+        target += f", variant {agent['variant_id']}"
+    return target
+
+
 def print_sip_trunks(config: dict[str, Any]) -> None:
     """Print a table of SIP trunks and extension counts."""
     table = Table(box=box.SIMPLE, header_style="bold")
@@ -1183,6 +1193,7 @@ def print_sip_trunks(config: dict[str, Any]) -> None:
     table.add_column("Hostname")
     table.add_column("Encrypted")
     table.add_column("Auth")
+    table.add_column("Default route")
     table.add_column("Extensions", justify="right")
     for trunk in config["sip_trunks"]:
         auth = trunk.get("inbound_auth") or {"type": "none"}
@@ -1195,6 +1206,7 @@ def print_sip_trunks(config: dict[str, Any]) -> None:
             trunk.get("hostname") or "—",
             "yes" if trunk.get("encrypted") else "no",
             auth_summary,
+            _sip_trunk_route_summary(trunk.get("default_route")),
             str(len(trunk.get("extensions") or [])),
         )
     console.print(table)
@@ -1211,6 +1223,9 @@ def print_sip_trunk_detail(trunk: dict[str, Any], extensions: list[dict[str, Any
     details.add_row("Hostname", str(inbound.get("hostname") or "—"))
     details.add_row("Encrypted", "yes" if trunk.get("encrypted") else "no")
     details.add_row("Authentication", _sip_trunk_auth_summary(inbound))
+    details.add_row(
+        "Default route", _sip_trunk_route_summary((inbound.get("default_route") or {}).get("agent"))
+    )
     details.add_row("SIP CIDRs", ", ".join(trunk.get("sip_cidr") or []) or "—")
     details.add_row("RTP CIDRs", ", ".join(trunk.get("rtp_cidr") or []) or "—")
     details.add_row("Created", str(trunk.get("created_at") or "—"))
