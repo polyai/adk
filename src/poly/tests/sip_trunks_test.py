@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import os
 import unittest
 from argparse import Namespace
+from contextlib import chdir
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
@@ -501,7 +502,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     def test_explicit_file_is_relative_to_cwd_and_bypasses_discovery(self):
         with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
+            root = Path(temp_dir).resolve()
             project_dir = self._write_project_config(root / "project")
             (project_dir / "sip-trunks.yaml").write_text("[]\n", encoding="utf-8")
             selected = root / "selected.yaml"
@@ -509,9 +510,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 "- name: Selected carrier\n  default_route: null\n", encoding="utf-8"
             )
 
-            loaded = load_manage_config(
-                str(project_dir), file_path=os.path.relpath(selected, os.getcwd())
-            )
+            with chdir(root):
+                loaded = load_manage_config(str(project_dir), file_path="selected.yaml")
 
         self.assertEqual(loaded.path, str(selected))
         self.assertEqual(loaded.trunks, [{"name": "Selected carrier", "default_route": None}])
