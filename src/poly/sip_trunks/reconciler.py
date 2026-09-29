@@ -94,9 +94,15 @@ def managed_trunk_data(local_name: str, config: dict[str, Any], *, create: bool)
         raise ValueError(f"SIP trunk '{local_name}' must contain a mapping.")
     if "inbound" in config:
         raise ValueError(
-            f"SIP trunk '{local_name}' must use 'inbound_auth' instead of 'inbound' "
+            f"SIP trunk '{local_name}' must use 'inbound_auth' and 'default_route' instead of 'inbound' "
             "in sip-trunks.yaml."
         )
+    if "default_route" not in config:
+        raise ValueError(
+            f"SIP trunk '{local_name}' is missing required field 'default_route'. "
+            "Set it to null to disable the default route, or provide an agent mapping."
+        )
+    default_route = managed_default_route(local_name, config["default_route"])
     data: dict[str, Any] = {}
     for field in ("name", "sip_cidr", "rtp_cidr", "encrypted"):
         if field in config:
@@ -130,21 +136,58 @@ def managed_trunk_data(local_name: str, config: dict[str, Any], *, create: bool)
             raise ValueError(
                 f"SIP trunk '{local_name}' inbound_auth.type must be digest, token, or none."
             )
+
+    if default_route is not None:
+        data.setdefault("inbound", {})["default_route"] = {"agent": default_route}
+    elif not create:
+        # Disabling a route is a PATCH operation; new trunks have no route by default.
+        data.setdefault("inbound", {})["default_route"] = {"disable": True}
     return data
 
 
-def managed_agent_data(local_name: str, config: dict[str, Any]) -> dict[str, Any]:
-    """Validate and translate an extension's agent target."""
+def managed_default_route(local_name: str, config: Any) -> dict[str, Any] | None:
+    """Validate an explicit default agent target or a disabled route."""
+    if config is None:
+        return None
     if not isinstance(config, dict):
-        raise ValueError(f"Extension '{local_name}' must contain a mapping.")
+        raise ValueError(
+            f"SIP trunk '{local_name}' default_route must be an agent mapping or null."
+        )
+    unknown_fields = config.keys() - {"agent_id", "client_env", "variant_id"}
+    if unknown_fields:
+        raise ValueError(
+            f"SIP trunk '{local_name}' default_route has unsupported field(s): "
+            f"{', '.join(sorted(map(str, unknown_fields)))}."
+        )
+    for field, value in config.items():
+        if not isinstance(value, str) or len(value) > 255:
+            raise ValueError(
+                f"SIP trunk '{local_name}' default_route.{field} must be a string "
+                "of at most 255 characters."
+            )
+    if "agent_id" in config and not config["agent_id"].strip():
+        raise ValueError(f"SIP trunk '{local_name}' default_route.agent_id must not be empty.")
+    agent = managed_agent_data(local_name, config, resource="Default route for SIP trunk")
+    # Make selecting the default variant explicit, including when replacing a
+    # route that previously selected a named variant.
+    agent.setdefault("variant_id", "")
+    return agent
+
+
+def managed_agent_data(
+    local_name: str, config: dict[str, Any], *, resource: str = "Extension"
+) -> dict[str, Any]:
+    """Validate and translate an agent target."""
+    if not isinstance(config, dict):
+        raise ValueError(f"{resource} '{local_name}' must contain a mapping.")
     missing = [field for field in ("agent_id", "client_env") if not config.get(field)]
     if missing:
         raise ValueError(
-            f"Extension '{local_name}' is missing required field(s): {', '.join(missing)}"
+            f"{resource} '{local_name}' is missing required field(s): {', '.join(missing)}"
         )
     if config["client_env"] not in {"sandbox", "pre-release", "live"}:
         raise ValueError(
-            f"Extension '{local_name}' client_env must be sandbox, pre-release, or live."
+            f"{resource} '{local_name}' client_env must be sandbox, pre-release, or live."
         )
     agent = {"agent_id": config["agent_id"], "client_env": config["client_env"]}
     if "variant_id" in config:
@@ -195,17 +238,16 @@ def trunk_patch(
         if field in desired and current.get(field) != desired[field]:
             patch[field] = desired[field]
 
+    current_inbound = current.get("inbound") or {}
+    desired_inbound = desired.get("inbound") or {}
+    inbound_patch: dict[str, Any] = {}
     if desired.get("_disable_auth"):
-        current_inbound = current.get("inbound") or {}
         if (current_inbound.get("sip_auth") or {}).get("enabled"):
-            patch["inbound"] = {"sip_auth": {"disable": True}}
+            inbound_patch["sip_auth"] = {"disable": True}
         elif (current_inbound.get("sip_token_auth") or {}).get("enabled"):
-            patch["inbound"] = {"sip_token_auth": {"disable": True}}
-        return patch
+            inbound_patch["sip_token_auth"] = {"disable": True}
 
-    desired_inbound = desired.get("inbound")
-    if desired_inbound:
-        current_inbound = current.get("inbound") or {}
+    else:
         if "sip_auth" in desired_inbound:
             desired_auth = desired_inbound["sip_auth"]
             current_auth = current_inbound.get("sip_auth") or {}
@@ -217,11 +259,29 @@ def trunk_patch(
                     and current_auth.get("username") != desired_auth["username"]
                 )
             ):
-                patch["inbound"] = desired_inbound
+                inbound_patch["sip_auth"] = desired_auth
         elif "sip_token_auth" in desired_inbound:
             current_auth = current_inbound.get("sip_token_auth") or {}
             if secret_supplied or not current_auth.get("enabled"):
-                patch["inbound"] = desired_inbound
+                inbound_patch["sip_token_auth"] = desired_inbound["sip_token_auth"]
+
+    if "default_route" in desired_inbound:
+        desired_route = desired_inbound["default_route"]
+        current_route = current_inbound.get("default_route") or {}
+        if desired_route.get("disable"):
+            if current_route:
+                inbound_patch["default_route"] = desired_route
+        else:
+            agent = desired_route["agent"]
+            # A default route declares the complete target; an omitted variant
+            # selects the agent's default variant.
+            current_agent, desired_agent = _comparable_agents(
+                current_route.get("agent") or {}, {"variant_id": "", **agent}
+            )
+            if current_agent != desired_agent:
+                inbound_patch["default_route"] = desired_route
+    if inbound_patch:
+        patch["inbound"] = inbound_patch
     return patch
 
 
@@ -241,8 +301,8 @@ def credential_required(
     rotate: bool,
 ) -> bool:
     """Return whether applying a desired auth state requires a new secret."""
-    desired_inbound = desired.get("inbound")
-    if not desired_inbound:
+    desired_inbound = desired.get("inbound") or {}
+    if not any(field in desired_inbound for field in ("sip_auth", "sip_token_auth")):
         if rotate:
             raise ValueError("Digest or token authentication must be declared to rotate it.")
         return False
@@ -353,7 +413,12 @@ def _trunk_changes(
 ) -> list[PlanChange]:
     changes: list[PlanChange] = []
     for field, value in patch.items():
-        if field == "inbound":
+        if field != "inbound":
+            detail = f"{field}: {current.get(field)!r} -> {value!r}"
+            changes.append(PlanChange("update", f"trunk {current['id']}", detail))
+            continue
+
+        if any(auth_field in value for auth_field in ("sip_auth", "sip_token_auth")):
             old_value = auth_type(current.get("inbound") or {})
             if desired.get("_disable_auth"):
                 new_value = "none"
@@ -372,9 +437,14 @@ def _trunk_changes(
                 )
             else:
                 detail = f"authentication: {old_value} -> {new_value}"
-        else:
-            detail = f"{field}: {current.get(field)!r} -> {value!r}"
-        changes.append(PlanChange("update", f"trunk {current['id']}", detail))
+            changes.append(PlanChange("update", f"trunk {current['id']}", detail))
+        if "default_route" in value:
+            current_route = (current.get("inbound") or {}).get("default_route") or {}
+            detail = (
+                f"default route: {current_route.get('agent')!r} -> "
+                f"{value['default_route'].get('agent')!r}"
+            )
+            changes.append(PlanChange("update", f"trunk {current['id']}", detail))
     return changes
 
 
@@ -488,7 +558,9 @@ def build_manage_plan(
             current = matches[0] if matches else None
 
         rotate = bool(current and rotate_auth == current.get("id"))
-        if rotate and not desired.get("inbound"):
+        if rotate and not any(
+            field in (desired.get("inbound") or {}) for field in ("sip_auth", "sip_token_auth")
+        ):
             raise ValueError(
                 f"SIP trunk '{local_name}' must declare digest or token authentication "
                 "to rotate credentials."
@@ -618,7 +690,11 @@ def apply_manage_plan(
                 raise ValueError(
                     f"A credential is required for SIP trunk '{operation.local_name}'."
                 )
-            payload["inbound"] = desired["inbound"]
+            # Add prompted credentials without replacing an independent route
+            # change or resending the desired route when it is unchanged.
+            for field in ("sip_auth", "sip_token_auth"):
+                if field in desired["inbound"]:
+                    payload.setdefault("inbound", {})[field] = desired["inbound"][field]
         prepared.append((desired, payload))
 
     # A user may spend time entering multiple credentials. Recheck after the
@@ -730,6 +806,16 @@ def export_config(region: str, account_id: str) -> dict[str, Any]:
             "encrypted": trunk.get("encrypted", True),
         }
         inbound = trunk.get("inbound") or {}
+        default_agent = (inbound.get("default_route") or {}).get("agent")
+        config["default_route"] = (
+            {
+                key: value
+                for key, value in default_agent.items()
+                if key in {"agent_id", "client_env", "variant_id"}
+            }
+            if default_agent is not None
+            else None
+        )
         hostname = inbound.get("hostname")
         if hostname:
             config["hostname"] = hostname
