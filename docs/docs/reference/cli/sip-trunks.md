@@ -5,7 +5,7 @@ description: Reference for the `poly sip-trunks` command.
 
 # `poly sip-trunks`
 
-Manage account-level SIP trunks, default routes, and extension-to-agent routes through the SIP Trunking API. `poly sip-trunks` requires a subcommand.
+Manage account-level SIP trunks, default routes, outbound settings, and extension-to-agent routes through the SIP Trunking API. `poly sip-trunks` requires a subcommand.
 
 Examples:
 
@@ -23,7 +23,7 @@ By default, the command reads the account and canonical API region from the curr
 
 ## `poly sip-trunks list`
 
-List the account's SIP trunks, including their default routes, in a summary table, or export their configuration to a reusable YAML file.
+List the account's SIP trunks, including their default routes and outbound SIP addresses, in a summary table, or export their configuration to a reusable YAML file.
 
 Examples:
 
@@ -36,7 +36,7 @@ poly sip-trunks list --output --force
 poly sip-trunks list --account-id my-account --region uk-1 --json
 ~~~
 
-The export includes trunk IDs, hostnames, CIDRs, readable authentication state (including the digest realm), default routes, and all extension bindings. Every exported trunk includes `default_route`, using `null` when the trunk has no default route. Creation and update timestamps are omitted. The file can be passed directly back to `manage`. SIP passwords and tokens are never returned by the API and therefore cannot appear in the export.
+The export includes trunk IDs, hostnames, CIDRs, readable authentication state (including the digest realm), default routes, outbound settings, and all extension bindings. Every exported trunk includes `default_route` and `outbound`, each set to `null` when absent from the API response. Creation and update timestamps are omitted. Export the current configuration, edit the desired settings, then pass the file back to `manage` to apply them. An outbound mapping describes the complete desired outbound configuration. SIP passwords and tokens are never returned by the API and therefore cannot appear in the export.
 
 The export uses a top-level list without account or region fields. Each file describes trunks for one account and region, including all their extension bindings; the current project does not filter routes by agent.
 
@@ -67,6 +67,10 @@ When `--output` is passed without a filename, the export goes to `sip-trunks.yam
         "client_env": "live",
         "variant_id": ""
       },
+      "outbound": {
+        "sip_addresses": ["sip:sbc.example.com:5060"],
+        "default_caller_id": "+442079460000"
+      },
       "inbound_auth": {
         "type": "digest",
         "username": "carrier-user",
@@ -96,7 +100,7 @@ With `--output`, the JSON response describes the written file:
 
 ## `poly sip-trunks manage`
 
-Create or update SIP trunks, default routes, and extension bindings from a YAML file for one account and region.
+Create or update SIP trunks, default routes, outbound settings, and extension bindings from a YAML file for one account and region.
 
 Examples:
 
@@ -122,6 +126,10 @@ Place `sip-trunks.yaml` in the project root or its immediate parent. The parent 
   default_route:
     agent_id: fallback-agent
     client_env: live
+  outbound:
+    sip_addresses:
+      - sip:sbc.example.com:5060
+    default_caller_id: "+442079460000"
   inbound_auth:
     type: digest
     username: carrier-user
@@ -145,6 +153,19 @@ default_route: null
 ~~~
 
 For a new trunk, `null` creates it without a default route. For an existing trunk, it removes the current route; if the trunk already has no default route, it makes no change.
+
+Every trunk mapping must also explicitly include a top-level `outbound` key. A missing or invalid value is rejected before any API calls. To enable outbound calling, use a mapping with:
+
+- `sip_addresses`: a required list of 1–4 `sip:` or `sips:` server URIs, each at most 255 characters. A URI may include a port and transport parameter, but must not contain a user part such as `user@`. Address order does not affect the configuration.
+- `default_caller_id`: an optional string of at most 128 characters. Omitting it, or setting it to an empty string, clears any existing default caller ID.
+
+The mapping describes the complete desired outbound configuration. To disable outbound calling and clear both the destinations and default caller ID, declare:
+
+~~~yaml
+outbound: null
+~~~
+
+For a new trunk, `null` creates it without outbound configuration. For an existing trunk, it removes that configuration; if outbound is already absent, it makes no change. An empty mapping or empty `sip_addresses` list is invalid in YAML; use `outbound: null` to disable it.
 
 `manage` first validates the complete file and calculates a diff without writing or prompting for credentials. By default, it displays the planned trunk, extension, credential-rotation, and local metadata changes, then asks whether to continue. After confirmation it creates missing trunks and extensions and patches changed ones. Use `--force` to skip confirmation. With `--json`, it automatically skips confirmation, applies the planned changes, and prints the result as JSON.
 
@@ -219,7 +240,7 @@ When there are no changes:
 
 ## `poly sip-trunks get`
 
-Display a detailed trunk table, including its default route, followed by its extension bindings.
+Display a detailed trunk table, including its default route, outbound SIP addresses, and default caller ID, followed by its extension bindings.
 
 Examples:
 
@@ -264,12 +285,16 @@ poly sip-trunks get <trunk_id> --json
       }
     }
   },
+  "outbound": {
+    "sip_addresses": ["sip:sbc.example.com:5060"],
+    "default_caller_id": "+442079460000"
+  },
   "created_at": "2026-08-12T12:00:00Z",
   "updated_at": "2026-08-12T12:01:00Z"
 }
 ~~~
 
-JSON mode returns the trunk API response directly. `inbound.default_route` is present only when a default route is configured. It does not add the separately fetched extension bindings shown in the table output; use `list --json` for configuration that includes extensions.
+JSON mode returns the trunk API response directly. `inbound.default_route` and `outbound` are omitted when their respective settings are absent. The response does not add the separately fetched extension bindings shown in the table output; use `list --json` for configuration that includes extensions and explicit `null` values for disabled default routes and outbound settings.
 
 ## `poly sip-trunks delete`
 

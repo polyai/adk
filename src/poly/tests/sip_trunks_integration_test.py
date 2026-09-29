@@ -30,7 +30,10 @@ def sip_args(path, action, *extra):
 
 
 @pytest.mark.parametrize("disable_default_route", [False, True])
-def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys, disable_default_route):
+@pytest.mark.parametrize("disable_outbound", [False, True])
+def test_manage_creates_shared_trunk_and_persists_metadata(
+    tmp_path, capsys, disable_default_route, disable_outbound
+):
     project_dir = tmp_path / "current-project"
     project_dir.mkdir()
     (project_dir / "project.yaml").write_text(
@@ -50,10 +53,17 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys, dis
         "    client_env: live\n"
         "    variant_id: variant-1\n"
     )
+    outbound_yaml = (
+        "  outbound: null\n"
+        if disable_outbound
+        else "  outbound:\n"
+        "    sip_addresses: ['sip:carrier.example.com', 'sip:backup.example.com']\n"
+        "    default_caller_id: '+441234567890'\n"
+    )
     config_path.write_text(
         "- name: Shared carrier\n"
         "  sip_cidr: [203.0.113.0/24]\n"
-        "  rtp_cidr: [198.51.100.0/24]\n" + route_yaml + "  extensions:\n"
+        "  rtp_cidr: [198.51.100.0/24]\n" + route_yaml + outbound_yaml + "  extensions:\n"
         "    - extension: '1000'\n"
         "      agent_id: project-1\n"
         "      client_env: live\n"
@@ -91,6 +101,13 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys, dis
             "variant_id": "variant-1",
         }
         expected_create["inbound"] = {"default_route": {"agent": expected_default_route}}
+    expected_outbound = None
+    if not disable_outbound:
+        expected_outbound = {
+            "sip_addresses": ["sip:carrier.example.com", "sip:backup.example.com"],
+            "default_caller_id": "+441234567890",
+        }
+        expected_create["outbound"] = expected_outbound
 
     assert request.call_args_list == [
         call("uk-1", endpoint),
@@ -125,6 +142,7 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys, dis
     assert saved[0]["id"] == "tr-123"
     assert saved[0]["hostname"] == "tr-123.example.com"
     assert saved[0]["default_route"] == expected_default_route
+    assert saved[0]["outbound"] == expected_outbound
     assert [route["agent_id"] for route in saved[0]["extensions"]] == ["project-1", "project-3"]
     result = json.loads(capsys.readouterr().out)
     assert result["success"] is True
@@ -156,15 +174,28 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys, dis
         ({}, None),
     ],
 )
+@pytest.mark.parametrize(
+    "outbound",
+    [
+        {
+            "sip_addresses": ["sip:carrier.example.com", "sip:backup.example.com"],
+            "default_caller_id": "+441234567890",
+        },
+        None,
+    ],
+)
 def test_list_preserves_routes_to_multiple_projects(
-    tmp_path, capsys, inbound, expected_default_route
+    tmp_path, capsys, inbound, expected_default_route, outbound
 ):
+    remote_trunk = {"id": "tr-123", "name": "Shared carrier", "inbound": inbound}
+    if outbound is not None:
+        remote_trunk["outbound"] = outbound
     with (
         patch.object(
             PlatformAPIHandler,
             "make_request",
             side_effect=[
-                {"sip_trunks": [{"id": "tr-123", "name": "Shared carrier", "inbound": inbound}]},
+                {"sip_trunks": [remote_trunk]},
                 {
                     "extensions": [
                         {
@@ -193,6 +224,7 @@ def test_list_preserves_routes_to_multiple_projects(
     result = json.loads(capsys.readouterr().out)
     assert result["account_id"] == "acct-123"
     assert result["sip_trunks"][0]["default_route"] == expected_default_route
+    assert result["sip_trunks"][0]["outbound"] == outbound
     assert result["sip_trunks"][0]["extensions"] == [
         {"extension": "1000", "agent_id": "project-1", "client_env": "live"},
         {"extension": "2000", "agent_id": "project-3", "client_env": "sandbox"},

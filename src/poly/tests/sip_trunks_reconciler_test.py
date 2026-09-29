@@ -60,6 +60,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
         }
         desired = [
             {
+                "outbound": None,
                 "default_route": None,
                 "id": "tr-123",
                 "name": "Primary carrier",
@@ -137,6 +138,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
             "acct-123",
             [
                 {
+                    "outbound": None,
                     "default_route": None,
                     "id": "tr-123",
                     "name": "Primary carrier",
@@ -172,7 +174,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
             "/account/sip-trunks.yaml",
             "uk-1",
             "acct-123",
-            [{"default_route": None, "id": "tr-123", "name": "Primary carrier"}],
+            [{"outbound": None, "default_route": None, "id": "tr-123", "name": "Primary carrier"}],
         )
 
         list_extensions.assert_not_called()
@@ -183,12 +185,14 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
     def test_all_local_entries_are_validated_before_remote_discovery(self, list_trunks):
         desired = [
             {
+                "outbound": None,
                 "default_route": None,
                 "name": "Valid trunk",
                 "sip_cidr": ["203.0.113.0/24"],
                 "rtp_cidr": ["198.51.100.0/24"],
             },
             {
+                "outbound": None,
                 "default_route": None,
                 "name": "Invalid trunk",
                 "sip_cidr": ["192.0.2.0/24"],
@@ -210,6 +214,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
             "acct-123",
             [
                 {
+                    "outbound": None,
                     "default_route": None,
                     "name": "Primary carrier",
                     "sip_cidr": ["203.0.113.0/24"],
@@ -245,7 +250,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                         "/account/sip-trunks.yaml",
                         "uk-1",
                         "acct-123",
-                        [{"default_route": None, "name": "Primary carrier", **config}],
+                        [{"outbound": None, "default_route": None, "name": "Primary carrier", **config}],
                     )
                 list_trunks.assert_not_called()
 
@@ -264,7 +269,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                         "/account/sip-trunks.yaml",
                         "uk-1",
                         "acct-123",
-                        [{"default_route": None, "name": "Primary carrier", "extensions": extensions}],
+                        [{"outbound": None, "default_route": None, "name": "Primary carrier", "extensions": extensions}],
                     )
                 list_trunks.assert_not_called()
 
@@ -290,7 +295,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
             "/account/sip-trunks.yaml",
             "uk-1",
             "acct-123",
-            [{"default_route": None, "id": "tr-123", "name": "Primary carrier", "extensions": []}],
+            [{"outbound": None, "default_route": None, "id": "tr-123", "name": "Primary carrier", "extensions": []}],
         )
 
         self.assertEqual(
@@ -323,6 +328,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                     managed_trunk_data(
                         "Primary carrier",
                         {
+                            "outbound": None,
                             "default_route": None,
                             "inbound_auth": {"type": "none", secret_field: "secret"},
                         },
@@ -332,8 +338,8 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
     @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_duplicate_trunk_ids_are_rejected_before_remote_discovery(self, list_trunks):
         desired = [
-            {"default_route": None, "id": "tr-123", "name": "First"},
-            {"default_route": None, "id": "tr-123", "name": "Second"},
+            {"outbound": None, "default_route": None, "id": "tr-123", "name": "First"},
+            {"outbound": None, "default_route": None, "id": "tr-123", "name": "Second"},
         ]
 
         with self.assertRaisesRegex(ValueError, "ID 'tr-123'.*more than once"):
@@ -345,12 +351,14 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
     def test_duplicate_idless_trunk_names_are_rejected_before_remote_discovery(self, list_trunks):
         desired = [
             {
+                "outbound": None,
                 "default_route": None,
                 "name": "Primary carrier",
                 "sip_cidr": ["203.0.113.0/24"],
                 "rtp_cidr": ["198.51.100.0/24"],
             },
             {
+                "outbound": None,
                 "default_route": None,
                 "name": "Primary carrier",
                 "sip_cidr": ["192.0.2.0/24"],
@@ -370,7 +378,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                 "/account/sip-trunks.yaml",
                 "uk-1",
                 "acct-123",
-                [{"default_route": None, "id": "tr-deleted", "name": "Deleted trunk"}],
+                [{"outbound": None, "default_route": None, "id": "tr-deleted", "name": "Deleted trunk"}],
             )
 
         self.assertEqual(
@@ -391,8 +399,9 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                 "uk-1",
                 "acct-123",
                 [
-                    {"default_route": None, "id": "tr-123", "name": "New name"},
+                    {"outbound": None, "default_route": None, "id": "tr-123", "name": "New name"},
                     {
+                        "outbound": None,
                         "default_route": None,
                         "name": "Old name",
                         "sip_cidr": ["203.0.113.0/24"],
@@ -416,6 +425,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                 "acct-123",
                 [
                     {
+                        "outbound": None,
                         "default_route": None,
                         "id": "tr-123",
                         "name": "Primary carrier",
@@ -430,7 +440,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "sip-trunks.yaml"
             config_path.write_text(
-                "- name: Primary carrier\n  default_route: null\n", encoding="utf-8"
+                "- name: Primary carrier\n  default_route: null\n  outbound: null\n", encoding="utf-8"
             )
             plan = build_manage_plan(
                 str(config_path),
@@ -438,6 +448,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                 "acct-123",
                 [
                     {
+                        "outbound": None,
                         "default_route": None,
                         "name": "Primary carrier",
                         "sip_cidr": ["203.0.113.0/24"],
@@ -447,7 +458,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                 source_digest=file_digest(str(config_path)),
             )
             config_path.write_text(
-                "- name: Changed carrier\n  default_route: null\n", encoding="utf-8"
+                "- name: Changed carrier\n  default_route: null\n  outbound: null\n", encoding="utf-8"
             )
 
             with self.assertRaisesRegex(ValueError, "changed after.*preview"):
@@ -468,6 +479,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
             "acct-123",
             [
                 {
+                    "outbound": None,
                     "default_route": None,
                     "name": name,
                     "sip_cidr": ["203.0.113.0/24"],
@@ -513,7 +525,7 @@ class SIPTrunkDefaultRouteTest(unittest.TestCase):
         ):
             return build_manage_plan(
                 "/project/sip-trunks.yaml", "uk-1", "acct-123",
-                [{"id": "tr-123", "name": "Primary carrier", "default_route": route, **config}],
+                [{"outbound": None, "id": "tr-123", "name": "Primary carrier", "default_route": route, **config}],
                 rotate_auth="tr-123" if rotate else None,
             )
 
@@ -524,6 +536,7 @@ class SIPTrunkDefaultRouteTest(unittest.TestCase):
                 with self.subTest(missing_index=missing_index, identified=identified):
                     missing = {
                         "name": "Missing route",
+                        "outbound": None,
                         "sip_cidr": ["203.0.113.0/24"],
                         "rtp_cidr": ["198.51.100.0/24"],
                     }
@@ -554,7 +567,7 @@ class SIPTrunkDefaultRouteTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "[Dd]efault[_ ]route"):
                     build_manage_plan(
                         "/project/sip-trunks.yaml", "uk-1", "acct-123",
-                        [{"name": "Primary carrier", "default_route": route}],
+                        [{"outbound": None, "name": "Primary carrier", "default_route": route}],
                     )
                 list_trunks.assert_not_called()
 
@@ -741,6 +754,229 @@ class SIPTrunkDefaultRouteTest(unittest.TestCase):
 
         self.assertEqual(plan.changes, ())
         self.assertEqual(plan.trunks[0].extension_operations, ())
+
+
+class SIPTrunkOutboundTest(unittest.TestCase):
+    @staticmethod
+    def _current(**fields):
+        return {
+            "id": "tr-123",
+            "name": "Primary carrier",
+            "sip_cidr": ["203.0.113.0/24"],
+            "rtp_cidr": ["198.51.100.0/24"],
+            "encrypted": True,
+            "inbound": {},
+            **fields,
+        }
+
+    def _plan(self, current, outbound, *, rotate=False, **config):
+        with patch.object(
+            AgentStudioInterface, "list_sip_trunks", return_value={"sip_trunks": [current]}
+        ):
+            return build_manage_plan(
+                "/project/sip-trunks.yaml", "uk-1", "acct-123",
+                [{
+                    "id": "tr-123", "name": "Primary carrier",
+                    "default_route": None, "outbound": outbound, **config,
+                }],
+                rotate_auth="tr-123" if rotate else None,
+            )
+
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
+    def test_every_trunk_requires_outbound_before_remote_discovery(self, list_trunks):
+        for missing_index in (0, 1):
+            for identified in (False, True):
+                with self.subTest(missing_index=missing_index, identified=identified):
+                    missing = {
+                        "name": "Missing outbound", "default_route": None,
+                        "sip_cidr": ["203.0.113.0/24"], "rtp_cidr": ["198.51.100.0/24"],
+                    }
+                    if identified:
+                        missing["id"] = "tr-123"
+                    valid = {**missing, "name": "Valid outbound", "outbound": None}
+                    valid.pop("id", None)
+                    trunks = [missing, valid] if missing_index == 0 else [valid, missing]
+                    with self.assertRaisesRegex(ValueError, "missing required field 'outbound'"):
+                        build_manage_plan("/project/sip-trunks.yaml", "uk-1", "acct-123", trunks)
+                    list_trunks.assert_not_called()
+
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
+    def test_invalid_outbound_is_rejected_before_remote_discovery(self, list_trunks):
+        valid = {"sip_addresses": ["sip:carrier.example.com"]}
+        invalid = [
+            False, "sip:carrier.example.com", [], {}, {"disable": True},
+            {"default_caller_id": "+442012345678"},
+            {"sip_addresses": None}, {"sip_addresses": []},
+            {"sip_addresses": "sip:carrier.example.com"},
+            {"sip_addresses": ["sip:carrier.example.com"] * 5},
+            {**valid, "default_caller_id": None}, {**valid, "default_caller_id": 123},
+            {**valid, "default_caller_id": "1" * 129}, {**valid, "unknown": "value"},
+        ]
+        invalid.extend({"sip_addresses": [address]} for address in (
+            None, 123, "https://carrier.example.com", "sip:", "sip::5060",
+            "sip:;transport=tcp", "sip:user@carrier.example.com",
+            "sip:carrier.example.com ", "sip:carrier.example.com\n",
+            "sip:" + "a" * 252,
+        ))
+        for outbound in invalid:
+            with self.subTest(outbound=outbound):
+                with self.assertRaisesRegex(ValueError, "outbound"):
+                    build_manage_plan(
+                        "/project/sip-trunks.yaml", "uk-1", "acct-123",
+                        [{"name": "Primary carrier", "default_route": None, "outbound": outbound}],
+                    )
+                list_trunks.assert_not_called()
+
+    def test_outbound_creation_preserves_addresses_and_defaults_caller_id(self):
+        addresses = [
+            "sips:secure.example.com:5061", "sip:plain.example.com:5060;transport=tcp",
+            "sip:[2001:db8::1]:5060", "sip:backup.example.com",
+        ]
+        payload = managed_trunk_data(
+            "Primary carrier",
+            {
+                "default_route": None, "outbound": {"sip_addresses": addresses},
+                "sip_cidr": ["203.0.113.0/24"], "rtp_cidr": ["198.51.100.0/24"],
+            },
+            create=True,
+        )
+        self.assertEqual(payload["outbound"], {
+            "sip_addresses": addresses, "default_caller_id": "",
+        })
+        self.assertNotIn("inbound", payload)
+
+    def test_updates_only_changed_outbound_fields(self):
+        old_addresses = ["sip:old.example.com"]
+        new_addresses = ["sips:second.example.com", "sip:first.example.com"]
+        current = self._current(outbound={
+            "sip_addresses": old_addresses, "default_caller_id": "+442012345678",
+        })
+        cases = (
+            ({"sip_addresses": new_addresses, "default_caller_id": "+442012345678"},
+             {"sip_addresses": new_addresses}),
+            ({"sip_addresses": old_addresses, "default_caller_id": "+442087654321"},
+             {"default_caller_id": "+442087654321"}),
+            ({"sip_addresses": old_addresses}, {"default_caller_id": ""}),
+        )
+        for outbound, expected in cases:
+            with self.subTest(outbound=outbound):
+                plan = self._plan(current, outbound)
+                self.assertEqual(plan.trunks[0].payload, {"outbound": expected})
+                self.assertTrue(any("outbound" in change.diff for change in plan.changes))
+                self.assertFalse(plan.trunks[0].credential_required)
+                prompt = MagicMock()
+                with patch.object(
+                    AgentStudioInterface, "update_sip_trunk", return_value=current
+                ) as update:
+                    apply_manage_plan(
+                        plan, prompt_auth_secret=prompt,
+                        persist_trunk_response=MagicMock(return_value=False),
+                    )
+                update.assert_called_once_with("uk-1", "acct-123", "tr-123", {"outbound": expected})
+                prompt.assert_not_called()
+
+    def test_null_outbound_clears_settings_but_does_not_write_when_already_disabled(self):
+        states = (
+            ({}, False), ({"outbound": None}, False), ({"outbound": {}}, False),
+            ({"outbound": {"sip_addresses": [], "default_caller_id": ""}}, False),
+            ({"outbound": {"sip_addresses": ["sip:carrier.example.com"]}}, True),
+            ({"outbound": {"default_caller_id": "+442012345678"}}, True),
+        )
+        for fields, changed in states:
+            with self.subTest(fields=fields):
+                current = self._current(**fields)
+                plan = self._plan(current, None)
+                with patch.object(
+                    AgentStudioInterface, "update_sip_trunk", return_value=current
+                ) as update:
+                    apply_manage_plan(
+                        plan, prompt_auth_secret=MagicMock(),
+                        persist_trunk_response=MagicMock(return_value=False),
+                    )
+                if changed:
+                    update.assert_called_once_with(
+                        "uk-1", "acct-123", "tr-123", {"outbound": {"sip_addresses": []}},
+                    )
+                    self.assertTrue(plan.changes)
+                else:
+                    update.assert_not_called()
+                    self.assertEqual(plan.trunks[0].payload, {})
+                    self.assertEqual(plan.changes, ())
+
+    def test_address_order_duplicates_and_absent_caller_id_do_not_cause_updates(self):
+        addresses = ["sip:first.example.com", "sip:second.example.com"]
+        for caller_fields in ({}, {"default_caller_id": ""}):
+            for desired_addresses in (addresses, addresses[::-1], [*addresses, addresses[0]]):
+                with self.subTest(caller_fields=caller_fields, addresses=desired_addresses):
+                    current = self._current(outbound={"sip_addresses": addresses, **caller_fields})
+                    plan = self._plan(current, {"sip_addresses": desired_addresses})
+                    self.assertEqual(plan.trunks[0].payload, {})
+                    self.assertEqual(plan.changes, ())
+
+    def test_outbound_and_route_changes_survive_credential_rotation(self):
+        existing = {"sip_addresses": ["sip:old.example.com"], "default_caller_id": "+442012345678"}
+        replacement = {"sip_addresses": ["sip:new.example.com"], "default_caller_id": "+442012345678"}
+        target = {"agent_id": "agent-new", "client_env": "live", "variant_id": ""}
+        for outbound, expected_outbound in (
+            (existing, None), (replacement, {"sip_addresses": replacement["sip_addresses"]}),
+            (None, {"sip_addresses": []}),
+        ):
+            with self.subTest(outbound=outbound):
+                current = self._current(outbound=existing, inbound={
+                    "sip_auth": {"enabled": True, "username": "alice"},
+                })
+                plan = self._plan(
+                    current, outbound, rotate=True, default_route=target,
+                    inbound_auth={"type": "digest", "username": "alice"},
+                )
+
+                def supply_secret(_name, _current, desired, *, rotate):
+                    desired["inbound"]["sip_auth"]["password"] = "secret-value"
+                    return True
+
+                prompt = MagicMock(side_effect=supply_secret)
+                expected = {"inbound": {
+                    "sip_auth": {"username": "alice", "password": "secret-value"},
+                    "default_route": {"agent": target},
+                }}
+                if expected_outbound is not None:
+                    expected["outbound"] = expected_outbound
+                with patch.object(
+                    AgentStudioInterface, "update_sip_trunk", return_value=current
+                ) as update:
+                    apply_manage_plan(
+                        plan, prompt_auth_secret=prompt,
+                        persist_trunk_response=MagicMock(return_value=False),
+                    )
+                update.assert_called_once_with("uk-1", "acct-123", "tr-123", expected)
+                prompt.assert_called_once()
+                self.assertNotIn("secret-value", repr(plan))
+
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions", return_value={"extensions": []})
+    def test_exported_outbound_configuration_reconciles_without_changes(self, _list_extensions):
+        addresses = ["sip:first.example.com", "sip:second.example.com"]
+        states = (
+            ({}, None), ({"outbound": None}, None),
+            ({"outbound": {"sip_addresses": [], "default_caller_id": ""}}, None),
+            ({"outbound": {"sip_addresses": addresses}}, {"sip_addresses": addresses}),
+            ({"outbound": {"sip_addresses": addresses, "default_caller_id": ""}},
+             {"sip_addresses": addresses}),
+            ({"outbound": {"sip_addresses": addresses, "default_caller_id": "+442012345678"}},
+             {"sip_addresses": addresses, "default_caller_id": "+442012345678"}),
+        )
+        for fields, expected in states:
+            with self.subTest(fields=fields):
+                current = self._current(**fields)
+                with patch.object(
+                    AgentStudioInterface, "list_sip_trunks", return_value={"sip_trunks": [current]}
+                ):
+                    exported = export_config("uk-1", "acct-123")
+                    self.assertEqual(exported["sip_trunks"][0]["outbound"], expected)
+                    plan = build_manage_plan(
+                        "/project/sip-trunks.yaml", "uk-1", "acct-123", exported["sip_trunks"],
+                    )
+                self.assertEqual(plan.trunks[0].payload, {})
+                self.assertEqual(plan.changes, ())
 
 
 if __name__ == "__main__":
