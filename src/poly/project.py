@@ -4052,9 +4052,9 @@ class AgentStudioProject:
         except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
             return [f"Invalid schema: {e}"]
 
-    # SIP trunks belong to an account and region. Accept the resolved scope
-    # explicitly so these operations also work without a local project and do
-    # not initialize branch synchronization through self.api_handler.
+    # SIP trunks belong to an account and region. Pass the scope resolved from
+    # the selected project without initializing branch synchronization through
+    # self.api_handler.
 
     @staticmethod
     def build_sip_trunk_plan(

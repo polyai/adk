@@ -20,21 +20,6 @@ class SIPTrunksCommand(BaseCommand):
     command = "sip-trunks"
     group = BUILDER_API_GROUP
 
-    @staticmethod
-    def _add_context_arguments(parser: ArgumentParser) -> None:
-        parser.add_argument(
-            "--account-id",
-            "--account_id",
-            dest="account_id",
-            help="PolyAI account ID. Defaults to the current project's account.",
-        )
-        parser.add_argument(
-            "--region",
-            type=str,
-            choices=sip_trunk_config.SIP_TRUNK_REGIONS,
-            help="Account region (euw-1, uk-1, or us-1). Defaults to the current project's region.",
-        )
-
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
         """Register the ``sip-trunks`` subcommand tree."""
@@ -44,7 +29,7 @@ class SIPTrunksCommand(BaseCommand):
             help="Manage SIP trunks and extensions.",
             description=(
                 "Manage account-level SIP trunks and extension routing.\n\n"
-                "Account and region default to the current ADK project.\n\n"
+                "Account and region are read from the selected ADK project.\n\n"
                 "Examples:\n"
                 "  adk sip-trunks manage\n"
                 "  adk sip-trunks list --output\n"
@@ -57,7 +42,6 @@ class SIPTrunksCommand(BaseCommand):
         leaf_parents = [parents.path, parents.json, parents.verbose]
 
         list_parser = actions.add_parser("list", parents=leaf_parents, help="List SIP trunks.")
-        cls._add_context_arguments(list_parser)
         list_parser.add_argument(
             "-o",
             "--output",
@@ -84,7 +68,6 @@ class SIPTrunksCommand(BaseCommand):
                 "Resources omitted from the file are left unchanged."
             ),
         )
-        cls._add_context_arguments(manage_parser)
         manage_parser.add_argument(
             "--file",
             dest="file_path",
@@ -110,13 +93,11 @@ class SIPTrunksCommand(BaseCommand):
         )
 
         get_parser = actions.add_parser("get", parents=leaf_parents, help="Get a SIP trunk.")
-        cls._add_context_arguments(get_parser)
         get_parser.add_argument("trunk_id", help="SIP trunk ID.")
 
         delete_parser = actions.add_parser(
             "delete", parents=leaf_parents, help="Delete a SIP trunk."
         )
-        cls._add_context_arguments(delete_parser)
         delete_parser.add_argument("trunk_id", help="SIP trunk ID.")
         delete_parser.add_argument(
             "--force",
@@ -127,11 +108,7 @@ class SIPTrunksCommand(BaseCommand):
 
     @staticmethod
     def _resolve_context(args: Namespace) -> tuple[str, str]:
-        context = sip_trunk_config.resolve_account_context(
-            args.path,
-            account_id=args.account_id,
-            region=args.region,
-        )
+        context = sip_trunk_config.resolve_account_context(args.path)
         return context.region, context.account_id
 
     @staticmethod
@@ -206,8 +183,6 @@ class SIPTrunksCommand(BaseCommand):
         loaded = sip_trunk_config.load_manage_config(
             args.path,
             file_path=args.file_path,
-            account_id=args.account_id,
-            region=args.region,
         )
         return AgentStudioProject.build_sip_trunk_plan(
             loaded.path,
