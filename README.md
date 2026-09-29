@@ -241,27 +241,22 @@ carrier-level SIP behaviour.
 
 ### `poly sip-trunks`
 
-Manage account-level SIP trunks, inbound routes, and outbound settings. Every command
-requires an ADK project, which supplies the account and API region. ADK finds the project
-by checking the current working directory, or `--path` when supplied, then its parents.
-Commands therefore work from project subdirectories. If no project is found, use
-`--path /path/to/project`.
+Run from an ADK project to manage SIP trunks for its account and region. List the trunks,
+export their configuration, edit the YAML, then apply it:
 
-Place `sip-trunks.yaml` in the project root or its immediate parent. The parent is a
-convenient shared location for projects using the same account and region:
-
-```text
-projects/
-├── sip-trunks.yaml
-└── my-project/
-    └── project.yaml
+```bash
+poly sip-trunks list
+poly sip-trunks list --output                # write project-root sip-trunks.yaml
+# Edit sip-trunks.yaml, then apply:
+poly sip-trunks manage
+poly sip-trunks list --path /path/to/project  # select a project explicitly
 ```
 
-Use separate YAML files for different accounts or regions, selecting the appropriate file
-with `--file` when needed.
+`manage` looks for `sip-trunks.yaml` in the project root, then its immediate parent.
+The parent is useful for sharing configuration between projects in the same account and
+region. Keep separate files for different accounts or regions.
 
-For a new trunk, start with the fields you control. The trunk ID and hostname do not exist
-until the API creates the trunk:
+To create a trunk, add an entry such as:
 
 ```yaml
 - name: Primary carrier
@@ -279,82 +274,17 @@ until the API creates the trunk:
       client_env: live
 ```
 
-```bash
-poly sip-trunks manage
-poly sip-trunks manage --force               # apply without confirmation
-poly sip-trunks manage --rotate-auth <trunk_id>
-poly sip-trunks manage --file ../sip-trunks.yaml
-poly sip-trunks list                         # display a summary table
-poly sip-trunks list --output                # write project-root sip-trunks.yaml
-poly sip-trunks list --output ../sip-trunks.yaml  # shared export, run from project root
-poly sip-trunks list --output export.yaml
-poly sip-trunks get <trunk_id>
-poly sip-trunks delete <trunk_id>             # confirm before deleting
-poly sip-trunks delete <trunk_id> --force     # delete without prompting
-```
+`manage` previews the changes and asks for confirmation. It prompts securely for any
+required credentials and saves generated trunk IDs and hostnames back to the YAML.
+Use `--force` to apply without confirmation; `--json` also skips confirmation.
+The required `default_route` and `outbound` fields use `null` to disable those features.
 
-After finding the project, `manage` checks for `sip-trunks.yaml` in that project's root,
-then its immediate parent, and stops there. `--file` selects a YAML file relative to the
-current working directory; it does not select the project or change its account or region.
+An `extensions` list specifies all bindings to keep; removing an entry deletes that
+binding. Removing a trunk from YAML leaves the live trunk unchanged; use
+`poly sip-trunks delete <trunk_id>` to delete it.
 
-Every trunk must explicitly declare `default_route`. Use `null` to disable it: a new
-trunk has no default route, and an existing trunk's current default route is removed.
-To route calls whose dialled number has no extension to an agent, use:
-
-```yaml
-default_route:
-  agent_id: my-project
-  client_env: live
-```
-
-`agent_id` and `client_env` are required; the environment must be `sandbox`, `pre-release`,
-or `live`. An optional `variant_id` selects a variant; omitting it uses the default variant.
-An extension always takes precedence over the default route. With no default route,
-unmatched calls are rejected. A missing or invalid `default_route` is rejected before
-any API calls.
-
-Every trunk must also declare `outbound`. Use `null` to disable outbound calling and
-clear its destinations and default caller ID. To enable it, provide a mapping with
-`sip_addresses` containing 1–4 `sip:` or `sips:` server URIs without a user part. Address
-order does not affect the configuration. An optional `default_caller_id` sets the caller
-ID; omitting it clears any existing value.
-An empty mapping or address list is invalid. Missing or invalid `outbound` is rejected
-before any API calls.
-
-`manage` creates or updates entries in the YAML and prints every managed trunk's generated
-hostname when it changes. Before writing, it validates the complete file, displays a diff,
-and asks for confirmation. Use `--force` (or `-f`) to skip confirmation. With `--json`,
-confirmation is skipped automatically and `--force` is not required. When everything
-already matches, it prints `Nothing changed.`
-After a new trunk is created successfully, `manage` adds its generated `id` (the trunk ID)
-and `hostname` to the same YAML entry. It also saves the digest `realm` returned by the API.
-These fields are informational and ignored when constructing API writes. Formatting and
-comments are preserved, while creation and update timestamps are intentionally omitted.
-Entries omitted from the file are not deleted; use `delete` explicitly for trunks.
-A SIP trunk can serve multiple projects in the same account and region, so exports include
-all its extension routes, including routes to other projects. An `extensions` list is
-complete: removing an entry schedules that binding for deletion in the confirmation diff.
-Filtering the export to the current project's routes would therefore delete other projects'
-bindings when applied. Omitting the entire `extensions` key leaves the trunk's extensions
-unmanaged. The configuration uses the top-level list shown above.
-
-`list` and `get` display each trunk's default route and outbound SIP addresses; `get`
-also displays its default caller ID. With `--output`, `list` exports trunk IDs, hostnames,
-CIDRs, authentication state, default routes, outbound settings, and
-extensions in the same schema consumed by `manage`. Every exported trunk includes
-`default_route` and `outbound`, each using `null` when disabled. Export, edit the desired
-settings, then run `manage` to apply them. An outbound mapping describes the complete
-desired outbound configuration.
-Without a filename, `--output` writes `sip-trunks.yaml` in the project root. An explicit
-filename is relative to the current working directory. Existing files are protected unless
-`--force` is used, including with `--json`.
-API responses never contain SIP passwords or tokens, so exported files do not contain
-secrets. `inbound_auth.type` is `digest`, `token`, or `none`. `manage` securely prompts
-when a secret is required to create a trunk or change its authentication. Normal updates
-never resend existing credentials; use `--rotate-auth <trunk_id>` to rotate them explicitly.
-`delete` asks for confirmation by default and prints a concise success message. Use `--force`
-(or `-f`) to skip confirmation. With `--json`, confirmation is skipped automatically and
-the result is printed as JSON.
+See the [SIP trunks reference](https://polyai.github.io/adk/reference/cli/sip-trunks/)
+for the full YAML schema, file options, and command reference.
 
 ### `poly docs`
 
