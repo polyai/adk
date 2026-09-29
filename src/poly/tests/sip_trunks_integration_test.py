@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import json
 from unittest.mock import call, patch
 
+import pytest
 from ruamel.yaml import YAML
 
 from poly.cli import AgentStudioCLI
@@ -28,7 +29,8 @@ def sip_args(path, action, *extra):
     )
 
 
-def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys):
+@pytest.mark.parametrize("disable_default_route", [False, True])
+def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys, disable_default_route):
     project_dir = tmp_path / "current-project"
     project_dir.mkdir()
     (project_dir / "project.yaml").write_text(
@@ -40,11 +42,18 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys):
         "project_id: project-2\naccount_id: acct-123\nregion: us-1\n"
     )
     config_path = tmp_path / "sip-trunks.yaml"
+    route_yaml = (
+        "  default_route: null\n"
+        if disable_default_route
+        else "  default_route:\n"
+        "    agent_id: project-4\n"
+        "    client_env: live\n"
+        "    variant_id: variant-1\n"
+    )
     config_path.write_text(
         "- name: Shared carrier\n"
         "  sip_cidr: [203.0.113.0/24]\n"
-        "  rtp_cidr: [198.51.100.0/24]\n"
-        "  extensions:\n"
+        "  rtp_cidr: [198.51.100.0/24]\n" + route_yaml + "  extensions:\n"
         "    - extension: '1000'\n"
         "      agent_id: project-1\n"
         "      client_env: live\n"
@@ -69,17 +78,27 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys):
     ):
         SIPTrunksCommand.run(sip_args(project_dir, "manage"))
 
+    expected_create = {
+        "name": "Shared carrier",
+        "sip_cidr": ["203.0.113.0/24"],
+        "rtp_cidr": ["198.51.100.0/24"],
+    }
+    expected_default_route = None
+    if not disable_default_route:
+        expected_default_route = {
+            "agent_id": "project-4",
+            "client_env": "live",
+            "variant_id": "variant-1",
+        }
+        expected_create["inbound"] = {"default_route": {"agent": expected_default_route}}
+
     assert request.call_args_list == [
         call("uk-1", endpoint),
         call(
             "uk-1",
             endpoint,
             "POST",
-            data={
-                "name": "Shared carrier",
-                "sip_cidr": ["203.0.113.0/24"],
-                "rtp_cidr": ["198.51.100.0/24"],
-            },
+            data=expected_create,
         ),
         call(
             "uk-1",
@@ -105,6 +124,7 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys):
     saved = YAML(typ="safe").load(config_path)
     assert saved[0]["id"] == "tr-123"
     assert saved[0]["hostname"] == "tr-123.example.com"
+    assert saved[0]["default_route"] == expected_default_route
     assert [route["agent_id"] for route in saved[0]["extensions"]] == ["project-1", "project-3"]
     result = json.loads(capsys.readouterr().out)
     assert result["success"] is True
@@ -114,13 +134,37 @@ def test_manage_creates_shared_trunk_and_persists_metadata(tmp_path, capsys):
     assert result["trunks"][0]["extensions_created"] == 2
 
 
-def test_list_preserves_routes_to_multiple_projects(tmp_path, capsys):
+@pytest.mark.parametrize(
+    ("inbound", "expected_default_route"),
+    [
+        (
+            {
+                "default_route": {
+                    "agent": {
+                        "agent_id": "project-4",
+                        "client_env": "live",
+                        "variant_id": "variant-1",
+                    }
+                }
+            },
+            {
+                "agent_id": "project-4",
+                "client_env": "live",
+                "variant_id": "variant-1",
+            },
+        ),
+        ({}, None),
+    ],
+)
+def test_list_preserves_routes_to_multiple_projects(
+    tmp_path, capsys, inbound, expected_default_route
+):
     with (
         patch.object(
             PlatformAPIHandler,
             "make_request",
             side_effect=[
-                {"sip_trunks": [{"id": "tr-123", "name": "Shared carrier"}]},
+                {"sip_trunks": [{"id": "tr-123", "name": "Shared carrier", "inbound": inbound}]},
                 {
                     "extensions": [
                         {
@@ -148,6 +192,7 @@ def test_list_preserves_routes_to_multiple_projects(tmp_path, capsys):
     sync_client.assert_not_called()
     result = json.loads(capsys.readouterr().out)
     assert result["account_id"] == "acct-123"
+    assert result["sip_trunks"][0]["default_route"] == expected_default_route
     assert result["sip_trunks"][0]["extensions"] == [
         {"extension": "1000", "agent_id": "project-1", "client_env": "live"},
         {"extension": "2000", "agent_id": "project-3", "client_env": "sandbox"},

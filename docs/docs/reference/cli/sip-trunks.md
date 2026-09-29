@@ -5,7 +5,7 @@ description: Reference for the `poly sip-trunks` command.
 
 # `poly sip-trunks`
 
-Manage account-level SIP trunks and their extension-to-agent routes through the SIP Trunking API. `poly sip-trunks` requires a subcommand.
+Manage account-level SIP trunks, default routes, and extension-to-agent routes through the SIP Trunking API. `poly sip-trunks` requires a subcommand.
 
 Examples:
 
@@ -23,7 +23,7 @@ By default, the command reads the account and canonical API region from the curr
 
 ## `poly sip-trunks list`
 
-List the account's SIP trunks in a summary table, or export their configuration to a reusable YAML file.
+List the account's SIP trunks, including their default routes, in a summary table, or export their configuration to a reusable YAML file.
 
 Examples:
 
@@ -36,7 +36,7 @@ poly sip-trunks list --output --force
 poly sip-trunks list --account-id my-account --region uk-1 --json
 ~~~
 
-The export includes trunk IDs, hostnames, CIDRs, readable authentication state (including the digest realm), and all extension bindings. Creation and update timestamps are omitted. The file can be passed directly back to `manage`. SIP passwords and tokens are never returned by the API and therefore cannot appear in the export.
+The export includes trunk IDs, hostnames, CIDRs, readable authentication state (including the digest realm), default routes, and all extension bindings. Every exported trunk includes `default_route`, using `null` when the trunk has no default route. Creation and update timestamps are omitted. The file can be passed directly back to `manage`. SIP passwords and tokens are never returned by the API and therefore cannot appear in the export.
 
 The export uses a top-level list without account or region fields. Each file describes trunks for one account and region, including all their extension bindings; the current project does not filter routes by agent.
 
@@ -62,6 +62,11 @@ When `--output` is passed without a filename, the export goes to `sip-trunks.yam
       "rtp_cidr": ["198.51.100.0/24"],
       "encrypted": true,
       "hostname": "tr-example.sbc.sip.uk.poly.ai",
+      "default_route": {
+        "agent_id": "fallback-agent",
+        "client_env": "live",
+        "variant_id": ""
+      },
       "inbound_auth": {
         "type": "digest",
         "username": "carrier-user",
@@ -91,7 +96,7 @@ With `--output`, the JSON response describes the written file:
 
 ## `poly sip-trunks manage`
 
-Create or update SIP trunks and reconcile extension bindings from a YAML file for one account and region.
+Create or update SIP trunks, default routes, and extension bindings from a YAML file for one account and region.
 
 Examples:
 
@@ -114,6 +119,9 @@ Place `sip-trunks.yaml` in the project root or its immediate parent. The parent 
     - 198.51.100.0/24
   encrypted: true
   hostname: tr-example.sbc.sip.uk.poly.ai
+  default_route:
+    agent_id: fallback-agent
+    client_env: live
   inbound_auth:
     type: digest
     username: carrier-user
@@ -126,7 +134,17 @@ Place `sip-trunks.yaml` in the project root or its immediate parent. The parent 
 
 `manage` searches the project root for `sip-trunks.yaml`, then its immediate parent, and stops there. This search is the same when running from a project subdirectory. `--file` selects a file relative to the current working directory; it does not change the account or region. Without a project, supply `--account-id`, `--region`, and `--file`.
 
-The YAML contains neither account nor region fields. All entries use the selected account and region, and extension routes are not filtered by the current project's agent.
+The YAML contains neither account nor region fields. All entries use the selected account and region, and routes are not filtered by the current project's agent.
+
+Every trunk mapping must explicitly include a top-level `default_route` key. A missing or invalid value is rejected before any API calls. Set it to a mapping with required `agent_id` and `client_env` fields, as above. The environment must be `sandbox`, `pre-release`, or `live`. An optional `variant_id` selects a variant; omitting it uses the agent's default variant.
+
+An extension always takes precedence over the default route. Calls to numbers without an extension go to the default route; without one, those calls are rejected. To disable the route, declare:
+
+~~~yaml
+default_route: null
+~~~
+
+For a new trunk, `null` creates it without a default route. For an existing trunk, it removes the current route; if the trunk already has no default route, it makes no change.
 
 `manage` first validates the complete file and calculates a diff without writing or prompting for credentials. By default, it displays the planned trunk, extension, credential-rotation, and local metadata changes, then asks whether to continue. After confirmation it creates missing trunks and extensions and patches changed ones. Use `--force` to skip confirmation. With `--json`, it automatically skips confirmation, applies the planned changes, and prints the result as JSON.
 
@@ -201,7 +219,7 @@ When there are no changes:
 
 ## `poly sip-trunks get`
 
-Display a detailed trunk table followed by its extension bindings.
+Display a detailed trunk table, including its default route, followed by its extension bindings.
 
 Examples:
 
@@ -237,6 +255,13 @@ poly sip-trunks get <trunk_id> --json
     },
     "sip_token_auth": {
       "enabled": false
+    },
+    "default_route": {
+      "agent": {
+        "agent_id": "fallback-agent",
+        "client_env": "live",
+        "variant_id": ""
+      }
     }
   },
   "created_at": "2026-08-12T12:00:00Z",
@@ -244,7 +269,7 @@ poly sip-trunks get <trunk_id> --json
 }
 ~~~
 
-JSON mode returns the trunk API response directly. It does not add the separately fetched extension bindings shown in the table output; use `list --json` for configuration that includes extensions.
+JSON mode returns the trunk API response directly. `inbound.default_route` is present only when a default route is configured. It does not add the separately fetched extension bindings shown in the table output; use `list --json` for configuration that includes extensions.
 
 ## `poly sip-trunks delete`
 
