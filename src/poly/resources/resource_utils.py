@@ -19,6 +19,7 @@ import typing
 from dataclasses import fields, is_dataclass
 from difflib import unified_diff
 from enum import Enum
+from io import StringIO
 from typing import TYPE_CHECKING, Callable, Optional, TypeVar, Union
 
 import yaml
@@ -161,16 +162,25 @@ def strip_strings(data):
     return data
 
 
-def dump_yaml(data, stream=None):
+def dump_yaml(data, stream=None, *, dumper=None):
     """Dump data to YAML, with block style for multiline strings.
 
     Args:
         data: Data structure to dump.
         stream: Optional stream to write to. If None, returns a string.
+        dumper: Optional YAML instance with custom output formatting.
 
     Returns:
         str: YAML string if stream is None, otherwise None.
     """
+    if dumper is not None:
+        if stream is None:
+            stream = StringIO()
+            dumper.dump(data, stream)
+            return stream.getvalue()
+        dumper.dump(data, stream)
+        return None
+
     return yaml.dump(
         data,
         stream,

@@ -15,6 +15,7 @@ from poly.cli import AgentStudioCLI
 from poly.cli_commands.sip_trunks import SIPTrunksCommand
 from poly.handlers.interface import AgentStudioInterface
 from poly.project import AgentStudioProject
+from poly.resources.resource_utils import dump_yaml, load_yaml
 from poly.sip_trunks.config import (
     default_export_path,
     find_manage_file,
@@ -692,6 +693,34 @@ class SIPTrunksCommandTest(unittest.TestCase):
         self.assertNotIn("sip_trunks:", exported_text)
         self.assertNotIn("account_id:", exported_text)
 
+    def test_export_writes_explicit_nulls_without_changing_generic_yaml_formatting(self):
+        self.assertEqual(dump_yaml({"value": None}), "value:\n")
+        data = {
+            "account_id": "acct-123",
+            "sip_trunks": [{
+                "id": "tr-123", "name": "Primary carrier",
+                "default_route": None, "outbound": None,
+            }],
+        }
+        with TemporaryDirectory() as temp_dir:
+            project_dir = self._write_project_config(Path(temp_dir) / "project")
+            output = project_dir / "sip-trunks.yaml"
+            args = Namespace(path=str(project_dir), output=str(output), force=False)
+
+            SIPTrunksCommand._write_export(args, data)
+
+            exported = output.read_text(encoding="utf-8")
+            self.assertIn("default_route: null\n", exported)
+            self.assertIn("outbound: null\n", exported)
+            self.assertEqual(load_yaml(exported), data["sip_trunks"])
+            self.assertEqual(load_manage_config(str(project_dir)).trunks, data["sip_trunks"])
+
+            # Blank values remain a valid spelling of null in user-authored files.
+            output.write_text(exported.replace(": null\n", ":\n"), encoding="utf-8")
+            self.assertEqual(load_manage_config(str(project_dir)).trunks, data["sip_trunks"])
+
+        self.assertEqual(dump_yaml({"value": None}), "value:\n")
+
     def test_manage_rejects_region_in_yaml(self):
         with TemporaryDirectory() as temp_dir:
             self._write_project_config(Path(temp_dir))
@@ -1101,6 +1130,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                     self.assertEqual(config_file.read_text(encoding="utf-8"), source)
 
     def test_persist_trunk_response_preserves_comments_and_adds_useful_fields(self):
+        self.assertEqual(dump_yaml({"value": None}), "value:\n")
         with TemporaryDirectory() as temp_dir:
             config_file = Path(temp_dir) / "sip-trunks.yaml"
             config_file.write_text(
@@ -1113,6 +1143,10 @@ class SIPTrunksCommandTest(unittest.TestCase):
   inbound_auth:
     type: digest
     username: carrier-user
+  extensions:
+    - extension: "0010"  # Keep the leading zeroes
+      agent_id: my-project
+      client_env: live
 """,
                 encoding="utf-8",
             )
@@ -1137,11 +1171,18 @@ class SIPTrunksCommandTest(unittest.TestCase):
         self.assertIn("# Carrier connection", saved)
         self.assertNotIn("account_id:", saved)
         self.assertIn('name: "Primary carrier"', saved)
+        self.assertIn("default_route: null\n", saved)
+        self.assertIn("outbound: null\n", saved)
+        self.assertIn('extension: "0010"', saved)
+        self.assertIn("# Keep the leading zeroes", saved)
+        self.assertIsNone(load_yaml(saved)[0]["default_route"])
+        self.assertIsNone(load_yaml(saved)[0]["outbound"])
         self.assertIn("id: tr-123", saved)
         self.assertIn("hostname: tr-123.sbc.sip.uk.poly.ai", saved)
         self.assertIn("realm: sbc.sip.uk.poly.ai", saved)
         self.assertNotIn("created_at", saved)
         self.assertNotIn("updated_at", saved)
+        self.assertEqual(dump_yaml({"value": None}), "value:\n")
 
     @patch("getpass.getpass", return_value="rotated-secret")
     @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
