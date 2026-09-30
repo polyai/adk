@@ -26,12 +26,14 @@ _clients: dict[str, Posthog] = {}
 
 region_to_posthog_cluster = {
     "dev": "apollo",
+    "studio": "plg-us-1-prod",
 }
 
 # Anything unlisted is production.
 region_to_cluster_env = {
     "dev": "dev",
     "staging": "staging",
+    "studio": "plg",
 }
 
 
