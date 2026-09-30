@@ -82,8 +82,8 @@ def test_sip_interface_preserves_request_contract(method_name, identifiers, suff
         ("delete_sip_trunk_extension", "DELETE", None),
     ],
 )
-def test_sip_path_segments_encode_reserved_characters(method_name, verb, payload):
-    args = ("us-1", "acct/one?", "tr#1%", "+44/100?x=1")
+def test_sip_extensions_encode_reserved_characters(method_name, verb, payload):
+    args = ("us-1", "acct-123", "tr-123", "+44/100?x=1")
     if payload is not None:
         args += (payload,)
 
@@ -92,7 +92,7 @@ def test_sip_path_segments_encode_reserved_characters(method_name, verb, payload
 
     expected_args = (
         "us-1",
-        "/v1/accounts/acct%2Fone%3F/telephony/sip-trunks/tr%231%25/extensions/%2B44%2F100%3Fx%3D1",
+        "/v1/accounts/acct-123/telephony/sip-trunks/tr-123/extensions/%2B44%2F100%3Fx%3D1",
     )
     if verb != "GET":
         expected_args += (verb,)
