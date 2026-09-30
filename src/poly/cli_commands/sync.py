@@ -18,6 +18,7 @@ from poly.cli_commands.shared import (
     load_project,
     parse_from_projection_json,
     print_project_file_changes,
+    sync_declared_modules,
 )
 from poly.output.json_output import commands_to_dicts, json_print
 
@@ -227,6 +228,9 @@ class PullCommand(BaseCommand):
                 force=force, format=format, projection_json=projection_json, on_save=on_save
             )
 
+        # Refresh shared flows
+        sync_declared_modules(project, output_json=(output_json or output_json_projection))
+
         new_branch_name = None
         if original_branch_id != project.branch_id:
             new_branch_name = project.get_current_branch()
@@ -394,6 +398,7 @@ class PushCommand(BaseCommand):
         from poly.output.console import error, info, plain, success, warning
 
         project = load_project(base_path, output_json=output_json)
+        sync_declared_modules(project, output_json=(output_json or output_commands))
         if not output_json and not output_commands:
             info(
                 f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
@@ -923,6 +928,7 @@ class ValidateCommand(BaseCommand):
         from poly.output.console import print_validation_errors, success
 
         project = load_project(base_path, output_json=output_json)
+        sync_declared_modules(project, output_json=output_json)
         errors = project.validate_project()
 
         if output_json:

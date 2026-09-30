@@ -85,6 +85,25 @@ def load_project(base_path: str, output_json: bool = False) -> AgentStudioProjec
     return project
 
 
+def sync_declared_modules(project: AgentStudioProject, output_json: bool = False) -> None:
+    """Materialize the project's declared shared flows.
+
+    Exits with a clear error if a declared flow doesn't exist under _modules/flows/, or would
+    clobber a hand-authored local flow of the same name.
+    """
+    from poly.modules import ModuleSyncError, sync_project_modules
+    from poly.output.console import error
+
+    try:
+        sync_project_modules(project)
+    except ModuleSyncError as e:
+        if output_json:
+            json_print({"success": False, "error": str(e)})
+        else:
+            error(str(e))
+        sys.exit(1)
+
+
 def resolve_project_scope(
     base_path: str,
     region: Optional[str],
@@ -145,6 +164,7 @@ def compute_diff(
     from poly.output.console import error
 
     project = load_project(base_path, output_json=output_json)
+    sync_declared_modules(project, output_json=output_json)
     files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
     if not (before or after):
         return project.get_diffs(file_paths=files)

@@ -32,6 +32,7 @@ from poly.migration_utils import (
     load_migration_flags,
     run_migrations,
 )
+from poly.modules import get_module_owned_flow_names
 from poly.resources import (
     BaseFlowStep,
     ChildTopic,
@@ -69,6 +70,54 @@ DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
+
+# Resource types that can be materialized from poly.modules
+_MODULE_FLOW_RESOURCE_TYPES: tuple[ResourceType, ...] = (
+    FlowConfig,
+    FlowStep,
+    FunctionStep,
+    Function,
+)
+
+
+def _module_flow_key(resource_type: ResourceType, resource: Resource) -> Optional[str]:
+    """Return the clean flow-folder name a flow-scoped resource belongs to, or None."""
+    name = resource.name if resource_type is FlowConfig else getattr(resource, "flow_name", None)
+    return resource_utils.clean_name(name) if name else None
+
+
+def _filter_out_flows(resources: ResourceMap, owned_flow_names: set[str]) -> ResourceMap:
+    """Shallow copy of `resources` with entries in `_MODULE_FLOW_RESOURCE_TYPES` that belong to
+    `owned_flow_names` removed. Other resource types pass through untouched."""
+    if not owned_flow_names:
+        return resources
+    filtered: ResourceMap = {}
+    for resource_type, resource_dict in resources.items():
+        if resource_type not in _MODULE_FLOW_RESOURCE_TYPES:
+            filtered[resource_type] = resource_dict
+            continue
+        filtered[resource_type] = {
+            resource_id: resource
+            for resource_id, resource in resource_dict.items()
+            if _module_flow_key(resource_type, resource) not in owned_flow_names
+        }
+    return filtered
+
+
+def _extract_flows(resources: ResourceMap, owned_flow_names: set[str]) -> ResourceMap:
+    """Inverse of `_filter_out_flows`: only the entries belonging to `owned_flow_names`."""
+    if not owned_flow_names:
+        return {}
+    extracted: ResourceMap = {}
+    for resource_type in _MODULE_FLOW_RESOURCE_TYPES:
+        matched = {
+            resource_id: resource
+            for resource_id, resource in resources.get(resource_type, {}).items()
+            if _module_flow_key(resource_type, resource) in owned_flow_names
+        }
+        if matched:
+            extracted[resource_type] = matched
+    return extracted
 
 
 @dataclass
@@ -114,6 +163,7 @@ class AgentStudioProject:
     branch_id: str = None
     project_name: Optional[str] = None
     account_name: Optional[str] = None
+    modules: dict = field(default_factory=dict)
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
@@ -124,6 +174,11 @@ class AgentStudioProject:
     # So they aren't considered locally deleted when pushing/pulling
     # before they are saved.
     _not_loaded_resources: list[ResourceType] = field(default_factory=list)
+
+    @property
+    def imported_flow_names(self) -> list[str]:
+        """Flow names this project cherry-picks from the shared `_modules/flows/` pool."""
+        return list(self.modules.get("flows") or [])
 
     @property
     def all_resources(self) -> list[Resource]:
@@ -159,6 +214,8 @@ class AgentStudioProject:
             config["project_name"] = self.project_name
         if self.account_name:
             config["account_name"] = self.account_name
+        if self.modules.get("flows"):
+            config["modules"] = {"flows": list(self.modules["flows"])}
         return config
 
     @classmethod
@@ -242,6 +299,7 @@ class AgentStudioProject:
             branch_id=status_dict.get("branch_id", "main"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
             account_name=config_dict.get("account_name") or status_dict.get("account_name"),
+            modules=config_dict.get("modules") or {},
             _not_loaded_resources=not_loaded_resources,
             _migration_flags=migration_flags,
             rtc_metadata=status_dict.get("rtc_metadata"),
@@ -265,6 +323,7 @@ class AgentStudioProject:
             "branch_id": self.branch_id,
             "project_name": self.project_name,
             "account_name": self.account_name,
+            "modules": self.modules,
             "migration_flags": [flag.value for flag in self._migration_flags]
             if self._migration_flags
             else [],
@@ -292,6 +351,7 @@ class AgentStudioProject:
             branch_id=data.get("branch_id", "main"),
             project_name=data.get("project_name"),
             account_name=data.get("account_name"),
+            modules=data.get("modules") or {},
             _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
             slim_resources=slim_resources,
@@ -592,12 +652,28 @@ class AgentStudioProject:
             self.branch_id = self.api_handler.branch_id
 
         self._check_no_duplicate_resource_paths(incoming_resources)
+
+        # -------
+        # Set aside shared (`_modules`) flows
+        # -------
+        # Their local truth is `_modules/flows/<name>/`, materialized via
+        # `sync_project_modules` -- never reconciled from remote state here. Filtering them out
+        # of both `original_resources` and `incoming_resources` means none of
+        # `_update_pulled_resources`'s write/delete branches ever visit or mutate their entries,
+        # so whatever resource_id/hash was already tracked for them survives this pull untouched,
+        # whether or not their local file currently exists. See poly.modules for the full design
+        # and why this needs to happen here rather than as a selective skip inside the merge.
+        module_owned_flow_names = get_module_owned_flow_names(self.root_path)
+        preserved_module_resources = _extract_flows(self.resources, module_owned_flow_names)
+        original_resources_for_merge = _filter_out_flows(self.resources, module_owned_flow_names)
+        incoming_resources = _filter_out_flows(incoming_resources, module_owned_flow_names)
+
         # -------
         # Update resources
         # -------
 
         files_with_conflicts = self._update_pulled_resources(
-            original_resources=self.resources,
+            original_resources=original_resources_for_merge,
             incoming_resources=incoming_resources,
             force=force,
             format=format,
@@ -613,6 +689,10 @@ class AgentStudioProject:
         flow_folder = os.path.join(self.root_path, "flows")
         if os.path.exists(flow_folder):
             self._delete_empty_folders(flow_folder)
+
+        # Restore the module-owned resources so their tracked resource_id survive the pull.
+        for resource_type, resource_dict in preserved_module_resources.items():
+            incoming_resources.setdefault(resource_type, {}).update(resource_dict)
 
         # Save the updated project configuration
         self.resources = incoming_resources
@@ -1736,9 +1816,18 @@ class AgentStudioProject:
         reverted_files = []
         resource_mappings = self._make_resource_mappings(self.resources)
         all_files = not file_paths
+        module_owned_flow_names = get_module_owned_flow_names(self.root_path)
         MultiResourceYamlResource._file_cache.clear()
         try:
             for resource in self.all_resources:
+                resource_type = type(resource)
+                if (
+                    resource_type in _MODULE_FLOW_RESOURCE_TYPES
+                    and _module_flow_key(resource_type, resource) in module_owned_flow_names
+                ):
+                    # Shared flows are managed by `sync_project_modules`, not tracked-state
+                    # revert -- their content should come from `_modules/`, not the last push.
+                    continue
                 if not all_files and resource.get_path(self.root_path) not in file_paths:
                     continue
 
