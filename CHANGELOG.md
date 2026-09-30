@@ -1,6 +1,215 @@
 # CHANGELOG
 
 
+## v0.64.0 (2026-09-28)
+
+### Features
+
+- Send is_asserted with function-call test assertions
+  ([#341](https://github.com/polyai/adk/pull/341),
+  [`84d8264`](https://github.com/polyai/adk/commit/84d82649491a1a822d352c7c6849863faff32508))
+
+## Summary
+
+Function-call assertions written in `test_suite/*.yaml` are now sent with `is_asserted: true`, so
+  test runs actually check them.
+
+## Motivation
+
+`FunctionCallAssertion.is_asserted` is a proto3 bool, so it defaults to false, and `to_proto` never
+  set it. Every function-call assertion pushed from YAML was stored as recorded but not asserted,
+  and test runs reported the call as `(not asserted)` instead of checking its name and arguments.
+  Nothing failed, so the gap was silent.
+
+No linked issue.
+
+## Changes
+
+- `FunctionCallAssertion` carries `is_asserted`, defaulting to true, and sends it in `to_proto`. -
+  YAML: a call is asserted unless it says `is_asserted: false`; the key is written only when false.
+  - Pull: the flag is read from the projection (missing means false, since proto3 omits a false
+  bool), so a call left unasserted in Studio survives a pull and push unchanged. - Migration:
+  assertions pushed before this fix are stored as not asserted, so a pull writes them out with
+  `is_asserted: false`. Deleting that line and pushing turns them on.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`ruff check` passes on both changed files. `ruff format --check` flags one pre-existing unformatted
+  line in `resources_test.py` that this PR does not touch, so the box above is left unticked.
+
+``` $ uv run pytest src/poly/tests -q 2111 passed, 372 subtests passed in 29.50s ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
+## v0.63.1 (2026-09-28)
+
+### Bug Fixes
+
+- Push a renamed test case as an update, keeping its id
+  ([#342](https://github.com/polyai/adk/pull/342),
+  [`5fab4ed`](https://github.com/polyai/adk/commit/5fab4ed94d714653c0f3fa025d316aa687e57074))
+
+## Summary
+
+Renaming a test case no longer deletes it and creates a new one. A push pairs the renamed file with
+  the case it came from and sends an update, so the case keeps its id and its run history.
+
+## Motivation
+
+A test case's file name is derived from its name, so a rename moves the file. The push matched
+  resources by file path only, saw the old path as deleted and the new one as new, and minted a
+  fresh id. The platform already supports renaming through `Update_TestCase.name`; the push just
+  never used it. Every rename dropped the case's run history.
+
+No linked issue.
+
+## Changes
+
+- New pre-push step `prepush.pair_renamed_test_cases`, run first in `_clean_resources_before_push`
+  alongside the other push fixes. It pairs a new test case with a deleted one when their scenario
+  text matches and each side has exactly one candidate. - A paired case takes the saved id and moves
+  from new to updated. Its sub-resources (assertions, tags, SIP headers, integration attributes, API
+  mocks) are re-keyed to that id and re-diffed against the saved case, so only real changes are
+  sent. The pushed state is re-keyed too. - Anything ambiguous (several cases share a scenario, or
+  the scenario changed along with the name) is left as a delete and a create, as before. - Only test
+  cases are paired; other resource types are unchanged.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` $ uv run pytest src/poly/tests -q 2111 passed, 372 subtests passed ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
+## v0.63.0 (2026-09-28)
+
+### Features
+
+- Move poly call voice dependencies into an optional call extra
+  ([#338](https://github.com/polyai/adk/pull/338),
+  [`20157e2`](https://github.com/polyai/adk/commit/20157e21039fafbb769b4a384cb708862586f5d7))
+
+## Summary
+
+The voice-calling dependencies for `poly call` move out of the default install into an optional
+  `call` extra. `pip install polyai-adk` drops from 163 MB to 74 MB. Anyone who uses `poly call`
+  installs `polyai-adk[call]`.
+
+## Motivation
+
+Every install pulled in the full WebRTC and audio stack (aiortc, sounddevice, websockets, numpy,
+  pywebrtc-audio, plus av, cryptography and pylibsrtp through them), about 90 MB of native wheels.
+  That is more than half the install, and only interactive users who place calls need it. CI
+  pipelines and other non-interactive installs paid for it on every run. A `[ci]` extra can't help,
+  because extras only add dependencies, so the voice stack has to leave the core list.
+
+## Changes
+
+- Move `aiortc`, `sounddevice`, `websockets`, `numpy` and `pywebrtc-audio` from `dependencies` into
+  a new `call` extra. `dev` includes `polyai-adk[call]`, so `uv pip install -e ".[dev]"` in CI and
+  in contributor setups still installs them and the call tests keep running. - `poly call` checks
+  for the voice dependencies first, before it loads the project or pushes with `--push`. If they are
+  missing, it exits with the install command that matches how ADK was installed: - uv tool: `uv tool
+  install "polyai-adk[call]"` - pipx: `pipx install --force "polyai-adk[call]"` - uv pip / pip: `uv
+  pip install "polyai-adk[call]"` / `pip install "polyai-adk[call]"` - uvx: `uvx --from
+  "polyai-adk[call]" poly call` - editable: `uv pip install -e ".[call]"` - `poly update` keeps the
+  `call` extra. `poly update --to X` used to run `uv tool install --force polyai-adk==X` (or the
+  pipx equivalent), which rewrites the installer's record without the extra. The requirement is now
+  `polyai-adk[call]` whenever the voice dependencies are importable. Upgrades through pip and uv pip
+  include it too, so the voice dependencies follow new pins. `uv tool upgrade` and `pipx upgrade`
+  already keep the extra. - Escape the `poly call` hint and the `poly update` failure message for
+  Rich, which otherwise treats `[call]` as markup and drops it. - Document the `call` extra in the
+  README, on the docs home page, in the getting-started install step and in the `poly call`
+  reference. Update the echo-cancellation hints to match. - Bump `google-crc32c` from 1.8.0 to 1.9.0
+  in `uv.lock` and mark its licence as Apache-2.0 in `licenses.json`. CI installs `.[dev]` without
+  the lock and gets the latest `google-crc32c` (1.9.0). While it was a core dependency, `uv run`
+  synced it back to the locked version. As a dependency of an extra it no longer does, so the lock
+  has to match what CI installs or the `licenses.json` check fails.
+
+Migration: an existing `uv tool` install loses the voice dependencies on the upgrade that crosses
+  this change, because uv makes the tool environment match the new dependency list. The next `poly
+  call` prints the one-line install command. pip and uv pip venvs are not affected, because pip
+  never removes packages.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+I installed into fresh venvs:
+
+- `.[dev]` installs the voice stack. - `.` installs none of it. `poly --help` works, and `poly call`
+  exits at once with the install hint. - `.[call]` installs the voice stack, and `poly update --to`
+  keeps `[call]`.
+
+I checked how uv tool treats extras on upgrade with a toy package (details under Screenshots /
+  Logs).
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Install size in a fresh Python 3.14 venv:
+
+| Install | Size | |---|---| | `polyai-adk` | 74 MB | | `polyai-adk[call]` | 163 MB |
+
+`poly call` without the extra, in a uv pip venv:
+
+``` Error: `poly call` needs the voice calling dependencies, which are installed
+
+with the `call` extra. Install them with: uv pip install "polyai-adk[call]" ```
+
+How uv 0.11 handles extras, checked with a toy package:
+
+| Scenario | Result | |---|---| | `uv tool install 'pkg[call]'`, then `uv tool upgrade` | Extra kept
+  (it is stored in `uv-receipt.toml`) | | Existing uv tool install upgrades across the split | Voice
+  dependencies removed | | `uv tool install 'pkg[call]'` over an existing plain install | Extra
+  added in place | | `uv tool install --force pkg==X` after installing with the extra | Extra
+  dropped (fixed here for `poly update --to`) | | `pip` / `uv pip install --upgrade` in a venv |
+  Dependencies kept |
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.62.0 (2026-09-25)
 
 ### Features

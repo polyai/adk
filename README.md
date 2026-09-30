@@ -10,7 +10,9 @@
 
 A CLI for building, testing, and deploying PolyAI voice and chat agents.
 
-Sign up at [studio.poly.ai](https://studio.poly.ai) and start free.
+New to PolyAI? Sign up at [studio.poly.ai](https://studio.poly.ai) and start free.
+
+**[Documentation](https://polyai.github.io/adk/)**
 
 ## Installation
 
@@ -24,15 +26,20 @@ Via Pip:
 pip install polyai-adk
 ```
 
-Get an API key for the PolyAI APIs / Dialog RSN:
+Voice calling (`poly call`) needs extra audio and WebRTC dependencies, which are left out of the default install to keep it small for CI. Install them with the `call` extra:
 
 ```bash
-poly apikey --region studio
+pip install "polyai-adk[call]"
+uv tool install "polyai-adk[call]"
 ```
 
-**Documentation:** [guides on docs.poly.ai](https://docs.poly.ai/adk) · [full CLI reference](https://polyai.github.io/adk/)
+Then set up your account, API key, AI skills, and a project:
 
-Once installed, use the `poly` command to manage your projects:
+```bash
+poly setup
+```
+
+Once set up, use the `poly` command to manage your projects:
 
 ```bash
 poly setup      # Set up everything: account, API key, AI skills, and a project

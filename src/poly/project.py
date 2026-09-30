@@ -1574,6 +1574,9 @@ class AgentStudioProject:
         If new flow has function step as start step, create referencing a dummy default step.
         Then update the flow config to use the new step.
 
+        A renamed test case (same scenario, new file) is pushed as an update of
+        the saved case, keeping its id, rather than a delete and a create.
+
         When deleting a flow, only send a command to delete the flow config,
         not the steps/functions.
 
@@ -1612,6 +1615,7 @@ class AgentStudioProject:
             # as a side effect) if a webchat command is actually queued
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
+        prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
         prepush.fix_orphaned_variables(
             state,
             new_resources,
