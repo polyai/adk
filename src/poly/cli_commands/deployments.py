@@ -199,9 +199,12 @@ class DeploymentsCommand(BaseCommand):
         ab_test_parser = deployments_subparsers.add_parser(
             "ab-test",
             parents=[parents.verbose],
-            help="Manage A/B tests for live deployments.",
+            help="Manage A/B tests for live deployments. Deprecated: see 'experiment'.",
             description=(
                 "Manage A/B tests for live deployments.\n\n"
+                "Deprecated, and not available for projects on the simplified\n"
+                "deployment model — use 'poly deployments experiment' instead there.\n"
+                "Still required for projects on the classic deployment model.\n\n"
                 "Examples:\n"
                 "  poly deployments ab-test start --name 'v2 test'"
                 " --variant-version <hash> --traffic 50\n"
@@ -315,6 +318,149 @@ class DeploymentsCommand(BaseCommand):
             help="Version hash of the deployment to keep as winner. If omitted, prompts interactively.",
         )
 
+        # EXPERIMENTS
+        experiment_parser = deployments_subparsers.add_parser(
+            "experiment",
+            parents=[parents.verbose],
+            help="Manage experiments for projects on simplified deployments.",
+            description=(
+                "Manage experiments for projects using the simplified deployment model.\n\n"
+                "Experiments test a top-level branch against the current live version.\n"
+                "Only one experiment can run at a time, with a single variant, today.\n\n"
+                "Examples:\n"
+                "  poly deployments experiment start --name 'v2 test'"
+                " --branch my-branch --traffic 50\n"
+                "  poly deployments experiment list\n"
+                "  poly deployments experiment active\n"
+                "  poly deployments experiment update --traffic 30\n"
+                "  poly deployments experiment end\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        experiment_subparsers = experiment_parser.add_subparsers(
+            dest="experiment_subcommand", required=True
+        )
+
+        experiment_start_parser = experiment_subparsers.add_parser(
+            "start",
+            parents=[parents.path, parents.json, parents.verbose],
+            help="Start a new experiment.",
+            description=(
+                "Start a new experiment against the current live version.\n\n"
+                "The variant must be a top-level branch. Traffic percentage\n"
+                "controls what fraction of calls route to the variant (1-99).\n\n"
+                "Examples:\n"
+                "  poly deployments experiment start"
+                " --name 'v2 test' --branch my-branch --traffic 50\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        experiment_start_parser.add_argument(
+            "--name",
+            "-n",
+            type=str,
+            default=None,
+            help="Name/label for the experiment. If omitted, prompts interactively.",
+        )
+        experiment_start_parser.add_argument(
+            "--branch",
+            type=str,
+            default=None,
+            help="Name of the top-level branch to test as the variant."
+            " If omitted, prompts interactively.",
+        )
+        experiment_start_parser.add_argument(
+            "--traffic",
+            type=int,
+            default=None,
+            help="Percentage of traffic to route to the variant (1-99). Defaults to 50"
+            " interactively.",
+        )
+
+        experiment_list_parser = experiment_subparsers.add_parser(
+            "list",
+            parents=[parents.path, parents.json, parents.verbose],
+            help="List experiments for the project.",
+            description=(
+                "List experiments for the project.\n\n"
+                "Examples:\n"
+                "  poly deployments experiment list\n"
+                "  poly deployments experiment list --limit 20\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        experiment_list_parser.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="Number of experiments to show. Defaults to 10.",
+        )
+        experiment_list_parser.add_argument(
+            "--offset",
+            type=int,
+            default=None,
+            help="Number of experiments to skip before showing results.",
+        )
+
+        experiment_subparsers.add_parser(
+            "active",
+            parents=[parents.path, parents.json, parents.verbose],
+            help="Show the currently active experiment.",
+            description="Show the currently active experiment, if any.",
+            formatter_class=RawTextHelpFormatter,
+        )
+
+        experiment_update_parser = experiment_subparsers.add_parser(
+            "update",
+            parents=[parents.path, parents.json, parents.verbose],
+            help="Update the name and/or traffic split for an active experiment.",
+            description=(
+                "Update the name and/or traffic split for the active experiment.\n\n"
+                "At least one of --name or --traffic must be given.\n\n"
+                "Examples:\n"
+                "  poly deployments experiment update --traffic 30\n"
+                "  poly deployments experiment update --name 'v3 test'\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        experiment_update_parser.add_argument(
+            "--name",
+            "-n",
+            type=str,
+            default=None,
+            help="New name for the experiment.",
+        )
+        experiment_update_parser.add_argument(
+            "--traffic",
+            type=int,
+            default=None,
+            help="New percentage of traffic to route to the variant (1-99).",
+        )
+
+        experiment_end_parser = experiment_subparsers.add_parser(
+            "end",
+            parents=[parents.path, parents.json, parents.verbose],
+            help="End an active experiment and choose a winner.",
+            description=(
+                "End the active experiment and choose which branch wins.\n\n"
+                "The platform redeploys the winning branch to live automatically —\n"
+                "no separate promotion is needed.\n\n"
+                "If --chosen-branch is omitted, an interactive prompt shows the\n"
+                "control and variant branches for selection.\n\n"
+                "Examples:\n"
+                "  poly deployments experiment end"
+                " --chosen-branch my-branch\n"
+                "  poly deployments experiment end   # interactive\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        experiment_end_parser.add_argument(
+            "--chosen-branch",
+            type=str,
+            default=None,
+            help="Name of the branch to keep as winner. If omitted, prompts interactively.",
+        )
+
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching deployments sub-handler."""
@@ -381,6 +527,37 @@ class DeploymentsCommand(BaseCommand):
                 cls.ab_test_end(
                     args.path,
                     chosen_version=args.chosen_version,
+                    output_json=args.json,
+                )
+        elif args.deployments_subcommand == "experiment":
+            if args.experiment_subcommand == "start":
+                cls.experiment_start(
+                    args.path,
+                    args.name,
+                    args.branch,
+                    args.traffic,
+                    output_json=args.json,
+                )
+            elif args.experiment_subcommand == "list":
+                cls.experiment_list(
+                    args.path,
+                    args.limit,
+                    offset=args.offset,
+                    output_json=args.json,
+                )
+            elif args.experiment_subcommand == "active":
+                cls.experiment_active(args.path, output_json=args.json)
+            elif args.experiment_subcommand == "update":
+                cls.experiment_update(
+                    args.path,
+                    name=args.name,
+                    traffic_percentage=args.traffic,
+                    output_json=args.json,
+                )
+            elif args.experiment_subcommand == "end":
+                cls.experiment_end(
+                    args.path,
+                    chosen_branch=args.chosen_branch,
                     output_json=args.json,
                 )
 
@@ -481,6 +658,25 @@ class DeploymentsCommand(BaseCommand):
         if len(matches) == 1:
             return matches[0].get("id")
         return None
+
+    @staticmethod
+    def _resolve_branch_to_id(
+        branch_name: str,
+        branches: dict[str, dict],
+    ) -> str | None:
+        """Resolve a top-level branch name to a branch ID.
+
+        Args:
+            branch_name: Name of the branch.
+            branches: Mapping of branch name to branch metadata (from
+                ``AgentStudioProject.get_branches``), each containing at least
+                ``branchId``.
+
+        Returns:
+            The branch ID if the branch exists, else None.
+        """
+        meta = branches.get(branch_name)
+        return meta.get("branchId") if meta else None
 
     # ── deployment handlers ─────────────────────────────────────────
 
@@ -877,12 +1073,19 @@ class DeploymentsCommand(BaseCommand):
         traffic_percentage: int | None,
         output_json: bool = False,
     ) -> None:
-        """Start a new A/B test."""
+        """Start a new A/B test.
+
+        Deprecated: for projects on the simplified deployment model, use
+        ``poly deployments experiment start`` instead. A/B tests and
+        experiments are mutually exclusive by deployment model.
+        """
         import questionary
 
+        from poly.cli_commands.shared import require_ab_tests_enabled
         from poly.output.console import error, print_ab_test_detail, success, warning
 
         project = load_project(base_path, output_json=output_json)
+        require_ab_tests_enabled(project, output_json=output_json)
 
         # -- name --
         if name is None:
@@ -1010,9 +1213,12 @@ class DeploymentsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """List A/B tests for the project."""
+        from poly.cli_commands.shared import require_ab_tests_enabled
         from poly.output.console import paged_output, print_ab_tests
 
         project = load_project(base_path, output_json=output_json)
+        require_ab_tests_enabled(project, output_json=output_json)
+
         ab_tests = project.list_ab_tests(limit=limit)
         if output_json:
             json_print({"success": True, "ab_tests": ab_tests})
@@ -1028,9 +1234,12 @@ class DeploymentsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Show the currently active A/B test."""
+        from poly.cli_commands.shared import require_ab_tests_enabled
         from poly.output.console import print_ab_test_detail
 
         project = load_project(base_path, output_json=output_json)
+        require_ab_tests_enabled(project, output_json=output_json)
+
         ab_test = project.get_active_ab_test()
         if output_json:
             json_print({"success": True, "ab_test": ab_test})
@@ -1048,9 +1257,11 @@ class DeploymentsCommand(BaseCommand):
         """Update traffic percentage for the active A/B test."""
         import questionary
 
+        from poly.cli_commands.shared import require_ab_tests_enabled
         from poly.output.console import error, info, print_ab_test_detail, success, warning
 
         project = load_project(base_path, output_json=output_json)
+        require_ab_tests_enabled(project, output_json=output_json)
 
         ab_test = project.get_active_ab_test()
         if not ab_test:
@@ -1113,9 +1324,11 @@ class DeploymentsCommand(BaseCommand):
         """End the active A/B test and choose the winning deployment."""
         import questionary
 
+        from poly.cli_commands.shared import require_ab_tests_enabled
         from poly.output.console import error, info, success, warning
 
         project = load_project(base_path, output_json=output_json)
+        require_ab_tests_enabled(project, output_json=output_json)
 
         ab_test = project.get_active_ab_test()
         if not ab_test:
@@ -1222,3 +1435,360 @@ class DeploymentsCommand(BaseCommand):
                     "promoted": promoted,
                 }
             )
+
+    # ── Experiments ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _default_experiment_name() -> str:
+        """Generate a default experiment name matching the Agent Studio UI format."""
+        from datetime import datetime
+
+        now = datetime.now()
+        day = now.day
+        if 11 <= day <= 13:
+            suffix = "th"
+        else:
+            suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+        return f"{day}{suffix} {now.strftime('%B %Y')} Experiment {now.strftime('%H:%M')}"
+
+    @staticmethod
+    def _fetch_branch_map(project: AgentStudioProject) -> dict[str, dict]:
+        """Build a branch ID → branch dict map for display enrichment."""
+        branch_map: dict[str, dict] = {}
+        try:
+            _, branches = project.get_branches()
+            for branch_name, meta in branches.items():
+                branch_id = meta.get("branchId")
+                if branch_id:
+                    branch_map[branch_id] = {"name": branch_name, **meta}
+        except Exception as e:
+            logger.debug("Failed to fetch branches for experiment display: %s", e)
+        return branch_map
+
+    @classmethod
+    def experiment_start(
+        cls,
+        base_path: str,
+        name: str | None,
+        branch: str | None,
+        traffic_percentage: int | None,
+        output_json: bool = False,
+    ) -> None:
+        """Start a new experiment."""
+        import questionary
+
+        from poly.cli_commands.shared import require_experiments_enabled
+        from poly.output.console import error, print_experiment_detail, success, warning
+
+        project = load_project(base_path, output_json=output_json)
+        require_experiments_enabled(project, output_json=output_json)
+
+        # -- name --
+        if name is None:
+            if output_json:
+                msg = "--name is required when using --json."
+                json_print({"success": False, "error": msg})
+                sys.exit(1)
+            default_name = cls._default_experiment_name()
+            name = questionary.text("Experiment name:", default=default_name).ask()
+            if name is None:
+                warning("Aborted.")
+                sys.exit(0)
+
+        if not name.strip():
+            msg = "Experiment name is required and cannot be empty."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        # -- branch --
+        try:
+            _, branches = project.get_branches()
+        except Exception as e:
+            msg = f"Failed to fetch branches: {e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        # The control is always the implicit "main" branch, so it's never a
+        # valid choice for the variant.
+        eligible = [n for n in branches if n != "main"]
+
+        if branch is None:
+            if output_json:
+                msg = "--branch is required when using --json."
+                json_print({"success": False, "error": msg})
+                sys.exit(1)
+            if not eligible:
+                error("No eligible branches found. Create a branch to test as a variant first.")
+                sys.exit(1)
+            branch = questionary.select(
+                "Select branch (variant):",
+                choices=[questionary.Choice(title=n, value=n) for n in eligible],
+            ).ask()
+            if not branch:
+                warning("Aborted.")
+                sys.exit(0)
+        elif branch == "main":
+            msg = "Cannot test 'main' against itself — choose a different branch as the variant."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        branch_id = cls._resolve_branch_to_id(branch, branches)
+        if not branch_id:
+            msg = f"No branch found named '{branch}'."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        # -- traffic --
+        if traffic_percentage is None:
+            if output_json:
+                msg = "--traffic is required when using --json."
+                json_print({"success": False, "error": msg})
+                sys.exit(1)
+            traffic_input = questionary.text(
+                "Traffic percentage for variant (1-99):", default="50"
+            ).ask()
+            if traffic_input is None:
+                warning("Aborted.")
+                sys.exit(0)
+            try:
+                traffic_percentage = int(traffic_input)
+            except ValueError:
+                error("Traffic percentage must be an integer.")
+                sys.exit(1)
+
+        if not 1 <= traffic_percentage <= 99:
+            msg = "Traffic percentage must be an integer between 1 and 99."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        result = project.create_experiment(name.strip(), branch_id, traffic_percentage)
+        # The create response doesn't include per-version details (a gap in the
+        # platform API) — re-fetch so callers see the control/variant split.
+        result = project.get_active_experiment() or result
+        if output_json:
+            json_print({"success": True, "experiment": result})
+        else:
+            success("Experiment started.")
+            branch_map = cls._fetch_branch_map(project)
+            print_experiment_detail(result, branches=branch_map)
+
+    @classmethod
+    def experiment_list(
+        cls,
+        base_path: str,
+        limit: int = 10,
+        offset: int | None = None,
+        output_json: bool = False,
+    ) -> None:
+        """List experiments for the project."""
+        from poly.cli_commands.shared import require_experiments_enabled
+        from poly.output.console import paged_output, print_experiments
+
+        project = load_project(base_path, output_json=output_json)
+        require_experiments_enabled(project, output_json=output_json)
+
+        experiments = project.list_experiments(limit=limit, offset=offset)
+        if output_json:
+            json_print({"success": True, "experiments": experiments})
+        else:
+            branch_map = cls._fetch_branch_map(project) if experiments else {}
+            with paged_output():
+                print_experiments(experiments, branches=branch_map)
+
+    @classmethod
+    def experiment_active(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+    ) -> None:
+        """Show the currently active experiment."""
+        from poly.cli_commands.shared import require_experiments_enabled
+        from poly.output.console import print_experiment_detail
+
+        project = load_project(base_path, output_json=output_json)
+        require_experiments_enabled(project, output_json=output_json)
+
+        experiment = project.get_active_experiment()
+        if output_json:
+            json_print({"success": True, "experiment": experiment or None})
+        else:
+            branch_map = cls._fetch_branch_map(project) if experiment else {}
+            print_experiment_detail(experiment, branches=branch_map)
+
+    @classmethod
+    def experiment_update(
+        cls,
+        base_path: str,
+        name: str | None = None,
+        traffic_percentage: int | None = None,
+        output_json: bool = False,
+    ) -> None:
+        """Update the name and/or traffic split for the active experiment."""
+        import questionary
+
+        from poly.cli_commands.shared import require_experiments_enabled
+        from poly.output.console import error, print_experiment_detail, success, warning
+
+        project = load_project(base_path, output_json=output_json)
+        require_experiments_enabled(project, output_json=output_json)
+
+        experiment = project.get_active_experiment()
+        if not experiment:
+            msg = "No active experiment found for this project."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        versions = experiment.get("versions", [])
+        variant_version = next((v for v in versions if v.get("kind") != "control"), None)
+        variant_branch_id = (variant_version or {}).get("branch_id")
+
+        if name is None and traffic_percentage is None:
+            if output_json:
+                msg = "At least one of --name or --traffic is required when using --json."
+                json_print({"success": False, "error": msg})
+                sys.exit(1)
+            current = str((variant_version or {}).get("traffic_percentage", 50))
+            traffic_input = questionary.text(
+                "Traffic percentage for variant (1-99):", default=current
+            ).ask()
+            if traffic_input is None:
+                warning("Aborted.")
+                sys.exit(0)
+            try:
+                traffic_percentage = int(traffic_input)
+            except ValueError:
+                error("Traffic percentage must be an integer.")
+                sys.exit(1)
+
+        if traffic_percentage is not None and not 1 <= traffic_percentage <= 99:
+            msg = "Traffic percentage must be an integer between 1 and 99."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        result = project.update_experiment(
+            experiment["id"],
+            name=name,
+            branch_id=variant_branch_id,
+            traffic_percentage=traffic_percentage,
+        )
+        if output_json:
+            json_print({"success": True, "experiment": result})
+        else:
+            success("Experiment updated.")
+            branch_map = cls._fetch_branch_map(project)
+            print_experiment_detail(result, branches=branch_map)
+
+    @classmethod
+    def experiment_end(
+        cls,
+        base_path: str,
+        chosen_branch: str | None = None,
+        output_json: bool = False,
+    ) -> None:
+        """End the active experiment and choose the winning branch."""
+        import questionary
+
+        from poly.cli_commands.shared import require_experiments_enabled
+        from poly.output.console import error, info, success, warning
+
+        project = load_project(base_path, output_json=output_json)
+        require_experiments_enabled(project, output_json=output_json)
+
+        experiment = project.get_active_experiment()
+        if not experiment:
+            msg = "No active experiment found for this project."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        experiment_id = experiment["id"]
+        experiment_name = experiment.get("name") or experiment_id
+        branch_map = cls._fetch_branch_map(project)
+        name_to_branch_id = {meta["name"]: bid for bid, meta in branch_map.items()}
+
+        versions = experiment.get("versions", [])
+        control_version = next((v for v in versions if v.get("kind") == "control"), None)
+        variant_version = next((v for v in versions if v.get("kind") != "control"), None)
+
+        def _label(version: dict | None) -> str:
+            if not version:
+                return "unknown"
+            branch_id = version.get("branch_id", "")
+            return branch_map.get(branch_id, {}).get("name", branch_id)
+
+        control_label = _label(control_version)
+        variant_label = _label(variant_version)
+
+        if not output_json:
+            info(f"Active experiment: [bold]{experiment_name}[/bold]")
+
+        if not chosen_branch:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "--chosen-branch is required when using --json.",
+                    }
+                )
+                sys.exit(1)
+
+            choices = [
+                questionary.Choice(
+                    title=f"Control — {control_label}",
+                    value=control_version.get("branch_id") if control_version else None,
+                ),
+                questionary.Choice(
+                    title=f"Variant — {variant_label}",
+                    value=variant_version.get("branch_id") if variant_version else None,
+                ),
+            ]
+            chosen_branch_id = questionary.select(
+                "Choose the winning branch (this version will receive all live traffic):",
+                choices=choices,
+            ).ask()
+            if not chosen_branch_id:
+                warning("Aborted.")
+                sys.exit(0)
+        else:
+            chosen_branch_id = name_to_branch_id.get(chosen_branch)
+            if not chosen_branch_id:
+                msg = f"No branch found named '{chosen_branch}'."
+                if output_json:
+                    json_print({"success": False, "error": msg})
+                else:
+                    error(msg)
+                sys.exit(1)
+
+        winner_label = branch_map.get(chosen_branch_id, {}).get("name", chosen_branch_id)
+
+        result = project.end_experiment(experiment_id, chosen_branch_id)
+
+        if output_json:
+            json_print({"success": True, "experiment": result})
+        else:
+            success(f"Experiment '{experiment_name}' ended. Winner: {winner_label}")
+            if variant_version and chosen_branch_id == variant_version.get("branch_id"):
+                info("The variant branch has been redeployed to live.")

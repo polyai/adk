@@ -50,6 +50,7 @@ from poly.cli_commands.shared import (
     is_newer_version,
     parse_from_projection_json,
     require_deployment_simplification,
+    require_experiments_enabled,
     resolve_project_scope,
 )
 from poly.cli_commands.sync import FormatCommand, PushCommand, RevertCommand
@@ -4385,6 +4386,46 @@ class RequireDeploymentSimplificationTest(unittest.TestCase):
             require_deployment_simplification(self.proj, output_json=True)
 
         self.assertNotIn("[bold]", mock_json_print.call_args[0][0]["error"])
+
+
+class RequireExperimentsEnabledTest(unittest.TestCase):
+    """Tests for the require_experiments_enabled CLI gate."""
+
+    def setUp(self):
+        self.proj = MagicMock()
+
+    @patch("poly.output.console.error")
+    def test_returns_silently_when_enabled(self, mock_error):
+        """An eligible project passes through without output or exit."""
+        self.proj.experiments_enabled = True
+
+        require_experiments_enabled(self.proj)
+
+        mock_error.assert_not_called()
+
+    @patch("poly.output.console.error")
+    def test_exits_with_error_when_disabled(self, mock_error):
+        """An ineligible project is refused on stderr with exit code 1."""
+        self.proj.experiments_enabled = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            require_experiments_enabled(self.proj)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("top-level branches", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_reports_failure_as_json(self, mock_json_print):
+        """In JSON mode the refusal is a machine-readable payload, not stderr text."""
+        self.proj.experiments_enabled = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            require_experiments_enabled(self.proj, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json_print.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("top-level branches", payload["error"])
 
 
 class BranchTagTest(unittest.TestCase):

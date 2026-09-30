@@ -998,6 +998,116 @@ def print_ab_test_detail(
     console.print(Panel(table, title="[bold]A/B Test[/bold]", border_style="cyan"))
 
 
+# ── Experiments ──────────────────────────────────────────────────────
+
+
+def _experiment_status(experiment: dict[str, Any]) -> str:
+    """Derive a styled status string from an experiment record."""
+    if experiment.get("ended_at"):
+        return "[dim]ended[/dim]"
+    return "[bold green]active[/bold green]"
+
+
+def _format_branch_label(branch: dict[str, Any] | None, branch_id: str) -> str:
+    """Build a human-readable label for a branch."""
+    if not branch:
+        return branch_id
+    return branch.get("name", branch_id)
+
+
+def print_experiments(
+    experiments: list[dict[str, Any]],
+    branches: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Print a table of experiments.
+
+    Args:
+        experiments: List of experiment records.
+        branches: Optional mapping of branch ID to branch dict (with a
+            ``name`` key) for enriched display.
+    """
+    if not experiments:
+        info("No experiments found.")
+        return
+    branch_map = branches or {}
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("ID", style="bold yellow", no_wrap=True)
+    table.add_column("Name", overflow="fold")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Traffic %", justify="right", no_wrap=True)
+    table.add_column("Variant Branch", no_wrap=True)
+    table.add_column("Created", no_wrap=True)
+    for e in experiments:
+        versions = e.get("versions", [])
+        variant = next((v for v in versions if v.get("kind") != "control"), None)
+        variant_branch_id = (variant or {}).get("branch_id") or "—"
+        traffic = (variant or {}).get("traffic_percentage")
+        table.add_row(
+            e.get("id", "—"),
+            e.get("name", "—"),
+            _experiment_status(e),
+            str(traffic) if traffic is not None else "—",
+            _format_branch_label(branch_map.get(variant_branch_id), variant_branch_id),
+            _format_iso_timestamp(e.get("created_at", "")),
+        )
+    console.print(table)
+
+
+def print_experiment_detail(
+    experiment: dict[str, Any] | None,
+    branches: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Print detailed information for a single experiment.
+
+    Args:
+        experiment: A single experiment record, or None.
+        branches: Optional mapping of branch ID to branch dict (with a
+            ``name`` key) for enriched display.
+    """
+    if not experiment:
+        info("No active experiment.")
+        return
+
+    branch_map = branches or {}
+    versions = experiment.get("versions", [])
+    control = next((v for v in versions if v.get("kind") == "control"), None)
+    variant = next((v for v in versions if v.get("kind") != "control"), None)
+
+    control_id = (control or {}).get("branch_id", "—")
+    variant_id = (variant or {}).get("branch_id", "—")
+    control_label = _format_branch_label(branch_map.get(control_id), control_id)
+    variant_label = _format_branch_label(branch_map.get(variant_id), variant_id)
+
+    control_traffic_pct = (control or {}).get("traffic_percentage")
+    variant_traffic_pct = (variant or {}).get("traffic_percentage")
+    control_traffic = f"{control_traffic_pct}%" if control_traffic_pct is not None else "—"
+    variant_traffic = f"{variant_traffic_pct}%" if variant_traffic_pct is not None else "—"
+
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("Key", style="cyan", no_wrap=True)
+    table.add_column("Value")
+    table.add_row("Name", experiment.get("name", "—"))
+    table.add_row("Status", _experiment_status(experiment))
+    table.add_row(
+        "Control",
+        f"[dim]({control_traffic} traffic)[/dim]  {control_label}",
+    )
+    table.add_row(
+        "Variant",
+        f"[dim]({variant_traffic} traffic)[/dim]  {variant_label}",
+    )
+    table.add_row("Created By", experiment.get("created_by", "—"))
+    table.add_row("Created", _format_iso_timestamp(experiment.get("created_at", "")))
+    if experiment.get("ended_at"):
+        table.add_row("Ended", _format_iso_timestamp(experiment["ended_at"]))
+    chosen_version = experiment.get("chosen_version")
+    if chosen_version:
+        winner_id = chosen_version.get("branch_id", "—")
+        winner_label = _format_branch_label(branch_map.get(winner_id), winner_id)
+        table.add_row("Winner", winner_label)
+    console.print(Panel(table, title="[bold]Experiment[/bold]", border_style="cyan"))
+
+
 # ── Conversations ────────────────────────────────────────────────────
 
 

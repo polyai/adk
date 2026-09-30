@@ -948,6 +948,10 @@ class AgentStudioInterface:
     ) -> dict:
         """Create a new A/B test.
 
+        Deprecated: for projects on the simplified deployment model, use
+        ``create_experiment`` instead. Still required for projects on the
+        classic deployment model.
+
         Args:
             region: The region name.
             account_id: The account ID.
@@ -972,6 +976,9 @@ class AgentStudioInterface:
     ) -> dict:
         """List A/B tests for a project.
 
+        Deprecated: for projects on the simplified deployment model, use
+        ``list_experiments`` instead.
+
         Args:
             region: The region name.
             account_id: The account ID.
@@ -990,6 +997,9 @@ class AgentStudioInterface:
         project_id: str,
     ) -> dict:
         """Get the active A/B test for a project.
+
+        Deprecated: for projects on the simplified deployment model, use
+        ``get_active_experiment`` instead.
 
         Args:
             region: The region name.
@@ -1010,6 +1020,11 @@ class AgentStudioInterface:
         chosen_deployment_id: str,
     ) -> dict:
         """End an A/B test and choose a winner.
+
+        Deprecated: for projects on the simplified deployment model, use
+        ``end_experiment`` instead. Note that ending an A/B test does not
+        promote the winner — callers must do that separately — whereas ending
+        an experiment redeploys the winning branch automatically.
 
         Args:
             region: The region name.
@@ -1035,6 +1050,9 @@ class AgentStudioInterface:
     ) -> dict:
         """Update traffic percentage for an A/B test.
 
+        Deprecated: for projects on the simplified deployment model, use
+        ``update_experiment`` instead.
+
         Args:
             region: The region name.
             account_id: The account ID.
@@ -1047,6 +1065,107 @@ class AgentStudioInterface:
         """
         return PlatformAPIHandler.update_ab_test(
             region, account_id, project_id, ab_test_id, traffic_percentage
+        )
+
+    @staticmethod
+    def create_experiment(
+        region: str,
+        account_id: str,
+        project_id: str,
+        name: str,
+        branch_id: str,
+        traffic_percentage: int,
+    ) -> dict:
+        """Create a new experiment.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            name: Display name for the experiment.
+            branch_id: ID of the top-level branch to test as the variant.
+            traffic_percentage: Percentage of traffic routed to the variant (1-99).
+
+        Returns:
+            dict: The created experiment record.
+        """
+        return PlatformAPIHandler.create_experiment(
+            region, account_id, project_id, name, branch_id, traffic_percentage
+        )
+
+    @staticmethod
+    def list_experiments(
+        region: str,
+        account_id: str,
+        project_id: str,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> dict:
+        """List experiments for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            limit: Maximum number of experiments to return.
+            offset: Number of experiments to skip before collecting results.
+
+        Returns:
+            dict: Response containing an ``experiments`` list.
+        """
+        return PlatformAPIHandler.list_experiments(region, account_id, project_id, limit, offset)
+
+    @staticmethod
+    def end_experiment(
+        region: str,
+        account_id: str,
+        project_id: str,
+        experiment_id: str,
+        chosen_branch_id: str,
+    ) -> dict:
+        """End an experiment and choose a winning branch.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            experiment_id: The experiment ID.
+            chosen_branch_id: ID of the branch to keep (control or variant).
+
+        Returns:
+            dict: The ended experiment record.
+        """
+        return PlatformAPIHandler.end_experiment(
+            region, account_id, project_id, experiment_id, chosen_branch_id
+        )
+
+    @staticmethod
+    def update_experiment(
+        region: str,
+        account_id: str,
+        project_id: str,
+        experiment_id: str,
+        name: Optional[str] = None,
+        branch_id: Optional[str] = None,
+        traffic_percentage: Optional[int] = None,
+    ) -> dict:
+        """Update the name and/or traffic split for an experiment.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            experiment_id: The experiment ID.
+            name: New display name, if renaming.
+            branch_id: ID of the variant branch whose traffic share is changing.
+                Required together with ``traffic_percentage``.
+            traffic_percentage: New percentage of traffic to route to the variant (1-99).
+
+        Returns:
+            dict: The updated experiment record.
+        """
+        return PlatformAPIHandler.update_experiment(
+            region, account_id, project_id, experiment_id, name, branch_id, traffic_percentage
         )
 
     @staticmethod

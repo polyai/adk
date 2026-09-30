@@ -15,6 +15,7 @@ import requests
 from ruamel.yaml import YAML
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
+from poly.handlers.utils import camel_to_snake_keys
 from poly.utils import any_credentials_exist, retrieve_api_key
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,11 @@ CHAT_END_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conver
 AB_TESTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests"
 AB_TEST_ACTIVE_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/active"
 AB_TEST_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/{ab_test_id}"
+EXPERIMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/experiments"
+EXPERIMENT_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/experiments/{experiment_id}"
+EXPERIMENT_END_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/experiments/{experiment_id}/end"
+)
 CUSTOM_METRICS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics"
 CUSTOM_METRIC_URL = (
     "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/{metric_name}"
@@ -784,6 +790,10 @@ class PlatformAPIHandler:
     ) -> dict:
         """Create a new A/B test.
 
+        Deprecated: for projects on the simplified deployment model, use
+        ``create_experiment`` instead. Still required for projects on the
+        classic deployment model.
+
         Args:
             region: The region name.
             account_id: The account ID.
@@ -812,6 +822,9 @@ class PlatformAPIHandler:
     ) -> dict:
         """List A/B tests for a project.
 
+        Deprecated: for projects on the simplified deployment model, use
+        ``list_experiments`` instead.
+
         Args:
             region: The region name.
             account_id: The account ID.
@@ -835,6 +848,10 @@ class PlatformAPIHandler:
     ) -> dict:
         """Get the active A/B test for a project.
 
+        Deprecated: for projects on the simplified deployment model, there is
+        no direct equivalent endpoint — derive it client-side (see
+        ``AgentStudioInterface.get_active_experiment``).
+
         Args:
             region: The region name.
             account_id: The account ID.
@@ -855,6 +872,11 @@ class PlatformAPIHandler:
         chosen_deployment_id: str,
     ) -> dict:
         """End an A/B test and choose a winner.
+
+        Deprecated: for projects on the simplified deployment model, use
+        ``end_experiment`` instead. Note that ending an A/B test does not
+        promote the winner — callers must do that separately — whereas ending
+        an experiment redeploys the winning branch automatically.
 
         Args:
             region: The region name.
@@ -882,6 +904,9 @@ class PlatformAPIHandler:
     ) -> dict:
         """Update traffic percentage for an A/B test.
 
+        Deprecated: for projects on the simplified deployment model, use
+        ``update_experiment`` instead.
+
         Args:
             region: The region name.
             account_id: The account ID.
@@ -897,6 +922,143 @@ class PlatformAPIHandler:
         )
         data = {"traffic_percentage": traffic_percentage}
         return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
+
+    @staticmethod
+    def create_experiment(
+        region: str,
+        account_id: str,
+        project_id: str,
+        name: str,
+        branch_id: str,
+        traffic_percentage: int,
+    ) -> dict:
+        """Create a new experiment.
+
+        Experiments test a top-level branch against the current live version, on
+        projects using the simplified deployment model. Only one variant is
+        supported today; the request shape is a list to allow multi-variant
+        experiments without a contract change in the future.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            name: Display name for the experiment.
+            branch_id: ID of the top-level branch to test as the variant.
+            traffic_percentage: Percentage of traffic routed to the variant (1-99).
+
+        Returns:
+            dict: The created experiment record.
+        """
+        endpoint = EXPERIMENTS_URL.format(account_id=account_id, project_id=project_id)
+        data = {
+            "name": name,
+            "versions": [{"branch_id": branch_id, "traffic_percentage": traffic_percentage}],
+        }
+        response = PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
+        return camel_to_snake_keys(response)
+
+    @staticmethod
+    def list_experiments(
+        region: str,
+        account_id: str,
+        project_id: str,
+        limit: ty.Optional[int] = None,
+        offset: ty.Optional[int] = None,
+    ) -> dict:
+        """List experiments for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            limit: Maximum number of experiments to return.
+            offset: Number of experiments to skip before collecting results.
+
+        Returns:
+            dict: Response containing an ``experiments`` list.
+        """
+        endpoint = EXPERIMENTS_URL.format(account_id=account_id, project_id=project_id)
+        params = {}
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
+        response = PlatformAPIHandler.make_request(region, endpoint, "GET", params=params)
+        return camel_to_snake_keys(response)
+
+    @staticmethod
+    def end_experiment(
+        region: str,
+        account_id: str,
+        project_id: str,
+        experiment_id: str,
+        chosen_branch_id: str,
+    ) -> dict:
+        """End an experiment and choose a winning branch.
+
+        Unlike A/B tests, the winning branch is redeployed to live by the
+        platform itself as part of ending the experiment — callers do not need
+        to promote it separately afterward.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            experiment_id: The experiment ID.
+            chosen_branch_id: ID of the branch to keep (control or variant).
+
+        Returns:
+            dict: The ended experiment record.
+        """
+        endpoint = EXPERIMENT_END_URL.format(
+            account_id=account_id, project_id=project_id, experiment_id=experiment_id
+        )
+        data = {"winning_branch_id": chosen_branch_id}
+        response = PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
+        return camel_to_snake_keys(response)
+
+    @staticmethod
+    def update_experiment(
+        region: str,
+        account_id: str,
+        project_id: str,
+        experiment_id: str,
+        name: ty.Optional[str] = None,
+        branch_id: ty.Optional[str] = None,
+        traffic_percentage: ty.Optional[int] = None,
+    ) -> dict:
+        """Update the name and/or traffic split for an experiment.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            experiment_id: The experiment ID.
+            name: New display name, if renaming.
+            branch_id: ID of the variant branch whose traffic share is changing.
+                Required together with ``traffic_percentage`` — the API takes
+                traffic as part of a ``versions`` entry, not a bare scalar.
+            traffic_percentage: New percentage of traffic to route to the variant (1-99).
+
+        Returns:
+            dict: The updated experiment record.
+
+        Raises:
+            ValueError: If ``traffic_percentage`` is given without ``branch_id``.
+        """
+        if traffic_percentage is not None and branch_id is None:
+            raise ValueError("branch_id is required when updating traffic_percentage.")
+        endpoint = EXPERIMENT_URL.format(
+            account_id=account_id, project_id=project_id, experiment_id=experiment_id
+        )
+        data = {}
+        if name is not None:
+            data["name"] = name
+        if traffic_percentage is not None:
+            data["versions"] = [{"branch_id": branch_id, "traffic_percentage": traffic_percentage}]
+        response = PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
+        return camel_to_snake_keys(response)
 
     @staticmethod
     def _jwt_headers(jwt_token: str, source: str = "adk") -> dict[str, str]:
