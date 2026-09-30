@@ -67,7 +67,7 @@ from poly.resources.function import (
     FunctionType,
     LatencyControl,
 )
-from poly.resources.guardrails import CustomGuardrail, PlatformGuardrail
+from poly.resources.guardrails import MAX_CUSTOM_GUARDRAILS, CustomGuardrail, PlatformGuardrail
 from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import (
@@ -11428,6 +11428,43 @@ class CustomGuardrailTests(unittest.TestCase):
         ]
         self.assertIsNone(guardrail.validate(resource_mappings=resource_mappings))
 
+    @staticmethod
+    def _collection_of(count: int) -> dict[str, CustomGuardrail]:
+        """Build a collection of ``count`` distinct, otherwise-valid custom guardrails."""
+        return {
+            f"guardrail_{i}": CustomGuardrail(
+                resource_id=f"CUSTOM_GUARDRAILS-{i}",
+                name=f"guardrail_{i}",
+                prompt="Never give medical advice.",
+                action="warn",
+            )
+            for i in range(count)
+        }
+
+    def test_validate_collection_passes_when_empty(self):
+        """A project with no custom guardrails is valid."""
+        self.assertIsNone(CustomGuardrail.validate_collection({}))
+
+    def test_validate_collection_passes_with_a_few_guardrails(self):
+        """A typical project with a handful of custom guardrails is valid."""
+        self.assertIsNone(CustomGuardrail.validate_collection(self._collection_of(3)))
+
+    def test_validate_collection_passes_at_exactly_the_limit(self):
+        """Exactly MAX_CUSTOM_GUARDRAILS (20) is allowed — the limit is inclusive."""
+        self.assertEqual(MAX_CUSTOM_GUARDRAILS, 20)
+        collection = self._collection_of(MAX_CUSTOM_GUARDRAILS)
+        self.assertIsNone(CustomGuardrail.validate_collection(collection))
+
+    def test_validate_collection_one_over_the_limit_raises_with_count_and_limit(self):
+        """21 custom guardrails is rejected locally, naming both the count and the limit."""
+        collection = self._collection_of(MAX_CUSTOM_GUARDRAILS + 1)
+
+        with self.assertRaises(ValueError) as cm:
+            CustomGuardrail.validate_collection(collection)
+        message = str(cm.exception)
+        self.assertIn("Too many custom guardrails (21)", message)
+        self.assertIn("Maximum of 20 custom guardrails per project", message)
+
     def test_build_create_proto_includes_fields_and_references(self):
         guardrail = CustomGuardrail(
             resource_id="CUSTOM_GUARDRAILS-1",
@@ -13113,4 +13150,3 @@ class MultiResourceFileCacheTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
