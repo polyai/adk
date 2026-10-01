@@ -74,6 +74,8 @@ platform_guardrails:
 
 Custom guardrails live under an optional `custom_guardrails` list in the same file. Unlike platform guardrails, they can be created, updated, and deleted via the ADK.
 
+A project may have at most **20 custom guardrails**. `poly validate` and `poly push` both enforce this limit locally and report a clear error if it is exceeded — this avoids a server-side rejection that would otherwise roll back the entire push transaction.
+
 ### Fields
 
 | Field | Description |
@@ -108,6 +110,7 @@ Validation rejects a `guardrails.yaml` that doesn't satisfy these rules:
 - Every platform and custom guardrail's `enabled` must be a boolean (`true`/`false`, unquoted).
 - A custom guardrail's `name`, `prompt`, and `action` are all required.
 - Any `{{prefix:name}}` reference in a custom guardrail's `action` must use one of the supported prefixes above, and must resolve to a resource that actually exists.
+- The total number of custom guardrails must not exceed **20**. Exceeding this limit raises an error at `poly validate` and `poly push` time, before any changes are sent to the platform.
 
 ## Best practices
 
