@@ -167,7 +167,14 @@ def compute_diff(
     sync_declared_modules(project, output_json=output_json)
     files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
     if not (before or after):
-        return project.get_diffs(file_paths=files)
+        diffs = project.get_diffs(file_paths=files)
+        # Shared (`_modules`-derived) flows are invisible to get_diffs() above -- their tracked
+        # hash can't reflect an edit made directly in Agent Studio, since `ad pull` deliberately
+        # never lets that content land locally (see pull_project). Surface it here instead, via
+        # a live remote fetch, clearly labeled so it isn't mistaken for a local change.
+        for file_path, diff in project.diff_module_flows_against_remote(file_paths=files).items():
+            diffs[f"{file_path} (remote drift: Agent Studio differs from _modules)"] = diff
+        return diffs
 
     if not before:
         client_env = "sandbox"

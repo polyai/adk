@@ -1924,6 +1924,64 @@ class AgentStudioProject:
 
         return diffs
 
+    def diff_module_flows_against_remote(self, file_paths: list[str] = None) -> dict[str, str]:
+        """Compare the live remote content of shared (`_modules`-derived) flows against what's
+        currently materialized locally.
+
+        `ad pull` deliberately excludes these resources from its reconciliation (see
+        `pull_project`), so their tracked hash never reflects an edit made directly in Agent
+        Studio -- `get_diffs()` has no way to notice that kind of drift, since it only ever
+        compares local file content against the locally-tracked hash from the last sync, never
+        against live remote content. This performs a read-only comparison instead: it fetches
+        the current remote projection and diffs it against what's on disk right now, but writes
+        nothing to disk and does not touch tracked state.
+
+        Args:
+            file_paths (list[str]): If given, only compare resources whose local file path is
+                in this list.
+
+        Returns:
+            dict[str, str]: local file_path -> diff text (remote -> local), one entry per
+                module-owned resource whose live remote content differs from what's on disk.
+                Empty if the project has no currently-materialized shared flows.
+        """
+        module_owned_flow_names = get_module_owned_flow_names(self.root_path)
+        if not module_owned_flow_names:
+            return {}
+
+        incoming_resources, _, _ = self.api_handler.pull_resources()
+        remote_module_resources = _extract_flows(incoming_resources, module_owned_flow_names)
+        if not remote_module_resources:
+            return {}
+
+        # The tracked (already-pushed) mappings are what let us match a remote resource back to
+        # a local file by resource_id -- a resource not yet pushed from this project has nothing
+        # local to compare against, and is skipped.
+        tracked_module_resources = _extract_flows(self.resources, module_owned_flow_names)
+        tracked_mappings = self._make_resource_mappings(tracked_module_resources)
+        mapping_by_id = {(m.resource_type, m.resource_id): m for m in tracked_mappings}
+
+        all_files = not file_paths
+        diffs: dict[str, str] = {}
+        for resource_type, resource_dict in remote_module_resources.items():
+            for resource_id, remote_resource in resource_dict.items():
+                mapping = mapping_by_id.get((resource_type, resource_id))
+                if mapping is None:
+                    continue
+                if not all_files and file_paths and mapping.file_path not in file_paths:
+                    continue
+                try:
+                    local_resource = self.read_local_resource(
+                        resource=mapping, resource_mappings=tracked_mappings
+                    )
+                except FileNotFoundError:
+                    continue
+
+                if diff := remote_resource.get_diff(local_resource):
+                    diffs[local_resource.file_path] = diff
+
+        return diffs
+
     def get_deployments(
         self, client_env: str = "sandbox"
     ) -> tuple[list[dict[str, Any]], dict[str, str]]:
