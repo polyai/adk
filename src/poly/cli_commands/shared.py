@@ -12,6 +12,7 @@ import os
 import sys
 from typing import Any, Optional
 
+from poly.modules import ModuleSyncError, sync_project_modules
 from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
 
@@ -85,23 +86,51 @@ def load_project(base_path: str, output_json: bool = False) -> AgentStudioProjec
     return project
 
 
-def sync_declared_modules(project: AgentStudioProject, output_json: bool = False) -> None:
-    """Materialize the project's declared shared flows.
-
-    Exits with a clear error if a declared flow doesn't exist under _modules/flows/, or would
-    clobber a hand-authored local flow of the same name.
+def prompt_module_conflict_resolution(flow_name: str) -> str:
+    """Ask interactively whether to overwrite a shared flow with the `_modules` version, or
+    keep its current content for now. Returns "module" or "local".
     """
-    from poly.modules import ModuleSyncError, sync_project_modules
+    import questionary
+
+    from poly.output.console import warning
+
+    warning(
+        f"Flow '{flow_name}' differs from it's module version in `_modules/flows/{flow_name}/`. "
+    )
+    choice = questionary.select(
+        f"How should '{flow_name}' be resolved?",
+        choices=[
+            questionary.Choice(
+                "Use the _modules version (overwrite the current content)", value="module"
+            ),
+            questionary.Choice(
+                "Keep the current content for now (_modules is left unchanged)", value="local"
+            ),
+        ],
+    ).ask()
+    return choice or "module"
+
+
+def exit_with_module_sync_error(e: ModuleSyncError, output_json: bool = False) -> None:
+    """Report a ModuleSyncError (declared flow missing from _modules/, or a collision with a
+    hand-authored local flow) and exit 1. Shared by every call site that can raise one."""
     from poly.output.console import error
 
+    if output_json:
+        json_print({"success": False, "error": str(e)})
+    else:
+        error(str(e))
+    sys.exit(1)
+
+
+def sync_declared_modules(project: AgentStudioProject, output_json: bool = False) -> None:
+    """Materialize the project's declared shared flows."""
     try:
-        sync_project_modules(project)
+        sync_project_modules(
+            project, on_conflict=None if output_json else prompt_module_conflict_resolution
+        )
     except ModuleSyncError as e:
-        if output_json:
-            json_print({"success": False, "error": str(e)})
-        else:
-            error(str(e))
-        sys.exit(1)
+        exit_with_module_sync_error(e, output_json)
 
 
 def resolve_project_scope(
@@ -167,14 +196,7 @@ def compute_diff(
     sync_declared_modules(project, output_json=output_json)
     files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
     if not (before or after):
-        diffs = project.get_diffs(file_paths=files)
-        # Shared (`_modules`-derived) flows are invisible to get_diffs() above -- their tracked
-        # hash can't reflect an edit made directly in Agent Studio, since `ad pull` deliberately
-        # never lets that content land locally (see pull_project). Surface it here instead, via
-        # a live remote fetch, clearly labeled so it isn't mistaken for a local change.
-        for file_path, diff in project.diff_module_flows_against_remote(file_paths=files).items():
-            diffs[f"{file_path} (remote drift: Agent Studio differs from _modules)"] = diff
-        return diffs
+        return project.get_diffs(file_paths=files)
 
     if not before:
         client_env = "sandbox"

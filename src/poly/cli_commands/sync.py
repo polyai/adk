@@ -15,11 +15,14 @@ from typing import Any, Optional
 from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import (
     compute_diff,
+    exit_with_module_sync_error,
     load_project,
     parse_from_projection_json,
     print_project_file_changes,
+    prompt_module_conflict_resolution,
     sync_declared_modules,
 )
+from poly.modules import ModuleSyncError
 from poly.output.json_output import commands_to_dicts, json_print
 
 logger = logging.getLogger(__name__)
@@ -398,7 +401,6 @@ class PushCommand(BaseCommand):
         from poly.output.console import error, info, plain, success, warning
 
         project = load_project(base_path, output_json=output_json)
-        sync_declared_modules(project, output_json=(output_json or output_commands))
         if not output_json and not output_commands:
             info(
                 f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
@@ -424,14 +426,19 @@ class PushCommand(BaseCommand):
         )
 
         original_branch_id = project.branch_id
-        push_ok, output, commands = project.push_project(
-            force=force,
-            skip_validation=skip_validation,
-            dry_run=dry_run,
-            format=format,
-            projection_json=projection_json,
-            parent_projection_json=parent_projection_json,
-        )
+        resolver = None if json_errors else prompt_module_conflict_resolution
+        try:
+            push_ok, output, commands = project.push_project(
+                force=force,
+                skip_validation=skip_validation,
+                dry_run=dry_run,
+                format=format,
+                projection_json=projection_json,
+                parent_projection_json=parent_projection_json,
+                module_conflict_resolver=resolver,
+            )
+        except ModuleSyncError as e:
+            exit_with_module_sync_error(e, json_errors)
         new_branch_name = None
         if original_branch_id != project.branch_id:
             new_branch_name = project.get_current_branch()

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
-from typing import Any, Optional, TypeAlias
+from typing import TYPE_CHECKING, Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
 
@@ -32,7 +32,10 @@ from poly.migration_utils import (
     load_migration_flags,
     run_migrations,
 )
-from poly.modules import get_module_owned_flow_names
+from poly.modules import get_module_owned_flow_names, sync_project_modules
+
+if TYPE_CHECKING:
+    from poly.modules import ModuleConflictResolver
 from poly.resources import (
     BaseFlowStep,
     ChildTopic,
@@ -70,54 +73,6 @@ DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
-
-# Resource types that can be materialized from poly.modules
-_MODULE_FLOW_RESOURCE_TYPES: tuple[ResourceType, ...] = (
-    FlowConfig,
-    FlowStep,
-    FunctionStep,
-    Function,
-)
-
-
-def _module_flow_key(resource_type: ResourceType, resource: Resource) -> Optional[str]:
-    """Return the clean flow-folder name a flow-scoped resource belongs to, or None."""
-    name = resource.name if resource_type is FlowConfig else getattr(resource, "flow_name", None)
-    return resource_utils.clean_name(name) if name else None
-
-
-def _filter_out_flows(resources: ResourceMap, owned_flow_names: set[str]) -> ResourceMap:
-    """Shallow copy of `resources` with entries in `_MODULE_FLOW_RESOURCE_TYPES` that belong to
-    `owned_flow_names` removed. Other resource types pass through untouched."""
-    if not owned_flow_names:
-        return resources
-    filtered: ResourceMap = {}
-    for resource_type, resource_dict in resources.items():
-        if resource_type not in _MODULE_FLOW_RESOURCE_TYPES:
-            filtered[resource_type] = resource_dict
-            continue
-        filtered[resource_type] = {
-            resource_id: resource
-            for resource_id, resource in resource_dict.items()
-            if _module_flow_key(resource_type, resource) not in owned_flow_names
-        }
-    return filtered
-
-
-def _extract_flows(resources: ResourceMap, owned_flow_names: set[str]) -> ResourceMap:
-    """Inverse of `_filter_out_flows`: only the entries belonging to `owned_flow_names`."""
-    if not owned_flow_names:
-        return {}
-    extracted: ResourceMap = {}
-    for resource_type in _MODULE_FLOW_RESOURCE_TYPES:
-        matched = {
-            resource_id: resource
-            for resource_id, resource in resources.get(resource_type, {}).items()
-            if _module_flow_key(resource_type, resource) in owned_flow_names
-        }
-        if matched:
-            extracted[resource_type] = matched
-    return extracted
 
 
 @dataclass
@@ -654,26 +609,11 @@ class AgentStudioProject:
         self._check_no_duplicate_resource_paths(incoming_resources)
 
         # -------
-        # Set aside shared (`_modules`) flows
-        # -------
-        # Their local truth is `_modules/flows/<name>/`, materialized via
-        # `sync_project_modules` -- never reconciled from remote state here. Filtering them out
-        # of both `original_resources` and `incoming_resources` means none of
-        # `_update_pulled_resources`'s write/delete branches ever visit or mutate their entries,
-        # so whatever resource_id/hash was already tracked for them survives this pull untouched,
-        # whether or not their local file currently exists. See poly.modules for the full design
-        # and why this needs to happen here rather than as a selective skip inside the merge.
-        module_owned_flow_names = get_module_owned_flow_names(self.root_path)
-        preserved_module_resources = _extract_flows(self.resources, module_owned_flow_names)
-        original_resources_for_merge = _filter_out_flows(self.resources, module_owned_flow_names)
-        incoming_resources = _filter_out_flows(incoming_resources, module_owned_flow_names)
-
-        # -------
         # Update resources
         # -------
 
         files_with_conflicts = self._update_pulled_resources(
-            original_resources=original_resources_for_merge,
+            original_resources=self.resources,
             incoming_resources=incoming_resources,
             force=force,
             format=format,
@@ -689,10 +629,6 @@ class AgentStudioProject:
         flow_folder = os.path.join(self.root_path, "flows")
         if os.path.exists(flow_folder):
             self._delete_empty_folders(flow_folder)
-
-        # Restore the module-owned resources so their tracked resource_id survive the pull.
-        for resource_type, resource_dict in preserved_module_resources.items():
-            incoming_resources.setdefault(resource_type, {}).update(resource_dict)
 
         # Save the updated project configuration
         self.resources = incoming_resources
@@ -1334,6 +1270,7 @@ class AgentStudioProject:
         format=False,
         projection_json: Optional[dict[str, Any]] = None,
         parent_projection_json: Optional[dict[str, Any]] = None,
+        module_conflict_resolver: Optional["ModuleConflictResolver"] = None,
     ) -> tuple[bool, str, list[Message]]:
         """Push the project configuration to the Agent Studio Interactor.
 
@@ -1348,6 +1285,8 @@ class AgentStudioProject:
                 projection. When provided, parent ids are adopted from it entirely
                 offline (also on dry runs); an empty dict means "no parent". When
                 None, the parent branch is fetched from the platform instead.
+            module_conflict_resolver (Optional[ModuleConflictResolver]): user to resolve merge conflict
+                on flows defined in modules.
 
         Returns:
             Tuple[bool, str, list[Message]]:
@@ -1376,6 +1315,8 @@ class AgentStudioProject:
                         f"Merge conflicts detected in the following files:\n- {conflicts}\nPlease resolve the conflicts and try again.",
                         [],
                     )
+
+            sync_project_modules(self, on_conflict=module_conflict_resolver)
 
         # New local resources that path-match a parent branch resource adopt the
         # parent's ids at mint time, so pushing does not mint ids that diverge from
@@ -1820,10 +1761,9 @@ class AgentStudioProject:
         MultiResourceYamlResource._file_cache.clear()
         try:
             for resource in self.all_resources:
-                resource_type = type(resource)
                 if (
-                    resource_type in _MODULE_FLOW_RESOURCE_TYPES
-                    and _module_flow_key(resource_type, resource) in module_owned_flow_names
+                    resource_utils.get_flow_name_from_path(resource.get_path(self.root_path))
+                    in module_owned_flow_names
                 ):
                     # Shared flows are managed by `sync_project_modules`, not tracked-state
                     # revert -- their content should come from `_modules/`, not the last push.
@@ -1921,64 +1861,6 @@ class AgentStudioProject:
             if not original_resource:
                 raise ValueError(f"Original resource not found for {resource_mapping.file_path}")
             diffs[resource_mapping.file_path] = resource_utils.get_diff(original_resource.raw, "")
-
-        return diffs
-
-    def diff_module_flows_against_remote(self, file_paths: list[str] = None) -> dict[str, str]:
-        """Compare the live remote content of shared (`_modules`-derived) flows against what's
-        currently materialized locally.
-
-        `ad pull` deliberately excludes these resources from its reconciliation (see
-        `pull_project`), so their tracked hash never reflects an edit made directly in Agent
-        Studio -- `get_diffs()` has no way to notice that kind of drift, since it only ever
-        compares local file content against the locally-tracked hash from the last sync, never
-        against live remote content. This performs a read-only comparison instead: it fetches
-        the current remote projection and diffs it against what's on disk right now, but writes
-        nothing to disk and does not touch tracked state.
-
-        Args:
-            file_paths (list[str]): If given, only compare resources whose local file path is
-                in this list.
-
-        Returns:
-            dict[str, str]: local file_path -> diff text (remote -> local), one entry per
-                module-owned resource whose live remote content differs from what's on disk.
-                Empty if the project has no currently-materialized shared flows.
-        """
-        module_owned_flow_names = get_module_owned_flow_names(self.root_path)
-        if not module_owned_flow_names:
-            return {}
-
-        incoming_resources, _, _ = self.api_handler.pull_resources()
-        remote_module_resources = _extract_flows(incoming_resources, module_owned_flow_names)
-        if not remote_module_resources:
-            return {}
-
-        # The tracked (already-pushed) mappings are what let us match a remote resource back to
-        # a local file by resource_id -- a resource not yet pushed from this project has nothing
-        # local to compare against, and is skipped.
-        tracked_module_resources = _extract_flows(self.resources, module_owned_flow_names)
-        tracked_mappings = self._make_resource_mappings(tracked_module_resources)
-        mapping_by_id = {(m.resource_type, m.resource_id): m for m in tracked_mappings}
-
-        all_files = not file_paths
-        diffs: dict[str, str] = {}
-        for resource_type, resource_dict in remote_module_resources.items():
-            for resource_id, remote_resource in resource_dict.items():
-                mapping = mapping_by_id.get((resource_type, resource_id))
-                if mapping is None:
-                    continue
-                if not all_files and file_paths and mapping.file_path not in file_paths:
-                    continue
-                try:
-                    local_resource = self.read_local_resource(
-                        resource=mapping, resource_mappings=tracked_mappings
-                    )
-                except FileNotFoundError:
-                    continue
-
-                if diff := remote_resource.get_diff(local_resource):
-                    diffs[local_resource.file_path] = diff
 
         return diffs
 
