@@ -66,6 +66,8 @@ PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
+# The platform trigger endpoint's own limit on a run name.
+MAX_TEST_RUN_NAME_LENGTH = 120
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
@@ -3543,11 +3545,14 @@ class AgentStudioProject:
 
         return matched
 
-    def trigger_tests(self, test_ids: list[str]) -> dict:
+    def trigger_tests(self, test_ids: list[str], name: str | None = None) -> dict:
         """Trigger tests for the project.
 
         Args:
             test_ids: List of test case resource IDs to run.
+            name: Optional title for the run in Agent Studio, so it can be found
+                in run history. Blank means none: the run is named after its
+                single test or its test count.
 
         Returns:
             dict: API response with test run details.
@@ -3555,11 +3560,18 @@ class AgentStudioProject:
         if not test_ids:
             raise ValueError("No test IDs provided.")
 
+        name = (name or "").strip() or None
+        if name and len(name) > MAX_TEST_RUN_NAME_LENGTH:
+            raise ValueError(
+                f"Test run name must be at most {MAX_TEST_RUN_NAME_LENGTH} characters."
+            )
+
         return self.api_handler.trigger_test_run(
             self.region,
             self.project_id,
             test_ids,
             self.branch_id,
+            name=name,
         )
 
     def get_test_run(self, test_run_id: str) -> dict:

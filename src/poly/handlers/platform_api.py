@@ -1483,6 +1483,7 @@ class PlatformAPIHandler:
         project_id: str,
         test_case_ids: list[str],
         branch_id: str,
+        name: str | None = None,
     ) -> dict:
         """Trigger a test run for a project.
 
@@ -1491,15 +1492,22 @@ class PlatformAPIHandler:
             project_id: The project ID (agent ID).
             test_case_ids: List of test case IDs to run.
             branch_id: The branch ID to run tests against.
+            name: Optional title for the run in Agent Studio. Omitted, the run is
+                named after its single test or its test count.
 
         Returns:
             dict: The created test run response.
         """
         endpoint = TRIGGER_TEST_RUN_URL.format(project_id=project_id)
-        data = {
-            "testCaseIds": test_case_ids,
+        # The select shape, not the legacy {testCaseIds, branchId} body: the
+        # platform lifts a legacy body into {branchId, select} and drops any
+        # other field on it, so a name sent that way would never arrive.
+        data: dict = {
             "branchId": branch_id,
+            "select": {"mode": "testIds", "testIds": test_case_ids},
         }
+        if name:
+            data["name"] = name
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod

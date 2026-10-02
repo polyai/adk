@@ -1414,6 +1414,7 @@ class AgentStudioInterface:
         project_id: str,
         test_case_ids: list[str],
         branch_id: str,
+        name: str | None = None,
     ) -> dict:
         """Trigger a test run for a project.
 
@@ -1422,11 +1423,14 @@ class AgentStudioInterface:
             project_id: The project ID (agent ID).
             test_case_ids: List of test case IDs to run.
             branch_id: The branch ID to run tests against.
+            name: Optional title for the run in Agent Studio.
 
         Returns:
             dict: The created test run response.
         """
-        return PlatformAPIHandler.trigger_test_run(region, project_id, test_case_ids, branch_id)
+        return PlatformAPIHandler.trigger_test_run(
+            region, project_id, test_case_ids, branch_id, name=name
+        )
 
     @staticmethod
     def get_custom_metrics(

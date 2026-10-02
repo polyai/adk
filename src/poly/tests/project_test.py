@@ -1058,6 +1058,41 @@ class GetDiffsTest(unittest.TestCase):
         self.assertIn(other_func_path, message)
 
 
+class TriggerTestsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.trigger_tests."""
+
+    def setUp(self):
+        # Accessing api_handler writes the project config into the fixture; mock it.
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_forwards_a_trimmed_name(self):
+        """Surrounding whitespace is stripped before the name is sent."""
+        self.project.trigger_tests(["tc-1"], name="  Nightly · smoke  ")
+
+        self.assertEqual(
+            self.mock_api_handler.trigger_test_run.call_args.kwargs["name"], "Nightly · smoke"
+        )
+
+    def test_sends_no_name_when_blank(self):
+        """A blank name is no name, so the platform picks its default."""
+        self.project.trigger_tests(["tc-1"], name="   ")
+
+        self.assertIsNone(self.mock_api_handler.trigger_test_run.call_args.kwargs["name"])
+
+    def test_rejects_a_name_over_the_platform_limit(self):
+        """Names over 120 characters fail locally instead of as a platform 422."""
+        with self.assertRaises(ValueError):
+            self.project.trigger_tests(["tc-1"], name="x" * 121)
+
+        self.mock_api_handler.trigger_test_run.assert_not_called()
+
+
 class CleanResourcesBeforePushTest(unittest.TestCase):
     """Tests for the _clean_resources_before_push method"""
 

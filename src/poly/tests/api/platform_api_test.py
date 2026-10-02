@@ -667,6 +667,39 @@ class CreateCustomMetric(unittest.TestCase):
         self.assertIn("/custom-metrics", call_kwargs.kwargs["url"])
 
 
+class TriggerTestRun(unittest.TestCase):
+    """Tests for PlatformAPIHandler.trigger_test_run."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_the_select_shape(self, mock_request, _mock_key):
+        """The body uses select, not the legacy testCaseIds that drops other fields."""
+        mock_request.return_value = make_mock_response(200, json_body={"id": "run-1"})
+
+        PlatformAPIHandler.trigger_test_run("studio", "proj1", ["tc-1", "tc-2"], "main")
+
+        call_kwargs = mock_request.call_args.kwargs
+        self.assertEqual(call_kwargs["method"], "POST")
+        self.assertIn("/v1/agents/proj1/testing/test-runs/trigger", call_kwargs["url"])
+        self.assertEqual(
+            json.loads(call_kwargs["data"]),
+            {"branchId": "main", "select": {"mode": "testIds", "testIds": ["tc-1", "tc-2"]}},
+        )
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_includes_the_run_name_when_given(self, mock_request, _mock_key):
+        """A name is sent alongside the selection."""
+        mock_request.return_value = make_mock_response(200, json_body={"id": "run-1"})
+
+        PlatformAPIHandler.trigger_test_run(
+            "studio", "proj1", ["tc-1"], "main", name="Pre-release check · booking flow"
+        )
+
+        body = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(body["name"], "Pre-release check · booking flow")
+
+
 class UpdateCustomMetric(unittest.TestCase):
     """Tests for PlatformAPIHandler.update_custom_metric."""
 

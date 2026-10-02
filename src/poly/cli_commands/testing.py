@@ -42,6 +42,7 @@ class TestingCommand(BaseCommand):
                 "  poly test run --path /path/to/project\n"
                 "  poly test run --files test1.yaml test2.yaml\n"
                 "  poly test run --tag smoke\n"
+                '  poly test run --tag smoke --name "Pre-release check · booking flow"\n'
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -55,6 +56,14 @@ class TestingCommand(BaseCommand):
             type=str,
             nargs="*",
             help="Run tests with the specified tag(s).",
+        )
+        test_run_parser.add_argument(
+            "--name",
+            type=str,
+            help=(
+                "Name for the run in Agent Studio, so it can be found in run history: "
+                "why it runs, then what it covers. Defaults to the test name or count."
+            ),
         )
         test_run_parser.add_argument(
             "--dont-poll",
@@ -130,6 +139,7 @@ class TestingCommand(BaseCommand):
                 args.path,
                 files=args.files,
                 tags=args.tag,
+                name=args.name,
                 dont_poll=args.dont_poll,
                 push=args.push,
                 output_json=args.json,
@@ -156,6 +166,7 @@ class TestingCommand(BaseCommand):
         base_path: str,
         files: list[str],
         tags: list[str] = None,
+        name: str | None = None,
         dont_poll: bool = False,
         push: bool = False,
         output_json: bool = False,
@@ -222,7 +233,7 @@ class TestingCommand(BaseCommand):
         if not output_json:
             info(f"Running tests for {project.account_id}/{project.project_id}...")
 
-        test_info = project.trigger_tests(test_ids)
+        test_info = project.trigger_tests(test_ids, name=name)
         test_run_id = test_info.get("id")
 
         if output_json:

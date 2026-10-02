@@ -20,6 +20,7 @@ import requests
 from rich.console import Console
 
 from poly.cli import AgentStudioCLI
+from poly.cli_commands import testing as testing_cli
 from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.base import (
     BUILDER_API_GROUP,
@@ -5859,6 +5860,44 @@ class UpdateSkillsStepTest(unittest.TestCase):
         self.mock_update.return_value = False
 
         self.assertFalse(UpdateCommand.update_skills_step(output_json=False, required=True))
+
+
+class TestRunNameTest(unittest.TestCase):
+    """Tests for ``poly test run --name``."""
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.testing.load_project").start()
+        self.proj = MagicMock()
+        self.proj.resolve_tests.return_value = [MagicMock(resource_id="tc-1")]
+        self.proj.trigger_tests.return_value = {"id": "run-1", "test_case_count": 1}
+        self.mock_load.return_value = self.proj
+        patch("poly.output.console.info").start()
+        patch("poly.output.console.success").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _run(self, *argv: str) -> None:
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        # Imported via its module: pytest would collect a bare ``TestingCommand``
+        # (and its ``testing_*`` methods) as tests.
+        args = cli._create_parser().parse_args(["test", "run", "--dont-poll", *argv])
+        testing_cli.TestingCommand.run(args)
+
+    def test_name_flag_is_forwarded_to_the_trigger(self):
+        """'test run --name <name>' reaches trigger_tests as the run name."""
+        self._run("--name", "Pre-release check · booking flow")
+
+        self.proj.trigger_tests.assert_called_once_with(
+            ["tc-1"], name="Pre-release check · booking flow"
+        )
+
+    def test_run_without_a_name_sends_none(self):
+        """Without --name the platform keeps naming the run itself."""
+        self._run()
+
+        self.proj.trigger_tests.assert_called_once_with(["tc-1"], name=None)
 
 
 class StartupUpdateMessageTest(unittest.TestCase):
