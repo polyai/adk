@@ -60,10 +60,7 @@ class TestingCommand(BaseCommand):
         test_run_parser.add_argument(
             "--name",
             type=str,
-            help=(
-                "Name for the run in Agent Studio, so it can be found in run history: "
-                "why it runs, then what it covers. Defaults to the test name or count."
-            ),
+            help="Name for the run in Agent Studio. Defaults to the test name or count.",
         )
         test_run_parser.add_argument(
             "--dont-poll",

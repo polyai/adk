@@ -30,7 +30,7 @@ After triggering, the CLI polls for results every 5 seconds and displays a live-
 | `--files` | One or more specific test YAML files to run. |
 | `--tag` | Run only tests that carry the specified tag(s). Multiple tags are OR-matched. |
 | `--dry-run` | Preview which tests would run without triggering them. |
-| `--name` | Name the run so it can be found in Agent Studio run history: why it runs, then what it covers. No date or time; Agent Studio shows who ran it and when. Up to 120 characters. Defaults to the test name or the test count. |
+| `--name` | Name for the run in Agent Studio. Defaults to the test name or count. |
 | `--dont-poll` | Trigger the run and exit immediately. Use `poly test show <run_id>` to check results later. |
 | `--push` | Push the project before running tests. Equivalent to running `poly push` then `poly test run`. |
 
