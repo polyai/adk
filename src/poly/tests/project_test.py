@@ -1062,7 +1062,6 @@ class TriggerTestsTest(unittest.TestCase):
     """Tests for AgentStudioProject.trigger_tests."""
 
     def setUp(self):
-        # Accessing api_handler writes the project config into the fixture; mock it.
         self.mock_api_handler = patch.object(
             AgentStudioProject, "api_handler", new_callable=MagicMock
         ).start()

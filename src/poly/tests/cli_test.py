@@ -5880,8 +5880,6 @@ class TestRunNameTest(unittest.TestCase):
     def _run(self, *argv: str) -> None:
         cli = AgentStudioCLI()
         cli.register_commands()
-        # Imported via its module: pytest would collect a bare ``TestingCommand``
-        # (and its ``testing_*`` methods) as tests.
         args = cli._create_parser().parse_args(["test", "run", "--dont-poll", *argv])
         testing_cli.TestingCommand.run(args)
 

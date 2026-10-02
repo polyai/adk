@@ -66,7 +66,6 @@ PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
-# The platform trigger endpoint's own limit on a run name.
 MAX_TEST_RUN_NAME_LENGTH = 120
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
@@ -3550,9 +3549,7 @@ class AgentStudioProject:
 
         Args:
             test_ids: List of test case resource IDs to run.
-            name: Optional title for the run in Agent Studio, so it can be found
-                in run history. Blank means none: the run is named after its
-                single test or its test count.
+            name: Optional name for the run.
 
         Returns:
             dict: API response with test run details.

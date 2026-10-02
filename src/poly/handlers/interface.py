@@ -1423,7 +1423,7 @@ class AgentStudioInterface:
             project_id: The project ID (agent ID).
             test_case_ids: List of test case IDs to run.
             branch_id: The branch ID to run tests against.
-            name: Optional title for the run in Agent Studio.
+            name: Optional name for the run.
 
         Returns:
             dict: The created test run response.
