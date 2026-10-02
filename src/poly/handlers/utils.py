@@ -3,6 +3,28 @@
 Copyright PolyAI Limited
 """
 
+import re
+
+_CAMEL_CASE_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def camel_to_snake_keys(value: object) -> object:
+    """Recursively convert a JSON value's dict keys from camelCase to snake_case.
+
+    Sourcerer (agent-stream) responds with camelCase keys, unlike the rest of
+    the ADK v1 API (served by poly_core), which uses snake_case throughout.
+    This normalizes sourcerer responses to the convention the rest of ADK's
+    code expects, at the point they're received.
+    """
+    if isinstance(value, dict):
+        return {
+            _CAMEL_CASE_BOUNDARY.sub("_", k).lower(): camel_to_snake_keys(v)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [camel_to_snake_keys(v) for v in value]
+    return value
+
 
 def clean_body(body: dict) -> dict:
     """Clean the body dictionary by removing None values

@@ -4381,9 +4381,7 @@ class MultiResourcePullMergeTest(unittest.TestCase):
         patch("poly.utils.save_imports").start()
         patch("poly.utils.export_decorators").start()
         self.merge_spy = patch("poly.utils.merge_strings", wraps=merge_strings).start()
-        self.save_spy = patch.object(
-            Resource, "save_to_file", wraps=Resource.save_to_file
-        ).start()
+        self.save_spy = patch.object(Resource, "save_to_file", wraps=Resource.save_to_file).start()
         self.addCleanup(patch.stopall)
         MultiResourceYamlResource._file_cache.clear()
         self.addCleanup(MultiResourceYamlResource._file_cache.clear)
@@ -5586,6 +5584,98 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
             ],
             sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="mid")],
             expected=True,
+        )
+
+
+class ExperimentsTest(unittest.TestCase):
+    """Tests for the AgentStudioProject experiment methods."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.project._api_handler = self.mock_api
+
+    def _set_eligibility(self, simplified: bool, mode: DeploymentMode) -> None:
+        """Seed the cached simplified-deployments flag and the deployment mode."""
+        self.project.__dict__["using_simplified_deployments"] = simplified
+        self.project._deployment_mode = mode
+
+    def test_experiments_enabled_with_simplified_deployments_and_branches(self):
+        """Simplified deployments plus a branch-capable mode enables experiments."""
+        for mode in (DeploymentMode.RELEASES, DeploymentMode.RELEASES_BRANCHES):
+            with self.subTest(mode=mode):
+                self._set_eligibility(simplified=True, mode=mode)
+
+                self.assertTrue(self.project.experiments_enabled)
+
+    def test_experiments_disabled_in_simple_mode(self):
+        """A 'simple' mode project has no branch to test, so experiments are off."""
+        self._set_eligibility(simplified=True, mode=DeploymentMode.SIMPLE)
+
+        self.assertFalse(self.project.experiments_enabled)
+
+    def test_experiments_disabled_without_simplified_deployments(self):
+        """The classic deployment model does not support experiments."""
+        self._set_eligibility(simplified=False, mode=DeploymentMode.RELEASES)
+
+        self.assertFalse(self.project.experiments_enabled)
+
+    def test_list_experiments_unwraps_the_experiments_list(self):
+        """The API response's 'experiments' list is returned directly."""
+        self.mock_api.list_experiments.return_value = {"experiments": [{"id": "exp-1"}]}
+
+        result = self.project.list_experiments(limit=5, offset=10)
+
+        self.assertEqual(result, [{"id": "exp-1"}])
+        self.assertEqual(self.mock_api.list_experiments.call_args.kwargs["offset"], 10)
+
+    def test_list_experiments_missing_key_returns_empty_list(self):
+        """A response with no 'experiments' key is treated as no experiments."""
+        self.mock_api.list_experiments.return_value = {}
+
+        self.assertEqual(self.project.list_experiments(), [])
+
+    def test_get_active_experiment_returns_first_not_ended(self):
+        """The active experiment is the first record with no ended_at."""
+        self.mock_api.list_experiments.return_value = {
+            "experiments": [
+                {"id": "exp-old", "ended_at": "2026-01-01T00:00:00Z"},
+                {"id": "exp-live", "ended_at": None},
+                {"id": "exp-other"},
+            ]
+        }
+
+        self.assertEqual(self.project.get_active_experiment()["id"], "exp-live")
+
+    def test_get_active_experiment_returns_empty_dict_when_all_ended(self):
+        """If every experiment has ended, there is no active one."""
+        self.mock_api.list_experiments.return_value = {
+            "experiments": [{"id": "exp-old", "ended_at": "2026-01-01T00:00:00Z"}]
+        }
+
+        self.assertEqual(self.project.get_active_experiment(), {})
+
+    def test_create_end_and_update_forward_project_scope(self):
+        """Mutating calls are scoped to this project's region, account and id."""
+        scope = {
+            "region": self.project.region,
+            "account_id": self.project.account_id,
+            "project_id": self.project.project_id,
+        }
+
+        self.project.create_experiment("v2", "br-v2", 30)
+        self.project.end_experiment("exp-1", "br-v2")
+        self.project.update_experiment("exp-1", name="renamed")
+
+        self.mock_api.create_experiment.assert_called_once_with(
+            **scope, name="v2", branch_id="br-v2", traffic_percentage=30
+        )
+        self.mock_api.end_experiment.assert_called_once_with(
+            **scope, experiment_id="exp-1", chosen_branch_id="br-v2"
+        )
+        self.mock_api.update_experiment.assert_called_once_with(
+            **scope, experiment_id="exp-1", name="renamed", branch_id=None, traffic_percentage=None
         )
 
 

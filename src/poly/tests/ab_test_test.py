@@ -39,6 +39,7 @@ class ABTestStartTest(unittest.TestCase):
         patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = False
         self.proj.create_ab_test.return_value = dict(SAMPLE_AB_TEST)
         self.proj.get_deployments.return_value = (
             [
@@ -91,6 +92,54 @@ class ABTestStartTest(unittest.TestCase):
             variant_version="variant111",
             traffic_percentage=50,
             output_json=True,
+        )
+
+        self.proj.create_ab_test.assert_called_once_with("v2 test", "dep-v", 50)
+
+    # -- Mutual exclusivity with simplified-deployment projects --
+
+    @patch("poly.output.console.error")
+    def test_start__simplified_deployments_blocked(self, mock_error):
+        """On simplified deployments, A/B tests are blocked in favor of 'experiment'."""
+        self.proj.using_simplified_deployments = True
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.ab_test_start(
+                TEST_DIR, name="v2 test", variant_version="variant111", traffic_percentage=50
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("poly deployments experiment", mock_error.call_args[0][0])
+        self.proj.create_ab_test.assert_not_called()
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_start__simplified_deployments_blocked_json(self, mock_json):
+        """The simplified-deployments block emits an error payload in JSON mode."""
+        self.proj.using_simplified_deployments = True
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.ab_test_start(
+                TEST_DIR,
+                name="v2 test",
+                variant_version="variant111",
+                traffic_percentage=50,
+                output_json=True,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("poly deployments experiment", payload["error"])
+        self.proj.create_ab_test.assert_not_called()
+
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_ab_test_detail")
+    def test_start__classic_deployments_proceeds(self, mock_detail, mock_success):
+        """On the classic deployment model, A/B tests still work normally."""
+        self.proj.using_simplified_deployments = False
+
+        DeploymentsCommand.ab_test_start(
+            TEST_DIR, name="v2 test", variant_version="variant111", traffic_percentage=50
         )
 
         self.proj.create_ab_test.assert_called_once_with("v2 test", "dep-v", 50)
@@ -400,6 +449,7 @@ class ABTestListTest(unittest.TestCase):
         patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = False
         self.mock_load.return_value = self.proj
         self.addCleanup(patch.stopall)
 
@@ -454,6 +504,17 @@ class ABTestListTest(unittest.TestCase):
         with self.assertRaises(requests.HTTPError):
             DeploymentsCommand.ab_test_list(TEST_DIR)
 
+    @patch("poly.output.console.error")
+    def test_list__simplified_deployments_blocked(self, mock_error):
+        """On simplified deployments, listing A/B tests is blocked."""
+        self.proj.using_simplified_deployments = True
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.ab_test_list(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.list_ab_tests.assert_not_called()
+
 
 class ABTestActiveTest(unittest.TestCase):
     """Tests for DeploymentsCommand.ab_test_active."""
@@ -462,6 +523,7 @@ class ABTestActiveTest(unittest.TestCase):
         patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = False
         self.mock_load.return_value = self.proj
         self.addCleanup(patch.stopall)
 
@@ -514,6 +576,17 @@ class ABTestActiveTest(unittest.TestCase):
         with self.assertRaises(requests.HTTPError):
             DeploymentsCommand.ab_test_active(TEST_DIR)
 
+    @patch("poly.output.console.error")
+    def test_active__simplified_deployments_blocked(self, mock_error):
+        """On simplified deployments, showing the active A/B test is blocked."""
+        self.proj.using_simplified_deployments = True
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.ab_test_active(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.get_active_ab_test.assert_not_called()
+
 
 class ABTestUpdateTest(unittest.TestCase):
     """Tests for DeploymentsCommand.ab_test_update."""
@@ -522,6 +595,7 @@ class ABTestUpdateTest(unittest.TestCase):
         patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = False
         updated = dict(SAMPLE_AB_TEST, traffic_percentage=30)
         self.proj.update_ab_test.return_value = updated
         self.proj.get_active_ab_test.return_value = dict(SAMPLE_AB_TEST)
@@ -619,6 +693,18 @@ class ABTestUpdateTest(unittest.TestCase):
         with self.assertRaises(requests.HTTPError):
             DeploymentsCommand.ab_test_update(TEST_DIR, traffic_percentage=30)
 
+    @patch("poly.output.console.error")
+    def test_update__simplified_deployments_blocked(self, mock_error):
+        """On simplified deployments, updating an A/B test is blocked."""
+        self.proj.using_simplified_deployments = True
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.ab_test_update(TEST_DIR, traffic_percentage=30)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.get_active_ab_test.assert_not_called()
+        self.proj.update_ab_test.assert_not_called()
+
 
 class ABTestEndTest(unittest.TestCase):
     """Tests for DeploymentsCommand.ab_test_end."""
@@ -627,6 +713,7 @@ class ABTestEndTest(unittest.TestCase):
         patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = False
         self.proj.end_ab_test.return_value = dict(SAMPLE_AB_TEST, status="ended")
         self.proj.get_active_ab_test.return_value = dict(SAMPLE_AB_TEST)
         self.proj.get_deployments.return_value = (
@@ -798,6 +885,18 @@ class ABTestEndTest(unittest.TestCase):
 
         with self.assertRaises(requests.HTTPError):
             DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="live00000")
+
+    @patch("poly.output.console.error")
+    def test_end__simplified_deployments_blocked(self, mock_error):
+        """On simplified deployments, ending an A/B test is blocked."""
+        self.proj.using_simplified_deployments = True
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="live00000")
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.get_active_ab_test.assert_not_called()
+        self.proj.end_ab_test.assert_not_called()
 
 
 if __name__ == "__main__":

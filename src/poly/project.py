@@ -3603,6 +3603,10 @@ class AgentStudioProject:
     ) -> dict:
         """Create a new A/B test for the project.
 
+        Deprecated: for projects on the simplified deployment model, use
+        ``create_experiment`` instead. Still required for projects on the
+        classic deployment model.
+
         Args:
             name: Display name for the test.
             variant_deployment_id: ID of the pre-release variant deployment.
@@ -3623,6 +3627,9 @@ class AgentStudioProject:
     def list_ab_tests(self, limit: int | None = None) -> list[dict]:
         """List A/B tests for the project.
 
+        Deprecated: for projects on the simplified deployment model, use
+        ``list_experiments`` instead.
+
         Args:
             limit: Maximum number of tests to return.
 
@@ -3640,6 +3647,9 @@ class AgentStudioProject:
     def get_active_ab_test(self) -> dict:
         """Get the active A/B test for the project.
 
+        Deprecated: for projects on the simplified deployment model, use
+        ``get_active_experiment`` instead.
+
         Returns:
             dict: The active A/B test record, or empty dict if none.
         """
@@ -3651,6 +3661,12 @@ class AgentStudioProject:
 
     def end_ab_test(self, ab_test_id: str, chosen_deployment_id: str) -> dict:
         """End an A/B test and choose a winner.
+
+        Deprecated: for projects on the simplified deployment model, use
+        ``end_experiment`` instead. Note that ending an A/B test does not
+        promote the winner — callers must call ``promote_deployment``
+        separately — whereas ending an experiment redeploys the winning
+        branch automatically.
 
         Args:
             ab_test_id: The A/B test ID.
@@ -3670,6 +3686,9 @@ class AgentStudioProject:
     def update_ab_test(self, ab_test_id: str, traffic_percentage: int) -> dict:
         """Update traffic percentage for an A/B test.
 
+        Deprecated: for projects on the simplified deployment model, use
+        ``update_experiment`` instead.
+
         Args:
             ab_test_id: The A/B test ID.
             traffic_percentage: New traffic percentage (0-100).
@@ -3682,6 +3701,135 @@ class AgentStudioProject:
             account_id=self.account_id,
             project_id=self.project_id,
             ab_test_id=ab_test_id,
+            traffic_percentage=traffic_percentage,
+        )
+
+    # ── Experiments ─────────────────────────────────────────────────
+
+    @property
+    def experiments_enabled(self) -> bool:
+        """Check if the project is eligible to use experiments.
+
+        Experiments require both the simplified deployment model (flag +
+        convergence, see ``using_simplified_deployments``) and a
+        ``deployment_mode`` that supports top-level branches — a ``simple``
+        mode project has no branch to test.
+        """
+        return self.using_simplified_deployments and self.deployment_mode != DeploymentMode.SIMPLE
+
+    def create_experiment(self, name: str, branch_id: str, traffic_percentage: int) -> dict:
+        """Create a new experiment for the project.
+
+        Args:
+            name: Display name for the experiment.
+            branch_id: ID of the top-level branch to test as the variant.
+            traffic_percentage: Percentage of traffic routed to the variant (1-99).
+
+        Returns:
+            dict: The created experiment record.
+        """
+        return self.api_handler.create_experiment(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            name=name,
+            branch_id=branch_id,
+            traffic_percentage=traffic_percentage,
+        )
+
+    def list_experiments(self, limit: int | None = None, offset: int | None = None) -> list[dict]:
+        """List experiments for the project.
+
+        Args:
+            limit: Maximum number of experiments to return.
+            offset: Number of experiments to skip before collecting results.
+
+        Returns:
+            list[dict]: A list of experiment records.
+        """
+        result = self.api_handler.list_experiments(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            limit=limit,
+            offset=offset,
+        )
+        return result.get("experiments", [])
+
+    def get_active_experiment(self) -> dict:
+        """Get the active experiment for the project, if any.
+
+        There is no dedicated "active" endpoint for experiments (unlike A/B
+        tests) — at most one experiment can be active at a time (enforced
+        server-side), identified by an unset ``ended_at``. This derives that
+        client-side by paginating through ``list_experiments`` until the
+        active record is found or the list is exhausted — the list order
+        isn't assumed to be newest-first, since that isn't guaranteed by the
+        API contract.
+
+        Returns:
+            dict: The active experiment record, or empty dict if none.
+        """
+        page_size = 50
+        max_pages = 100  # guards against an API contract violation causing an infinite loop
+        offset = 0
+        for _ in range(max_pages):
+            page = self.list_experiments(limit=page_size, offset=offset)
+            for experiment in page:
+                if not experiment.get("ended_at"):
+                    return experiment
+            if len(page) < page_size:
+                return {}
+            offset += page_size
+        return {}
+
+    def end_experiment(self, experiment_id: str, chosen_branch_id: str) -> dict:
+        """End an experiment and choose a winning branch.
+
+        The platform redeploys the winning branch to live automatically as
+        part of ending the experiment — no separate promotion call is needed.
+
+        Args:
+            experiment_id: The experiment ID.
+            chosen_branch_id: ID of the branch to keep (control or variant).
+
+        Returns:
+            dict: The ended experiment record.
+        """
+        return self.api_handler.end_experiment(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            experiment_id=experiment_id,
+            chosen_branch_id=chosen_branch_id,
+        )
+
+    def update_experiment(
+        self,
+        experiment_id: str,
+        name: str | None = None,
+        branch_id: str | None = None,
+        traffic_percentage: int | None = None,
+    ) -> dict:
+        """Update the name and/or traffic split for an experiment.
+
+        Args:
+            experiment_id: The experiment ID.
+            name: New display name, if renaming.
+            branch_id: ID of the variant branch whose traffic share is changing.
+                Required together with ``traffic_percentage``.
+            traffic_percentage: New percentage of traffic to route to the variant (1-99).
+
+        Returns:
+            dict: The updated experiment record.
+        """
+        return self.api_handler.update_experiment(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            experiment_id=experiment_id,
+            name=name,
+            branch_id=branch_id,
             traffic_percentage=traffic_percentage,
         )
 
