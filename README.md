@@ -8,21 +8,22 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Develop with Claude Code](https://img.shields.io/badge/Develop%20with-Claude%20Code-DC9E63?logo=claude)](https://claude.ai/download)
 
-A CLI and Python package for managing [Agent Studio](https://studio.us.poly.ai) projects locally. It provides a Git-like workflow for synchronizing project configurations between your local filesystem and the Agent Studio platform.
+A CLI for building, testing, and deploying PolyAI voice and chat agents.
+
+New to PolyAI? Sign up at [studio.poly.ai](https://studio.poly.ai) and start free.
 
 **[Documentation](https://polyai.github.io/adk/)**
 
 ## Installation
 
+Via [UV](https://docs.astral.sh/uv/):
+```bash
+uv tool install polyai-adk
+```
 
 Via Pip:
 ```bash
 pip install polyai-adk
-```
-
-Via [UV](https://docs.astral.sh/uv/):
-```bash
-uv tool install polyai-adk
 ```
 
 Voice calling (`poly call`) needs extra audio and WebRTC dependencies, which are left out of the default install to keep it small for CI. Install them with the `call` extra:
@@ -32,7 +33,13 @@ pip install "polyai-adk[call]"
 uv tool install "polyai-adk[call]"
 ```
 
-Once installed, use the `poly` command to manage your projects:
+Then set up your account, API key, AI skills, and a project:
+
+```bash
+poly setup
+```
+
+Once set up, use the `poly` command to manage your projects:
 
 ```bash
 poly setup      # Set up everything: account, API key, AI skills, and a project
