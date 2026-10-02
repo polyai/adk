@@ -139,6 +139,7 @@ nav:
           - metrics: reference/cli/metrics.md
           - rtc: reference/cli/rtc.md
           - audio-cache: reference/cli/audio-cache.md
+          - sip-trunks: reference/cli/sip-trunks.md
           - docs: reference/cli/docs.md
           - studio: reference/cli/studio.md
           - completion: reference/cli/completion.md

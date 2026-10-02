@@ -138,6 +138,74 @@ class AgentStudioInterface:
         return PlatformAPIHandler.get_accounts(region)
 
     @staticmethod
+    def list_sip_trunks(region: str, account_id: str) -> dict[str, Any]:
+        """List the account's SIP trunks without loading a project branch."""
+        return PlatformAPIHandler.list_sip_trunks(region, account_id)
+
+    @staticmethod
+    def create_sip_trunk(region: str, account_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Create an account-level SIP trunk."""
+        return PlatformAPIHandler.create_sip_trunk(region, account_id, data)
+
+    @staticmethod
+    def get_sip_trunk(region: str, account_id: str, trunk_id: str) -> dict[str, Any]:
+        """Get one of the account's SIP trunks."""
+        return PlatformAPIHandler.get_sip_trunk(region, account_id, trunk_id)
+
+    @staticmethod
+    def update_sip_trunk(
+        region: str, account_id: str, trunk_id: str, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Patch one of the account's SIP trunks."""
+        return PlatformAPIHandler.update_sip_trunk(region, account_id, trunk_id, data)
+
+    @staticmethod
+    def delete_sip_trunk(region: str, account_id: str, trunk_id: str) -> dict[str, Any]:
+        """Delete one of the account's SIP trunks."""
+        return PlatformAPIHandler.delete_sip_trunk(region, account_id, trunk_id)
+
+    @staticmethod
+    def list_sip_trunk_extensions(region: str, account_id: str, trunk_id: str) -> dict[str, Any]:
+        """List extensions belonging to a SIP trunk."""
+        return PlatformAPIHandler.list_sip_trunk_extensions(region, account_id, trunk_id)
+
+    @staticmethod
+    def create_sip_trunk_extension(
+        region: str, account_id: str, trunk_id: str, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Create an extension on a SIP trunk."""
+        return PlatformAPIHandler.create_sip_trunk_extension(region, account_id, trunk_id, data)
+
+    @staticmethod
+    def get_sip_trunk_extension(
+        region: str, account_id: str, trunk_id: str, extension: str
+    ) -> dict[str, Any]:
+        """Get a SIP trunk extension and its routing target."""
+        return PlatformAPIHandler.get_sip_trunk_extension(region, account_id, trunk_id, extension)
+
+    @staticmethod
+    def update_sip_trunk_extension(
+        region: str,
+        account_id: str,
+        trunk_id: str,
+        extension: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Patch a SIP trunk extension's routing target."""
+        return PlatformAPIHandler.update_sip_trunk_extension(
+            region, account_id, trunk_id, extension, data
+        )
+
+    @staticmethod
+    def delete_sip_trunk_extension(
+        region: str, account_id: str, trunk_id: str, extension: str
+    ) -> dict[str, Any]:
+        """Delete an extension from a SIP trunk."""
+        return PlatformAPIHandler.delete_sip_trunk_extension(
+            region, account_id, trunk_id, extension
+        )
+
+    @staticmethod
     def get_accounts_with_key(region: str, api_key: str) -> dict[str, str]:
         """Get the accounts for a region, authenticating with `api_key` directly.
 
