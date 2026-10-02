@@ -46,6 +46,7 @@ from poly.resources import (
     TestCaseAssertion,
     TestCaseTags,
     Topic,
+    TopicTags,
     TranscriptCorrection,
     Translation,
     Variable,
@@ -4473,6 +4474,156 @@ class MultiResourcePullMergeTest(unittest.TestCase):
         self.assertEqual(conflicts, [])
         self.assertFalse(os.path.exists(self.sms_file))
         self.assertEqual(len(self._sms_merge_calls()), 1)
+
+
+class TopicTagsSyncTest(unittest.TestCase):
+    """Pushing and pulling topic tags against a real copy of the test project.
+
+    A force push compares local files straight against Agent Studio. A plain push pulls and
+    merges first.
+    """
+
+    TOPIC_ID = "TOPIC-Topic 1"
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_api_handler.queue_resources = MagicMock(return_value=[])
+        self.mock_api_handler.send_queued_commands = MagicMock(return_value=True)
+        patch.object(AgentStudioProject, "save_config").start()
+        patch.object(AgentStudioProject, "load_project").start()
+        patch.object(AgentStudioProject, "_fetch_parent_resources", return_value={}).start()
+        patch("poly.utils.save_imports").start()
+        patch("poly.utils.export_decorators").start()
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+
+        self.root = _copy_test_project(self)
+        self.topic_file = os.path.join(self.root, "topics", "topic_1.yaml")
+
+    def _project(self, saved_tags: Optional[list[str]] = None) -> AgentStudioProject:
+        """Load the project with Topic 1 saved in Agent Studio with the given tags."""
+        project_data = deepcopy(PROJECT_DATA)
+        if saved_tags is not None:
+            project_data["resources"]["topics"][self.TOPIC_ID]["tags"] = saved_tags
+        return AgentStudioProject.from_dict(project_data, self.root)
+
+    def _read_topic_file(self) -> str:
+        with open(self.topic_file, encoding="utf-8") as f:
+            return f.read()
+
+    def _set_local_tags(self, tags_yaml: str) -> None:
+        """Add a tags block to the local Topic 1 file, after its enabled line."""
+        contents = self._read_topic_file()
+        self.assertIn("enabled: true\n", contents)
+        with open(self.topic_file, "w", encoding="utf-8") as f:
+            f.write(contents.replace("enabled: true\n", f"enabled: true\n{tags_yaml}", 1))
+
+    def _pushed(self) -> dict:
+        return self.mock_api_handler.queue_resources.call_args.kwargs
+
+    def _incoming_with_tags(self, project: AgentStudioProject, tags: list[str]) -> None:
+        """Serve Agent Studio as the project's resources with Topic 1 tagged."""
+        incoming = deepcopy(project.resources)
+        incoming[Topic][self.TOPIC_ID].tags = tags
+        self.mock_api_handler.pull_resources.return_value = (incoming, [], {})
+
+    def test_force_push_clears_tags_when_file_has_no_tags_key(self):
+        """A force push has no pulled baseline, so a file without tags clears them."""
+        project = self._project(saved_tags=["billing"])
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID].tags, [])
+
+    def test_push_pulls_studio_tags_into_a_file_from_before_tags(self):
+        """A plain push merges first, so a file pulled before tags were supported keeps them."""
+        project = self._project()
+        self._incoming_with_tags(project, ["billing"])
+
+        success, message, _ = project.push_project()
+
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+        self.assertIn("enabled: true\ntags:\n- billing\nactions:", self._read_topic_file())
+
+    def test_push_clears_tags_after_the_tags_key_is_deleted(self):
+        """Deleting the tags key from a pulled file clears the tags on a plain push."""
+        project = self._project(saved_tags=["billing"])
+        self._incoming_with_tags(project, ["billing"])
+
+        success, message, _ = project.push_project()
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID].tags, [])
+        self.assertNotIn("tags:", self._read_topic_file())
+
+    def test_push_sets_changed_tags(self):
+        self._set_local_tags("tags:\n- billing\n- refunds\n")
+        project = self._project(saved_tags=["billing"])
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        tags = self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID]
+        self.assertEqual(tags.tags, ["billing", "refunds"])
+
+    def test_push_clears_tags_set_to_an_empty_list(self):
+        self._set_local_tags("tags: []\n")
+        project = self._project(saved_tags=["billing"])
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID].tags, [])
+
+    def test_push_sends_a_new_topics_tags_on_create(self):
+        self._set_local_tags("tags:\n- billing\n")
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["topics"].pop(self.TOPIC_ID)
+        project = AgentStudioProject.from_dict(project_data, self.root)
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        pushed = self._pushed()
+        (new_topic,) = [t for t in pushed["new_resources"][Topic].values() if t.name == "Topic 1"]
+        self.assertEqual(list(new_topic.build_create_proto().tags), ["billing"])
+        self.assertNotIn(TopicTags, pushed["updated_resources"])
+
+    def test_push_rejects_duplicate_tags(self):
+        self._set_local_tags("tags:\n- billing\n- billing\n")
+        project = self._project()
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertIn("Duplicate tags: ['billing']", message)
+        self.mock_api_handler.queue_resources.assert_not_called()
+
+    def test_pull_writes_studio_tags_into_a_file_without_tags_key(self):
+        """The first pull after upgrading writes the tags into the topic file."""
+        project = self._project()
+        incoming = deepcopy(project.resources)
+        incoming[Topic][self.TOPIC_ID].tags = ["billing", "refunds"]
+        self.mock_api_handler.pull_resources.return_value = (incoming, [], {})
+
+        files_with_conflicts, _ = project.pull_project()
+
+        self.assertEqual(files_with_conflicts, [])
+        self.assertIn("enabled: true\ntags:\n- billing\n- refunds\nactions:", self._read_topic_file())
+
+    def test_status_file_round_trips_tags(self):
+        """Tags survive the status file, and a status file from before tags loads with none."""
+        project = self._project(saved_tags=["billing"])
+
+        reloaded = AgentStudioProject.from_dict(project.to_dict(), self.root)
+
+        self.assertEqual(reloaded.resources[Topic][self.TOPIC_ID].tags, ["billing"])
+        self.assertEqual(self._project().resources[Topic][self.TOPIC_ID].tags, [])
 
 
 class MigrateFlowStepResourceIdsTest(unittest.TestCase):

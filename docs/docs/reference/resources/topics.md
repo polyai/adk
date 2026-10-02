@@ -25,12 +25,13 @@ The filename is derived from the topic's `name` field, cleaned to lowercase snak
 
 ## What a topic contains
 
-Each topic has five main fields:
+Each topic has five main fields, plus optional tags:
 
 | Field | Description |
 |---|---|
 | `name` | The display name of the topic. This is the canonical name — the filename is derived from it. Can contain spaces, punctuation, and mixed case. |
 | `enabled` | Whether the topic is active. Default: `true`. |
+| `tags` | Optional labels for grouping and filtering topics in Agent Studio. See [Tags](#tags). |
 | `example_queries` | Example user inputs that should retrieve the topic. |
 | `content` | Factual information retrieved by RAG. |
 | `actions` | Behavioral instructions the agent should follow when the topic is matched. |
@@ -40,6 +41,9 @@ Each topic has five main fields:
 ~~~yaml
 name: Opening Hours & Locations
 enabled: true
+tags:
+  - hours
+  - locations
 example_queries:
   - What are your opening hours?
   - When are you open?
@@ -94,6 +98,15 @@ This split is important: content is for facts, actions are for behavior.
 
 - use no more than **20** example queries
 - cover meaningful variation, not every minor wording change
+
+## Tags
+
+`tags` is an optional list of labels for grouping and filtering topics in Agent Studio. Tags don't change how the agent behaves.
+
+- `poly pull` writes `tags` only for topics that have tags.
+- A topic file without a `tags` key has no tags, so deleting the key clears them when you push.
+- Each tag must be non-empty, unique within the topic, at most 16 characters, and have no leading or trailing whitespace. Tags are case-sensitive.
+- Child topics don't support tags, so a `tags` key in a child topic file is an error.
 
 ## Content
 

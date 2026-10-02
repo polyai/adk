@@ -12,10 +12,11 @@ File names are cleaned to lowercase snake_case. For example, a topic named `"Ope
 
 ## Structure
 
-Each topic has five fields:
+Each topic has five fields, plus optional tags:
 
 - **name** (string): The display name of the topic. This is the canonical name — the filename is derived from it (cleaned to lowercase snake_case).
 - **enabled** (bool): Whether the topic is active. Default: `true`.
+- **tags** (optional list of strings): Labels for grouping and filtering topics in Agent Studio. See Tags below.
 - **example_queries**: List of example user inputs that should trigger this topic.
 - **content**: Factual information retrieved via RAG. No function calls or variable references allowed here.
 - **actions**: Behavioral instructions for the agent when the topic is triggered. This is where you use references.
@@ -24,6 +25,9 @@ Each topic has five fields:
 ```yaml
 name: Opening Hours & Locations
 enabled: true
+tags:
+  - hours
+  - locations
 example_queries:
   - What are your opening hours?
   - When are you open?
@@ -52,6 +56,13 @@ actions: |-
 - Maximum **20 queries**.
 - Cover different ways a user might ask about the same thing.
 - Don't try to cover every minor variation - the model generalizes.
+
+## Tags
+- Optional labels for grouping and filtering topics in Agent Studio. They don't change how the agent behaves.
+- `pull` writes `tags` only for topics that have tags.
+- A topic file without a `tags` key has no tags, so deleting the key clears them on `push`.
+- Each tag must be non-empty, unique within the topic, at most **16 characters**, and have no leading or trailing whitespace. Tags are case-sensitive.
+- Child topics don't support tags, so a `tags` key in a child topic file is an error.
 
 ## Content
 - Factual information only. This is what gets retrieved via RAG.
