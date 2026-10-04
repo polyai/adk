@@ -43,7 +43,7 @@ Once set up, use the `poly` command to manage your projects:
 
 ```bash
 poly setup      # Set up everything: account, API key, AI skills, and a project
-poly apikey --region studio     # Get an API key for the PolyAI APIs / Dialog RSN
+poly apikey     # Get an API key for the PolyAI APIs / Dialog RSN (separate from ADK setup; pass --region for your cluster)
 poly init       # Initialize a project
 poly project    # Manage poly projects
 poly pull       # Pull latest configuration
