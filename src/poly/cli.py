@@ -46,6 +46,7 @@ from poly.cli_commands.sync import (
 )
 from poly.cli_commands.template import TemplateCommand
 from poly.cli_commands.testing import TestingCommand
+from poly.cli_commands.transcripts import TranscriptsCommand
 from poly.cli_commands.update import UpdateCommand, display_update_message
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
 from poly.handlers.interface import REGIONS
@@ -74,6 +75,7 @@ COMMANDS = [
     DeploymentsCommand,
     MetricsCommand,
     ConversationsCommand,
+    TranscriptsCommand,
     AudioCacheCommand,
     FunctionsCommand,
     TestingCommand,
