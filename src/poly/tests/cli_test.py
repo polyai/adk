@@ -1504,6 +1504,58 @@ class ChatLoopTest(unittest.TestCase):
         self.assertEqual(self.proj.send_message.call_args_list[0][0][1], "Hello")
         self.assertEqual(self.proj.send_message.call_args_list[1][0][1], "Goodbye")
 
+    def test_language_returned_by_a_turn_is_sent_on_the_next_turn(self):
+        """A mid-conversation language switch is echoed back so it persists."""
+        self.proj.send_message.side_effect = [
+            {
+                "response": "Por supuesto.",
+                "conversation_ended": False,
+                "metadata": {"asr_lang_code": "es-US", "tts_lang_code": "es-US"},
+            },
+            {"response": "Perfecto.", "conversation_ended": False},
+        ]
+
+        ChatCommand._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Sí, por favor", "Una reserva"],
+        )
+
+        first, second = self.proj.send_message.call_args_list
+        self.assertEqual(first[0][3:], (None, None))
+        self.assertEqual(second[0][3:], ("es-US", "es-US"))
+
+    def test_first_turn_uses_language_from_initial_response(self):
+        """The session's starting language is sent instead of the server-side default."""
+        ChatCommand._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Hello"],
+            initial_response={
+                "response": "Hi",
+                "conversation_ended": False,
+                "metadata": {"asr_lang_code": "en-US", "tts_lang_code": "en-US"},
+            },
+        )
+
+        self.assertEqual(self.proj.send_message.call_args[0][3:], ("en-US", "en-US"))
+
+    def test_cli_language_kept_when_reply_has_no_language(self):
+        """Explicit --input-lang/--output-lang are kept when replies don't carry codes."""
+        ChatCommand._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_lang="fr-FR",
+            output_lang="fr-FR",
+            input_messages=["Bonjour", "Merci"],
+        )
+
+        for call in self.proj.send_message.call_args_list:
+            self.assertEqual(call[0][3:], ("fr-FR", "fr-FR"))
+
     def test_scripted_messages_exits_cleanly_when_exhausted(self):
         """Loop returns restart=False once all scripted messages are consumed."""
         restart, _ = ChatCommand._run_chat_loop(
