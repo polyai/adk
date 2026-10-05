@@ -60,6 +60,6 @@ For the test-case format, the available assertions, and worked examples, see the
 
 Validation, chat, and voice calls belong in the edit loop, tests belong before you merge, and conversation inspection happens after release and feeds back into the next change.
 
-Deployed environments matter here too — `poly chat -e` talks to `sandbox`, `pre-release`, or `live`, so a change can be checked again after each promotion. Test runs always use the current branch. See [environments and deployment](./environments-and-deployment.md).
+Deployed environments matter here too — `poly chat -e live` talks to production, so a change can be checked again after it merges. Test runs always use the current branch. See [environments and deployment](./environments-and-deployment.md).
 
 Every flag for these commands is in the [CLI reference](../reference/cli.md).

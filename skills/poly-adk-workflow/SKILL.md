@@ -143,7 +143,7 @@ To try a branch in a deployed environment before merging, `poly branch tag` depl
 poly deployments list             # what is deployed where
 ```
 
-`poly chat -e <environment>` talks to a deployed environment. See `poly deployments --help` for the full surface, including rollback, and never roll back or deploy unless the user explicitly asks.
+`poly chat -e live` talks to production (avoid `-e sandbox`, which is frozen with simplified deployments). See `poly deployments --help` for the full surface, including rollback, and never roll back or deploy unless the user explicitly asks.
 
 A few older projects still use sandbox-first deployments. There, merging into `main` deploys to `sandbox`, and `poly deployments promote` moves it up `sandbox` → `pre-release` → `live` one step at a time (`--dry-run` first).
 

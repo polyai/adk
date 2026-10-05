@@ -21,7 +21,7 @@ metadata:
 
 Load `poly-adk-workflow` first for the overall build loop these commands fit into.
 
-The four verification layers (validate, chat, test suite, real conversations) and what each runs against are summarised in `poly-adk-workflow`, section 6. The rule that matters most here: **`poly chat` and `poly test run` run against the last pushed state of the current branch, not local files.** Push first, or pass `--push` to push and run in one step. `poly chat -e sandbox|pre-release|live` can talk to a deployed environment instead; `poly test run` always runs on the current branch.
+The four verification layers (validate, chat, test suite, real conversations) and what each runs against are summarised in `poly-adk-workflow`, section 6. The rule that matters most here: **`poly chat` and `poly test run` run against the last pushed state of the current branch, not local files.** Push first, or pass `--push` to push and run in one step. `poly chat -e live` talks to production instead, which is useful for reproducing a live issue. Don't use `-e sandbox`: with simplified deployments, sandbox is frozen at its pre-migration state. `poly test run` always runs on the current branch.
 
 ## 1. Validate while editing
 
@@ -90,4 +90,4 @@ Both subcommands accept `--region --project_id --branch_id` (all three together)
 
 ## Where each layer fits
 
-Validation and chat belong in the edit loop, and the test suite belongs before merging. After promoting, `poly chat -e <environment>` checks the deployed agent. A surprising real conversation found via `poly-adk-conversations` is the raw material for the next test case.
+Validation and chat belong in the edit loop, and the test suite belongs before merging. After merging, `poly chat -e live` checks what production now does. A surprising real conversation found via `poly-adk-conversations` is the raw material for the next test case.
