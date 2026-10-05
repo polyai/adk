@@ -135,6 +135,7 @@ nav:
           - call: reference/cli/call.md
           - test: reference/cli/test.md
           - conversations: reference/cli/conversations.md
+          - transcripts: reference/cli/transcripts.md
           - deployments: reference/cli/deployments.md
           - metrics: reference/cli/metrics.md
           - rtc: reference/cli/rtc.md

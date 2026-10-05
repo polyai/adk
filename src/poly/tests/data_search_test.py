@@ -62,11 +62,11 @@ class ConversationsSearchTest(unittest.TestCase):
     """Tests for ConversationsCommand.conversations_search."""
 
     @patch("poly.output.console.print_conversation_search")
-    @patch("poly.cli_commands.conversations.AgentStudioInterface.search_conversations")
     @patch("poly.cli_commands.conversations.load_project")
-    def test_builds_full_body(self, mock_load, mock_api, mock_print):
+    def test_builds_full_body(self, mock_load, mock_print):
         """Every flag lands in the request body under the gateway's field name."""
         mock_load.return_value = _project()
+        mock_api = mock_load.return_value.search_conversations
         mock_api.return_value = {
             "conversations": [{"conversation_id": "c1", "metrics": {"poly_score": 4}}],
             "total": 1,
@@ -88,8 +88,7 @@ class ConversationsSearchTest(unittest.TestCase):
 
         ConversationsCommand.conversations_search("/tmp/p", args, output_json=False)
 
-        self.assertEqual(mock_api.call_args.kwargs["region"], "uk-1")
-        body = mock_api.call_args.kwargs["body"]
+        body = mock_api.call_args.args[0]
         self.assertEqual(
             body,
             {
@@ -106,29 +105,27 @@ class ConversationsSearchTest(unittest.TestCase):
                 "client_env": ["live"],
                 "sort": {"field": "duration", "order": "desc"},
                 "filter_operator": "or",
-                "project_id": "proj1",
             },
         )
         mock_print.assert_called_once()
         self.assertEqual(mock_print.call_args.kwargs["fields"], ["poly_score", "handoff"])
 
     @patch("poly.cli_commands.conversations.json_print")
-    @patch("poly.cli_commands.conversations.AgentStudioInterface.search_conversations")
     @patch("poly.cli_commands.conversations.load_project")
-    def test_defaults_fields_and_sends_no_nulls(self, mock_load, mock_api, mock_json):
+    def test_defaults_fields_and_sends_no_nulls(self, mock_load, mock_json):
         """With no flags the body carries the default fields and paging only."""
         mock_load.return_value = _project()
+        mock_api = mock_load.return_value.search_conversations
         mock_api.return_value = {"conversations": [], "total": 0}
 
         ConversationsCommand.conversations_search("/tmp/p", _search_args(), output_json=True)
 
         self.assertEqual(
-            mock_api.call_args.kwargs["body"],
+            mock_api.call_args.args[0],
             {
                 "fields": ["poly_score", "duration", "channel"],
                 "limit": 20,
                 "offset": 0,
-                "project_id": "proj1",
             },
         )
         mock_json.assert_called_once_with({"conversations": [], "total": 0})
@@ -145,11 +142,11 @@ class ConversationsSearchTest(unittest.TestCase):
         self.assertIn("started_at", mock_json.call_args[0][0]["error"])
 
     @patch("poly.cli_commands.conversations.json_print")
-    @patch("poly.cli_commands.conversations.AgentStudioInterface.search_conversations")
     @patch("poly.cli_commands.conversations.load_project")
-    def test_http_error_is_explained(self, mock_load, mock_api, mock_json):
+    def test_http_error_is_explained(self, mock_load, mock_json):
         """A 403 is reported as a permission problem on the key."""
         mock_load.return_value = _project()
+        mock_api = mock_load.return_value.search_conversations
         mock_api.side_effect = _http_error(403)
         with self.assertRaises(SystemExit):
             ConversationsCommand.conversations_search("/tmp/p", _search_args(), output_json=True)
@@ -160,11 +157,11 @@ class TranscriptsSearchTest(unittest.TestCase):
     """Tests for TranscriptsCommand.transcripts_search."""
 
     @patch("poly.output.console.print_transcript_matches")
-    @patch("poly.cli_commands.transcripts.AgentStudioInterface.search_transcripts")
     @patch("poly.cli_commands.transcripts.load_project")
-    def test_builds_params_and_always_sends_project(self, mock_load, mock_api, mock_print):
+    def test_builds_params_and_always_sends_project(self, mock_load, mock_print):
         """Query flags become the gateway's query parameters; project_id is always set."""
         mock_load.return_value = _project()
+        mock_api = mock_load.return_value.search_transcripts
         mock_api.return_value = {
             "results": [{"conversation_id": "c1", "project_id": "proj1", "matched_turns": []}],
             "total": 1,
@@ -176,9 +173,8 @@ class TranscriptsSearchTest(unittest.TestCase):
 
         TranscriptsCommand.transcripts_search("/tmp/p", args, output_json=False)
 
-        self.assertEqual(mock_api.call_args.kwargs["region"], "uk-1")
         self.assertEqual(
-            mock_api.call_args.kwargs["params"],
+            mock_api.call_args.args[0],
             {
                 "q": "cancel my booking",
                 "context_turns": 2,
@@ -186,7 +182,6 @@ class TranscriptsSearchTest(unittest.TestCase):
                 "offset": 100,
                 "from": "2026-09-01T00:00:00",
                 "to": "2026-10-01T00:00:00",
-                "project_id": "proj1",
             },
         )
         mock_print.assert_called_once()
@@ -204,22 +199,22 @@ class TranscriptsSearchTest(unittest.TestCase):
         self.assertIn("3 to 300", mock_json.call_args[0][0]["error"])
 
     @patch("poly.cli_commands.transcripts.json_print")
-    @patch("poly.cli_commands.transcripts.AgentStudioInterface.search_transcripts")
     @patch("poly.cli_commands.transcripts.load_project")
-    def test_403_names_pii_permission(self, mock_load, mock_api, mock_json):
+    def test_403_names_pii_permission(self, mock_load, mock_json):
         """Transcript routes need PII read outright, so a 403 names that permission."""
         mock_load.return_value = _project()
+        mock_api = mock_load.return_value.search_transcripts
         mock_api.side_effect = _http_error(403)
         with self.assertRaises(SystemExit):
             TranscriptsCommand.transcripts_search("/tmp/p", _transcript_args(), output_json=True)
         self.assertIn("PII read", mock_json.call_args[0][0]["error"])
 
     @patch("poly.cli_commands.transcripts.json_print")
-    @patch("poly.cli_commands.transcripts.AgentStudioInterface.search_transcripts")
     @patch("poly.cli_commands.transcripts.load_project")
-    def test_429_explains_rate_limit(self, mock_load, mock_api, mock_json):
+    def test_429_explains_rate_limit(self, mock_load, mock_json):
         """A 429 explains the per-key limit rather than dumping the response."""
         mock_load.return_value = _project()
+        mock_api = mock_load.return_value.search_transcripts
         mock_api.side_effect = _http_error(429)
         with self.assertRaises(SystemExit):
             TranscriptsCommand.transcripts_search("/tmp/p", _transcript_args(), output_json=True)
@@ -230,25 +225,25 @@ class TranscriptsGetTest(unittest.TestCase):
     """Tests for TranscriptsCommand.transcripts_get."""
 
     @patch("poly.output.console.print_transcript")
-    @patch("poly.cli_commands.transcripts.AgentStudioInterface.get_transcript")
     @patch("poly.cli_commands.transcripts.load_project")
-    def test_fetches_with_project_and_prints(self, mock_load, mock_api, mock_print):
+    def test_fetches_with_project_and_prints(self, mock_load, mock_print):
         """The transcript is fetched for the loaded project and printed with a Studio link."""
         mock_load.return_value = _project()
+        mock_api = mock_load.return_value.get_transcript
         mock_api.return_value = {"conversation_id": "c1", "turns": [], "total_turns": 0}
 
         TranscriptsCommand.transcripts_get("/tmp/p", "c1", english=True, output_json=False)
 
-        mock_api.assert_called_once_with(region="uk-1", conversation_id="c1", project_id="proj1")
+        mock_api.assert_called_once_with("c1")
         self.assertEqual(mock_print.call_args.kwargs["english"], True)
         self.assertEqual(mock_print.call_args.kwargs["studio_url"], "https://studio/c1")
 
     @patch("poly.cli_commands.transcripts.json_print")
-    @patch("poly.cli_commands.transcripts.AgentStudioInterface.get_transcript")
     @patch("poly.cli_commands.transcripts.load_project")
-    def test_json_passes_result_through(self, mock_load, mock_api, mock_json):
+    def test_json_passes_result_through(self, mock_load, mock_json):
         """--json emits the gateway payload untouched."""
         mock_load.return_value = _project()
+        mock_api = mock_load.return_value.get_transcript
         mock_api.return_value = {"conversation_id": "c1", "turns": [{"turn_index": 0}]}
         TranscriptsCommand.transcripts_get("/tmp/p", "c1", output_json=True)
         mock_json.assert_called_once_with(mock_api.return_value)

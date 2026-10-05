@@ -142,7 +142,7 @@ poly metrics score --json
 ~~~
 
 !!! info "Permissions"
-    `available`, `query` and `score` need an API key with read permission on conversations. They return no PII, so PII read permission is not required.
+    `available`, `query` and `score` need an API key with read permission on conversations. They return no PII, so PII read permission is not required. See [`poly conversations search`](./conversations.md#poly-conversations-search) and [`poly transcripts`](./transcripts.md) for the routes that are PII-gated.
 
 ## `poly metrics export`
 

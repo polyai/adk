@@ -30,7 +30,7 @@ This skill covers setup and the core loop. Load the matching skill when the task
 |---|---|
 | Testing the agent — scripted chat, running the test suite, writing test cases | `poly-adk-testing` |
 | Merge conflicts, branch management, sharing reviews | `poly-adk-branching` |
-| Inspecting real conversations, reading Poly Score and metrics, logging | `poly-adk-conversations` |
+| Inspecting real conversations, reading Poly Score and metrics, searching transcripts, logging | `poly-adk-conversations` |
 | Per-environment real-time configuration | `poly-adk-rtc` |
 
 ## 1. Installing and updating
@@ -127,7 +127,7 @@ Four layers, catching different problems — load `poly-adk-testing` for the det
 | `poly validate` | Invalid resources, missing values, broken references | Local files |
 | `poly chat` | Conversational behavior, judged by reading | Last **pushed** state |
 | `poly test run` | Regressions, repeatably | Last **pushed** state |
-| `poly conversations`, `poly metrics score` | What happened on real calls, and how they scored | Live traffic |
+| `poly conversations`, `poly transcripts`, `poly metrics score` | What happened on real calls, and how they scored | Live traffic |
 
 `poly chat` and `poly test run` run against the last pushed state, **not** local files — push first, or use `poly chat --push` / `poly test run --push`.
 

@@ -16,7 +16,6 @@ from poly.cli_commands.shared import (
     load_project,
     parse_datetime_flag,
 )
-from poly.handlers.interface import AgentStudioInterface
 from poly.output.json_output import json_print
 
 QUERY_MIN_CHARS = 3
@@ -144,9 +143,8 @@ class TranscriptsCommand(BaseCommand):
         # The loaded project's id is always sent: Personal Access Tokens need it
         # on this route, and account keys accept it as a scope.
         project = load_project(base_path, output_json=output_json)
-        params["project_id"] = project.project_id
         try:
-            result = AgentStudioInterface.search_transcripts(region=project.region, params=params)
+            result = project.search_transcripts(params)
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e, needs_pii=True), output_json)
 
@@ -184,11 +182,7 @@ class TranscriptsCommand(BaseCommand):
 
         project = load_project(base_path, output_json=output_json)
         try:
-            transcript = AgentStudioInterface.get_transcript(
-                region=project.region,
-                conversation_id=conversation_id,
-                project_id=project.project_id,
-            )
+            transcript = project.get_transcript(conversation_id)
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e, needs_pii=True), output_json)
 
