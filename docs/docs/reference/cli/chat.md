@@ -73,6 +73,16 @@ Use language flags to specify the expected input and output language when chatti
 
 `--input-lang` and `--output-lang` take precedence over `--lang` when both are supplied.
 
+#### Language persistence across turns
+
+`poly chat` automatically carries the conversation language across turns, matching the behavior of voice calls and the Agent Studio chat panel. Each reply from the platform includes the current language codes in its metadata (`asr_lang_code` / `tts_lang_code`); `poly chat` reads these and sends them back on the next turn.
+
+This means:
+
+- **Mid-conversation language switches** (`conv.set_language("es-US")` in a function) persist for the rest of the session, exactly as they do on voice.
+- **Sessions start in the project's configured default language** rather than the API fallback (`en-GB`).
+- **Explicit `--lang` / `--input-lang` / `--output-lang` flags** are used for session creation and are kept as the fallback whenever a reply carries no language codes. A language switch made by the agent mid-conversation takes precedence over the CLI flag, mirroring voice behavior.
+
 #### Simulating SIP headers
 
 Use `--sip-header NAME=VALUE` to simulate a SIP header when starting a conversation.
