@@ -145,49 +145,6 @@ tag_format = "v{version}"
 # GitHub release (DEVP-790); CHANGELOG.md generation is unaffected.
 template_dir = "templates"
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 [project]
 name = "polyai-adk"
 version = "0.66.0"
