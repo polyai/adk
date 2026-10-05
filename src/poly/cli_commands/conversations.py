@@ -282,9 +282,8 @@ class ConversationsCommand(BaseCommand):
             cls._fail(str(e), output_json)
 
         project = load_project(base_path, output_json=output_json)
-        body["project_id"] = project.project_id
         try:
-            result = AgentStudioInterface.search_conversations(region=project.region, body=body)
+            result = project.search_conversations(body)
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e), output_json)
 

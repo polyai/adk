@@ -52,9 +52,20 @@ poly conversations get-audio <conversation_id> -o recording.wav
 
 `list` pages through recent conversations, `get` returns the full turn-by-turn detail, and `get-audio` downloads the recording for a voice call.
 
+To go from "what happened on this call" to "how are calls going", the same data is readable in aggregate and by search:
+
+~~~bash
+poly metrics score --interval weekly --by channel         # Poly Score over time
+poly metrics query handoff --agg conversation_count --interval daily --filter handoff eq true
+poly conversations search --filter poly_score lt 3 --env live --field call_summary
+poly transcripts search "speak to a human" --context 1
+~~~
+
+[`poly metrics available`](../reference/cli/metrics.md#poly-metrics-available) lists what you can read, built-in metrics included; the custom metrics your functions write with `conv.write_metric(...)` appear there too, which closes the loop between instrumenting and reviewing.
+
 This is where you find out what callers actually say, as opposed to what you imagined they would. Treat it as an input to development rather than an end in itself — a surprising real conversation is the raw material for the next test case.
 
-Agent Studio provides the aggregate view — containment, CSAT, handle time, and flagged transcripts — which the CLI does not.
+Agent Studio's Analytics pages chart the same metrics; the CLI gives you the numbers and the matching conversations where you are already working.
 
 ## How this fits the workflow
 
@@ -63,4 +74,4 @@ Instrumentation is something you add while building, and it only pays off later.
 - [Custom metrics](./custom-metrics.md) — defining the metrics function code writes to
 - [Simulated conversation tests](./testing.md#simulated-conversation-tests) — turning a surprising real conversation into a repeatable test case
 - [Environments and deployment](./environments-and-deployment.md) — which environment a conversation came from
-- Every flag for these commands is in the [CLI reference](../reference/cli/conversations.md)
+- Every flag for these commands is in the CLI reference: [`poly conversations`](../reference/cli/conversations.md), [`poly transcripts`](../reference/cli/transcripts.md), [`poly metrics`](../reference/cli/metrics.md)
