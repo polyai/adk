@@ -1,6 +1,81 @@
 # CHANGELOG
 
 
+## v0.67.0 (2026-10-05)
+
+### Features
+
+- Sync knowledge base topic tags on pull and push ([#345](https://github.com/polyai/adk/pull/345),
+  [`fe2cadd`](https://github.com/polyai/adk/commit/fe2cadde6a12712a4e96ac41afcd66ad5417afd5))
+
+## Summary
+
+Knowledge base topic tags now sync through the ADK. Pull writes an optional `tags:` list into topic
+  files, and push sends tag changes to Agent Studio.
+
+## Motivation
+
+Topic tags set in Agent Studio can't be read or set from the ADK. Pull never writes them, and a
+  `tags:` key in a topic file passes `poly validate` but push drops it without a warning. The
+  platform already supports them: the projection returns `tags`, `create_topic` accepts them, and
+  `set_topic_tags` exists.
+
+## Changes
+
+- **Pull** reads `tags` from the projection and writes `tags:` right after `enabled:`, but only for
+  topics that have tags. Untagged topic files don't change. - **A topic file without a `tags:` key
+  has no tags**, the same as test cases. Deleting the key clears the tags on push. - **Push:** a new
+  topic sends its tags on `create_topic`. On an existing topic, changed tags go out as
+  `set_topic_tags` through a new `TopicTags` sub-resource, like `TestCaseTags`. As with test cases,
+  `update_topic` is also sent when the topic changed. - **Validation:** each tag must be non-empty,
+  unique, and have no leading or trailing whitespace. Tags are case-sensitive. Length isn't checked:
+  the Agent Studio input stops at 16 characters, but imported topics can have longer tags, and
+  validation must pass on what a pull writes. A `tags:` that isn't a list now fails to read instead
+  of being dropped. - **Child topics** stay without tags, since the platform has no command to set
+  them. A non-empty `tags` key in a child topic file is an error. - **Docs:** tags added to both
+  topic reference pages.
+
+## Upgrading
+
+A plain `poly push` pulls and merges first, so topic files pulled before this change pick up their
+  tags before anything is pushed. A force push doesn't pull first: from an older file, it clears the
+  tags set in Agent Studio. After upgrading, run `poly pull` once before any `poly push --force`,
+  including in CI.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Live check, read-only: a force pull plus dry-run pushes into a scratch copy of a project with 104
+  topics, 35 of them tagged. - Compared with a pull from 0.64.0, the only difference is the `tags:`
+  block in those 35 files. - Dry-run pushes:
+
+| Local file | Commands | |---|---| | unchanged | none | | `tags:` key removed | `update_topic`,
+  `set_topic_tags []` | | tags edited | `update_topic`, `set_topic_tags` with the new tags | |
+  `tags: []` | `update_topic`, `set_topic_tags []` |
+
+End to end with `poly pull`/`poly push` against live projects (the test branch was deleted
+  afterwards): - Pulling a project with one tagged topic changed only that topic's file, which
+  gained its `tags:` block. - I edited one topic's tags, tagged an untagged topic, and force-pushed
+  to a new branch. The branch had the new tags, and `main` was unchanged. - On that branch, a plain
+  push cleared tags both by deleting the `tags:` key and with `tags: []`, and created a new topic
+  with its tags. Pulling the branch back gave the same files. - A project with imported tags longer
+  than 16 characters, one of them containing a function reference, pulls and validates cleanly.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.66.1 (2026-10-05)
 
 ### Bug Fixes
