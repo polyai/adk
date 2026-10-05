@@ -103,9 +103,14 @@ This split is important: content is for facts, actions are for behavior.
 
 `tags` is an optional list of labels for grouping and filtering topics in Agent Studio. Tags don't change how the agent behaves.
 
-- `poly pull` writes `tags` only for topics that have tags.
+- `poly pull` writes `tags` only for topics that have tags. Untagged topic files are not changed.
 - A topic file without a `tags` key has no tags, so deleting the key clears them when you push.
+- `tags: []` also clears all tags on push.
 - Each tag must be non-empty and unique within the topic. Tags are case-sensitive.
+- Leading and trailing whitespace is stripped from each tag when the file is read.
+
+!!! tip "Upgrading from an older ADK version"
+    A plain `poly push` pulls and merges first, so topic files pulled before this feature existed pick up their tags automatically before anything is pushed. If you use `poly push --force`, run `poly pull` once first — a force push skips the pull step, so an older file would clear any tags set in Agent Studio.
 
 ## Content
 
@@ -152,7 +157,7 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 ### Prefer
 
 - structured conditional sections
-- plain instructions like “Tell the user that...”
+- plain instructions like "Tell the user that..."
 - clear points where a function should be called
 
 ### Avoid
@@ -164,6 +169,8 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 ## Validation
 
 - The filename must match the cleaned version of `name` — a mismatch raises a validation error on `pull` or `push`.
+- Each tag must be non-empty (after stripping whitespace) and unique within the topic. A `tags:` value that is not a list fails to read rather than being silently ignored.
+- Child topics cannot have tags. A non-empty `tags` key in a child topic file is a validation error.
 
 ## Best practices
 
