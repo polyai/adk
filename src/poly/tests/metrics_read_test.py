@@ -142,25 +142,25 @@ class MetricsAvailableTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_available."""
 
     @patch("poly.cli_commands.metrics.print_available_metrics")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_available_metrics")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_table_mode(self, mock_load, mock_api, mock_print):
+    def test_table_mode(self, mock_load, mock_print):
         """Fetches the catalog for the project's region and prints it."""
         mock_load.return_value = MagicMock(region="us-1", project_id="proj1")
+        mock_api = mock_load.return_value.get_available_metrics
         metrics = [{"name": "poly_score", "type": "float"}]
         mock_api.return_value = {"metrics": metrics, "total": 1}
 
         MetricsCommand.metrics_available("/tmp/p", output_json=False)
 
-        mock_api.assert_called_once_with(region="us-1", project_id="proj1")
+        mock_api.assert_called_once_with()
         mock_print.assert_called_once_with(metrics)
 
     @patch("poly.cli_commands.metrics.json_print")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_available_metrics")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_json_mode(self, mock_load, mock_api, mock_json):
+    def test_json_mode(self, mock_load, mock_json):
         """JSON mode emits the raw response."""
         mock_load.return_value = MagicMock(region="us-1", project_id="proj1")
+        mock_api = mock_load.return_value.get_available_metrics
         mock_api.return_value = {"metrics": [], "total": 0}
 
         MetricsCommand.metrics_available("/tmp/p", output_json=True)
@@ -168,11 +168,11 @@ class MetricsAvailableTest(unittest.TestCase):
         mock_json.assert_called_once_with({"metrics": [], "total": 0})
 
     @patch("poly.cli_commands.metrics.error")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_available_metrics")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_http_error_exits_with_message(self, mock_load, mock_api, mock_error):
+    def test_http_error_exits_with_message(self, mock_load, mock_error):
         """A gateway error is explained and the command exits non-zero."""
         mock_load.return_value = MagicMock(region="us-1", project_id="proj1")
+        mock_api = mock_load.return_value.get_available_metrics
         mock_api.side_effect = _http_error(401)
 
         with self.assertRaises(SystemExit) as ctx:
@@ -186,11 +186,11 @@ class MetricsQueryTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_query."""
 
     @patch("poly.cli_commands.metrics.print_aggregate")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.query_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_builds_full_body(self, mock_load, mock_api, mock_print):
+    def test_builds_full_body(self, mock_load, mock_print):
         """Every flag lands in the request body under the gateway's field name."""
         mock_load.return_value = MagicMock(region="uk-1", project_id="proj1")
+        mock_api = mock_load.return_value.query_metric
         mock_api.return_value = {"columns": ["avg"], "rows": [[4.2]], "limit": 20, "offset": 0}
         args = _args(
             agg=["avg", "p95"],
@@ -213,8 +213,7 @@ class MetricsQueryTest(unittest.TestCase):
 
         MetricsCommand.metrics_query("/tmp/p", "duration", args, output_json=False)
 
-        body = mock_api.call_args.kwargs["body"]
-        self.assertEqual(mock_api.call_args.kwargs["region"], "uk-1")
+        body = mock_api.call_args.args[0]
         self.assertEqual(body["metric"], "duration")
         self.assertEqual(body["aggs"], ["avg", "p95"])
         self.assertEqual(body["from_datetime"], "2026-09-01T00:00:00")
@@ -232,19 +231,18 @@ class MetricsQueryTest(unittest.TestCase):
         self.assertEqual(body["sort"], {"field": "avg", "order": "desc"})
         self.assertEqual(body["limit"], 50)
         self.assertEqual(body["offset"], 100)
-        self.assertEqual(body["project_id"], "proj1")
         mock_print.assert_called_once()
 
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.query_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_minimal_body_has_defaults_and_no_nulls(self, mock_load, mock_api):
+    def test_minimal_body_has_defaults_and_no_nulls(self, mock_load):
         """With no flags the body carries the defaults only; nothing is sent as null."""
         mock_load.return_value = MagicMock(region="us-1", project_id="proj1")
+        mock_api = mock_load.return_value.query_metric
         mock_api.return_value = {"columns": [], "rows": []}
 
         MetricsCommand.metrics_query("/tmp/p", "poly_score", _args(), output_json=True)
 
-        body = mock_api.call_args.kwargs["body"]
+        body = mock_api.call_args.args[0]
         self.assertEqual(
             body,
             {
@@ -252,7 +250,6 @@ class MetricsQueryTest(unittest.TestCase):
                 "aggs": ["avg", "conversation_count"],
                 "limit": 20,
                 "offset": 0,
-                "project_id": "proj1",
             },
         )
 
@@ -272,13 +269,13 @@ class MetricsScoreTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_score."""
 
     @patch("poly.cli_commands.metrics.print_aggregate")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.query_metric")
     @patch("poly.cli_commands.metrics.load_project")
     def test_defaults_to_seven_days_daily_with_weighted_headline(
-        self, mock_load, mock_api, mock_print
+        self, mock_load, mock_print
     ):
         """score queries poly_score avg+count, daily, over the last 7 days, and summarises."""
         mock_load.return_value = MagicMock(region="us-1", project_id="proj1")
+        mock_api = mock_load.return_value.query_metric
         mock_api.return_value = {
             "columns": ["bucket", "avg", "conversation_count"],
             "rows": [["2026-09-28T00:00:00", 80.0, 10], ["2026-09-29T00:00:00", 90.0, 30]],
@@ -288,7 +285,7 @@ class MetricsScoreTest(unittest.TestCase):
 
         MetricsCommand.metrics_score("/tmp/p", _args(interval="daily"), output_json=False)
 
-        body = mock_api.call_args.kwargs["body"]
+        body = mock_api.call_args.args[0]
         self.assertEqual(body["metric"], "poly_score")
         self.assertEqual(body["aggs"], ["avg", "conversation_count"])
         self.assertEqual(body["interval"], "daily")
@@ -299,11 +296,11 @@ class MetricsScoreTest(unittest.TestCase):
         self.assertIn("87.5 average over 40 conversations", headline)
 
     @patch("poly.cli_commands.metrics.json_print")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.query_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_json_includes_summary(self, mock_load, mock_api, mock_json):
+    def test_json_includes_summary(self, mock_load, mock_json):
         """JSON output carries the computed summary next to the raw table."""
         mock_load.return_value = MagicMock(region="us-1", project_id="proj1")
+        mock_api = mock_load.return_value.query_metric
         mock_api.return_value = {"columns": ["avg", "conversation_count"], "rows": []}
 
         MetricsCommand.metrics_score("/tmp/p", _args(interval="daily"), output_json=True)
@@ -313,18 +310,18 @@ class MetricsScoreTest(unittest.TestCase):
         self.assertEqual(payload["summary"]["conversations"], 0)
         self.assertIn("no scored conversations", payload["summary"]["text"])
 
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.query_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_explicit_window_is_respected(self, mock_load, mock_api):
+    def test_explicit_window_is_respected(self, mock_load):
         """When --from is given, no default window is applied."""
         mock_load.return_value = MagicMock(region="us-1", project_id="proj1")
+        mock_api = mock_load.return_value.query_metric
         mock_api.return_value = {"columns": [], "rows": []}
 
         MetricsCommand.metrics_score(
             "/tmp/p", _args(interval="weekly", from_dt="2026-09-01"), output_json=True
         )
 
-        body = mock_api.call_args.kwargs["body"]
+        body = mock_api.call_args.args[0]
         self.assertEqual(body["from_datetime"], "2026-09-01T00:00:00")
         self.assertNotIn("to_datetime", body)
         self.assertEqual(body["interval"], "weekly")
@@ -332,3 +329,61 @@ class MetricsScoreTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProjectDataReadTest(unittest.TestCase):
+    """The project layer scopes every Data API read to the loaded project."""
+
+    def _project(self):
+        return MagicMock(region="us-1", project_id="proj1")
+
+    @patch("poly.project.AgentStudioInterface.get_available_metrics")
+    def test_available_metrics_is_scoped_to_project(self, mock_api):
+        """Catalog lookups pass the project's region and id."""
+        from poly.project import AgentStudioProject
+
+        AgentStudioProject.get_available_metrics(self._project())
+
+        mock_api.assert_called_once_with("us-1", project_id="proj1")
+
+    @patch("poly.project.AgentStudioInterface.query_metric")
+    def test_query_metric_sets_project_id(self, mock_api):
+        """The project id is added to the body without mutating the caller's dict."""
+        from poly.project import AgentStudioProject
+
+        body = {"metric": "poly_score", "aggs": ["avg"]}
+        AgentStudioProject.query_metric(self._project(), body)
+
+        sent = mock_api.call_args.kwargs["body"]
+        self.assertEqual(sent["project_id"], "proj1")
+        self.assertEqual(sent["metric"], "poly_score")
+        self.assertNotIn("project_id", body)
+
+    @patch("poly.project.AgentStudioInterface.search_conversations")
+    def test_search_conversations_sets_project_id(self, mock_api):
+        """Conversation search is scoped to the project."""
+        from poly.project import AgentStudioProject
+
+        AgentStudioProject.search_conversations(self._project(), {"limit": 5})
+
+        self.assertEqual(mock_api.call_args.kwargs["body"], {"limit": 5, "project_id": "proj1"})
+
+    @patch("poly.project.AgentStudioInterface.search_transcripts")
+    def test_search_transcripts_sets_project_id(self, mock_api):
+        """Transcript search always sends the project id (PATs require it)."""
+        from poly.project import AgentStudioProject
+
+        AgentStudioProject.search_transcripts(self._project(), {"query": "human"})
+
+        self.assertEqual(
+            mock_api.call_args.kwargs["params"], {"query": "human", "project_id": "proj1"}
+        )
+
+    @patch("poly.project.AgentStudioInterface.get_transcript")
+    def test_get_transcript_passes_ids(self, mock_api):
+        """Transcript fetches carry the conversation and project ids."""
+        from poly.project import AgentStudioProject
+
+        AgentStudioProject.get_transcript(self._project(), "conv-1")
+
+        mock_api.assert_called_once_with("us-1", conversation_id="conv-1", project_id="proj1")

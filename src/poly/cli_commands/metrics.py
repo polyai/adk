@@ -26,7 +26,6 @@ from poly.cli_commands.shared import (
     parse_having_flags,
     parse_sort_flag,
 )
-from poly.handlers.interface import AgentStudioInterface
 from poly.output.console import (
     error,
     plain,
@@ -414,9 +413,7 @@ class MetricsCommand(BaseCommand):
 
         project = load_project(base_path, output_json=output_json)
         try:
-            result = AgentStudioInterface.get_available_metrics(
-                region=project.region, project_id=project.project_id
-            )
+            result = project.get_available_metrics()
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e), output_json)
 
@@ -437,9 +434,8 @@ class MetricsCommand(BaseCommand):
             cls._fail(str(e), output_json)
 
         project = load_project(base_path, output_json=output_json)
-        body["project_id"] = project.project_id
         try:
-            result = AgentStudioInterface.query_metric(region=project.region, body=body)
+            result = project.query_metric(body)
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e), output_json)
 
@@ -462,9 +458,8 @@ class MetricsCommand(BaseCommand):
             cls._fail(str(e), output_json)
 
         project = load_project(base_path, output_json=output_json)
-        body["project_id"] = project.project_id
         try:
-            result = AgentStudioInterface.query_metric(region=project.region, body=body)
+            result = project.query_metric(body)
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e), output_json)
 
