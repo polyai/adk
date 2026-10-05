@@ -28,7 +28,8 @@ Closes #<!-- issue number -->
 - [ ] `ruff check .` and `ruff format --check .` pass
 - [ ] `pytest` passes
 - [ ] No breaking changes to the `poly` CLI interface (or migration path documented)
-- [ ] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+- [ ] PR title follows [conventional commits](https://www.conventionalcommits.org/), and its type matches the change (`feat:` for anything user-visible; see CONTRIBUTING.md)
+- [ ] User-facing changes are reflected in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
 
 ## Screenshots / Logs
 

@@ -19,39 +19,38 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Test, lint and type-check caches
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage*.json
 
 # Virtual environments
 venv/
 env/
 ENV/
-.venv
+.venv/
+
+# Docs build
+site/
 
 # OS
 .DS_Store
 Thumbs.db
 
+# Editors
+.vscode/
+.idea/
+
 # Pre-commit
 .pre-commit-config.yaml.bak
 
-# VS Code
-.vscode/
-
-# Ruff cache
-.ruff_cache/
-
-# UV
-.python_version
-
-# Claude Code
+# Claude Code (shared settings and skills in .claude/ are tracked)
 .claude/settings.local.json
+.claude/worktrees/
+.claude/*.lock
 
-.idea/
-.venv/
-site/
-__pycache__/
-*.pyc
-
-.venv/
-src/poly/docs/.venv/
+# ADK sync state written by poly pull/push
 .agent_studio_config

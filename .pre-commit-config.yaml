@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Ruff version - match requirements-dev.txt (0.14.2)
+    # Ruff version - match the ruff pin in pyproject.toml's dev extras (0.14.2)
     rev: v0.14.2
     hooks:
       # Run the linter (with --fix to auto-fix issues locally)
