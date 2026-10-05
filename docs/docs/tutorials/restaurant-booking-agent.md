@@ -567,7 +567,7 @@ See [`poly branch merge`](../reference/cli/branch.md#poly-branch-merge) for the 
 
 `poly branch merge` switches you back to `main` locally and pulls the merged state automatically — there's no separate `poly branch switch` or `poly pull` needed.
 
-Merging into `main` also deploys automatically (to sandbox on most projects, or to live on projects using simplified deployments), so there's no separate deploy step either. To confirm:
+Merging into `main` also deploys to live automatically (to sandbox on older projects still using sandbox-first deployments), so there's no separate deploy step either. To confirm:
 
 ~~~bash
 poly deployments list

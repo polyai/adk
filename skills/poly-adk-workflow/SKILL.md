@@ -111,7 +111,7 @@ poly chat --push                 # 7. test interactively (see poly-adk-testing)
 poly test run                    #    and/or run the simulated test suite
 # 8. iterate: repeat 3–7
 poly branch diff                 # 9. review everything on the branch since creation
-poly branch merge '<message>'    # 10. merge into the parent branch (into main, this deploys; see section 7)
+poly branch merge '<message>'    # 10. merge into the parent branch (into main, this deploys to live; see section 7)
 ```
 
 Key distinctions:
@@ -135,16 +135,17 @@ Four layers, catching different problems — load `poly-adk-testing` for the det
 
 ## 7. Deployment
 
-Merging into `main` deploys. On most projects it deploys to `sandbox`. On projects using simplified deployments it deploys **straight to `live`**: the interactive prompt warns about this, but `--json` and `--force` skip the prompt. **Never merge into `main` unless the user has explicitly asked for that merge.**
+**Merging into `main` deploys straight to `live`**, which is production. The interactive prompt warns about this, but `--json` and `--force` skip the prompt. **Never merge into `main` unless the user has explicitly asked for that merge.**
 
-On sandbox-first projects, promotion is one step at a time up the ladder — `sandbox` → `pre-release` → `live`:
+To try a branch in a deployed environment before merging, `poly branch tag` deploys it to staging (`poly branch untag` removes it).
 
 ```bash
-poly deployments promote --from sandbox --to pre-release --dry-run
 poly deployments list             # what is deployed where
 ```
 
-**Never promote to `pre-release` or `live` unless the user explicitly asks** — `live` is production. Use `--dry-run` first to preview. `poly chat -e <environment>` talks to a deployed environment if you need to check one after promoting. See `poly deployments --help` for the full surface, including rollback.
+`poly chat -e <environment>` talks to a deployed environment. See `poly deployments --help` for the full surface, including rollback, and never roll back or deploy unless the user explicitly asks.
+
+A few older projects still use sandbox-first deployments. There, merging into `main` deploys to `sandbox`, and `poly deployments promote` moves it up `sandbox` → `pre-release` → `live` one step at a time (`--dry-run` first).
 
 ## Rules and gotchas
 

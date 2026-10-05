@@ -38,7 +38,7 @@ poly branch tag                    # deploy this branch to the staging environme
 poly branch untag                  # remove that tag
 ```
 
-`sync`, `tag` and `untag` need a project using simplified deployments.
+`sync`, `tag` and `untag` aren't available on the few older projects still using sandbox-first deployments.
 
 Semantics that matter:
 
@@ -75,7 +75,7 @@ poly branch merge 'Merge message'       # message required when merging into mai
 
 A clean merge completes immediately and switches your checkout to the parent branch. The web UI's **Merge** button hits the same endpoint, with an identical result. Merge refuses while you have unpushed local changes, so push or revert them first.
 
-**Merging into `main` deploys.** On most projects it deploys to `sandbox`. On projects using simplified deployments it deploys **straight to `live`**. The interactive prompt warns about this, but `--json` and `--force` skip the prompt. **Never merge into `main` unless the user has explicitly asked for that merge.** Merging a nested branch into its parent feature branch deploys nothing.
+**Merging into `main` deploys straight to `live`**, which is production. (A few older projects still deploy to `sandbox` instead.) The interactive prompt warns about this, but `--json` and `--force` skip the prompt. **Never merge into `main` unless the user has explicitly asked for that merge.** Merging a nested branch into its parent feature branch deploys nothing.
 
 ### Resolving merge conflicts
 
