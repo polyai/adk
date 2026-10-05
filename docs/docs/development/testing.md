@@ -10,9 +10,9 @@ There are five ways to check an agent, and they catch different kinds of problem
 | Approach | Catches | Runs against |
 |---|---|---|
 | `poly validate` | Structural mistakes — invalid resources, missing values, broken references | Local files |
-| `poly chat` | Conversational behavior you need to judge by reading | A deployed branch or environment |
+| `poly chat` | Conversational behavior you need to judge by reading | The pushed branch, or a deployed environment with `-e` |
 | `poly call` | Voice behavior — speech, timing, barge-in — judged by listening | A deployed branch |
-| `poly test run` | Regressions, repeatably | A deployed branch or environment |
+| `poly test run` | Regressions, repeatably | The pushed state of the current branch |
 | `poly conversations` | What actually happened on real calls | Live traffic |
 
 ## Validate before anything else
@@ -60,6 +60,6 @@ For the test-case format, the available assertions, and worked examples, see the
 
 Validation, chat, and voice calls belong in the edit loop, tests belong before you merge, and conversation inspection happens after release and feeds back into the next change.
 
-Deployed environments matter here too — you can chat against and run tests against `sandbox`, `pre-release`, or `live`, so a change can be verified again after each promotion. See [environments and deployment](./environments-and-deployment.md).
+Deployed environments matter here too — `poly chat -e` talks to `sandbox`, `pre-release`, or `live`, so a change can be checked again after each promotion. Test runs always use the current branch. See [environments and deployment](./environments-and-deployment.md).
 
 Every flag for these commands is in the [CLI reference](../reference/cli.md).

@@ -19,30 +19,37 @@ metadata:
 
 # Branching, Merging, and Conflicts
 
-Load `poly-adk-workflow` first for where branching sits in the build loop. The one rule that shapes everything: **you cannot work on `main`** — `branch diff`, `merge`, `sync`, `tag`, and `untag` all refuse to run there.
+Load `poly-adk-workflow` first for where branching sits in the build loop. The one rule that shapes everything: **you cannot work on `main`**. `merge`, `sync`, `tag`, `untag` and `rename` refuse to run there, and so does `branch diff` without a branch name.
 
 ## Branch management
 
 ```bash
 poly branch list                   # all branches (--archived for soft-deleted ones)
 poly branch current                # current branch + its parent
-poly branch create <name>          # create + switch; branches from main's latest state
+poly branch create <name>          # create + switch; branches from the CURRENT branch
+poly branch create <name> --from main   # branch from main regardless of where you are
 poly branch switch <name>          # requires a clean tree (--force discards local changes)
 poly branch rename <new-name>
 poly branch delete [<name>]        # main cannot be deleted
 poly branch restore <branch_id>    # un-archive; IDs from poly branch list --archived
 poly branch history                # branches merged into the current branch
+poly branch sync                   # bring the parent branch's changes into this one (-i / --resolutions as for merge)
+poly branch tag                    # deploy this branch to the staging environment
+poly branch untag                  # remove that tag
 ```
+
+`sync`, `tag` and `untag` need a project using simplified deployments.
 
 Semantics that matter:
 
+- **`create` branches from wherever you are.** Run it on a feature branch and you get a nested branch that merges back into that feature branch, not `main`. Use `--from main` (or `poly branch switch main` first) for a fresh branch off main.
 - **`create` carries uncommitted local work onto the new branch; `switch` refuses to move with uncommitted changes** and replaces local files with the target branch's state. Started editing on `main` by accident? `branch create` alone recovers it — nothing is lost.
 - Branches exist **on the platform**, not just locally — teammates can switch to yours, and the web UI can edit it while you work.
 - `poly status`/`poly diff` show unpushed local edits; `poly branch status`/`poly branch diff` show everything since the branch was created. Use the branch-level pair before merging. `poly branch status` also says whether the branch has diverged — i.e. whether it will merge cleanly.
 
 ### Hotfix branches from a deployed environment
 
-`poly branch create my-hotfix --env live` snapshots the deployed environment into a fresh branch (also `sandbox`, `pre-release`). **Use with caution**: it overwrites your local project with the deployed state, and merging that branch back to main can roll back changes made after the snapshot. It fails on uncommitted local changes unless `--force`.
+`poly branch create my-hotfix --env live` snapshots the deployed environment into a fresh branch (`pre-release` works the same way). **Use with caution**: it overwrites your local project with the deployed state, and merging that branch back to main can roll back changes made after the snapshot. It fails on uncommitted local changes unless `--force`.
 
 ## How pull merges
 
@@ -66,7 +73,9 @@ the incoming remote version
 poly branch merge 'Merge message'       # message required when merging into main
 ```
 
-A clean merge completes immediately and switches your checkout to the parent branch. Merging into `main` deploys to `sandbox` automatically. The web UI's **Merge** button hits the same endpoint — identical result.
+A clean merge completes immediately and switches your checkout to the parent branch. The web UI's **Merge** button hits the same endpoint, with an identical result. Merge refuses while you have unpushed local changes, so push or revert them first.
+
+**Merging into `main` deploys.** On most projects it deploys to `sandbox`. On projects using simplified deployments it deploys **straight to `live`**. The interactive prompt warns about this, but `--json` and `--force` skip the prompt. **Never merge into `main` unless the user has explicitly asked for that merge.** Merging a nested branch into its parent feature branch deploys nothing.
 
 ### Resolving merge conflicts
 

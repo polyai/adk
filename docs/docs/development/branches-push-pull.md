@@ -104,7 +104,7 @@ poly branch merge '<commit message>'
 
 Merging uses the same conflict detection as `poly pull`, so `poly branch status` will tell you in advance whether the branch can merge cleanly. For conflict resolution options — `--interactive` and `--resolutions` — see [`poly branch merge`](../reference/cli/branch.md#conflicts). You can also merge from the Agent Studio web UI by switching to the branch and clicking **Merge**.
 
-Merging into `main` also deploys the result to the `sandbox` environment. See [deploying your changes](./working-locally.md#deploying-your-changes) for promoting from there to `pre-release` and `live`.
+Merging into `main` also deploys the result: to `sandbox` on most projects, or straight to `live` on projects using simplified deployments (the command warns and asks you to confirm first). See [deploying your changes](./working-locally.md#deploying-your-changes) for promoting from there to `pre-release` and `live`.
 
 ## Habits that avoid trouble
 
