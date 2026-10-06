@@ -1,16 +1,21 @@
 # Reviewing ADK pull requests
 
 Checklist for any reviewer, human or AI. It repeats the rules from `AGENTS.md` that matter in
-review, because some review tools read only this file.
+review, because some review tools read only this file. When you change a rule here, update
+`AGENTS.md` too, and the other way round.
 
 Report **blocking** issues first, then **nits**. Don't comment on what the ignore list covers.
 
 ## Blocking
 
-1. **Layering.** Command classes in `src/poly/cli_commands/` only parse, call `AgentStudioProject`
-   and print. Flag API calls, file I/O, validation or merge logic in the CLI layer, and any new
-   direct call to `AgentStudioInterface` from a command. The fix is a project method, even a thin
-   wrapper.
+1. **Layering.** Anything that acts on a project must be callable as an `AgentStudioProject`
+   method, with its logic and validation there. User interaction stays in the CLI layer. Flag:
+   - API calls, file I/O, validation or merge logic in `src/poly/cli_commands/`. The fix is a
+     project method, even a thin wrapper.
+   - A project-scoped command calling `AgentStudioInterface` directly. Commands that run before a
+     project exists (`login`, `apikey`, `setup`, `init`, `project list` / `create`) are allowed to.
+   - `print`, prompts, console output or `sys.exit` inside `project.py`. Project methods return
+     data or raise, and the command decides how to show it.
 2. **PR title type.** The title becomes the release. `feat:` for anything a user can see,
    including output or on-disk changes. `fix:`/`perf:` for patches. `chore:`/`docs:`/`ci:`/`build:`/
    `refactor:`/`style:`/`test:` don't release, so a user-visible change under one of them never

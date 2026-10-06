@@ -15,10 +15,13 @@ Contributions are welcome! Please ensure all tests pass before submitting a pull
 git clone https://github.com/PolyAI/adk.git
 cd adk
 uv venv
-source .venv/bin/activate
 uv pip install -e ".[dev]"
-pre-commit install
+uv run pre-commit install
 ```
+
+To try your changes with plain `poly` commands (e.g. `poly --help`), activate the environment
+with `source .venv/bin/activate`. Otherwise prefix commands with `uv run` (`uv run poly --help`,
+`uv run pytest`); scripts, CI and coding agents always use `uv run`.
 
 ## Running Tests
 
@@ -87,8 +90,11 @@ Don't edit any of these by hand. Adding a new user skill under `skills/` means a
 
 ## Tooling
 
-The repo works with any coding agent. Claude Code and GitHub Copilot both read `AGENTS.md`
-(repo-wide, with more specific ones in `src/poly/resources/`, `src/poly/cli_commands/` and the
-docs reference folders). Shared contributor skills live in `.claude/skills/`: `ci-check`,
-`review-pr`, `write-tests`, `add-resource-type` and `open-pr`. Both tools load skills from
-there. `.claude/settings.json` holds Claude Code permissions.
+The repo works with any coding agent. The rules live in `AGENTS.md` (repo-wide, with more
+specific ones in `src/poly/resources/`, `src/poly/cli_commands/` and the docs reference folders),
+which both GitHub Copilot and Claude Code read. Keep Claude Code up to date: older versions
+don't read `AGENTS.md`. The repo deliberately has no `CLAUDE.md`, so add rules to `AGENTS.md`.
+
+Shared contributor skills live in `.claude/skills/`: `ci-check`, `review-pr`, `write-tests`,
+`add-resource-type` and `open-pr`. Both tools load skills from there. `.claude/settings.json`
+holds Claude Code permissions.

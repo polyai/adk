@@ -2,7 +2,8 @@
 
 `polyai-adk` is the `poly` CLI: a git-like workflow (`pull`, `push`, `branch`, `diff`, …) for
 building PolyAI Agent Studio agents locally as YAML and Python files. These rules apply to every
-coding agent and reviewer working in this repo. Review-specific guidance is in `REVIEW.md`.
+coding agent and reviewer working in this repo. Review-specific guidance is in `REVIEW.md`, which
+repeats the rules below that matter in review: when you change one of those rules, update both.
 
 ## Commands
 
@@ -24,14 +25,24 @@ title is a conventional commit. The `ci-check` skill runs the same set locally.
 ## Layering
 
 ```
-cli_commands/  →  AgentStudioProject (project.py)  →  AgentStudioInterface (handlers/interface.py)  →  PlatformAPIHandler / sdk
+cli_commands/        →  AgentStudioProject (project.py)  →  AgentStudioInterface  →  PlatformAPIHandler / sdk
+user interaction        logic and validation                 API facade               HTTP / protobuf
 ```
 
-- Command classes parse arguments, call project methods and print results. Logic (API calls,
-  file I/O, validation, merging) lives in `project.py` or below.
-- A project method that only forwards to the interface is fine. Don't call
-  `AgentStudioInterface` from a command. `audio_cache.py`, `functions.py` and
-  `conversations.py` still do; they are exceptions to fix, not patterns to copy.
+- **Anything that acts on a project is a method on `AgentStudioProject`**, so it can be done
+  programmatically as `project.<method>()`. Tests and other tools build on the project directly,
+  without going through the CLI. That includes reads: if a command needs project data, add a
+  project method, even one that only forwards to the interface.
+- **`project.py` owns the logic and validation:** API calls, file I/O, merging, and checking
+  inputs (raise `ValueError` with a clear message). Validating there gives programmatic callers
+  the same checks as the CLI.
+- **`cli_commands/` owns user interaction:** argument parsing, prompts and confirmations, `--json`
+  versus human output, and exit codes. Project methods never print, prompt or exit; they return
+  data or raise, and the command decides how to show it.
+- **Exception:** commands that run before a project exists (`login`, `apikey`, `setup`, `init`,
+  `project list` / `create`) may call `AgentStudioInterface` directly. Some project-scoped commands that
+  still do (`audio_cache.py`, `functions.py`, `conversations.py`) are leftovers to fix, not
+  patterns to copy.
 - New HTTP calls go through `PlatformAPIHandler.make_request`. If it lacks something you need,
   extend it.
 
@@ -61,7 +72,7 @@ Generated, never edit by hand: `src/poly/handlers/protobuf/` and `src/poly/types
   each resource's `discover_resources`, `load_project` (`cli_commands/shared.py`) and
   `json_print`. Don't add a parallel helper.
 - **Match sibling commands.** Same flag names (`--json`, `--path`, `--force`), and `--json`
-  skips confirmation prompts. Commands are scoped to a project, and regions are written `us-1` /
+  skips confirmation prompts. Most commands are scoped to a project, and regions are written `us-1` /
   `euw-1` / `uk-1`. Use the existing name for a concept; don't invent a new one.
 - **Delete, don't shim.** When a platform field or behaviour is removed, delete it from the ADK.
   Don't keep back-compat paths or code nothing uses.
@@ -70,8 +81,9 @@ Generated, never edit by hand: `src/poly/handlers/protobuf/` and `src/poly/types
 - **Guard side effects.** Deletes touch only files the ADK owns. Anything that reaches `live`
   says so in its prompt and help text.
 - **Code style:** 100-char lines, type hints and docstrings on public functions, absolute
-  `poly.` imports, `logging.getLogger(__name__)` (no `print`), `ValueError` for validation, and
-  `SourcererAPIError` (`handlers/sdk.py`) for API failures.
+  `poly.` imports, `ValueError` for validation and `SourcererAPIError` (`handlers/sdk.py`) for
+  API failures. User output goes through `output/console.py` or `json_print` in the CLI layer,
+  diagnostics through `logging.getLogger(__name__)`, and never a bare `print`.
 - **Comments explain why, briefly.** No narration of the change, and no stray files (scratch
   scripts, `BUILD.bazel`, editor settings) in the diff.
 
