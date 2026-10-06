@@ -205,6 +205,8 @@ class DeploymentsCommand(BaseCommand):
                 "Deprecated, and not available for projects on the simplified\n"
                 "deployment model — use 'poly deployments experiment' instead there.\n"
                 "Still required for projects on the classic deployment model.\n\n"
+                "'end' is the one exception that always works: it's the escape\n"
+                "hatch for a pre-migration test left active on a migrated project.\n\n"
                 "Examples:\n"
                 "  poly deployments ab-test start --name 'v2 test'"
                 " --variant-version <hash> --traffic 50\n"
@@ -304,6 +306,8 @@ class DeploymentsCommand(BaseCommand):
                 "End the active A/B test and choose which deployment wins.\n\n"
                 "If --chosen-version is omitted, an interactive prompt\n"
                 "shows the control and variant deployments for selection.\n\n"
+                "Works regardless of deployment model, unlike the other 'ab-test'\n"
+                "subcommands.\n\n"
                 "Examples:\n"
                 "  poly deployments ab-test end"
                 " --chosen-version <hash>\n"
@@ -1321,18 +1325,33 @@ class DeploymentsCommand(BaseCommand):
         chosen_version: str | None = None,
         output_json: bool = False,
     ) -> None:
-        """End the active A/B test and choose the winning deployment."""
+        """End the active A/B test and choose the winning deployment.
+
+        Unlike the other 'ab-test' subcommands, not gated by
+        ``require_ab_tests_enabled``: it's the escape hatch for a classic
+        test left active after a project migrates to simplified deployments.
+        """
         import questionary
 
-        from poly.cli_commands.shared import require_ab_tests_enabled
         from poly.output.console import error, info, success, warning
 
         project = load_project(base_path, output_json=output_json)
-        require_ab_tests_enabled(project, output_json=output_json)
 
         ab_test = project.get_active_ab_test()
         if not ab_test:
             msg = "No active A/B test found for this project."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        if ab_test.get("versions"):
+            # Branch-based experiment record, not a deployment-based A/B test.
+            msg = (
+                "This is a branch-based experiment, not a classic A/B test."
+                " Use 'poly deployments experiment end' instead."
+            )
             if output_json:
                 json_print({"success": False, "error": msg})
             else:
@@ -1477,6 +1496,32 @@ class DeploymentsCommand(BaseCommand):
         except Exception as e:
             logger.debug("Failed to fetch branches for experiment display: %s", e)
             return {}
+
+    @staticmethod
+    def _exit_for_legacy_ab_test_record(output_json: bool, action: str) -> None:
+        """Exit with a clear error for an experiment record with no branch-based versions.
+
+        A legacy A/B test can surface here (shared backing table) with no
+        branch to resolve, so point to 'ab-test end' instead of proceeding
+        with a missing branch id.
+
+        Args:
+            output_json: If True, emit JSON and exit.
+            action: Clause naming what the calling command can't do, e.g.
+                ``"can't be updated through 'experiment update'"``.
+        """
+        from poly.output.console import error
+
+        msg = (
+            "This experiment has no branch-based variant: it was started as a"
+            " classic A/B test before this project adopted simplified deployments,"
+            f" and {action}. Use 'poly deployments ab-test end' instead."
+        )
+        if output_json:
+            json_print({"success": False, "error": msg})
+        else:
+            error(msg)
+        sys.exit(1)
 
     @classmethod
     def experiment_start(
@@ -1688,7 +1733,12 @@ class DeploymentsCommand(BaseCommand):
                 error(msg)
             sys.exit(1)
 
-        versions = experiment.get("versions", [])
+        versions = experiment.get("versions") or []
+        if not versions:
+            cls._exit_for_legacy_ab_test_record(
+                output_json, "can't be updated through 'experiment update'"
+            )
+
         variant_version = next((v for v in versions if v.get("kind") != "control"), None)
         variant_branch_id = (variant_version or {}).get("branch_id")
 
@@ -1758,6 +1808,11 @@ class DeploymentsCommand(BaseCommand):
 
         experiment_id = experiment["id"]
         experiment_name = experiment.get("name") or experiment_id
+        versions = experiment.get("versions") or []
+        if not versions:
+            cls._exit_for_legacy_ab_test_record(
+                output_json, "can't be ended through 'experiment end'"
+            )
 
         try:
             _, branches = project.get_branches()
@@ -1772,7 +1827,6 @@ class DeploymentsCommand(BaseCommand):
         branch_map = cls._branch_map_from_branches(branches)
         name_to_branch_id = {meta["name"]: bid for bid, meta in branch_map.items()}
 
-        versions = experiment.get("versions", [])
         control_version = next((v for v in versions if v.get("kind") == "control"), None)
         variant_version = next((v for v in versions if v.get("kind") != "control"), None)
 

@@ -887,15 +887,54 @@ class ABTestEndTest(unittest.TestCase):
             DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="live00000")
 
     @patch("poly.output.console.error")
-    def test_end__simplified_deployments_blocked(self, mock_error):
-        """On simplified deployments, ending an A/B test is blocked."""
+    def test_end__works_on_simplified_deployments(self, mock_error):
+        """Unlike the other ab-test subcommands, 'end' works on any deployment model."""
         self.proj.using_simplified_deployments = True
 
+        DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="live00000")
+
+        self.proj.get_active_ab_test.assert_called_once()
+        self.proj.end_ab_test.assert_called_once_with("ab-001", "dep-live")
+        mock_error.assert_not_called()
+
+    # -- Active record is actually a branch-based experiment --
+
+    @patch("poly.output.console.error")
+    def test_end__experiment_record_points_to_experiment_end(self, mock_error):
+        """A branch-based experiment record is rejected, pointing to experiment end."""
+        self.proj.get_active_ab_test.return_value = dict(
+            SAMPLE_AB_TEST,
+            versions=[
+                {"branch_id": "br-main", "kind": "control"},
+                {"branch_id": "br-v2", "kind": "release"},
+            ],
+        )
+
         with self.assertRaises(SystemExit) as ctx:
-            DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="live00000")
+            DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version=None)
 
         self.assertEqual(ctx.exception.code, 1)
-        self.proj.get_active_ab_test.assert_not_called()
+        self.assertIn("poly deployments experiment end", mock_error.call_args[0][0])
+        self.proj.end_ab_test.assert_not_called()
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_end__experiment_record_points_to_experiment_end_json(self, mock_json):
+        """A branch-based experiment record in JSON mode emits error JSON."""
+        self.proj.get_active_ab_test.return_value = dict(
+            SAMPLE_AB_TEST,
+            versions=[
+                {"branch_id": "br-main", "kind": "control"},
+                {"branch_id": "br-v2", "kind": "release"},
+            ],
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="live00000", output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("poly deployments experiment end", payload["error"])
         self.proj.end_ab_test.assert_not_called()
 
 
