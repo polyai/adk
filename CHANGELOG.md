@@ -1,6 +1,235 @@
 # CHANGELOG
 
 
+## v0.67.0 (2026-10-05)
+
+### Features
+
+- Sync knowledge base topic tags on pull and push ([#345](https://github.com/polyai/adk/pull/345),
+  [`fe2cadd`](https://github.com/polyai/adk/commit/fe2cadde6a12712a4e96ac41afcd66ad5417afd5))
+
+## Summary
+
+Knowledge base topic tags now sync through the ADK. Pull writes an optional `tags:` list into topic
+  files, and push sends tag changes to Agent Studio.
+
+## Motivation
+
+Topic tags set in Agent Studio can't be read or set from the ADK. Pull never writes them, and a
+  `tags:` key in a topic file passes `poly validate` but push drops it without a warning. The
+  platform already supports them: the projection returns `tags`, `create_topic` accepts them, and
+  `set_topic_tags` exists.
+
+## Changes
+
+- **Pull** reads `tags` from the projection and writes `tags:` right after `enabled:`, but only for
+  topics that have tags. Untagged topic files don't change. - **A topic file without a `tags:` key
+  has no tags**, the same as test cases. Deleting the key clears the tags on push. - **Push:** a new
+  topic sends its tags on `create_topic`. On an existing topic, changed tags go out as
+  `set_topic_tags` through a new `TopicTags` sub-resource, like `TestCaseTags`. As with test cases,
+  `update_topic` is also sent when the topic changed. - **Validation:** each tag must be non-empty,
+  unique, and have no leading or trailing whitespace. Tags are case-sensitive. Length isn't checked:
+  the Agent Studio input stops at 16 characters, but imported topics can have longer tags, and
+  validation must pass on what a pull writes. A `tags:` that isn't a list now fails to read instead
+  of being dropped. - **Child topics** stay without tags, since the platform has no command to set
+  them. A non-empty `tags` key in a child topic file is an error. - **Docs:** tags added to both
+  topic reference pages.
+
+## Upgrading
+
+A plain `poly push` pulls and merges first, so topic files pulled before this change pick up their
+  tags before anything is pushed. A force push doesn't pull first: from an older file, it clears the
+  tags set in Agent Studio. After upgrading, run `poly pull` once before any `poly push --force`,
+  including in CI.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Live check, read-only: a force pull plus dry-run pushes into a scratch copy of a project with 104
+  topics, 35 of them tagged. - Compared with a pull from 0.64.0, the only difference is the `tags:`
+  block in those 35 files. - Dry-run pushes:
+
+| Local file | Commands | |---|---| | unchanged | none | | `tags:` key removed | `update_topic`,
+  `set_topic_tags []` | | tags edited | `update_topic`, `set_topic_tags` with the new tags | |
+  `tags: []` | `update_topic`, `set_topic_tags []` |
+
+End to end with `poly pull`/`poly push` against live projects (the test branch was deleted
+  afterwards): - Pulling a project with one tagged topic changed only that topic's file, which
+  gained its `tags:` block. - I edited one topic's tags, tagged an untagged topic, and force-pushed
+  to a new branch. The branch had the new tags, and `main` was unchanged. - On that branch, a plain
+  push cleared tags both by deleting the `tags:` key and with `tags: []`, and created a new topic
+  with its tags. Pulling the branch back gave the same files. - A project with imported tags longer
+  than 16 characters, one of them containing a function reference, pulls and validates cleanly.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.66.1 (2026-10-05)
+
+### Bug Fixes
+
+- Keep conversation language across poly chat turns ([#351](https://github.com/polyai/adk/pull/351),
+  [`6e3e012`](https://github.com/polyai/adk/commit/6e3e0127918a310269edc11d6a2d84473dce3cdc))
+
+## Summary
+
+`poly chat` now sends back the language codes returned by each turn, so a mid-conversation
+  `conv.set_language()` persists across turns and sessions start in the project's default language
+  instead of the API's fallback (`en-GB`).
+
+## Motivation
+
+The platform does not persist the conversation language between chat turns. Each request is
+  processed in the language it carries (falling back to `en-GB` when none is sent), and each reply
+  returns the current language in `metadata.asr_lang_code` / `metadata.tts_lang_code`. Clients are
+  expected to echo these back on the next turn.
+
+`poly chat` sent the same `--lang` value (usually none) on every turn and never read the reply. As a
+  result:
+
+- After a function called `conv.set_language("es-US")`, only the following turn ran in `es-US`;
+  every later turn reverted to `en-GB`, so the agent drifted back to English. The same conversation
+  behaves correctly over voice and the Agent Studio chat panel, which makes `poly chat` misleading
+  for testing multilingual agents. - Every `poly chat` session ran on `en-GB` regardless of the
+  project's configured default language.
+
+## Changes
+
+- `_run_chat_loop` seeds the language codes from the session's start response and updates them from
+  each reply's metadata before the next `send_message`. - An explicit `--lang` / `--input-lang` /
+  `--output-lang` still applies to session creation and is kept when a reply carries no language
+  codes. A language switch made by the agent mid-conversation takes precedence, matching voice
+  behaviour.
+
+## Test strategy
+
+- [x] Added/updated unit tests (`ChatLoopTest`: carry-over after a switch, seeding from the start
+  response, CLI language kept when replies carry no codes) - [x] Manual CLI testing (`poly
+  <command>`) - [x] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (via the repo's pinned pre-commit hooks; a
+  newer unpinned ruff flags an existing `except (KeyboardInterrupt, EOFError)` on `main`, untouched
+  here) - [x] `pytest` passes (2127 passed) - [x] No breaking changes to the `poly` CLI interface
+  (or migration path documented) - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Language sent with each turn, patched vs unpatched, for a conversation where the agent switches to
+  Spanish on turn 3:
+
+``` turn before after 2 en-GB en-US (project default) 3 es-US es-US (switch) 4 en-GB es-US 5 en-GB
+  es-US 6 en-GB es-US ```
+
+With the fix, agent replies stay in Spanish for the rest of the conversation.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
+## v0.66.0 (2026-10-02)
+
+### Features
+
+- Name test runs with `poly test run --name` (AOS-1284)
+  ([#347](https://github.com/polyai/adk/pull/347),
+  [`3d15749`](https://github.com/polyai/adk/commit/3d15749f2b8f753591b769045225ef3621c18254))
+
+## Summary
+
+`poly test run` now sends the platform's current trigger payload and takes an optional `--name`, so
+  runs started from the ADK can be found in Agent Studio run history.
+
+## Motivation
+
+The ADK still posted the legacy `{ testCaseIds, branchId }` body. The platform converts that body to
+  `{ branchId, select }` and drops any other field, so a run name could never arrive. Agent Studio
+  now names runs and shows who started them (PolyAI-LDN/platform_ui#10837), so ADK runs should be
+  nameable too.
+
+Linear:
+  [AOS-1284](https://linear.app/poly-ai/issue/AOS-1284/adk-send-the-new-test-run-trigger-payload-and-allow-naming-runs)
+
+## Changes
+
+- `PlatformAPIHandler.trigger_test_run` sends `{ branchId, select: { mode: "testIds", testIds },
+  name? }`. Same endpoint, `/v1/agents/{project_id}/testing/test-runs/trigger`. - `name` is passed
+  through `AgentStudioInterface.trigger_test_run` and `AgentStudioProject.trigger_tests`. The name
+  is trimmed, a blank one is dropped, and anything over 120 characters fails locally with a
+  `ValueError` instead of a platform 422. - New `poly test run --name "<why> · <what>"` flag.
+  Without it, the platform keeps its default name (the test name or count). - CLI reference
+  (`docs/reference/cli/test.md`) and the `poly-adk-testing` skill document the flag.
+
+## Test strategy
+
+- [x] Added/updated unit tests: the request body shape, the name being sent, trim, blank and
+  over-length handling, and the `--name` flag being parsed and forwarded - [ ] Manual CLI testing
+  (`poly <command>`) - [ ] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (2124) - [x] No breaking
+  changes to the `poly` CLI interface. `--name` is optional, and the platform has accepted the
+  `select` shape since platform_ui#9801 and `name` since #10525. - [x] Commit messages follow
+  conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
+## v0.65.0 (2026-10-01)
+
+### Features
+
+- Limit custom guardrails to 20 per project ([#346](https://github.com/polyai/adk/pull/346),
+  [`351faf7`](https://github.com/polyai/adk/commit/351faf70aaad5df18e54c1e0f1284b3bf8e34efc))
+
+## Summary
+
+Adds a local cap of 20 custom guardrails per project, enforced during `poly validate`/`poly push`.
+
+## Motivation
+
+The platform already rejects a 21st custom guardrail server-side, but that rejection surfaces after
+  the whole push transaction has been submitted — rolling back every resource in the batch, not just
+  the excess guardrails. Catching the count locally avoids that failure mode.
+
+## Changes
+
+- Added `MAX_CUSTOM_GUARDRAILS = 20` constant in `src/poly/resources/guardrails.py`, mirroring the
+  platform's server-side limit - Added `CustomGuardrail.validate_collection()` override that raises
+  `ValueError` when the collection exceeds the limit
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.64.0 (2026-09-28)
 
 ### Features

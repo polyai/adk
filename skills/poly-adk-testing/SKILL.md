@@ -10,7 +10,7 @@ description: >
 metadata:
   author: PolyAI
   license: Apache-2.0
-  version: 0.64.0
+  version: 0.67.0
   requires:
     bins:
       - poly
@@ -74,6 +74,7 @@ poly test run --tag smoke        # only tagged tests (multiple tags OR-match)
 poly test run --files test_suite/greeting_flow_test.yaml
 poly test run --dry-run          # preview which tests would run
 poly test run --dont-poll        # trigger and exit; check later with poly test show
+poly test run --tag smoke --name "Pre-release check · booking flow"   # name the run
 poly test list                   # past runs
 poly test show <run_id>                    # run summary + per-test table
 poly test show <run_id> <test_case_id>     # assertion results, function failures, full transcript

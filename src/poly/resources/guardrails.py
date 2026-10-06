@@ -25,6 +25,9 @@ GUARDRAILS_FILE = os.path.join("agent_settings", "guardrails.yaml")
 
 logger = logging.getLogger(__name__)
 
+# Mirrors the platform's server-side limit; kept in sync manually.
+MAX_CUSTOM_GUARDRAILS = 20
+
 CUSTOM_GUARDRAIL_REFERENCES = [
     "global_functions",
     "sms",
@@ -307,6 +310,20 @@ class CustomGuardrail(_GuardrailYamlResource):
         valid, invalid_references = utils.validate_references(references, resource_mappings)
         if not valid:
             raise ValueError(f"Invalid references: {invalid_references}")
+
+    @classmethod
+    def validate_collection(cls, resources: dict[str, "CustomGuardrail"]) -> None:
+        """Reject a collection exceeding the platform's custom guardrail limit.
+
+        Catches the count locally, before push, since a rejection from Sourcerer
+        would otherwise roll back the entire command batch (not just the excess
+        guardrails).
+        """
+        if len(resources) > MAX_CUSTOM_GUARDRAILS:
+            raise ValueError(
+                f"Too many custom guardrails ({len(resources)}). "
+                f"Maximum of {MAX_CUSTOM_GUARDRAILS} custom guardrails per project."
+            )
 
     def build_create_proto(self) -> Guardrails_CreateCustomGuardrail:
         """Create a proto for creating the resource."""

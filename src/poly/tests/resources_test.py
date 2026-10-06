@@ -67,7 +67,7 @@ from poly.resources.function import (
     FunctionType,
     LatencyControl,
 )
-from poly.resources.guardrails import CustomGuardrail, PlatformGuardrail
+from poly.resources.guardrails import MAX_CUSTOM_GUARDRAILS, CustomGuardrail, PlatformGuardrail
 from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import (
@@ -105,6 +105,7 @@ from poly.resources.test_suite import (
 from poly.resources.topic import (
     FUNCTION_REGEX,
     Topic,
+    TopicTags,
 )
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.translations import Translation
@@ -11428,6 +11429,43 @@ class CustomGuardrailTests(unittest.TestCase):
         ]
         self.assertIsNone(guardrail.validate(resource_mappings=resource_mappings))
 
+    @staticmethod
+    def _collection_of(count: int) -> dict[str, CustomGuardrail]:
+        """Build a collection of ``count`` distinct, otherwise-valid custom guardrails."""
+        return {
+            f"guardrail_{i}": CustomGuardrail(
+                resource_id=f"CUSTOM_GUARDRAILS-{i}",
+                name=f"guardrail_{i}",
+                prompt="Never give medical advice.",
+                action="warn",
+            )
+            for i in range(count)
+        }
+
+    def test_validate_collection_passes_when_empty(self):
+        """A project with no custom guardrails is valid."""
+        self.assertIsNone(CustomGuardrail.validate_collection({}))
+
+    def test_validate_collection_passes_with_a_few_guardrails(self):
+        """A typical project with a handful of custom guardrails is valid."""
+        self.assertIsNone(CustomGuardrail.validate_collection(self._collection_of(3)))
+
+    def test_validate_collection_passes_at_exactly_the_limit(self):
+        """Exactly MAX_CUSTOM_GUARDRAILS (20) is allowed — the limit is inclusive."""
+        self.assertEqual(MAX_CUSTOM_GUARDRAILS, 20)
+        collection = self._collection_of(MAX_CUSTOM_GUARDRAILS)
+        self.assertIsNone(CustomGuardrail.validate_collection(collection))
+
+    def test_validate_collection_one_over_the_limit_raises_with_count_and_limit(self):
+        """21 custom guardrails is rejected locally, naming both the count and the limit."""
+        collection = self._collection_of(MAX_CUSTOM_GUARDRAILS + 1)
+
+        with self.assertRaises(ValueError) as cm:
+            CustomGuardrail.validate_collection(collection)
+        message = str(cm.exception)
+        self.assertIn("Too many custom guardrails (21)", message)
+        self.assertIn("Maximum of 20 custom guardrails per project", message)
+
     def test_build_create_proto_includes_fields_and_references(self):
         guardrail = CustomGuardrail(
             resource_id="CUSTOM_GUARDRAILS-1",
@@ -12006,6 +12044,215 @@ class TopicFromProjection(unittest.TestCase):
     def test_empty_projection_yields_no_topics(self):
         """An empty projection should return an empty dict."""
         self.assertEqual(Topic.from_projection({}), {})
+
+    def test_parses_tags(self):
+        """Tags on the projection are read onto the topic, and a topic without them has none."""
+        projection = {
+            "knowledgeBase": {
+                "topics": {
+                    "entities": {
+                        "TOPIC-1": {
+                            "name": "Tagged",
+                            "actions": "",
+                            "content": "Tagged content",
+                            "tags": ["billing", "refunds"],
+                        },
+                        "TOPIC-2": {"name": "Untagged", "actions": "", "content": "Untagged"},
+                    }
+                }
+            }
+        }
+
+        topics = Topic.from_projection(projection)
+
+        self.assertEqual(topics["TOPIC-1"].tags, ["billing", "refunds"])
+        self.assertEqual(topics["TOPIC-2"].tags, [])
+
+
+def _topic(tags: list[str] = None) -> Topic:
+    """Return a topic with no references, so only its tags can fail validation."""
+    return Topic(
+        resource_id="TOPIC-1",
+        name="Opening Hours",
+        actions="Tell the user the opening hours.",
+        content="We open at 9am.",
+        example_queries=["When do you open?"],
+        tags=tags,
+    )
+
+
+class TopicTagsTests(unittest.TestCase):
+    """Tests for reading, writing and pushing topic tags."""
+
+    TOPIC_FILE = """name: Opening Hours
+enabled: true
+{tags}actions: Tell the user the opening hours.
+content: We open at 9am.
+example_queries:
+- When do you open?
+"""
+
+    def _read(self, tags_yaml: str = "") -> Topic:
+        with mock_read_from_file(self.TOPIC_FILE.format(tags=tags_yaml)):
+            return Topic.read_local_resource(
+                file_path="topics/opening_hours.yaml",
+                resource_id="TOPIC-1",
+                resource_name="Opening Hours",
+                resource_mappings=[],
+            )
+
+    def test_tags_are_written_after_enabled(self):
+        """Tags sit near the top of the file, above the long actions and content."""
+        raw = _topic(tags=["billing", "refunds"]).raw
+
+        self.assertEqual(raw, self.TOPIC_FILE.format(tags="tags:\n- billing\n- refunds\n"))
+
+    def test_untagged_topic_has_no_tags_key(self):
+        """Untagged topic files are unchanged, so pulling adds no tags: [] anywhere."""
+        raw = _topic().raw
+
+        self.assertEqual(raw, self.TOPIC_FILE.format(tags=""))
+
+    def test_reads_tags_from_file(self):
+        topic = self._read("tags:\n- billing\n")
+
+        self.assertEqual(topic.tags, ["billing"])
+
+    def test_missing_tags_key_means_no_tags(self):
+        topic = self._read()
+
+        self.assertEqual(topic.tags, [])
+
+    def test_empty_tags_value_means_no_tags(self):
+        for tags_yaml in ("tags: []\n", "tags:\n"):
+            with self.subTest(tags_yaml=tags_yaml):
+                self.assertEqual(self._read(tags_yaml).tags, [])
+
+    def test_tags_that_are_not_a_list_fail_to_read(self):
+        """A malformed tags value is an error rather than being silently dropped."""
+        with self.assertRaises(ValueError) as cm:
+            self._read("tags: billing\n")
+
+        self.assertIn("'tags' should be a list of str", str(cm.exception))
+
+    def test_valid_tags_pass_validation(self):
+        """Long tags pass: imported topics can have tags longer than the Agent Studio input allows."""
+        tags = ["billing", "can I send you the directions?"]
+
+        self.assertIsNone(_topic(tags=tags).validate(resource_mappings=[]))
+
+    def test_empty_tag_fails_validation(self):
+        with self.assertRaises(ValueError) as cm:
+            _topic(tags=["billing", " "]).validate(resource_mappings=[])
+
+        self.assertIn("Tags must not be empty", str(cm.exception))
+
+    def test_tags_are_stripped_when_read(self):
+        topic = self._read("tags:\n- ' billing '\n- refunds\n")
+
+        self.assertEqual(topic.tags, ["billing", "refunds"])
+
+    def test_tags_equal_once_stripped_are_duplicates(self):
+        topic = self._read("tags:\n- billing\n- ' billing '\n")
+
+        with self.assertRaises(ValueError) as cm:
+            topic.validate(resource_mappings=[])
+
+        self.assertIn("Duplicate tags: ['billing']", str(cm.exception))
+
+    def test_duplicate_tags_fail_validation(self):
+        """Tags are case-sensitive in Agent Studio, so only exact repeats are duplicates."""
+        _topic(tags=["billing", "Billing"]).validate(resource_mappings=[])
+
+        with self.assertRaises(ValueError) as cm:
+            _topic(tags=["billing", "refunds", "billing"]).validate(resource_mappings=[])
+
+        self.assertIn("Duplicate tags: ['billing']", str(cm.exception))
+
+    def test_create_proto_carries_tags(self):
+        proto = _topic(tags=["billing", "refunds"]).build_create_proto()
+
+        self.assertEqual(list(proto.tags), ["billing", "refunds"])
+
+    def test_new_topic_has_no_tags_subresource(self):
+        """A new topic's tags go out on create_topic, not as a separate command."""
+        self.assertEqual(
+            _topic(tags=["billing"]).get_new_updated_deleted_subresources(old_resource=None),
+            ([], [], []),
+        )
+
+    def test_unchanged_tags_have_no_subresource_change(self):
+        topic = _topic(tags=["billing"])
+
+        self.assertEqual(
+            topic.get_new_updated_deleted_subresources(old_resource=_topic(tags=["billing"])),
+            ([], [], []),
+        )
+
+    def test_changed_tags_are_set_with_set_topic_tags(self):
+        topic = _topic(tags=["refunds", "billing"])
+
+        new, updated, deleted = topic.get_new_updated_deleted_subresources(
+            old_resource=_topic(tags=["billing"])
+        )
+
+        self.assertEqual((new, deleted), ([], []))
+        self.assertEqual(updated, [TopicTags(resource_id="TOPIC-1", name="tags", tags=topic.tags)])
+        self.assertEqual(updated[0].update_command_type, "set_topic_tags")
+        proto = updated[0].build_update_proto()
+        self.assertEqual(proto.id, "TOPIC-1")
+        self.assertEqual(list(proto.tags), ["refunds", "billing"])
+
+    def test_clearing_tags_sets_an_empty_list(self):
+        _, updated, _ = _topic(tags=[]).get_new_updated_deleted_subresources(
+            old_resource=_topic(tags=["billing"])
+        )
+
+        self.assertEqual(updated, [TopicTags(resource_id="TOPIC-1", name="tags", tags=[])])
+
+    def test_topic_tags_are_only_ever_set(self):
+        """Tags are created with their topic and cleared with an empty list."""
+        tags = TopicTags(resource_id="TOPIC-1", name="tags", tags=["billing"])
+
+        self.assertEqual(tags.command_type, "topic_tags")
+        with self.assertRaises(NotImplementedError):
+            tags.build_create_proto()
+        with self.assertRaises(NotImplementedError):
+            tags.build_delete_proto()
+
+    def test_child_topic_file_with_tags_is_rejected(self):
+        """Child topics can't have tags, so a tags key is an error rather than dropped."""
+        yaml_dict = {"name": "Opening Hours", "content": "We open at 10am.", "tags": ["billing"]}
+
+        with self.assertRaises(ValueError) as cm:
+            ChildTopic.from_yaml_dict(yaml_dict, resource_id="TOPIC-child", name="Opening Hours")
+
+        self.assertIn("Child topic 'Opening Hours' has tags", str(cm.exception))
+
+    def test_child_topic_file_with_empty_tags_is_accepted(self):
+        yaml_dict = {"name": "Opening Hours", "content": "We open at 10am.", "tags": []}
+
+        child_topic = ChildTopic.from_yaml_dict(
+            yaml_dict, resource_id="TOPIC-child", name="Opening Hours"
+        )
+
+        self.assertEqual(child_topic.tags, [])
+
+    def test_child_topics_have_no_tags(self):
+        """The platform cannot set tags on a child topic, so child topic files never get them."""
+        child_topic = ChildTopic(
+            resource_id="TOPIC-child",
+            name="Opening Hours",
+            variant_id="VARIANT-1",
+            variant_name="Variant 1",
+            actions="",
+            content="We open at 10am.",
+            example_queries=[],
+        )
+
+        self.assertEqual(child_topic.tags, [])
+        self.assertNotIn("tags", child_topic.to_yaml_dict())
+        self.assertEqual(list(child_topic.build_create_proto().tags), [])
 
 
 class ChildTopicFromProjection(unittest.TestCase):
@@ -13113,4 +13360,3 @@ class MultiResourceFileCacheTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
