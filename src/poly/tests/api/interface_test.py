@@ -520,6 +520,16 @@ class ExperimentPassThroughTest(unittest.TestCase):
         self.assertEqual(result, {"experiments": []})
         mock_list.assert_called_once_with("eu", "acc", "proj", 5, 10)
 
+    @patch("poly.handlers.interface.PlatformAPIHandler.get_experiment")
+    def test_get_experiment_returns_platform_response(self, mock_get):
+        """Get forwards the experiment ID and returns the platform's record."""
+        mock_get.return_value = {"id": "exp-1"}
+
+        result = AgentStudioInterface.get_experiment("eu", "acc", "proj", "exp-1")
+
+        self.assertEqual(result, {"id": "exp-1"})
+        mock_get.assert_called_once_with("eu", "acc", "proj", "exp-1")
+
     @patch("poly.handlers.interface.PlatformAPIHandler.end_experiment")
     def test_end_experiment_returns_platform_response(self, mock_end):
         """End forwards the chosen branch and returns the ended record."""

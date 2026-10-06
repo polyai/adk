@@ -5622,6 +5622,14 @@ class ExperimentsTest(unittest.TestCase):
 
         self.assertEqual(self.project.get_active_experiment(), {})
 
+    def test_get_experiment_returns_api_response(self):
+        """get_experiment returns the platform response for the given ID directly."""
+        self.mock_api.get_experiment.return_value = {"id": "exp-1", "name": "v2 test"}
+
+        result = self.project.get_experiment("exp-1")
+
+        self.assertEqual(result, {"id": "exp-1", "name": "v2 test"})
+
     def test_create_end_and_update_forward_project_scope(self):
         """Mutating calls are scoped to this project's region, account and id."""
         scope = {
@@ -5631,12 +5639,14 @@ class ExperimentsTest(unittest.TestCase):
         }
 
         self.project.create_experiment("v2", "br-v2", 30)
+        self.project.get_experiment("exp-1")
         self.project.end_experiment("exp-1", "br-v2")
         self.project.update_experiment("exp-1", name="renamed")
 
         self.mock_api.create_experiment.assert_called_once_with(
             **scope, name="v2", branch_id="br-v2", traffic_percentage=30
         )
+        self.mock_api.get_experiment.assert_called_once_with(**scope, experiment_id="exp-1")
         self.mock_api.end_experiment.assert_called_once_with(
             **scope, experiment_id="exp-1", chosen_branch_id="br-v2"
         )

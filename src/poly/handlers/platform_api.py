@@ -988,6 +988,30 @@ class PlatformAPIHandler:
         return camel_to_snake_keys(response)
 
     @staticmethod
+    def get_experiment(
+        region: str,
+        account_id: str,
+        project_id: str,
+        experiment_id: str,
+    ) -> dict:
+        """Get a single experiment by ID.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            experiment_id: The experiment ID.
+
+        Returns:
+            dict: The experiment record.
+        """
+        endpoint = EXPERIMENT_URL.format(
+            account_id=account_id, project_id=project_id, experiment_id=experiment_id
+        )
+        response = PlatformAPIHandler.make_request(region, endpoint, "GET")
+        return camel_to_snake_keys(response)
+
+    @staticmethod
     def end_experiment(
         region: str,
         account_id: str,

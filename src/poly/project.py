@@ -3747,6 +3747,22 @@ class AgentStudioProject:
         )
         return result.get("experiments", [])
 
+    def get_experiment(self, experiment_id: str) -> dict:
+        """Get a single experiment by ID.
+
+        Args:
+            experiment_id: The experiment ID.
+
+        Returns:
+            dict: The experiment record.
+        """
+        return self.api_handler.get_experiment(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            experiment_id=experiment_id,
+        )
+
     def get_active_experiment(self) -> dict:
         """Get the active experiment for the project, if any.
 

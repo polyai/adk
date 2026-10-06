@@ -1116,6 +1116,26 @@ class AgentStudioInterface:
         return PlatformAPIHandler.list_experiments(region, account_id, project_id, limit, offset)
 
     @staticmethod
+    def get_experiment(
+        region: str,
+        account_id: str,
+        project_id: str,
+        experiment_id: str,
+    ) -> dict:
+        """Get a single experiment by ID.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            experiment_id: The experiment ID.
+
+        Returns:
+            dict: The experiment record.
+        """
+        return PlatformAPIHandler.get_experiment(region, account_id, project_id, experiment_id)
+
+    @staticmethod
     def end_experiment(
         region: str,
         account_id: str,

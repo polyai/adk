@@ -916,6 +916,16 @@ class ExperimentCalls(unittest.TestCase):
         self.assertEqual(first.args, ("eu", self.BASE, "GET"))
 
     @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_get_experiment_sends_get_to_experiment_url(self, mock_make_request):
+        """Get hits the single-experiment URL with no body."""
+        mock_make_request.return_value = {"id": "exp-1"}
+
+        result = PlatformAPIHandler.get_experiment("eu", "acc-1", "proj-1", "exp-1")
+
+        mock_make_request.assert_called_once_with("eu", f"{self.BASE}/exp-1", "GET")
+        self.assertEqual(result, {"id": "exp-1"})
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_end_experiment_posts_chosen_branch_to_end_url(self, mock_make_request):
         """End posts the winning branch ID to the experiment's /end endpoint."""
         PlatformAPIHandler.end_experiment("eu", "acc-1", "proj-1", "exp-1", "br-v2")

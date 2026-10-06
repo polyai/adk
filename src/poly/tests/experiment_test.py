@@ -57,9 +57,9 @@ class ExperimentStartTest(unittest.TestCase):
         self.proj = MagicMock()
         self.proj.experiments_enabled = True
         # The create response omits per-version detail (a platform API gap), so
-        # experiment_start re-fetches via get_active_experiment for display.
+        # experiment_start re-fetches by ID via get_experiment for display.
         self.proj.create_experiment.return_value = {"id": "exp-001", "name": "v2 test"}
-        self.proj.get_active_experiment.return_value = dict(SAMPLE_EXPERIMENT)
+        self.proj.get_experiment.return_value = dict(SAMPLE_EXPERIMENT)
         self.proj.get_branches.return_value = ("main", dict(SAMPLE_BRANCHES))
         self.mock_load.return_value = self.proj
         self.addCleanup(patch.stopall)
@@ -116,19 +116,28 @@ class ExperimentStartTest(unittest.TestCase):
 
     @patch("poly.output.console.success")
     @patch("poly.output.console.print_experiment_detail")
-    def test_start__falls_back_to_create_response_if_refetch_finds_nothing(
-        self, mock_detail, mock_success
-    ):
-        """If the re-fetch can't find it (e.g. a transient race), fall back to create's response."""
-        self.proj.get_active_experiment.return_value = {}
+    def test_start__falls_back_to_create_response_if_no_id(self, mock_detail, mock_success):
+        """If the create response has no id to re-fetch with, fall back to it as-is."""
+        self.proj.create_experiment.return_value = {"name": "v2 test"}
 
         DeploymentsCommand.experiment_start(
             TEST_DIR, name="v2 test", branch="v2-branch", traffic_percentage=50
         )
 
+        self.proj.get_experiment.assert_not_called()
         mock_detail.assert_called_once_with(
             self.proj.create_experiment.return_value, branches=SAMPLE_BRANCH_MAP
         )
+
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_experiment_detail")
+    def test_start__refetches_experiment_by_id(self, mock_detail, mock_success):
+        """The re-fetch targets the experiment directly by ID rather than scanning the list."""
+        DeploymentsCommand.experiment_start(
+            TEST_DIR, name="v2 test", branch="v2-branch", traffic_percentage=50
+        )
+
+        self.proj.get_experiment.assert_called_once_with("exp-001")
 
     @patch("poly.cli_commands.deployments.json_print")
     def test_start__success_json_output(self, mock_json):

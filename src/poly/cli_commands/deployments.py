@@ -1578,8 +1578,10 @@ class DeploymentsCommand(BaseCommand):
 
         result = project.create_experiment(name.strip(), branch_id, traffic_percentage)
         # The create response doesn't include per-version details (a gap in the
-        # platform API) — re-fetch so callers see the control/variant split.
-        result = project.get_active_experiment() or result
+        # platform API) — re-fetch by ID so callers see the control/variant split.
+        experiment_id = result.get("id")
+        if experiment_id:
+            result = project.get_experiment(experiment_id)
         if output_json:
             json_print({"success": True, "experiment": result})
         else:
