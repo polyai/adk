@@ -233,6 +233,32 @@ class ExperimentStartTest(unittest.TestCase):
 
     @patch("questionary.select")
     @patch("questionary.Choice")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_experiment_detail")
+    def test_start__interactive_branch_picker_excludes_child_branches(
+        self, mock_detail, mock_success, mock_choice, mock_select
+    ):
+        """A branch whose parent isn't main is excluded — the server rejects it as a variant."""
+        self.proj.get_branches.return_value = (
+            "main",
+            {
+                "main": {"branchId": "br-main"},
+                "v2-branch": {"branchId": "br-v2", "parentBranchId": "main"},
+                "child-of-v2": {"branchId": "br-v2-child", "parentBranchId": "br-v2"},
+            },
+        )
+        mock_choice.side_effect = lambda **kw: kw
+        mock_select.return_value.ask.return_value = "v2-branch"
+
+        DeploymentsCommand.experiment_start(
+            TEST_DIR, name="test", branch=None, traffic_percentage=50
+        )
+
+        choice_titles = [c["title"] for c in mock_select.call_args[1]["choices"]]
+        self.assertEqual(choice_titles, ["v2-branch"])
+
+    @patch("questionary.select")
+    @patch("questionary.Choice")
     @patch("poly.output.console.warning")
     def test_start__interactive_branch_picker_aborted_exits_zero(
         self, mock_warning, mock_choice, mock_select
@@ -306,6 +332,54 @@ class ExperimentStartTest(unittest.TestCase):
         payload = mock_json.call_args[0][0]
         self.assertFalse(payload["success"])
         self.assertIn("No branch found", payload["error"])
+
+    @patch("poly.output.console.error")
+    def test_start__explicit_child_branch_rejected(self, mock_error):
+        """A branch whose parent isn't main is rejected — the server only tests top-level branches."""
+        self.proj.get_branches.return_value = (
+            "main",
+            {
+                "main": {"branchId": "br-main"},
+                "v2-branch": {"branchId": "br-v2", "parentBranchId": "main"},
+                "child-of-v2": {"branchId": "br-v2-child", "parentBranchId": "br-v2"},
+            },
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_start(
+                TEST_DIR, name="test", branch="child-of-v2", traffic_percentage=50
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("is not a top-level branch", mock_error.call_args[0][0])
+        self.proj.create_experiment.assert_not_called()
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_start__explicit_child_branch_rejected_json(self, mock_json):
+        """A child branch in JSON mode emits error JSON and exits."""
+        self.proj.get_branches.return_value = (
+            "main",
+            {
+                "main": {"branchId": "br-main"},
+                "v2-branch": {"branchId": "br-v2", "parentBranchId": "main"},
+                "child-of-v2": {"branchId": "br-v2-child", "parentBranchId": "br-v2"},
+            },
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_start(
+                TEST_DIR,
+                name="test",
+                branch="child-of-v2",
+                traffic_percentage=50,
+                output_json=True,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("is not a top-level branch", payload["error"])
+        self.proj.create_experiment.assert_not_called()
 
     @patch("poly.output.console.error")
     def test_start__main_branch_rejected(self, mock_error):

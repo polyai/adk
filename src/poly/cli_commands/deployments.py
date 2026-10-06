@@ -1528,8 +1528,13 @@ class DeploymentsCommand(BaseCommand):
             sys.exit(1)
 
         # The control is always the implicit "main" branch, so it's never a
-        # valid choice for the variant.
-        eligible = [n for n in branches if n != "main"]
+        # valid choice for the variant. The server also only accepts a
+        # top-level branch as the variant (assertTopLevelBranch rejects a
+        # child branch with a 400), so child branches are excluded too.
+        def _is_top_level(meta: dict) -> bool:
+            return meta.get("parentBranchId") in (None, "main")
+
+        eligible = [n for n, meta in branches.items() if n != "main" and _is_top_level(meta)]
 
         if branch is None:
             if output_json:
@@ -1553,6 +1558,18 @@ class DeploymentsCommand(BaseCommand):
             else:
                 error(msg)
             sys.exit(1)
+        else:
+            branch_meta = branches.get(branch)
+            if branch_meta is not None and not _is_top_level(branch_meta):
+                msg = (
+                    f"Branch '{branch}' is not a top-level branch — only a top-level"
+                    " branch can be tested as a variant."
+                )
+                if output_json:
+                    json_print({"success": False, "error": msg})
+                else:
+                    error(msg)
+                sys.exit(1)
 
         branch_id = cls._resolve_branch_to_id(branch, branches)
         if not branch_id:
