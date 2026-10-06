@@ -15,46 +15,57 @@ Contributions are welcome! Please ensure all tests pass before submitting a pull
 git clone https://github.com/PolyAI/adk.git
 cd adk
 uv venv
-source .venv/bin/activate
 uv pip install -e ".[dev]"
-pre-commit install
+uv run pre-commit install
 ```
+
+To try your changes with plain `poly` commands (e.g. `poly --help`), activate the environment
+with `source .venv/bin/activate`. Otherwise prefix commands with `uv run` (`uv run poly --help`,
+`uv run pytest`); scripts, CI and coding agents always use `uv run`.
 
 ## Running Tests
 
 ```bash
-pytest
+uv run pytest src/poly/tests/
 ```
 
 Test files are located in `src/poly/tests/`.
 
-## Project Structure
+## Project Structure and Rules
 
-- `src/poly/cli.py` - CLI interface
-- `src/poly/project.py` - Core project management
-- `src/poly/resources/` - Resource type implementations
-- `src/poly/handlers/` - API handler implementations
-- `src/poly/tests/` - Test suite
-- `src/poly/types/` - Python type definitions for the Agent Studio runtime
+[`AGENTS.md`](AGENTS.md) describes where code goes (CLI → project → interface → API), the
+conventions reviewers enforce, and what a PR needs to include. [`REVIEW.md`](REVIEW.md) is the
+review checklist. Both apply whether you write the code yourself or with an AI coding agent.
 
 ## Code Style
 
 The project uses [ruff](https://github.com/astral-sh/ruff) for linting and formatting, enforced via pre-commit hooks.
 
 - **Line length**: 100 characters
-- **Formatting**: `ruff format .`
-- **Linting**: `ruff check .` (auto-fix with `ruff check . --fix`)
+- **Formatting**: `uv run ruff format .`
+- **Linting**: `uv run ruff check .` (auto-fix with `uv run ruff check . --fix`)
 
-## Commit Conventions
+## Pull Requests
 
-We use [conventional commits](https://www.conventionalcommits.org/):
+PRs are squash-merged, so the PR title becomes the commit on `main`. It must follow
+[conventional commits](https://www.conventionalcommits.org/), and its type decides the release:
 
-| Commit prefix | Version bump | Example |
+| Title prefix | Release | Example |
 |---|---|---|
-| `fix:` | Patch (2.0.4 → 2.0.5) | `fix: handle missing config file` |
+| `fix:`, `perf:` | Patch (2.0.4 → 2.0.5) | `fix: handle missing config file` |
 | `feat:` | Minor (2.0.4 → 2.1.0) | `feat: add poly export command` |
 | `feat!:` / `BREAKING CHANGE:` | Major (2.0.4 → 3.0.0) | `feat!: redesign resource schema` |
-| `chore:`, `docs:`, `ci:` | No release | `docs: update README` |
+| `chore:`, `docs:`, `ci:`, `build:`, `refactor:`, `style:`, `test:` | No release | `docs: update README` |
+
+Use `feat:` for anything a user can see, including changes to command output or to files written
+to disk. A user-facing change under a non-releasing type won't be released.
+
+- Fill in the [PR template](.github/PULL_REQUEST_TEMPLATE.md).
+- PR titles and descriptions are public and become release notes. Don't include ticket IDs,
+  internal client or project names, or internal tools. Link a ticket in a PR comment instead.
+- Merge stacked PRs bottom-up, retargeting each to `main` after the one below it merges.
+- Once your PR is approved and CI is green, merge it yourself if you have write access, or ask
+  the reviewer to.
 
 ### Updating dependencies
 
@@ -70,9 +81,20 @@ This project uses [python-semantic-release](https://python-semantic-release.read
 When a commit is merged to `main`, the release workflow automatically:
 
 1. Determines the next version from commit history
-2. Updates the version in `pyproject.toml`
-3. Creates a git tag and GitHub Release
+2. Updates the version in `pyproject.toml` and in every `skills/*/SKILL.md`
+3. Writes `CHANGELOG.md`
+4. Creates a git tag and GitHub Release and publishes to PyPI
+
+Don't edit any of these by hand. Adding a new user skill under `skills/` means adding it to
+`version_variables` in `pyproject.toml`.
 
 ## Tooling
 
-We recommend using [Claude Code](https://claude.ai/download) for development. The repo includes a `.claude/` directory with project-specific instructions and permissions pre-configured.
+The repo works with any coding agent. The rules live in `AGENTS.md` (repo-wide, with more
+specific ones in `src/poly/resources/`, `src/poly/cli_commands/` and the docs reference folders),
+which both GitHub Copilot and Claude Code read. Keep Claude Code up to date: older versions
+don't read `AGENTS.md`. The repo deliberately has no `CLAUDE.md`, so add rules to `AGENTS.md`.
+
+Shared contributor skills live in `.claude/skills/`: `ci-check`, `review-pr`, `write-tests`,
+`add-resource-type` and `open-pr`. Both tools load skills from there. `.claude/settings.json`
+holds Claude Code permissions.
