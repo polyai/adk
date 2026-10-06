@@ -1452,18 +1452,31 @@ class DeploymentsCommand(BaseCommand):
         return f"{day}{suffix} {now.strftime('%B %Y')} Experiment {now.strftime('%H:%M')}"
 
     @staticmethod
-    def _fetch_branch_map(project: AgentStudioProject) -> dict[str, dict]:
-        """Build a branch ID → branch dict map for display enrichment."""
+    def _branch_map_from_branches(branches: dict[str, dict]) -> dict[str, dict]:
+        """Convert a name → branch dict mapping (as returned by get_branches) to ID → branch dict."""
         branch_map: dict[str, dict] = {}
+        for branch_name, meta in branches.items():
+            branch_id = meta.get("branchId")
+            if branch_id:
+                branch_map[branch_id] = {"name": branch_name, **meta}
+        return branch_map
+
+    @classmethod
+    def _fetch_branch_map(cls, project: AgentStudioProject) -> dict[str, dict]:
+        """Build a branch ID → branch dict map for display enrichment.
+
+        Failures are swallowed — callers use this only to decorate output with
+        branch names, and a missing label falls back to the raw ID. Resolving
+        a user-supplied branch name to an ID is a functional need, not display
+        enrichment, so that must fetch branches directly instead and let
+        failures surface (see ``experiment_end``).
+        """
         try:
             _, branches = project.get_branches()
-            for branch_name, meta in branches.items():
-                branch_id = meta.get("branchId")
-                if branch_id:
-                    branch_map[branch_id] = {"name": branch_name, **meta}
+            return cls._branch_map_from_branches(branches)
         except Exception as e:
             logger.debug("Failed to fetch branches for experiment display: %s", e)
-        return branch_map
+            return {}
 
     @classmethod
     def experiment_start(
@@ -1728,7 +1741,18 @@ class DeploymentsCommand(BaseCommand):
 
         experiment_id = experiment["id"]
         experiment_name = experiment.get("name") or experiment_id
-        branch_map = cls._fetch_branch_map(project)
+
+        try:
+            _, branches = project.get_branches()
+        except Exception as e:
+            msg = f"Failed to fetch branches: {e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        branch_map = cls._branch_map_from_branches(branches)
         name_to_branch_id = {meta["name"]: bid for bid, meta in branch_map.items()}
 
         versions = experiment.get("versions", [])

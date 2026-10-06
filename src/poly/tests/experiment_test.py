@@ -1068,6 +1068,34 @@ class ExperimentEndTest(unittest.TestCase):
         self.assertIn("--chosen-branch", payload["error"])
         self.proj.end_experiment.assert_not_called()
 
+    # -- Branch fetch failures surface instead of being swallowed --
+
+    @patch("poly.output.console.error")
+    def test_end__branch_fetch_failure_surfaces_not_swallowed(self, mock_error):
+        """A failure fetching branches is reported as-is, not masked as 'branch not found'."""
+        self.proj.get_branches.side_effect = _make_http_error(500)
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="main")
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("Failed to fetch branches", mock_error.call_args[0][0])
+        self.proj.end_experiment.assert_not_called()
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_end__branch_fetch_failure_json_surfaces_not_swallowed(self, mock_json):
+        """A branch fetch failure in JSON mode is reported as-is in the error payload."""
+        self.proj.get_branches.side_effect = _make_http_error(500)
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="main", output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("Failed to fetch branches", payload["error"])
+        self.proj.end_experiment.assert_not_called()
+
     # -- No active experiment --
 
     @patch("poly.output.console.error")
