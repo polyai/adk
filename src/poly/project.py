@@ -3768,26 +3768,19 @@ class AgentStudioProject:
 
         There is no dedicated "active" endpoint for experiments (unlike A/B
         tests) — at most one experiment can be active at a time (enforced
-        server-side), identified by an unset ``ended_at``. This derives that
-        client-side by paginating through ``list_experiments`` until the
-        active record is found or the list is exhausted — the list order
-        isn't assumed to be newest-first, since that isn't guaranteed by the
-        API contract.
+        server-side), identified by an unset ``ended_at``. Since a new
+        experiment can't be created while one is still active, the active
+        experiment — if any — is always the most recently created one, and
+        ``list_experiments`` returns newest first. So this only needs to
+        check the first entry of the first page.
 
         Returns:
             dict: The active experiment record, or empty dict if none.
         """
-        page_size = 50
-        max_pages = 100  # guards against an API contract violation causing an infinite loop
-        offset = 0
-        for _ in range(max_pages):
-            page = self.list_experiments(limit=page_size, offset=offset)
-            for experiment in page:
-                if not experiment.get("ended_at"):
-                    return experiment
-            if len(page) < page_size:
-                return {}
-            offset += page_size
+        page = self.list_experiments(limit=1)
+        if page and not page[0].get("ended_at"):
+            return page[0]
+        return {}
         return {}
 
     def end_experiment(self, experiment_id: str, chosen_branch_id: str) -> dict:

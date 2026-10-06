@@ -5602,23 +5602,26 @@ class ExperimentsTest(unittest.TestCase):
 
         self.assertEqual(self.project.list_experiments(), [])
 
-    def test_get_active_experiment_returns_first_not_ended(self):
-        """The active experiment is the first record with no ended_at."""
+    def test_get_active_experiment_returns_newest_when_not_ended(self):
+        """The active experiment, if any, is the newest (first) entry."""
         self.mock_api.list_experiments.return_value = {
-            "experiments": [
-                {"id": "exp-old", "ended_at": "2026-01-01T00:00:00Z"},
-                {"id": "exp-live", "ended_at": None},
-                {"id": "exp-other"},
-            ]
+            "experiments": [{"id": "exp-live", "ended_at": None}]
         }
 
         self.assertEqual(self.project.get_active_experiment()["id"], "exp-live")
+        self.assertEqual(self.mock_api.list_experiments.call_args.kwargs["limit"], 1)
 
-    def test_get_active_experiment_returns_empty_dict_when_all_ended(self):
-        """If every experiment has ended, there is no active one."""
+    def test_get_active_experiment_returns_empty_dict_when_newest_has_ended(self):
+        """If the newest experiment has ended, there is no active one."""
         self.mock_api.list_experiments.return_value = {
             "experiments": [{"id": "exp-old", "ended_at": "2026-01-01T00:00:00Z"}]
         }
+
+        self.assertEqual(self.project.get_active_experiment(), {})
+
+    def test_get_active_experiment_returns_empty_dict_when_no_experiments(self):
+        """An empty project has no active experiment."""
+        self.mock_api.list_experiments.return_value = {"experiments": []}
 
         self.assertEqual(self.project.get_active_experiment(), {})
 
