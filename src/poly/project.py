@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
-from typing import Any, Optional, TypeAlias
+from typing import TYPE_CHECKING, Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
 
@@ -32,6 +32,10 @@ from poly.migration_utils import (
     load_migration_flags,
     run_migrations,
 )
+from poly.modules import get_module_owned_flow_names, sync_project_modules
+
+if TYPE_CHECKING:
+    from poly.modules import ModuleConflictResolver
 from poly.resources import (
     BaseFlowStep,
     ChildTopic,
@@ -115,6 +119,7 @@ class AgentStudioProject:
     branch_id: str = None
     project_name: Optional[str] = None
     account_name: Optional[str] = None
+    modules: dict = field(default_factory=dict)
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
@@ -125,6 +130,11 @@ class AgentStudioProject:
     # So they aren't considered locally deleted when pushing/pulling
     # before they are saved.
     _not_loaded_resources: list[ResourceType] = field(default_factory=list)
+
+    @property
+    def imported_flow_names(self) -> list[str]:
+        """Flow names this project cherry-picks from the shared `_modules/flows/` pool."""
+        return list(self.modules.get("flows") or [])
 
     @property
     def all_resources(self) -> list[Resource]:
@@ -160,6 +170,8 @@ class AgentStudioProject:
             config["project_name"] = self.project_name
         if self.account_name:
             config["account_name"] = self.account_name
+        if self.modules.get("flows"):
+            config["modules"] = {"flows": list(self.modules["flows"])}
         return config
 
     @classmethod
@@ -243,6 +255,7 @@ class AgentStudioProject:
             branch_id=status_dict.get("branch_id", "main"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
             account_name=config_dict.get("account_name") or status_dict.get("account_name"),
+            modules=config_dict.get("modules") or {},
             _not_loaded_resources=not_loaded_resources,
             _migration_flags=migration_flags,
             rtc_metadata=status_dict.get("rtc_metadata"),
@@ -266,6 +279,7 @@ class AgentStudioProject:
             "branch_id": self.branch_id,
             "project_name": self.project_name,
             "account_name": self.account_name,
+            "modules": self.modules,
             "migration_flags": [flag.value for flag in self._migration_flags]
             if self._migration_flags
             else [],
@@ -293,6 +307,7 @@ class AgentStudioProject:
             branch_id=data.get("branch_id", "main"),
             project_name=data.get("project_name"),
             account_name=data.get("account_name"),
+            modules=data.get("modules") or {},
             _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
             slim_resources=slim_resources,
@@ -593,6 +608,7 @@ class AgentStudioProject:
             self.branch_id = self.api_handler.branch_id
 
         self._check_no_duplicate_resource_paths(incoming_resources)
+
         # -------
         # Update resources
         # -------
@@ -1255,6 +1271,7 @@ class AgentStudioProject:
         format=False,
         projection_json: Optional[dict[str, Any]] = None,
         parent_projection_json: Optional[dict[str, Any]] = None,
+        module_conflict_resolver: Optional["ModuleConflictResolver"] = None,
     ) -> tuple[bool, str, list[Message]]:
         """Push the project configuration to the Agent Studio Interactor.
 
@@ -1269,6 +1286,8 @@ class AgentStudioProject:
                 projection. When provided, parent ids are adopted from it entirely
                 offline (also on dry runs); an empty dict means "no parent". When
                 None, the parent branch is fetched from the platform instead.
+            module_conflict_resolver (Optional[ModuleConflictResolver]): user to resolve merge conflict
+                on flows defined in modules.
 
         Returns:
             Tuple[bool, str, list[Message]]:
@@ -1297,6 +1316,8 @@ class AgentStudioProject:
                         f"Merge conflicts detected in the following files:\n- {conflicts}\nPlease resolve the conflicts and try again.",
                         [],
                     )
+
+            sync_project_modules(self, on_conflict=module_conflict_resolver)
 
         # New local resources that path-match a parent branch resource adopt the
         # parent's ids at mint time, so pushing does not mint ids that diverge from
@@ -1737,9 +1758,17 @@ class AgentStudioProject:
         reverted_files = []
         resource_mappings = self._make_resource_mappings(self.resources)
         all_files = not file_paths
+        module_owned_flow_names = get_module_owned_flow_names(self.root_path)
         MultiResourceYamlResource._file_cache.clear()
         try:
             for resource in self.all_resources:
+                if (
+                    resource_utils.get_flow_name_from_path(resource.get_path(self.root_path))
+                    in module_owned_flow_names
+                ):
+                    # Shared flows are managed by `sync_project_modules`, not tracked-state
+                    # revert -- their content should come from `_modules/`, not the last push.
+                    continue
                 if not all_files and resource.get_path(self.root_path) not in file_paths:
                     continue
 
