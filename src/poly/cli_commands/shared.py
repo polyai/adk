@@ -10,7 +10,11 @@ import base64
 import json
 import os
 import sys
+from argparse import ArgumentParser
+from datetime import UTC, datetime, timedelta
 from typing import Any, Optional
+
+import requests
 
 from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
@@ -409,3 +413,235 @@ def is_newer_version(candidate: str, current: str) -> bool:
         return Version(candidate) > Version(current)
     except InvalidVersion:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Data Gateway read helpers (shared by ``poly metrics``, ``poly conversations
+# search`` and ``poly transcripts``). The enum values mirror the service's
+# request schemas; the gateway rejects anything else with a 400.
+# ---------------------------------------------------------------------------
+
+DATA_CHANNELS = ["VOICE-SIP", "CHAT", "WEBCHAT", "SMS", "RCS"]
+DATA_CLIENT_ENVS = ["test", "sandbox", "pre-release", "live", "scenarios"]
+DATA_INTERVALS = ["hourly", "daily", "weekly", "monthly"]
+DATA_AGGS = [
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "p50",
+    "p95",
+    "p99",
+    "conversation_count",
+    "distinct_count",
+]
+DATA_GROUP_BY = [
+    "project_id",
+    "channel",
+    "deployment_id",
+    "variant_id",
+    "client_env",
+    "experiment_id",
+    "experiment_version_id",
+    "value_string",
+]
+DATA_FILTER_OPS = ["eq", "gt", "gte", "lt", "lte", "in", "ex", "contains", "not_contains", "exists"]
+DATA_LIST_OPS = {"in", "ex"}
+DATA_HAVING_OPS = ["eq", "gt", "gte", "lt", "lte"]
+DATA_RATE_LIMIT_PER_MINUTE = 100
+
+
+def parse_datetime_flag(value: str, *, exclusive_end: bool = False) -> str:
+    """Parse a ``--from``/``--to`` value into an ISO 8601 string for the gateway.
+
+    Accepts a date (``2026-09-01``) or a datetime (``2026-09-01T09:30``,
+    with or without an offset). A bare date for an exclusive end bound rolls
+    to the next midnight so ``--to 2026-09-30`` includes the whole of the 30th.
+
+    Raises:
+        ValueError: If the value is not a date or datetime.
+    """
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as e:
+        raise ValueError(f"Invalid date {value!r}. Use YYYY-MM-DD or an ISO 8601 datetime.") from e
+    is_date_only = len(text) == 10
+    if is_date_only and exclusive_end:
+        parsed = parsed + timedelta(days=1)
+    return parsed.isoformat()
+
+
+def default_window(days: int) -> tuple[str, str]:
+    """Return an ISO (from, to) pair covering the last ``days`` days, in UTC."""
+    now = datetime.now(UTC).replace(microsecond=0)
+    return (now - timedelta(days=days)).isoformat(), now.isoformat()
+
+
+def coerce_filter_value(raw: str) -> Any:
+    """Turn a command-line token into the JSON type the gateway expects."""
+    lowered = raw.lower()
+    if lowered in ("true", "false"):
+        return lowered == "true"
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        return raw
+
+
+def parse_filter_flags(filters: Optional[list[list[str]]]) -> list[dict]:
+    """Parse repeated ``--filter METRIC OP VALUE`` triples into gateway filters.
+
+    ``in`` and ``ex`` take a comma-separated list; the others take one value.
+    ``exists`` takes ``true`` or ``false``.
+
+    Raises:
+        ValueError: On an unknown operator.
+    """
+    parsed = []
+    for metric, op, value in filters or []:
+        op = op.lower()
+        if op not in DATA_FILTER_OPS:
+            raise ValueError(
+                f"Unknown filter operator {op!r}. Use one of: {', '.join(DATA_FILTER_OPS)}."
+            )
+        if op in DATA_LIST_OPS:
+            coerced: Any = [coerce_filter_value(v.strip()) for v in value.split(",") if v.strip()]
+        else:
+            coerced = coerce_filter_value(value)
+        parsed.append({"metric": metric, "op": op, "value": coerced})
+    return parsed
+
+
+def parse_having_flags(havings: Optional[list[list[str]]]) -> list[dict]:
+    """Parse repeated ``--having AGG OP VALUE`` triples into gateway thresholds.
+
+    Raises:
+        ValueError: On an unknown aggregate, operator, or non-numeric value.
+    """
+    parsed = []
+    for field, op, value in havings or []:
+        if field not in DATA_AGGS:
+            raise ValueError(f"--having field must be one of: {', '.join(DATA_AGGS)}.")
+        op = op.lower()
+        if op not in DATA_HAVING_OPS:
+            raise ValueError(f"--having operator must be one of: {', '.join(DATA_HAVING_OPS)}.")
+        try:
+            number = float(value)
+        except ValueError as e:
+            raise ValueError(f"--having value must be a number, got {value!r}.") from e
+        parsed.append({"field": field, "op": op, "value": number})
+    return parsed
+
+
+def parse_sort_flag(value: Optional[str]) -> Optional[dict]:
+    """Parse ``FIELD`` or ``FIELD:asc|desc`` into a gateway sort object."""
+    if not value:
+        return None
+    field, _, order = value.partition(":")
+    order = (order or "asc").lower()
+    if order not in ("asc", "desc"):
+        raise ValueError("--sort order must be 'asc' or 'desc'.")
+    return {"field": field, "order": order}
+
+
+def add_window_arguments(parser: ArgumentParser, default_help: str) -> None:
+    """Add ``--from``/``--to`` to a Data Gateway read command."""
+    parser.add_argument(
+        "--from",
+        dest="from_dt",
+        type=str,
+        default=None,
+        metavar="DATE",
+        help=f"Inclusive start, YYYY-MM-DD or ISO datetime. {default_help}",
+    )
+    parser.add_argument(
+        "--to",
+        dest="to_dt",
+        type=str,
+        default=None,
+        metavar="DATE",
+        help="Exclusive end, YYYY-MM-DD (whole day included) or ISO datetime.",
+    )
+
+
+def add_cohort_arguments(parser: ArgumentParser, *, deployments: bool = True) -> None:
+    """Add the channel/environment/deployment/variant restrictors."""
+    parser.add_argument(
+        "--channel",
+        action="append",
+        choices=DATA_CHANNELS,
+        default=None,
+        help="Restrict to a channel. Repeatable.",
+    )
+    parser.add_argument(
+        "--env",
+        action="append",
+        choices=DATA_CLIENT_ENVS,
+        default=None,
+        help="Restrict to an environment (pre-release is Staging). Repeatable.",
+    )
+    if deployments:
+        parser.add_argument(
+            "--deployment",
+            action="append",
+            default=None,
+            metavar="ID",
+            help="Restrict to a deployment ID. Repeatable.",
+        )
+        parser.add_argument(
+            "--variant",
+            action="append",
+            default=None,
+            metavar="ID",
+            help="Restrict to a variant ID. Repeatable.",
+        )
+
+
+def describe_data_api_error(e: requests.HTTPError, *, needs_pii: bool = False) -> str:
+    """Explain a Data Gateway HTTP error in the caller's terms.
+
+    Args:
+        e: The error raised by ``requests``.
+        needs_pii: True for routes that require the PII read permission outright
+            (transcripts), so a 403 names that permission.
+    """
+    response = e.response
+    status = response.status_code if response is not None else None
+    detail = ""
+    if response is not None:
+        try:
+            payload = response.json()
+            detail = payload.get("detail") or payload.get("message") or ""
+            if isinstance(detail, list):
+                detail = "; ".join(str(d.get("msg", d)) for d in detail)
+        except ValueError:
+            detail = response.text.strip()[:200]
+    if status == 400:
+        return f"The gateway rejected the request: {detail or 'validation error'}."
+    if status == 401:
+        return "The API key for this region is missing or invalid. Run `poly apikey`."
+    if status == 403:
+        if needs_pii:
+            return (
+                "Your API key lacks the PII read permission this route requires. "
+                "Transcripts contain what callers said, so the key needs PII read on "
+                "the project. Grant it on the API Keys page in Agent Studio."
+            )
+        return "Your API key does not have permission for this project or account."
+    if status == 404:
+        return detail or "Not found, or the key cannot access this account."
+    if status == 422:
+        return f"Unsupported filter: {detail or 'see --help for valid operators'}."
+    if status == 429:
+        return (
+            f"Rate limited: the Data API allows {DATA_RATE_LIMIT_PER_MINUTE} requests "
+            "per minute per key. Wait a minute and retry."
+        )
+    return f"Request failed ({status}): {detail or str(e)}"
