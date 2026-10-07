@@ -22,4 +22,8 @@ npx -y skills add https://github.com/polyai/adk -y
 
 ## Versioning
 
-Each skill's `metadata.version` tracks the `polyai-adk` release it was written against. Update the skills alongside CLI releases that change command surfaces or workflows.
+Each skill's `metadata.version` always equals the current `polyai-adk` release. semantic-release stamps it on every release, and CI (`scripts/validate_skills.py`) fails if they differ, so never edit it by hand. A new skill must be added to `version_variables` in `pyproject.toml`.
+
+Update a skill's content in the same PR as any change to a command, flag or workflow it describes.
+
+Contributor skills for working on this repo live in `.claude/skills/` instead. They're marked `metadata.internal: true`, so `npx skills` (and therefore `poly setup`) doesn't install them.

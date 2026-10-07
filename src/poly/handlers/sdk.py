@@ -788,6 +788,35 @@ class SourcererSDK:
         except Exception as e:
             raise SourcererAPIError(f"Failed to get branch chat info: {e}") from e
 
+    def get_branch_call_info(self, branch_id: str) -> dict[str, Any]:
+        """Get deployment info needed to start a draft voice call on a branch.
+
+        Uses the cached lastKnownSequence and calls the
+        /branches/{branchId}/deploy endpoint, which prepares the deployment and
+        mints a studio token for the WebRTC call.
+
+        Args:
+            branch_id: The branch ID to prepare for a call
+
+        Returns:
+            dict with 'artifactVersion', 'lambdaDeploymentVersion' and 'authToken'.
+
+        Raises:
+            SourcererAPIError: If the API call fails
+        """
+        sequence = self.get_last_known_sequence() or 0
+        url = f"{self._get_branches_url()}/{branch_id}/deploy"
+        logger.info(f"Preparing branch deployment for call via {url}")
+        try:
+            resp = self.session.post(
+                url,
+                json={"expectedBranchLastKnownSequence": sequence},
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            raise SourcererAPIError(f"Failed to get branch call info: {e}") from e
+
     def get_last_known_sequence(self) -> Optional[int]:
         """Get the last known sequence number from the current projection
 

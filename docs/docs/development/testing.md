@@ -5,12 +5,13 @@ description: The ways to verify an agent with the PolyAI ADK — validation, int
 
 # Testing
 
-There are four ways to check an agent, and they catch different kinds of problem. Most of the time you want more than one.
+There are five ways to check an agent, and they catch different kinds of problem. Most of the time you want more than one.
 
 | Approach | Catches | Runs against |
 |---|---|---|
 | `poly validate` | Structural mistakes — invalid resources, missing values, broken references | Local files |
 | `poly chat` | Conversational behavior you need to judge by reading | A deployed branch or environment |
+| `poly call` | Voice behavior — speech, timing, barge-in — judged by listening | A deployed branch |
 | `poly test run` | Regressions, repeatably | A deployed branch or environment |
 | `poly conversations` | What actually happened on real calls | Live traffic |
 
@@ -27,6 +28,12 @@ Run it while you edit, not just before pushing. `poly push` runs the same valida
 Chat runs against the **last pushed state**, not your working directory, so push before you chat or pass `--push` to do both. By default it targets your current branch; you can point it at a deployed environment instead.
 
 This is the right tool for exploring a change and the wrong tool for confirming it stays working. Anything you find worth checking twice should become a test case.
+
+## Call the agent (voice)
+
+`poly call` is the spoken counterpart to `poly chat`: it places a real WebRTC voice call to the agent using your microphone and speaker, so you can judge speech, timing, and barge-in by ear — things reading a transcript can't tell you. Press `Ctrl+C` to hang up; the command prints a link to the conversation in Agent Studio to review afterwards.
+
+Unlike chat, calling only targets the current branch's **draft** build, so you must be on a non-main branch — push first, or pass `--push`. Echo cancellation is on by default so the agent doesn't hear itself on a laptop speaker. See the [`poly call` reference](../reference/cli/call.md).
 
 ## Simulated conversation tests
 
@@ -51,7 +58,7 @@ For the test-case format, the available assertions, and worked examples, see the
 
 ## How this fits the workflow
 
-Validation and chat belong in the edit loop, tests belong before you merge, and conversation inspection happens after release and feeds back into the next change.
+Validation, chat, and voice calls belong in the edit loop, tests belong before you merge, and conversation inspection happens after release and feeds back into the next change.
 
 Deployed environments matter here too — you can chat against and run tests against `sandbox`, `pre-release`, or `live`, so a change can be verified again after each promotion. See [environments and deployment](./environments-and-deployment.md).
 

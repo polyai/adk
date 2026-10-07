@@ -424,6 +424,7 @@ class ChatCommand(BaseCommand):
 
         conversation_ended = False
         restart = False
+        input_lang, output_lang = cls._carry_language(initial_response, input_lang, output_lang)
         url = project.get_conversation_url(conversation_id)
         turns: list[dict] = (
             [
@@ -475,6 +476,8 @@ class ChatCommand(BaseCommand):
                         error(f"Failed to send message: {e}")
                     continue
 
+                input_lang, output_lang = cls._carry_language(reply, input_lang, output_lang)
+
                 if output_json:
                     # Filter reply for relevant fields to avoid dumping large state
                     processed_reply = cls._process_json_chat_reply(
@@ -512,6 +515,22 @@ class ChatCommand(BaseCommand):
                     break
 
         return restart, {"conversation_id": conversation_id, "url": url, "turns": turns}
+
+    @staticmethod
+    def _carry_language(
+        reply: Optional[dict], input_lang: Optional[str], output_lang: Optional[str]
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Return the language codes to send on the next turn.
+
+        The platform does not persist the conversation language: each turn re-reads it from
+        the request (falling back to en-GB) and returns the current codes in the reply
+        metadata. Echoing them back is what keeps a conv.set_language() switch alive.
+        """
+        metadata = (reply or {}).get("metadata") or {}
+        return (
+            metadata.get("asr_lang_code") or input_lang,
+            metadata.get("tts_lang_code") or output_lang,
+        )
 
     @staticmethod
     def _process_json_chat_reply(

@@ -79,8 +79,8 @@ from poly.resources.test_suite import (
     TestCaseAssertion,
     TestCaseTags,
 )
-from poly.resources.topic import Topic
+from poly.resources.topic import Topic, TopicTags
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.translations import Translation
 from poly.resources.variable import Variable
-from poly.resources.variant_attributes import Variant, VariantAttribute
+from poly.resources.variant_attributes import AttributeKind, Variant, VariantAttribute

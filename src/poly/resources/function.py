@@ -11,7 +11,7 @@ import typing as ty
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property, lru_cache
-from typing import Literal, Optional, Union
+from typing import Literal, Optional
 
 from google.protobuf.message import Message
 
@@ -67,6 +67,15 @@ PY_TO_SCHEMA: dict[str, SchemaType] = {
 }
 
 SCHEMA_TO_PY = {v: k for k, v in PY_TO_SCHEMA.items()}
+
+
+@dataclass(frozen=True)
+class FunctionMetadata:
+    """The parts of a parsed function that rendering and decorator extraction read."""
+
+    lineno: int
+    args: tuple[ast.arg, ...]
+    decorator_list: tuple[ast.expr, ...]
 
 
 class FunctionType(str, Enum):
@@ -828,11 +837,9 @@ class Function(Resource):
 
     @staticmethod
     @lru_cache(maxsize=2048)
-    def _get_target_function(
-        code: str, function_name: str
-    ) -> Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]]:
+    def _get_target_function(code: str, function_name: str) -> Optional[FunctionMetadata]:
         module = ast.parse(code)
-        return next(
+        target = next(
             (
                 f
                 for f in ast.walk(module)
@@ -841,6 +848,13 @@ class Function(Resource):
             ),
             None,
         )
+        if target:
+            return FunctionMetadata(
+                lineno=target.lineno,
+                args=tuple(target.args.args),
+                decorator_list=tuple(target.decorator_list),
+            )
+        return None
 
     @staticmethod
     def _extract_decorators(
@@ -871,7 +885,7 @@ class Function(Resource):
 
                 if decorator_name == "func_parameter" and len(decorator.args) == 2:
                     name, desc = (arg.value for arg in decorator.args)
-                    matched_arg = next((arg for arg in target.args.args if arg.arg == name), None)
+                    matched_arg = next((arg for arg in target.args if arg.arg == name), None)
                     if matched_arg is None or matched_arg.annotation is None:
                         raise ValueError(
                             f"Parameter {name!r} has no type annotation. "

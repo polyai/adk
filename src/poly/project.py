@@ -21,6 +21,7 @@ from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
+from poly.call.session import CallSession
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
@@ -65,6 +66,7 @@ PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
+MAX_TEST_RUN_NAME_LENGTH = 120
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
@@ -761,6 +763,17 @@ class AgentStudioProject:
                     )
                 seen_paths.add(file_path)
 
+    @staticmethod
+    def _snapshot_multi_resource_file_cache() -> dict[str, dict]:
+        """Return {file path: top-level YAML data} for every file in the multi-resource cache.
+
+        The data is not copied; clearing the cache afterwards leaves it intact.
+        """
+        return {
+            file: top_level_yaml_dict
+            for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
+        }
+
     def _update_multi_resource_yaml_resources(
         self,
         original_resources: ResourceMap,
@@ -784,8 +797,8 @@ class AgentStudioProject:
         files_with_conflicts = []
 
         # Merge MultiResourceYaml:
-        # Compute original file contents
-        original_file_contents = {}
+        # Compute original file data
+        original_file_data: dict[str, dict] = {}
         local_file_paths: dict[type[Resource], list[str]] = {}
         if not force:
             # Get file for original resources
@@ -821,13 +834,9 @@ class AgentStudioProject:
 
                 local_file_paths[resource_type] = local_resources_file_paths
 
-            original_file_contents = {
-                file: resource_utils.dump_yaml(top_level_yaml_dict)
-                for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
-            }
+            original_file_data = self._snapshot_multi_resource_file_cache()
 
-        # Compute incoming file contents
-        incoming_file_contents = {}
+        # Compute incoming file data
         MultiResourceYamlResource._file_cache.clear()
         for resource_type, resources in incoming_resources.items():
             if not issubclass(resource_type, MultiResourceYamlResource):
@@ -866,14 +875,12 @@ class AgentStudioProject:
             if on_save:
                 on_save(progress_offset, progress_total)
 
-        incoming_file_contents = {
-            file: resource_utils.dump_yaml(top_level_yaml_dict)
-            for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
-        }
+        incoming_file_data = self._snapshot_multi_resource_file_cache()
 
         # Normalise local resources through resource classes to ensure
         # serialization differences don't cause merge conflicts
-        local_file_contents = {}
+        local_file_data: dict[str, dict] = {}
+        local_file_text: dict[str, str] = {}
         MultiResourceYamlResource._file_cache.clear()
         if not force:
             for resource_type, resources in incoming_resources.items():
@@ -896,30 +903,52 @@ class AgentStudioProject:
                     except (FileNotFoundError, ValueError, TypeError):
                         continue
 
-            local_file_contents = {
-                file: resource_utils.dump_yaml(top_level_yaml_dict)
-                for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
-            }
+            local_file_data = self._snapshot_multi_resource_file_cache()
 
-            for file in incoming_file_contents:
-                if file not in local_file_contents:
+            for file in incoming_file_data:
+                if file not in local_file_data:
                     try:
                         contents = Resource.read_from_file(file)
                         if format:
                             contents = MultiResourceYamlResource.format_resource(
                                 contents, file_name=file
                             )
-                        local_file_contents[file] = contents
+                        local_file_text[file] = contents
                     except FileNotFoundError:
-                        local_file_contents[file] = ""
+                        local_file_text[file] = ""
 
         # Save and compute merges
-        for file, incoming_content in incoming_file_contents.items():
+        for file, incoming_data in incoming_file_data.items():
             if force:
-                MultiResourceYamlResource.save_to_file(incoming_content, file)
+                MultiResourceYamlResource.save_to_file(
+                    resource_utils.dump_yaml(incoming_data), file
+                )
                 continue
-            original_content = original_file_contents.get(file, "")
-            local_content = local_file_contents.get(file, "")
+            original_data = original_file_data.get(file)
+            local_data = local_file_data.get(file)
+            if local_data is not None:
+                # Local already matches incoming, or only local changed: keep local
+                if resource_utils.same_yaml_data(local_data, incoming_data) or (
+                    original_data is not None
+                    and resource_utils.same_yaml_data(original_data, incoming_data)
+                ):
+                    continue
+                # Only incoming changed: take incoming
+                if original_data is not None and resource_utils.same_yaml_data(
+                    original_data, local_data
+                ):
+                    incoming_content = resource_utils.dump_yaml(incoming_data)
+                    if resource_utils.contains_merge_conflict(incoming_content):
+                        files_with_conflicts.append(file)
+                    MultiResourceYamlResource.save_to_file(incoming_content, file)
+                    continue
+                local_content = resource_utils.dump_yaml(local_data)
+            else:
+                local_content = local_file_text.get(file, "")
+            original_content = (
+                resource_utils.dump_yaml(original_data) if original_data is not None else ""
+            )
+            incoming_content = resource_utils.dump_yaml(incoming_data)
             merged_contents = utils.merge_strings(original_content, local_content, incoming_content)
 
             if not merged_contents and os.path.exists(file):
@@ -1546,6 +1575,9 @@ class AgentStudioProject:
         If new flow has function step as start step, create referencing a dummy default step.
         Then update the flow config to use the new step.
 
+        A renamed test case (same scenario, new file) is pushed as an update of
+        the saved case, keeping its id, rather than a delete and a create.
+
         When deleting a flow, only send a command to delete the flow config,
         not the steps/functions.
 
@@ -1584,6 +1616,7 @@ class AgentStudioProject:
             # as a side effect) if a webchat command is actually queued
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
+        prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
         prepush.fix_orphaned_variables(
             state,
             new_resources,
@@ -1704,12 +1737,22 @@ class AgentStudioProject:
         reverted_files = []
         resource_mappings = self._make_resource_mappings(self.resources)
         all_files = not file_paths
-        for resource in self.all_resources:
-            if not all_files and resource.get_path(self.root_path) not in file_paths:
-                continue
+        MultiResourceYamlResource._file_cache.clear()
+        try:
+            for resource in self.all_resources:
+                if not all_files and resource.get_path(self.root_path) not in file_paths:
+                    continue
 
-            resource.save(self.root_path, resource_mappings=resource_mappings)
-            reverted_files.append(resource.get_path(self.root_path))
+                resource.save(
+                    self.root_path,
+                    resource_mappings=resource_mappings,
+                    save_to_cache=isinstance(resource, MultiResourceYamlResource),
+                )
+                reverted_files.append(resource.get_path(self.root_path))
+
+            MultiResourceYamlResource.write_cache_to_file()
+        finally:
+            MultiResourceYamlResource._file_cache.clear()
 
         return reverted_files
 
@@ -2709,6 +2752,58 @@ class AgentStudioProject:
             sip_headers=sip_headers,
         )
 
+    def create_call_session(
+        self,
+        environment: str,
+        variant: Optional[str] = None,
+    ) -> CallSession:
+        """Bootstrap a WebRTC voice call session against a branch draft build.
+
+        Prepares the branch deployment and mints a studio token, returning the
+        parameters the signaling OFFER needs. Only draft/branch calls are
+        currently supported; deployed environments raise NotImplementedError.
+
+        Args:
+            environment (str): The environment to call. Only "draft" is supported.
+            variant (ty.Optional[str]): The variant ID to call, if any.
+
+        Returns:
+            CallSession: Parameters for opening the WebRTC call.
+
+        Raises:
+            NotImplementedError: If a non-draft environment is requested.
+            ValueError: If the branch call info response is incomplete.
+            requests.HTTPError: If the API call fails.
+        """
+        if environment != "draft":
+            raise NotImplementedError(
+                "ad call currently supports only draft/branch calls; "
+                "deployed-environment calling is not yet available."
+            )
+
+        call_info = self.api_handler.get_branch_call_info(self.branch_id)
+
+        fields = {
+            "artifactVersion": call_info.get("artifactVersion"),
+            "lambdaDeploymentVersion": call_info.get("lambdaDeploymentVersion"),
+            "authToken": call_info.get("authToken"),
+            "gatewayWsUrl": call_info.get("gatewayWsUrl"),
+        }
+        missing = [name for name, value in fields.items() if not value]
+        if missing:
+            # Report only the missing field names
+            raise ValueError(f"Incomplete branch call info; missing field(s): {', '.join(missing)}")
+
+        return CallSession(
+            account_id=self.account_id,
+            project_id=self.project_id,
+            variant_id=variant or "",
+            artifact_version=fields["artifactVersion"],
+            lambda_deployment_version=fields["lambdaDeploymentVersion"],
+            auth_token=fields["authToken"],
+            gateway_ws_url=fields["gatewayWsUrl"],
+        )
+
     def send_message(
         self,
         conversation_id: str,
@@ -3449,11 +3544,12 @@ class AgentStudioProject:
 
         return matched
 
-    def trigger_tests(self, test_ids: list[str]) -> dict:
+    def trigger_tests(self, test_ids: list[str], name: str | None = None) -> dict:
         """Trigger tests for the project.
 
         Args:
             test_ids: List of test case resource IDs to run.
+            name: Optional name for the run.
 
         Returns:
             dict: API response with test run details.
@@ -3461,11 +3557,18 @@ class AgentStudioProject:
         if not test_ids:
             raise ValueError("No test IDs provided.")
 
+        name = (name or "").strip() or None
+        if name and len(name) > MAX_TEST_RUN_NAME_LENGTH:
+            raise ValueError(
+                f"Test run name must be at most {MAX_TEST_RUN_NAME_LENGTH} characters."
+            )
+
         return self.api_handler.trigger_test_run(
             self.region,
             self.project_id,
             test_ids,
             self.branch_id,
+            name=name,
         )
 
     def get_test_run(self, test_run_id: str) -> dict:
@@ -3958,6 +4061,121 @@ class AgentStudioProject:
             ]
         except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
             return [f"Invalid schema: {e}"]
+
+    def get_custom_metrics(self) -> list[dict]:
+        """List all custom metrics for the project.
+
+        Returns:
+            list[dict]: List of custom metric records.
+        """
+        return AgentStudioInterface.get_custom_metrics(
+            self.region, self.account_id, self.project_id
+        )
+
+    def export_custom_metrics(self) -> dict:
+        """Export all custom metrics as a YAML-parsed dict.
+
+        Returns:
+            dict: Mapping of metric name to metric definition.
+        """
+        return AgentStudioInterface.export_custom_metrics(
+            self.region, self.account_id, self.project_id
+        )
+
+    def create_custom_metric(self, data: dict) -> dict:
+        """Validate and create a new custom metric.
+
+        Validates that ``expected_values`` is only set for string-type metrics,
+        then creates the metric. Works around a server bug where the ``api``
+        flag is ignored on create by issuing a follow-up update when ``api``
+        is ``True``.
+
+        Args:
+            data: Metric payload — name, type, description, expected_values, api.
+
+        Returns:
+            dict: The created metric record.
+
+        Raises:
+            ValueError: If expected_values is set for a non-string metric.
+        """
+        if data.get("expected_values") and data.get("type") != "string":
+            raise ValueError("--expected-values is only valid for string metrics.")
+
+        result = AgentStudioInterface.create_custom_metric(
+            self.region, self.account_id, self.project_id, data
+        )
+
+        if data.get("api"):
+            result = AgentStudioInterface.set_custom_metric_api_flag(
+                self.region, self.account_id, self.project_id, data["name"], True
+            )
+
+        return result
+
+    def update_custom_metric(self, metric_name: str, data: dict) -> dict:
+        """Validate and update an existing custom metric.
+
+        Validates that ``expected_values`` is only set for string-type metrics
+        by fetching the metric's current type when ``expected_values`` is present.
+
+        Args:
+            metric_name: Name of the metric to update.
+            data: Fields to update — description, expected_values, active, api.
+
+        Returns:
+            dict: The updated metric record.
+
+        Raises:
+            ValueError: If expected_values is set for a non-string metric.
+        """
+        if data.get("expected_values") is not None:
+            metrics = AgentStudioInterface.get_custom_metrics(
+                self.region, self.account_id, self.project_id
+            )
+            metric = next((m for m in metrics if m.get("name") == metric_name), None)
+            if metric and metric.get("type") != "string":
+                raise ValueError("--expected-values is only valid for string metrics.")
+
+        return AgentStudioInterface.update_custom_metric(
+            self.region, self.account_id, self.project_id, metric_name, data
+        )
+
+    def import_metrics_from_file(self, file_path: str, dry_run: bool = False) -> dict:
+        """Read a YAML file and import its metrics, or preview the import.
+
+        Args:
+            file_path: Path to the YAML file with metric definitions.
+            dry_run: If True, return a preview without applying changes.
+
+        Returns:
+            dict: In dry-run mode, a preview dict with ``would_create``,
+            ``would_skip``, and ``remote_only``. Otherwise, the import result
+            with ``metadata.created`` and ``metadata.ignored``.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            ValueError: If the file contains invalid YAML.
+        """
+        from ruamel.yaml import YAML, YAMLError
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        with open(file_path) as f:
+            yaml_content = f.read()
+
+        try:
+            ry = YAML()
+            local_metrics = ry.load(yaml_content) or {}
+        except YAMLError as e:
+            raise ValueError(f"Invalid YAML: {e}") from e
+
+        local_names = set(local_metrics.keys())
+
+        return AgentStudioInterface.import_metrics_from_file(
+            self.region, self.account_id, self.project_id, yaml_content, local_names, dry_run
+        )
 
     def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
         """Get the history of a branch.

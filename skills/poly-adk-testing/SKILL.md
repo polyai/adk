@@ -2,15 +2,15 @@
 name: poly-adk-testing
 description: >
   This skill should be used when the user wants to "test the agent", "chat with the agent",
-  "run the test suite", "write a test case", "check why a test failed", or "run a function"
-  built with the PolyAI ADK. Covers poly validate, scripted poly chat, the test_suite/
+  "call the agent", "run the test suite", "write a test case", "check why a test failed",
+  or "run a function" built with the PolyAI ADK. Covers poly validate, scripted poly chat, the test_suite/
   simulated conversation tests, and executing functions in isolation. Part of the PolyAI
   ADK skills suite. Do NOT use for inspecting real production calls (use
   poly-adk-conversations) or the general build workflow (use poly-adk-workflow).
 metadata:
   author: PolyAI
   license: Apache-2.0
-  version: 0.55.0
+  version: 0.67.1
   requires:
     bins:
       - poly
@@ -58,6 +58,12 @@ With `--json`, output is a `conversations` array with per-turn detail mirroring 
 
 Chat is for judging whether a conversation *feels* right. Anything worth checking twice belongs in the test suite instead.
 
+## Voice calls (`poly call`) — a user-only route
+
+`poly call` places a live WebRTC voice call to the agent through the user's microphone and speaker (draft/branch build only). It's the route for judging **voice-specific** behavior — speech, timing, barge-in — that a transcript can't show.
+
+It is interactive and human-driven: **you (the AI agent) can't use it** — there's no way to speak into a call or script it non-interactively. When a user wants to check voice/audio behavior, point them at `poly call` (`poly call --help`) rather than running it yourself.
+
 ## 3. Simulated conversation tests
 
 Test cases live in `test_suite/` and assert what the agent should say and which functions it should call. They are the only repeatable layer — the thing that stops a fixed bug coming back. Run `poly docs tests` for the file format and available assertions before writing cases.
@@ -68,6 +74,7 @@ poly test run --tag smoke        # only tagged tests (multiple tags OR-match)
 poly test run --files test_suite/greeting_flow_test.yaml
 poly test run --dry-run          # preview which tests would run
 poly test run --dont-poll        # trigger and exit; check later with poly test show
+poly test run --tag smoke --name "Pre-release check · booking flow"   # name the run
 poly test list                   # past runs
 poly test show <run_id>                    # run summary + per-test table
 poly test show <run_id> <test_case_id>     # assertion results, function failures, full transcript

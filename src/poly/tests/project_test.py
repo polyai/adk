@@ -16,12 +16,14 @@ from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
+from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
 from poly.project import AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
+    AttributeKind,
     ChatGreeting,
     ChatSafetyFilters,
     ChatStylePrompt,
@@ -44,6 +46,7 @@ from poly.resources import (
     TestCaseAssertion,
     TestCaseTags,
     Topic,
+    TopicTags,
     TranscriptCorrection,
     Translation,
     Variable,
@@ -61,8 +64,9 @@ from poly.resources.flows import (
     StepType,
 )
 from poly.resources.function import FunctionParameters, FunctionType
-from poly.resources.resource import MultiResourceYamlResource
+from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
 from poly.tests.testing_utils import mock_read_from_file
+from poly.utils import merge_strings
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_PROJECT_DIR = os.path.join(DIR, "test_projects")
@@ -1055,6 +1059,40 @@ class GetDiffsTest(unittest.TestCase):
         self.assertIn(other_func_path, message)
 
 
+class TriggerTestsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.trigger_tests."""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_forwards_a_trimmed_name(self):
+        """Surrounding whitespace is stripped before the name is sent."""
+        self.project.trigger_tests(["tc-1"], name="  Nightly · smoke  ")
+
+        self.assertEqual(
+            self.mock_api_handler.trigger_test_run.call_args.kwargs["name"], "Nightly · smoke"
+        )
+
+    def test_sends_no_name_when_blank(self):
+        """A blank name is no name, so the platform picks its default."""
+        self.project.trigger_tests(["tc-1"], name="   ")
+
+        self.assertIsNone(self.mock_api_handler.trigger_test_run.call_args.kwargs["name"])
+
+    def test_rejects_a_name_over_the_platform_limit(self):
+        """Names over 120 characters fail locally instead of as a platform 422."""
+        with self.assertRaises(ValueError):
+            self.project.trigger_tests(["tc-1"], name="x" * 121)
+
+        self.mock_api_handler.trigger_test_run.assert_not_called()
+
+
 class CleanResourcesBeforePushTest(unittest.TestCase):
     """Tests for the _clean_resources_before_push method"""
 
@@ -2044,7 +2082,54 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             deleted_resources,
         )
 
-        self.assertEqual(new_variant.attribute_ids, ["VARIANT_ATTRIBUTES-keep"])
+        self.assertEqual(new_variant.attribute_values, {"VARIANT_ATTRIBUTES-keep": ""})
+
+    def test_new_variant_seeds_typed_attributes_with_null(self):
+        """A typed attribute cannot hold "", so a new variant seeds it as null instead."""
+        string_attr = VariantAttribute(
+            resource_id="VARIANT_ATTRIBUTES-greeting",
+            name="greeting_name",
+            mappings={"v1": "Hello"},
+        )
+        number_attr = VariantAttribute(
+            resource_id="VARIANT_ATTRIBUTES-retries",
+            name="max_retries",
+            mappings={"v1": 3},
+            kind=AttributeKind.NUMBER,
+        )
+        self.project.resources[VariantAttribute] = {
+            "VARIANT_ATTRIBUTES-greeting": string_attr,
+            "VARIANT_ATTRIBUTES-retries": number_attr,
+        }
+
+        new_variant = Variant(
+            resource_id="VARIANTS-new",
+            name="New Variant",
+            is_default=False,
+        )
+
+        self.project._clean_resources_before_push(
+            {},
+            {Variant: {"VARIANTS-new": new_variant}},
+            {},
+            {},
+        )
+
+        self.assertEqual(
+            new_variant.attribute_values,
+            {"VARIANT_ATTRIBUTES-greeting": "", "VARIANT_ATTRIBUTES-retries": None},
+        )
+
+        # Both seeds reach the wire: "" in the legacy string map for every attribute,
+        # and a native null in typed_values for the typed one.
+        proto = new_variant.build_create_proto()
+        self.assertEqual(
+            dict(proto.attribute_values.values),
+            {"VARIANT_ATTRIBUTES-greeting": "", "VARIANT_ATTRIBUTES-retries": ""},
+        )
+        self.assertEqual(
+            dict(proto.attribute_values.typed_values), {"VARIANT_ATTRIBUTES-retries": None}
+        )
 
     def test_non_default_variant_update_is_kept(self):
         """A renamed non-default variant must still be pushed as an update."""
@@ -2170,6 +2255,65 @@ class PushProjectTest(unittest.TestCase):
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(Function, deleted_resources)
         self.assertIn("FUNCTION-extra_function", deleted_resources[Function])
+
+    def test_push_project_renamed_test_case_is_an_update(self):
+        """A test case renamed locally keeps its id: one update, no delete and create."""
+        project_data = deepcopy(PROJECT_DATA)
+        # Saved under an older name, so its file path differs from the local file's.
+        project_data["resources"]["test_cases"]["TEST-greeting_flow"]["name"] = "Old greeting name"
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        kwargs = self.mock_api_handler.queue_resources.call_args.kwargs
+        self.assertNotIn(TestCase, kwargs["new_resources"])
+        self.assertNotIn(TestCase, kwargs["deleted_resources"])
+        updated = kwargs["updated_resources"][TestCase]
+        self.assertEqual(list(updated), ["TEST-greeting_flow"])
+        self.assertEqual(updated["TEST-greeting_flow"].name, "Greeting flow test")
+        # Only the name changed, so no sub-resource commands are sent.
+        self.assertNotIn(TestCaseAssertion, kwargs["updated_resources"])
+        self.assertNotIn(TestCaseTags, kwargs["updated_resources"])
+        self.assertEqual(
+            set(project.resources[TestCase]), {"TEST-greeting_flow", "TEST-webchat_smoke"}
+        )
+
+    def test_push_project_renamed_test_case_diffs_sub_resources_against_saved_case(self):
+        """A rename with changed tags sends the tags update under the kept id."""
+        project_data = deepcopy(PROJECT_DATA)
+        saved = project_data["resources"]["test_cases"]["TEST-greeting_flow"]
+        saved["name"] = "Old greeting name"
+        saved["tags"]["tags"] = ["booking"]
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        kwargs = self.mock_api_handler.queue_resources.call_args.kwargs
+        self.assertEqual(list(kwargs["updated_resources"][TestCaseTags]), ["TEST-greeting_flow"])
+        self.assertNotIn(TestCaseAssertion, kwargs["updated_resources"])
+
+    def test_push_project_ambiguous_rename_stays_delete_and_create(self):
+        """Two saved cases share the local file's scenario: no pairing is guessed."""
+        project_data = deepcopy(PROJECT_DATA)
+        cases = project_data["resources"]["test_cases"]
+        cases["TEST-greeting_flow"]["name"] = "Old greeting name"
+        twin = deepcopy(cases["TEST-greeting_flow"])
+        twin["resource_id"] = "TEST-greeting_twin"
+        twin["name"] = "Another old greeting name"
+        cases["TEST-greeting_twin"] = twin
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        kwargs = self.mock_api_handler.queue_resources.call_args.kwargs
+        self.assertIn(TestCase, kwargs["new_resources"])
+        self.assertEqual(
+            set(kwargs["deleted_resources"][TestCase]),
+            {"TEST-greeting_flow", "TEST-greeting_twin"},
+        )
 
     def test_push_project_force_does_not_delete_remote_only_resources(self):
         """push --force with load_project: variant_attributes exist remotely but not locally.
@@ -3675,6 +3819,90 @@ class RevertChangesTest(unittest.TestCase):
         self.assertEqual(reverted, [])
 
 
+def _copy_test_project(test_case: unittest.TestCase) -> str:
+    """Copy the test project into a temp dir removed after the test, and return its root."""
+    tmp_dir = tempfile.mkdtemp()
+    test_case.addCleanup(shutil.rmtree, tmp_dir)
+    root = os.path.join(tmp_dir, "test_project")
+    shutil.copytree(TEST_DIR, root)
+    return root
+
+
+def _read_tree(root: str) -> dict[str, bytes]:
+    """Return {relative path: bytes} for every file under root."""
+    contents = {}
+    for dir_path, _, file_names in os.walk(root):
+        for file_name in file_names:
+            path = os.path.join(dir_path, file_name)
+            with open(path, "rb") as f:
+                contents[os.path.relpath(path, root)] = f.read()
+    return contents
+
+
+class RevertChangesOnDiskTest(unittest.TestCase):
+    """revert_changes against a real copy of the test project."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        self.root = _copy_test_project(self)
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        self.sms_file = os.path.join(self.root, "config", "sms_templates.yaml")
+        self.entities_file = os.path.join(self.root, "config", "entities.yaml")
+        # Revert once so every file is in the form revert writes
+        self.project.revert_changes()
+        self.clean_tree = _read_tree(self.root)
+
+    def _replace_in_file(self, path: str, old: str, new: str) -> None:
+        with open(path, encoding="utf-8") as f:
+            contents = f.read()
+        self.assertIn(old, contents)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(contents.replace(old, new, 1))
+
+    def test_revert_all_restores_modified_multi_resource_file(self):
+        """Every file is back to its reverted bytes, including the locally edited one."""
+        self._replace_in_file(self.sms_file, "This is a test template", "Edited locally")
+
+        self.project.revert_changes()
+
+        self.assertEqual(_read_tree(self.root), self.clean_tree)
+
+    def test_revert_one_file_leaves_other_edits_alone(self):
+        """Reverting the SMS templates leaves a local edit in another multi-resource file."""
+        self._replace_in_file(self.sms_file, "This is a test template", "Edited locally")
+        self._replace_in_file(self.entities_file, "customer_name", "customer_full_name")
+        entities_edited = _read_tree(self.root)[os.path.relpath(self.entities_file, self.root)]
+        sms_paths = [
+            resource.get_path(self.root)
+            for resource in self.project.resources[SMSTemplate].values()
+        ]
+
+        self.project.revert_changes(file_paths=sms_paths)
+
+        tree = _read_tree(self.root)
+        sms_rel = os.path.relpath(self.sms_file, self.root)
+        entities_rel = os.path.relpath(self.entities_file, self.root)
+        self.assertEqual(tree[sms_rel], self.clean_tree[sms_rel])
+        self.assertEqual(tree[entities_rel], entities_edited)
+
+    def test_revert_writes_each_multi_resource_file_once(self):
+        """Entries sharing a file are batched into a single write of that file."""
+        multi_resource_files = {
+            _parse_multi_resource_path(resource.get_path(self.root))[0]
+            for resource in self.project.all_resources
+            if isinstance(resource, MultiResourceYamlResource)
+        }
+        self.assertIn(self.sms_file, multi_resource_files)
+
+        with patch.object(Resource, "save_to_file", wraps=Resource.save_to_file) as save_spy:
+            self.project.revert_changes()
+
+        written = [call.args[1] for call in save_spy.call_args_list]
+        for path in multi_resource_files:
+            self.assertEqual(written.count(path), 1, path)
+
+
 class GetRemoteResourcesByNameLocalTest(unittest.TestCase):
     """Tests for the 'local' resolution mode of get_remote_resources_by_name."""
 
@@ -4135,6 +4363,311 @@ class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
             [],
             "Should not delete files for resource types in _not_loaded_resources",
         )
+
+
+class MultiResourcePullMergeTest(unittest.TestCase):
+    """Pulling a multi-resource file into a real copy of the test project.
+
+    Uses config/sms_templates.yaml, which holds test_template_1 and test_template_2.
+    """
+
+    TEMPLATE_1_TEXT = "This is a test template"
+    TEMPLATE_2_TEXT = "This is a second test template"
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        patch.object(AgentStudioProject, "save_config").start()
+        patch("poly.utils.save_imports").start()
+        patch("poly.utils.export_decorators").start()
+        self.merge_spy = patch("poly.utils.merge_strings", wraps=merge_strings).start()
+        self.save_spy = patch.object(
+            Resource, "save_to_file", wraps=Resource.save_to_file
+        ).start()
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+
+        self.root = _copy_test_project(self)
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        self.sms_file = os.path.join(self.root, "config", "sms_templates.yaml")
+
+    def _incoming(self, **text_by_name: str) -> dict:
+        """Return the project's resources with the given SMS template texts changed."""
+        incoming = deepcopy(self.project.resources)
+        for template in incoming[SMSTemplate].values():
+            template.text = text_by_name.get(template.name, template.text)
+        return incoming
+
+    def _pull(self, incoming: dict, force: bool = False) -> list[str]:
+        self.mock_api_handler.pull_resources.return_value = (incoming, [], {})
+        files_with_conflicts, _ = self.project.pull_project(force=force)
+        return files_with_conflicts
+
+    def _edit_local(self, old: str, new: str) -> None:
+        contents = self._read_sms_file()
+        self.assertIn(old, contents)
+        with open(self.sms_file, "w", encoding="utf-8") as f:
+            f.write(contents.replace(old, new, 1))
+
+    def _read_sms_file(self) -> str:
+        with open(self.sms_file, encoding="utf-8") as f:
+            return f.read()
+
+    def _expected_sms_file(self, text_1: str, text_2: str) -> str:
+        phone_numbers = {"sandbox": "", "pre_release": "", "live": "+447700102347"}
+        return resource_utils.dump_yaml(
+            {
+                "sms_templates": [
+                    {"name": "test_template_1", "text": text_1, "env_phone_numbers": phone_numbers},
+                    {"name": "test_template_2", "text": text_2, "env_phone_numbers": phone_numbers},
+                ]
+            }
+        )
+
+    def _sms_merge_calls(self) -> list:
+        return [
+            call
+            for call in self.merge_spy.call_args_list
+            if call.args[2].startswith("sms_templates:")
+        ]
+
+    def _sms_writes(self) -> list:
+        return [call for call in self.save_spy.call_args_list if call.args[1] == self.sms_file]
+
+    def test_remote_only_edit_writes_incoming_without_merging(self):
+        conflicts = self._pull(self._incoming(test_template_1="Edited remotely"))
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            self._read_sms_file(), self._expected_sms_file("Edited remotely", self.TEMPLATE_2_TEXT)
+        )
+        self.assertEqual(self._sms_merge_calls(), [])
+
+    def test_local_only_edit_is_left_untouched(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+        local_contents = self._read_sms_file()
+
+        conflicts = self._pull(self._incoming())
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._read_sms_file(), local_contents)
+        self.assertEqual(self._sms_writes(), [])
+        self.assertEqual(self._sms_merge_calls(), [])
+
+    def test_same_edit_on_both_sides_is_not_rewritten(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited on both sides")
+        local_contents = self._read_sms_file()
+
+        conflicts = self._pull(self._incoming(test_template_1="Edited on both sides"))
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._read_sms_file(), local_contents)
+        self.assertEqual(self._sms_writes(), [])
+
+    def test_edits_to_different_entries_are_merged(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+
+        conflicts = self._pull(self._incoming(test_template_2="Edited remotely"))
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(len(self._sms_merge_calls()), 1)
+        self.assertEqual(
+            self._read_sms_file(), self._expected_sms_file("Edited locally", "Edited remotely")
+        )
+
+    def test_conflicting_edits_to_same_entry_are_reported(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+
+        conflicts = self._pull(self._incoming(test_template_1="Edited remotely"))
+
+        self.assertEqual(conflicts, [self.sms_file])
+        contents = self._read_sms_file()
+        self.assertTrue(resource_utils.contains_merge_conflict(contents))
+        self.assertIn("Edited locally", contents)
+        self.assertIn("Edited remotely", contents)
+
+    def test_force_pull_overwrites_local_edit(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+
+        conflicts = self._pull(self._incoming(test_template_1="Edited remotely"), force=True)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            self._read_sms_file(), self._expected_sms_file("Edited remotely", self.TEMPLATE_2_TEXT)
+        )
+        self.assertEqual(self._sms_merge_calls(), [])
+
+    def test_locally_deleted_file_stays_deleted_when_remote_is_unchanged(self):
+        """With no local entries to normalise, the raw file text (empty) is merged instead."""
+        os.remove(self.sms_file)
+
+        conflicts = self._pull(self._incoming())
+
+        self.assertEqual(conflicts, [])
+        self.assertFalse(os.path.exists(self.sms_file))
+        self.assertEqual(len(self._sms_merge_calls()), 1)
+
+
+class TopicTagsSyncTest(unittest.TestCase):
+    """Pushing and pulling topic tags against a real copy of the test project.
+
+    A force push compares local files straight against Agent Studio. A plain push pulls and
+    merges first.
+    """
+
+    TOPIC_ID = "TOPIC-Topic 1"
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_api_handler.queue_resources = MagicMock(return_value=[])
+        self.mock_api_handler.send_queued_commands = MagicMock(return_value=True)
+        patch.object(AgentStudioProject, "save_config").start()
+        patch.object(AgentStudioProject, "load_project").start()
+        patch.object(AgentStudioProject, "_fetch_parent_resources", return_value={}).start()
+        patch("poly.utils.save_imports").start()
+        patch("poly.utils.export_decorators").start()
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+
+        self.root = _copy_test_project(self)
+        self.topic_file = os.path.join(self.root, "topics", "topic_1.yaml")
+
+    def _project(self, saved_tags: Optional[list[str]] = None) -> AgentStudioProject:
+        """Load the project with Topic 1 saved in Agent Studio with the given tags."""
+        project_data = deepcopy(PROJECT_DATA)
+        if saved_tags is not None:
+            project_data["resources"]["topics"][self.TOPIC_ID]["tags"] = saved_tags
+        return AgentStudioProject.from_dict(project_data, self.root)
+
+    def _read_topic_file(self) -> str:
+        with open(self.topic_file, encoding="utf-8") as f:
+            return f.read()
+
+    def _set_local_tags(self, tags_yaml: str) -> None:
+        """Add a tags block to the local Topic 1 file, after its enabled line."""
+        contents = self._read_topic_file()
+        self.assertIn("enabled: true\n", contents)
+        with open(self.topic_file, "w", encoding="utf-8") as f:
+            f.write(contents.replace("enabled: true\n", f"enabled: true\n{tags_yaml}", 1))
+
+    def _pushed(self) -> dict:
+        return self.mock_api_handler.queue_resources.call_args.kwargs
+
+    def _incoming_with_tags(self, project: AgentStudioProject, tags: list[str]) -> None:
+        """Serve Agent Studio as the project's resources with Topic 1 tagged."""
+        incoming = deepcopy(project.resources)
+        incoming[Topic][self.TOPIC_ID].tags = tags
+        self.mock_api_handler.pull_resources.return_value = (incoming, [], {})
+
+    def test_tagged_topic_in_the_test_project_has_no_changes(self):
+        """Topic 2 is tagged in both its file and the saved state, so nothing is pushed."""
+        project = self._project()
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertEqual(project.resources[Topic]["TOPIC-Topic 2"].tags, ["email", "validation"])
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+
+    def test_force_push_clears_tags_when_file_has_no_tags_key(self):
+        """A force push has no pulled baseline, so a file without tags clears them."""
+        project = self._project(saved_tags=["billing"])
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID].tags, [])
+
+    def test_push_pulls_studio_tags_into_a_file_from_before_tags(self):
+        """A plain push merges first, so a file pulled before tags were supported keeps them."""
+        project = self._project()
+        self._incoming_with_tags(project, ["billing"])
+
+        success, message, _ = project.push_project()
+
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+        self.assertIn("enabled: true\ntags:\n- billing\nactions:", self._read_topic_file())
+
+    def test_push_clears_tags_after_the_tags_key_is_deleted(self):
+        """Deleting the tags key from a pulled file clears the tags on a plain push."""
+        project = self._project(saved_tags=["billing"])
+        self._incoming_with_tags(project, ["billing"])
+
+        success, message, _ = project.push_project()
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID].tags, [])
+        self.assertNotIn("tags:", self._read_topic_file())
+
+    def test_push_sets_changed_tags(self):
+        self._set_local_tags("tags:\n- billing\n- refunds\n")
+        project = self._project(saved_tags=["billing"])
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        tags = self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID]
+        self.assertEqual(tags.tags, ["billing", "refunds"])
+
+    def test_push_clears_tags_set_to_an_empty_list(self):
+        self._set_local_tags("tags: []\n")
+        project = self._project(saved_tags=["billing"])
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID].tags, [])
+
+    def test_push_sends_a_new_topics_tags_on_create(self):
+        self._set_local_tags("tags:\n- billing\n")
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["topics"].pop(self.TOPIC_ID)
+        project = AgentStudioProject.from_dict(project_data, self.root)
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        pushed = self._pushed()
+        (new_topic,) = [t for t in pushed["new_resources"][Topic].values() if t.name == "Topic 1"]
+        self.assertEqual(list(new_topic.build_create_proto().tags), ["billing"])
+        self.assertNotIn(TopicTags, pushed["updated_resources"])
+
+    def test_push_rejects_duplicate_tags(self):
+        self._set_local_tags("tags:\n- billing\n- billing\n")
+        project = self._project()
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertIn("Duplicate tags: ['billing']", message)
+        self.mock_api_handler.queue_resources.assert_not_called()
+
+    def test_pull_writes_studio_tags_into_a_file_without_tags_key(self):
+        """The first pull after upgrading writes the tags into the topic file."""
+        project = self._project()
+        incoming = deepcopy(project.resources)
+        incoming[Topic][self.TOPIC_ID].tags = ["billing", "refunds"]
+        self.mock_api_handler.pull_resources.return_value = (incoming, [], {})
+
+        files_with_conflicts, _ = project.pull_project()
+
+        self.assertEqual(files_with_conflicts, [])
+        self.assertIn("enabled: true\ntags:\n- billing\n- refunds\nactions:", self._read_topic_file())
+
+    def test_status_file_round_trips_tags(self):
+        """Tags survive the status file, and a status file from before tags loads with none."""
+        project = self._project(saved_tags=["billing"])
+
+        reloaded = AgentStudioProject.from_dict(project.to_dict(), self.root)
+
+        self.assertEqual(reloaded.resources[Topic][self.TOPIC_ID].tags, ["billing"])
+        self.assertEqual(self._project().resources[Topic][self.TOPIC_ID].tags, [])
 
 
 class MigrateFlowStepResourceIdsTest(unittest.TestCase):
@@ -6353,9 +6886,7 @@ class PushProjectParentProjectionTest(unittest.TestCase):
         project = self._project_where_topic_1_is_new()
         fetch_failure = RuntimeError("boom")
 
-        with patch.object(
-            AgentStudioProject, "_fetch_parent_resources", side_effect=fetch_failure
-        ):
+        with patch.object(AgentStudioProject, "_fetch_parent_resources", side_effect=fetch_failure):
             with patch.dict(os.environ, {"POLY_ADK_SYNC_PARENT_IDS_TEST": "1"}):
                 with self.assertRaises(SourcererAPIError) as raised:
                     project.push_project(dry_run=True, skip_validation=True)
@@ -6940,6 +7471,234 @@ class TestProjectFixtureIntegrityTest(unittest.TestCase):
         # Without this the test passes vacuously if the path keying ever breaks.
         self.assertEqual(compared, len(self.mappings))
         self.assertEqual(differing, [])
+
+
+class ProjectCreateCustomMetricTest(unittest.TestCase):
+    """Tests for AgentStudioProject.create_custom_metric validation and orchestration."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @patch("poly.project.AgentStudioInterface.set_custom_metric_api_flag")
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
+    def test_api_flag_triggers_follow_up_update(self, mock_create, mock_set_api):
+        """When api=True, a follow-up call sets the api flag after create."""
+        mock_create.return_value = {"name": "SCORE", "type": "int"}
+        mock_set_api.return_value = {"name": "SCORE", "type": "int", "api": True}
+
+        result = self.project.create_custom_metric({"name": "SCORE", "type": "int", "api": True})
+
+        mock_create.assert_called_once()
+        mock_set_api.assert_called_once_with(
+            self.project.region, self.project.account_id, self.project.project_id, "SCORE", True
+        )
+        self.assertTrue(result["api"])
+
+    @patch("poly.project.AgentStudioInterface.set_custom_metric_api_flag")
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
+    def test_no_api_flag_skips_follow_up(self, mock_create, mock_set_api):
+        """When api is not set, no follow-up call is issued."""
+        mock_create.return_value = {"name": "SCORE", "type": "int"}
+
+        self.project.create_custom_metric({"name": "SCORE", "type": "int"})
+
+        mock_create.assert_called_once()
+        mock_set_api.assert_not_called()
+
+    def test_expected_values_rejected_for_non_string(self):
+        """Raises ValueError when expected_values is set on a non-string metric."""
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_custom_metric(
+                {"name": "SCORE", "type": "int", "expected_values": ["a", "b"]},
+            )
+
+        self.assertIn("only valid for string", str(ctx.exception))
+
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
+    def test_expected_values_allowed_for_string(self, mock_create):
+        """Does not raise when expected_values is set on a string metric."""
+        mock_create.return_value = {"name": "STATUS", "type": "string"}
+
+        self.project.create_custom_metric(
+            {"name": "STATUS", "type": "string", "expected_values": ["open", "closed"]},
+        )
+
+        mock_create.assert_called_once()
+
+
+class ProjectUpdateCustomMetricTest(unittest.TestCase):
+    """Tests for AgentStudioProject.update_custom_metric validation and orchestration."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @patch("poly.project.AgentStudioInterface.update_custom_metric")
+    @patch("poly.project.AgentStudioInterface.get_custom_metrics")
+    def test_expected_values_rejected_for_non_string(self, mock_get, mock_update):
+        """Raises ValueError when expected_values targets a non-string metric."""
+        mock_get.return_value = [{"name": "SCORE", "type": "int"}]
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.update_custom_metric("SCORE", {"expected_values": ["a", "b"]})
+
+        self.assertIn("only valid for string", str(ctx.exception))
+        mock_update.assert_not_called()
+
+    @patch("poly.project.AgentStudioInterface.update_custom_metric")
+    @patch("poly.project.AgentStudioInterface.get_custom_metrics")
+    def test_expected_values_allowed_for_string(self, mock_get, mock_update):
+        """Does not raise when expected_values targets a string metric."""
+        mock_get.return_value = [{"name": "STATUS", "type": "string"}]
+        mock_update.return_value = {"name": "STATUS"}
+
+        self.project.update_custom_metric("STATUS", {"expected_values": ["open"]})
+
+        mock_update.assert_called_once()
+
+    @patch("poly.project.AgentStudioInterface.update_custom_metric")
+    def test_no_expected_values_skips_type_check(self, mock_update):
+        """When expected_values is not in data, no type lookup is made."""
+        mock_update.return_value = {"name": "SCORE"}
+
+        self.project.update_custom_metric("SCORE", {"description": "new desc"})
+
+        mock_update.assert_called_once()
+
+
+class ProjectImportMetricsFromFileTest(unittest.TestCase):
+    """Tests for AgentStudioProject.import_metrics_from_file file reading and delegation."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_file_not_found_raises(self):
+        """Raises FileNotFoundError for a missing file."""
+        with self.assertRaises(FileNotFoundError):
+            self.project.import_metrics_from_file("/nonexistent/metrics.yaml")
+
+    def test_invalid_yaml_raises(self):
+        """Raises ValueError for unparseable YAML."""
+        bad_file = os.path.join(self.temp_dir, "bad.yaml")
+        with open(bad_file, "w") as f:
+            f.write("{{invalid")
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.import_metrics_from_file(bad_file)
+
+        self.assertIn("Invalid YAML", str(ctx.exception))
+
+    @patch("poly.project.AgentStudioInterface.import_metrics_from_file")
+    def test_delegates_parsed_content_to_interface(self, mock_import):
+        """Reads and parses the file, then delegates to the interface layer."""
+        metrics_file = os.path.join(self.temp_dir, "metrics.yaml")
+        with open(metrics_file, "w") as f:
+            f.write("SCORE:\n  type: int\n")
+        mock_import.return_value = {"metadata": {"created": ["SCORE"], "ignored": []}}
+
+        result = self.project.import_metrics_from_file(metrics_file, dry_run=True)
+
+        mock_import.assert_called_once_with(
+            self.project.region,
+            self.project.account_id,
+            self.project.project_id,
+            "SCORE:\n  type: int\n",
+            {"SCORE"},
+            True,
+        )
+        self.assertEqual(result["metadata"]["created"], ["SCORE"])
+
+
+class CreateCallSessionTest(unittest.TestCase):
+    """Tests for the create_call_session method."""
+
+    def setUp(self):
+        """Mock the api_handler and build a project from fixture data."""
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def tearDown(self):
+        """Clean up patches."""
+        patch.stopall()
+
+    @staticmethod
+    def _valid_call_info() -> dict:
+        """A complete branch call-info response."""
+        return {
+            "artifactVersion": "artifact-v1",
+            "lambdaDeploymentVersion": "lambda-v1",
+            "authToken": "studio-token",
+            "gatewayWsUrl": "wss://webrtc-gateway.test.polyai.app",
+        }
+
+    def test_draft_returns_call_session(self):
+        """A draft call maps the deploy response onto a CallSession."""
+        self.mock_api_handler.get_branch_call_info.return_value = self._valid_call_info()
+
+        session = self.project.create_call_session("draft", variant="VARIANT-x")
+
+        self.mock_api_handler.get_branch_call_info.assert_called_once_with(self.project.branch_id)
+        self.assertEqual(session.account_id, self.project.account_id)
+        self.assertEqual(session.project_id, self.project.project_id)
+        self.assertEqual(session.variant_id, "VARIANT-x")
+        self.assertEqual(session.artifact_version, "artifact-v1")
+        self.assertEqual(session.lambda_deployment_version, "lambda-v1")
+        self.assertEqual(session.auth_token, "studio-token")
+        self.assertEqual(session.gateway_ws_url, "wss://webrtc-gateway.test.polyai.app")
+        self.assertEqual(session.mode, DEFAULT_CALL_MODE)
+
+    def test_draft_defaults_empty_variant(self):
+        """A missing variant is normalised to an empty string."""
+        self.mock_api_handler.get_branch_call_info.return_value = self._valid_call_info()
+
+        session = self.project.create_call_session("draft")
+
+        self.assertEqual(session.variant_id, "")
+
+    def test_non_draft_raises_not_implemented(self):
+        """Deployed environments are not yet supported and must not call the API."""
+        with self.assertRaises(NotImplementedError):
+            self.project.create_call_session("sandbox")
+
+        self.mock_api_handler.get_branch_call_info.assert_not_called()
+
+    def test_incomplete_response_raises_value_error(self):
+        """A response missing any required field is rejected, naming the field."""
+        for missing in (
+            "artifactVersion",
+            "lambdaDeploymentVersion",
+            "authToken",
+            "gatewayWsUrl",
+        ):
+            info = self._valid_call_info()
+            info[missing] = ""
+            self.mock_api_handler.get_branch_call_info.return_value = info
+            with self.assertRaises(ValueError) as ctx:
+                self.project.create_call_session("draft")
+            self.assertIn(missing, str(ctx.exception))
+
+    def test_incomplete_response_does_not_leak_auth_token(self):
+        """The validation error must never echo the authToken credential."""
+        info = self._valid_call_info()
+        info["authToken"] = "super-secret-token"
+        info["gatewayWsUrl"] = ""  # trigger the error with the token still present
+        self.mock_api_handler.get_branch_call_info.return_value = info
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_call_session("draft")
+        self.assertNotIn("super-secret-token", str(ctx.exception))
 
 
 if __name__ == "__main__":

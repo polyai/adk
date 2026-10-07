@@ -88,6 +88,8 @@ class ChildTopic(Topic):
         self.content = content
         self.example_queries = example_queries or []
         self.enabled = enabled
+        # The platform has no command to set tags on a child topic.
+        self.tags = []
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "ChildTopic"]:
@@ -157,6 +159,11 @@ class ChildTopic(Topic):
     ) -> "ChildTopic":
         """Create an instance from YAML data and identity fields."""
         resolved_name = yaml_dict.get("name") or name
+        if yaml_dict.get("tags"):
+            raise ValueError(
+                f"Child topic '{resolved_name}' has tags, but child topics don't support them. "
+                "Remove the tags key."
+            )
         return cls(
             resource_id=resource_id,
             name=resolved_name,
