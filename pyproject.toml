@@ -145,52 +145,9 @@ tag_format = "v{version}"
 # GitHub release (DEVP-790); CHANGELOG.md generation is unaffected.
 template_dir = "templates"
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 [project]
 name = "polyai-adk"
-version = "0.67.0"
+version = "0.67.1"
 description = "Agent Development Kit (ADK) — a CLI for building, testing, and deploying PolyAI voice and chat agents, self-serve"
 readme = "README.md"
 requires-python = ">=3.14.0"

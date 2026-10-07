@@ -1,6 +1,96 @@
 # CHANGELOG
 
 
+## v0.67.1 (2026-10-06)
+
+### Bug Fixes
+
+- Send Studio's real PostHog cluster key when evaluating flags
+  ([#336](https://github.com/polyai/adk/pull/336),
+  [`ac168ba`](https://github.com/polyai/adk/commit/ac168ba9e452f4872bd8b55c409a2a7a40e84267))
+
+## Summary
+
+Flag evaluation from the `studio` region now sends cluster `plg-us-1-prod` with env `plg`, the key
+  Studio and sourcerer use for that deployment. Before, the ADK sent `studio` / `prod`.
+
+## Motivation
+
+Studio (jupiter) and sourcerer both build PostHog groups from `CLUSTERS` in platform_ui's
+  `packages/schemas/src/posthog/index.ts`. There, the PLG deployment is `plg-us-1-prod` / `plg`, and
+  that matches `CLUSTER: plg-us-1-prod` in gitops for jupiter-api and sourcerer. The ADK's
+  `region_to_posthog_cluster` passed `studio` through unchanged, so:
+
+- flags targeted at the `plg-us-1-prod` cluster group never matched from the ADK - project groups
+  were keyed `studio/PROJECT-…`, so they never matched `plg-us-1-prod/PROJECT-…` - conditions on
+  `env = plg` never matched - the ADK created orphan `studio` groups in the prod PostHog project
+
+## Changes
+
+- Map `studio` → cluster `plg-us-1-prod` and env `plg` - Update tests to pin the Studio key and
+  properties, and cover the env mapping per region
+
+`dev → apollo` is unchanged and correct: the `apollo` cluster serves `studio.dev.poly.ai` and
+  `login.dev.poly.ai`, which is where the ADK's `dev` region points.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project
+
+**Not verified against live PostHog:** existing flags targeted at the orphan `studio` groups would
+  stop matching after this change. Worth checking the prod PostHog project for any before merging.
+
+**Dev/staging cluster migration:** the cluster keys here are hardcoded against the clusters serving
+  `api.dev.poly.ai` (`apollo`) and `api.staging.poly.ai` (`us-1-staging`) today. When those
+  hostnames move to the new `dev` and `staging` clusters, `region_to_posthog_cluster` needs updating
+  in the same change. The ADK has no way to detect the move itself.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (changed files) - [x] `pytest` passes (2080
+  passed) - [x] No breaking changes to the `poly` CLI interface - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Follow-up, not in this PR: `distinct_id` is the OS username (`getpass.getuser()`). Sourcerer uses
+  the user's email, so person-level targeting doesn't line up between the ADK and Studio.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Documentation
+
+- Lead the README with sign-up and poly setup (DEVP-788)
+  ([#340](https://github.com/polyai/adk/pull/340),
+  [`d34063d`](https://github.com/polyai/adk/commit/d34063df5ad2113613dcd9f5dc1b9316f8429f20))
+
+## Linear
+
+https://linear.app/poly-ai/issue/DEVP-788/rewrite-adk-readme-to-lead-with-sign-up
+
+## Summary
+
+First-screen-only change to the README so the repo reads as self-serve when someone lands on it from
+  search or a package listing:
+
+- Opening paragraph now says what the ADK is, and that new users sign up at studio.poly.ai and start
+  free (free trial, so "start free" rather than "sign up free"). - `uv tool install` listed before
+  `pip install`. - Adds a `poly setup` step after install. - Documentation link stays on GitHub
+  Pages until docs.poly.ai catches up.
+
+Updated after review: dropped the `poly apikey --region studio` block and the docs.poly.ai link, and
+  merged main to clear the conflict with #338.
+
+Everything below the install section is unchanged.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5.1 <noreply@anthropic.com>
+
+
 ## v0.67.0 (2026-10-05)
 
 ### Features
