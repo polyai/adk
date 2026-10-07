@@ -948,10 +948,6 @@ class AgentStudioInterface:
     ) -> dict:
         """Create a new A/B test.
 
-        Deprecated: for projects on the simplified deployment model, use
-        ``create_experiment`` instead. Still required for projects on the
-        classic deployment model.
-
         Args:
             region: The region name.
             account_id: The account ID.
@@ -976,9 +972,6 @@ class AgentStudioInterface:
     ) -> dict:
         """List A/B tests for a project.
 
-        Deprecated: for projects on the simplified deployment model, use
-        ``list_experiments`` instead.
-
         Args:
             region: The region name.
             account_id: The account ID.
@@ -997,9 +990,6 @@ class AgentStudioInterface:
         project_id: str,
     ) -> dict:
         """Get the active A/B test for a project.
-
-        Deprecated: for projects on the simplified deployment model, use
-        ``get_active_experiment`` instead.
 
         Args:
             region: The region name.
@@ -1020,11 +1010,6 @@ class AgentStudioInterface:
         chosen_deployment_id: str,
     ) -> dict:
         """End an A/B test and choose a winner.
-
-        Deprecated: for projects on the simplified deployment model, use
-        ``end_experiment`` instead. Note that ending an A/B test does not
-        promote the winner — callers must do that separately — whereas ending
-        an experiment redeploys the winning branch automatically.
 
         Args:
             region: The region name.
@@ -1049,9 +1034,6 @@ class AgentStudioInterface:
         traffic_percentage: int,
     ) -> dict:
         """Update traffic percentage for an A/B test.
-
-        Deprecated: for projects on the simplified deployment model, use
-        ``update_experiment`` instead.
 
         Args:
             region: The region name.

@@ -11,10 +11,8 @@ _CAMEL_CASE_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
 def camel_to_snake_keys(value: object) -> object:
     """Recursively convert a JSON value's dict keys from camelCase to snake_case.
 
-    Sourcerer (agent-stream) responds with camelCase keys, unlike the rest of
-    the ADK v1 API (served by poly_core), which uses snake_case throughout.
-    This normalizes sourcerer responses to the convention the rest of ADK's
-    code expects, at the point they're received.
+    The experiments endpoints return camelCase keys, unlike the rest of the
+    ADK v1 API, so their responses are normalised to snake_case on receipt.
     """
     if isinstance(value, dict):
         return {

@@ -47,7 +47,7 @@ SAMPLE_EXPERIMENT = {
 
 GATE_MESSAGE = "simplified deployments with top-level branches"
 
-# A legacy A/B test surfaced through get_active_experiment (shared backing table).
+# A classic A/B test, which the experiments API also returns, as seen by get_active_experiment.
 LEGACY_AB_TEST_EXPERIMENT = {
     "id": "exp-legacy",
     "name": "old ab test",
@@ -67,8 +67,6 @@ class ExperimentStartTest(unittest.TestCase):
         self.mock_load = patcher.start()
         self.proj = MagicMock()
         self.proj.experiments_enabled = True
-        # The create response omits per-version detail (a platform API gap), so
-        # experiment_start re-fetches by ID via get_experiment for display.
         self.proj.create_experiment.return_value = {"id": "exp-001", "name": "v2 test"}
         self.proj.get_experiment.return_value = dict(SAMPLE_EXPERIMENT)
         self.proj.get_branches.return_value = ("main", dict(SAMPLE_BRANCHES))

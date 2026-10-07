@@ -158,7 +158,7 @@ Adds `"dry_run": true` instead of rolling back when `--dry-run` is passed.
 
 Manage A/B tests for live deployments, on the classic deployment model — projects using simplified deployments use [`poly deployments experiment`](#poly-deployments-experiment) instead. `poly deployments ab-test` requires a subcommand.
 
-`ab-test end` is the one exception and works on either deployment model: experiments and classic A/B tests share the same underlying record, so a test started before a project adopted simplified deployments can still be left active afterward, with no other way to close it out.
+`ab-test end` works on either deployment model, so a test started before a project adopted simplified deployments can still be ended.
 
 ### `poly deployments ab-test start`
 
@@ -294,7 +294,7 @@ If promoting the winning variant to `live` fails after the test has already ende
 
 ## `poly deployments experiment`
 
-Manage experiments for projects using the simplified deployment model, testing a top-level branch against the current live version. Only one experiment can run at a time, with a single variant, today. `poly deployments experiment` requires a subcommand.
+Manage experiments for projects using the simplified deployment model, testing a top-level branch against the current live version. Only one experiment can run at a time, with a single variant. `poly deployments experiment` requires a subcommand.
 
 ### `poly deployments experiment start`
 

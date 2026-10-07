@@ -205,8 +205,7 @@ class DeploymentsCommand(BaseCommand):
                 "Deprecated, and not available for projects on the simplified\n"
                 "deployment model — use 'poly deployments experiment' instead there.\n"
                 "Still required for projects on the classic deployment model.\n\n"
-                "'end' is the one exception that always works: it's the escape\n"
-                "hatch for a pre-migration test left active on a migrated project.\n\n"
+                "'end' works on either model.\n\n"
                 "Examples:\n"
                 "  poly deployments ab-test start --name 'v2 test'"
                 " --variant-version <hash> --traffic 50\n"
@@ -330,7 +329,7 @@ class DeploymentsCommand(BaseCommand):
             description=(
                 "Manage experiments for projects using the simplified deployment model.\n\n"
                 "Experiments test a top-level branch against the current live version.\n"
-                "Only one experiment can run at a time, with a single variant, today.\n\n"
+                "Only one experiment can run at a time, with a single variant.\n\n"
                 "Examples:\n"
                 "  poly deployments experiment start --name 'v2 test'"
                 " --branch my-branch --traffic 50\n"
@@ -1077,12 +1076,7 @@ class DeploymentsCommand(BaseCommand):
         traffic_percentage: int | None,
         output_json: bool = False,
     ) -> None:
-        """Start a new A/B test.
-
-        Deprecated: for projects on the simplified deployment model, use
-        ``poly deployments experiment start`` instead. A/B tests and
-        experiments are mutually exclusive by deployment model.
-        """
+        """Start a new A/B test."""
         import questionary
 
         from poly.cli_commands.shared import require_ab_tests_enabled
@@ -1327,9 +1321,8 @@ class DeploymentsCommand(BaseCommand):
     ) -> None:
         """End the active A/B test and choose the winning deployment.
 
-        Unlike the other 'ab-test' subcommands, not gated by
-        ``require_ab_tests_enabled``: it's the escape hatch for a classic
-        test left active after a project migrates to simplified deployments.
+        Not gated by ``require_ab_tests_enabled``, so a test left active
+        after migrating to simplified deployments can still be ended.
         """
         import questionary
 
@@ -1501,9 +1494,7 @@ class DeploymentsCommand(BaseCommand):
     def _exit_for_legacy_ab_test_record(output_json: bool, action: str) -> None:
         """Exit with a clear error for an experiment record with no branch-based versions.
 
-        A legacy A/B test can surface here (shared backing table) with no
-        branch to resolve, so point to 'ab-test end' instead of proceeding
-        with a missing branch id.
+        The experiments API also returns classic A/B tests, which have no branch.
 
         Args:
             output_json: If True, emit JSON and exit.
@@ -1572,11 +1563,7 @@ class DeploymentsCommand(BaseCommand):
                 error(msg)
             sys.exit(1)
 
-        # The control is always the implicit "main" branch, so it's never a
-        # valid choice for the variant. The server also only accepts a
-        # top-level branch as the variant (assertTopLevelBranch rejects a
-        # child branch with a 400), and rejects one that's diverged from its
-        # parent (needs 'poly branch sync' first), so both are excluded here.
+        # The platform rejects 'main', child branches and diverged branches as the variant.
         def _is_top_level(meta: dict) -> bool:
             return meta.get("parentBranchId") in (None, "main")
 

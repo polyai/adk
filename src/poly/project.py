@@ -3597,15 +3597,12 @@ class AgentStudioProject:
         )
 
     # ── A/B tests ───────────────────────────────────────────────────
+    # Classic deployment model only; simplified deployments use experiments.
 
     def create_ab_test(
         self, name: str, variant_deployment_id: str, traffic_percentage: int
     ) -> dict:
         """Create a new A/B test for the project.
-
-        Deprecated: for projects on the simplified deployment model, use
-        ``create_experiment`` instead. Still required for projects on the
-        classic deployment model.
 
         Args:
             name: Display name for the test.
@@ -3627,9 +3624,6 @@ class AgentStudioProject:
     def list_ab_tests(self, limit: int | None = None) -> list[dict]:
         """List A/B tests for the project.
 
-        Deprecated: for projects on the simplified deployment model, use
-        ``list_experiments`` instead.
-
         Args:
             limit: Maximum number of tests to return.
 
@@ -3647,9 +3641,6 @@ class AgentStudioProject:
     def get_active_ab_test(self) -> dict:
         """Get the active A/B test for the project.
 
-        Deprecated: for projects on the simplified deployment model, use
-        ``get_active_experiment`` instead.
-
         Returns:
             dict: The active A/B test record, or empty dict if none.
         """
@@ -3662,11 +3653,7 @@ class AgentStudioProject:
     def end_ab_test(self, ab_test_id: str, chosen_deployment_id: str) -> dict:
         """End an A/B test and choose a winner.
 
-        Deprecated: for projects on the simplified deployment model, use
-        ``end_experiment`` instead. Note that ending an A/B test does not
-        promote the winner — callers must call ``promote_deployment``
-        separately — whereas ending an experiment redeploys the winning
-        branch automatically.
+        Doesn't promote the winner; call ``promote_deployment`` separately.
 
         Args:
             ab_test_id: The A/B test ID.
@@ -3685,9 +3672,6 @@ class AgentStudioProject:
 
     def update_ab_test(self, ab_test_id: str, traffic_percentage: int) -> dict:
         """Update traffic percentage for an A/B test.
-
-        Deprecated: for projects on the simplified deployment model, use
-        ``update_experiment`` instead.
 
         Args:
             ab_test_id: The A/B test ID.
@@ -3775,13 +3759,8 @@ class AgentStudioProject:
     def get_active_experiment(self) -> dict:
         """Get the active experiment for the project, if any.
 
-        There is no dedicated "active" endpoint for experiments (unlike A/B
-        tests) — at most one experiment can be active at a time (enforced
-        server-side), identified by an unset ``ended_at``. Since a new
-        experiment can't be created while one is still active, the active
-        experiment — if any — is always the most recently created one, and
-        ``list_experiments`` returns newest first. So this only needs to
-        check the first entry of the first page.
+        Experiments are listed newest first and only one can be active, so
+        check the first.
 
         Returns:
             dict: The active experiment record, or empty dict if none.
@@ -3789,7 +3768,6 @@ class AgentStudioProject:
         page = self.list_experiments(limit=1)
         if page and not page[0].get("ended_at"):
             return page[0]
-        return {}
         return {}
 
     def end_experiment(self, experiment_id: str, chosen_branch_id: str) -> dict:

@@ -790,10 +790,6 @@ class PlatformAPIHandler:
     ) -> dict:
         """Create a new A/B test.
 
-        Deprecated: for projects on the simplified deployment model, use
-        ``create_experiment`` instead. Still required for projects on the
-        classic deployment model.
-
         Args:
             region: The region name.
             account_id: The account ID.
@@ -822,9 +818,6 @@ class PlatformAPIHandler:
     ) -> dict:
         """List A/B tests for a project.
 
-        Deprecated: for projects on the simplified deployment model, use
-        ``list_experiments`` instead.
-
         Args:
             region: The region name.
             account_id: The account ID.
@@ -848,10 +841,6 @@ class PlatformAPIHandler:
     ) -> dict:
         """Get the active A/B test for a project.
 
-        Deprecated: for projects on the simplified deployment model, there is
-        no direct equivalent endpoint — derive it client-side (see
-        ``AgentStudioInterface.get_active_experiment``).
-
         Args:
             region: The region name.
             account_id: The account ID.
@@ -872,11 +861,6 @@ class PlatformAPIHandler:
         chosen_deployment_id: str,
     ) -> dict:
         """End an A/B test and choose a winner.
-
-        Deprecated: for projects on the simplified deployment model, use
-        ``end_experiment`` instead. Note that ending an A/B test does not
-        promote the winner — callers must do that separately — whereas ending
-        an experiment redeploys the winning branch automatically.
 
         Args:
             region: The region name.
@@ -904,9 +888,6 @@ class PlatformAPIHandler:
     ) -> dict:
         """Update traffic percentage for an A/B test.
 
-        Deprecated: for projects on the simplified deployment model, use
-        ``update_experiment`` instead.
-
         Args:
             region: The region name.
             account_id: The account ID.
@@ -933,11 +914,6 @@ class PlatformAPIHandler:
         traffic_percentage: int,
     ) -> dict:
         """Create a new experiment.
-
-        Experiments test a top-level branch against the current live version, on
-        projects using the simplified deployment model. Only one variant is
-        supported today; the request shape is a list to allow multi-variant
-        experiments without a contract change in the future.
 
         Args:
             region: The region name.
@@ -1021,10 +997,6 @@ class PlatformAPIHandler:
     ) -> dict:
         """End an experiment and choose a winning branch.
 
-        Unlike A/B tests, the winning branch is redeployed to live by the
-        platform itself as part of ending the experiment — callers do not need
-        to promote it separately afterward.
-
         Args:
             region: The region name.
             account_id: The account ID.
@@ -1061,8 +1033,7 @@ class PlatformAPIHandler:
             experiment_id: The experiment ID.
             name: New display name, if renaming.
             branch_id: ID of the variant branch whose traffic share is changing.
-                Required together with ``traffic_percentage`` — the API takes
-                traffic as part of a ``versions`` entry, not a bare scalar.
+                Required together with ``traffic_percentage``.
             traffic_percentage: New percentage of traffic to route to the variant (1-99).
 
         Returns:
