@@ -156,7 +156,9 @@ Adds `"dry_run": true` instead of rolling back when `--dry-run` is passed.
 
 ## `poly deployments ab-test`
 
-Manage A/B tests for live deployments. `poly deployments ab-test` requires a subcommand.
+Manage A/B tests for live deployments, on the classic deployment model — projects using simplified deployments use [`poly deployments experiment`](#poly-deployments-experiment) instead. `poly deployments ab-test` requires a subcommand.
+
+`ab-test end` is the one exception and works on either deployment model: experiments and classic A/B tests share the same underlying record, so a test started before a project adopted simplified deployments can still be left active afterward, with no other way to close it out.
 
 ### `poly deployments ab-test start`
 
@@ -261,7 +263,7 @@ Adds `"unchanged": true` instead of updating when `--traffic` matches the curren
 
 ### `poly deployments ab-test end`
 
-End the active A/B test and choose which deployment wins. If the variant wins, it is automatically promoted to `live`.
+End the active A/B test and choose which deployment wins. If the variant wins, it is automatically promoted to `live`. Works on either deployment model — see [`poly deployments ab-test`](#poly-deployments-ab-test) above.
 
 Examples:
 
@@ -289,6 +291,143 @@ poly deployments ab-test end
 ~~~
 
 If promoting the winning variant to `live` fails after the test has already ended, `"promoted"` is `false` and a `"promote_error"` key is added instead.
+
+## `poly deployments experiment`
+
+Manage experiments for projects using the simplified deployment model, testing a top-level branch against the current live version. Only one experiment can run at a time, with a single variant, today. `poly deployments experiment` requires a subcommand.
+
+### `poly deployments experiment start`
+
+Start a new experiment against the current live version. `main` is always the implicit control.
+
+Examples:
+
+~~~bash
+poly deployments experiment start --name 'v2 test' --branch my-branch --traffic 50
+~~~
+
+The variant must be a top-level branch (a direct child of `main`) that isn't diverged from it — sync a stale branch with its parent first.
+
+| Flag | Description |
+|---|---|
+| `--name`, `-n` | Name/label for the experiment. If omitted, prompts interactively. |
+| `--branch` | Name of the top-level branch to test as the variant. If omitted, prompts interactively. |
+| `--traffic` | Percentage of traffic to route to the variant (1-99). Defaults to 50 interactively. |
+
+!!! info "All flags are required with `--json`"
+
+    `--name`, `--branch`, and `--traffic` must all be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
+
+`--json` output shape:
+
+~~~json
+{
+  "success": true,
+  "experiment": {}
+}
+~~~
+
+### `poly deployments experiment list`
+
+List experiments for the project.
+
+Examples:
+
+~~~bash
+poly deployments experiment list
+poly deployments experiment list --limit 20
+poly deployments experiment list --offset 10
+~~~
+
+| Flag | Description |
+|---|---|
+| `--limit` | Number of experiments to show. Defaults to `10`. |
+| `--offset` | Number of experiments to skip before showing results. |
+
+`--json` output shape:
+
+~~~json
+{
+  "success": true,
+  "experiments": []
+}
+~~~
+
+### `poly deployments experiment active`
+
+Show the currently active experiment, if any.
+
+Examples:
+
+~~~bash
+poly deployments experiment active
+~~~
+
+`--json` output shape:
+
+~~~json
+{
+  "success": true,
+  "experiment": null
+}
+~~~
+
+### `poly deployments experiment update`
+
+Update the name and/or traffic split for the active experiment. At least one of `--name` or `--traffic` must be given.
+
+Examples:
+
+~~~bash
+poly deployments experiment update --traffic 30
+poly deployments experiment update --name 'v3 test'
+~~~
+
+| Flag | Description |
+|---|---|
+| `--name`, `-n` | New name for the experiment. |
+| `--traffic` | New percentage of traffic to route to the variant (1-99). Prompts if omitted. |
+
+!!! info "At least one of `--name` or `--traffic` is required with `--json`"
+
+    One of them must be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
+
+`--json` output shape:
+
+~~~json
+{
+  "success": true,
+  "experiment": {}
+}
+~~~
+
+### `poly deployments experiment end`
+
+End the active experiment and choose which branch wins. Unlike [`poly deployments ab-test end`](#poly-deployments-ab-test-end), the platform redeploys the winning branch to `live` automatically — no separate promotion step.
+
+Examples:
+
+~~~bash
+poly deployments experiment end --chosen-branch my-branch
+poly deployments experiment end
+~~~
+
+| Flag | Description |
+|---|---|
+| `--chosen-branch` | Name of the branch to keep as winner. If omitted, an interactive prompt shows the control and variant branches for selection. |
+
+!!! info "`--chosen-branch` is required with `--json`"
+
+    `--chosen-branch` must be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
+
+`--json` output shape:
+
+~~~json
+{
+  "success": true,
+  "experiment": {}
+}
+~~~
 
 ## Related pages
 
