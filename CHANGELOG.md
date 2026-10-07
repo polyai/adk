@@ -1,6 +1,130 @@
 # CHANGELOG
 
 
+## v0.67.2 (2026-10-07)
+
+### Bug Fixes
+
+- Use valid region in poly init help example ([#354](https://github.com/polyai/adk/pull/354),
+  [`25b6858`](https://github.com/polyai/adk/commit/25b6858ae3c3177237f7d4d5034031be0e1eda07))
+
+## Summary
+
+Fixes the example in `poly init --help`, which used the invalid region `eu-west-1`.
+
+## Motivation
+
+`--region` only accepts `us-1`, `euw-1`, `uk-1`, `studio`, `staging` or `dev`, so copying the help
+  example failed with an argument error.
+
+## Changes
+
+- Change the `poly init` help example from `--region eu-west-1` to `--region euw-1`.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Chores
+
+- Share contributor rules across coding agents with AGENTS.md and REVIEW.md
+  ([#352](https://github.com/polyai/adk/pull/352),
+  [`c61b79b`](https://github.com/polyai/adk/commit/c61b79b1e6beb26ea9d360204f5a4fbc49785a4f))
+
+## Summary
+
+Replaces the Claude- and Copilot-specific instruction files with tool-neutral ones that both tools
+  read: `AGENTS.md`, `REVIEW.md` and shared contributor skills. Drops guidance that had gone stale,
+  including the instruction to bump versions by hand.
+
+## Motivation
+
+Most PRs here are written with an AI coding agent, but the instructions those agents read were out
+  of date and split across tools:
+
+- `pr-reviewer` and `copilot-instructions.md` told contributors to bump the version in
+  `pyproject.toml`. semantic-release already does that, along with the skill versions and the
+  changelog. The PR title type is the only release input a contributor controls. - `CLAUDE.md`,
+  `pr-reviewer` and `copilot-instructions.md` described a resource-registration process that no
+  longer exists, named a nonexistent `PlatformAPIError`, and showed a stale project tree. - The
+  rules reviewers keep asking for weren't written down anywhere: the CLI → project → interface → API
+  layering, updating both doc trees and the skills, the test fixture, no internal references in
+  public PRs. - The same rules were copied per tool, so they drifted apart.
+
+Claude Code and GitHub Copilot both now read `AGENTS.md` and skills in `.claude/skills/`, so one set
+  of files covers both.
+
+## Changes
+
+- **`AGENTS.md`** (new): commands, the layering rule (anything that acts on a project is an
+  `AgentStudioProject` method holding its logic and validation, user interaction stays in the CLI,
+  and commands that run before a project exists may call the interface directly), what each
+  directory is for, the conventions reviewers enforce, test and docs expectations, and the PR title
+  → release table. Nested `AGENTS.md` files in `src/poly/resources/` (the current registration
+  steps) and `src/poly/cli_commands/` (command-layer rules). - **`REVIEW.md`** (new): a ranked
+  review checklist (blocking, worth raising, nits, ignore). It's self-contained because some review
+  tools read only this file; both files say to keep the two in sync. - **Contributor skills in
+  `.claude/skills/`**, replacing the four subagents in `.claude/agents/`: - `ci-check`: now mirrors
+  CI, adding the PR title, licence, `licenses.json` and skill-version checks. - `review-pr`: applies
+  `REVIEW.md`. - `write-tests`: measures coverage before and after. - `add-resource-type` -
+  `open-pr` (new)
+
+All are marked `metadata.internal: true`, so `poly setup` / `npx skills` don't install them into
+  users' projects. - **Removed** `.claude/CLAUDE.md`, `.claude/agents/` and
+  `.github/copilot-instructions.md`. - **Docs style guides:**
+  `docs/docs/reference/{cli,resources}/CLAUDE.md` renamed to `AGENTS.md` and excluded from the
+  mkdocs build. One was being published as a page on the docs site. - **Release notes:** the Slack
+  release notification and the GitHub release notes now say to upgrade with `poly update`. -
+  **CONTRIBUTING:** full title-type → release table, versions are never edited by hand, stacked-PR
+  merge order. Setup uses `uv run`, with venv activation optional for trying `poly` by hand. Notes
+  that Claude Code must be up to date to read `AGENTS.md` (there's deliberately no `CLAUDE.md`). The
+  skills README explains that skill versions are stamped automatically. - **PR template:** checklist
+  lines for the title type and for docs and skills updates. - **Housekeeping:** untracked `.idea/`;
+  `.gitignore` deduplicated, with cache, coverage and worktree entries added. Fixed the pre-commit
+  comment, which referenced a nonexistent `requirements-dev.txt` and a stale ruff version. Removed
+  43 blank lines that older release commits had left in `pyproject.toml`. -
+  **`.claude/settings.json`:** agents can now read the generated `protobuf/` and `types/` files;
+  editing them is still denied.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+- `npx -y skills@1.5.18 add . --list` lists only the five user skills. Without `metadata.internal:
+  true`, the contributor skills were listed too. - `mkdocs build` succeeds, with no `AGENTS` pages
+  in the output. - Claude Code picks up the five contributor skills from `.claude/skills/`.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+N/A
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.67.1 (2026-10-06)
 
 ### Bug Fixes
