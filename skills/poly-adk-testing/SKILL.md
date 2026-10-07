@@ -21,16 +21,7 @@ metadata:
 
 Load `poly-adk-workflow` first for the overall build loop these commands fit into.
 
-Four layers of verification, catching different problems:
-
-| Command | Catches | Runs against |
-|---|---|---|
-| `poly validate` | Invalid resources, missing values, broken references | Local files |
-| `poly chat` | Conversational behavior, judged by reading | Last **pushed** state |
-| `poly test run` | Regressions, repeatably | Last **pushed** state |
-| `poly conversations` | What happened on real calls (see `poly-adk-conversations`) | Live traffic |
-
-**`poly chat` and `poly test run` run against the last pushed state, not local files.** Push first, or pass `--push` to push-and-run in one step. Both target the current branch by default; `-e sandbox|pre-release|live` targets a deployed environment instead.
+The four verification layers (validate, chat, test suite, real conversations) and what each runs against are summarised in `poly-adk-workflow`, section 6. The rule that matters most here: **`poly chat` and `poly test run` run against the last pushed state of the current branch, not local files.** Push first, or pass `--push` to push and run in one step. `poly chat -e live` talks to production instead, which is useful for reproducing a live issue. Don't use `-e sandbox`: with simplified deployments, sandbox is frozen at its pre-migration state. `poly test run` always runs on the current branch.
 
 ## 1. Validate while editing
 
@@ -62,7 +53,7 @@ Chat is for judging whether a conversation *feels* right. Anything worth checkin
 
 `poly call` places a live WebRTC voice call to the agent through the user's microphone and speaker (draft/branch build only). It's the route for judging **voice-specific** behavior — speech, timing, barge-in — that a transcript can't show.
 
-It is interactive and human-driven: **you (the AI agent) can't use it** — there's no way to speak into a call or script it non-interactively. When a user wants to check voice/audio behavior, point them at `poly call` (`poly call --help`) rather than running it yourself.
+It needs the optional voice extra (`uv tool install "polyai-adk[call]"`), and it is interactive and human-driven: **you (the AI agent) can't use it** — there's no way to speak into a call or script it non-interactively. When a user wants to check voice/audio behavior, point them at `poly call` (`poly call --help`) rather than running it yourself.
 
 ## 3. Simulated conversation tests
 
@@ -75,7 +66,7 @@ poly test run --files test_suite/greeting_flow_test.yaml
 poly test run --dry-run          # preview which tests would run
 poly test run --dont-poll        # trigger and exit; check later with poly test show
 poly test run --tag smoke --name "Pre-release check · booking flow"   # name the run
-poly test list                   # past runs
+poly test list                   # past runs (--limit / --offset to page)
 poly test show <run_id>                    # run summary + per-test table
 poly test show <run_id> <test_case_id>     # assertion results, function failures, full transcript
 ```
@@ -99,4 +90,4 @@ Both subcommands accept `--region --project_id --branch_id` (all three together)
 
 ## Where each layer fits
 
-Validation and chat belong in the edit loop; the test suite belongs before merging; and after promoting to an environment, re-run chat and tests against it with `-e`. A surprising real conversation found via `poly-adk-conversations` is the raw material for the next test case.
+Validation and chat belong in the edit loop, and the test suite belongs before merging. After merging, `poly chat -e live` checks what production now does. A surprising real conversation found via `poly-adk-conversations` is the raw material for the next test case.

@@ -47,6 +47,7 @@ poly rtc push --env sandbox    # --env is REQUIRED on push — no default, so no
 
 - `--schema` / `--data` on pull and push operate on just one half (mutually exclusive).
 - `poly rtc push` runs the same validation as `poly rtc validate` unless `--skip-validation`.
+- `poly pull --include-rtc` and `poly push --include-rtc` also move RTC alongside resources. Push writes to `sandbox` unless `--rtc-env` says otherwise, and the same live-environment caution applies.
 - `poly rtc edit --env <env>` does pull → open in `$EDITOR` → validate → push in one step. It is inherently interactive (no `--json`), so as an agent prefer the pull/edit-files/push cycle.
 
 ## Drift protection
