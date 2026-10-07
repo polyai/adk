@@ -15,6 +15,8 @@ POSTHOG_KEY_NON_PROD = "phc_kS54QZyZRqi9T77rWEUfJ49vVYY4ADKEPnRUrJ7RNnZ6"
 NON_PROD_REGIONS = frozenset({"dev", "staging"})
 
 FEATURE_FLAGS_REQUEST_TIMEOUT_SECONDS = 1
+# Events are sent inline (sync mode), so this bounds how long a command waits on one.
+CAPTURE_REQUEST_TIMEOUT_SECONDS = 3
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +62,8 @@ def get_posthog_client(region: str) -> Posthog:
             project_api_key=project_api_key,
             host=POSTHOG_HOST,
             feature_flags_request_timeout_seconds=FEATURE_FLAGS_REQUEST_TIMEOUT_SECONDS,
+            timeout=CAPTURE_REQUEST_TIMEOUT_SECONDS,
+            sync_mode=True,
         )
         _clients[project_api_key] = client
     return client
