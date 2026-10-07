@@ -446,8 +446,9 @@ class DeploymentsCommand(BaseCommand):
             help="End an active experiment and choose a winner.",
             description=(
                 "End the active experiment and choose which branch wins.\n\n"
-                "The platform redeploys the winning branch to live automatically —\n"
-                "no separate promotion is needed.\n\n"
+                "The winning branch is redeployed to live immediately and receives\n"
+                "all live traffic. Asks for confirmation unless --force or --json\n"
+                "is given.\n\n"
                 "If --chosen-branch is omitted, an interactive prompt shows the\n"
                 "control and variant branches for selection.\n\n"
                 "Examples:\n"
@@ -461,7 +462,14 @@ class DeploymentsCommand(BaseCommand):
             "--chosen-branch",
             type=str,
             default=None,
-            help="Name of the branch to keep as winner. If omitted, prompts interactively.",
+            help="Name of the branch to keep as winner: the experiment's control or variant."
+            " If omitted, prompts interactively.",
+        )
+        experiment_end_parser.add_argument(
+            "--force",
+            action="store_true",
+            help="End the experiment and redeploy the winner to live without confirmation."
+            " This is default in non-interactive mode (e.g. when --json is used)",
         )
 
     @classmethod
@@ -561,6 +569,7 @@ class DeploymentsCommand(BaseCommand):
                 cls.experiment_end(
                     args.path,
                     chosen_branch=args.chosen_branch,
+                    force=args.force,
                     output_json=args.json,
                 )
 
@@ -1811,6 +1820,7 @@ class DeploymentsCommand(BaseCommand):
         cls,
         base_path: str,
         chosen_branch: str | None = None,
+        force: bool = False,
         output_json: bool = False,
     ) -> None:
         """End the active experiment and choose the winning branch."""
@@ -1888,7 +1898,7 @@ class DeploymentsCommand(BaseCommand):
                 ),
             ]
             chosen_branch_id = questionary.select(
-                "Choose the winning branch (this version will receive all live traffic):",
+                "Choose the winning branch (it will receive all live traffic):",
                 choices=choices,
             ).ask()
             if not chosen_branch_id:
@@ -1903,8 +1913,29 @@ class DeploymentsCommand(BaseCommand):
                 else:
                     error(msg)
                 sys.exit(1)
+            # Ending redeploys the winner to live, so only the experiment's own branches qualify.
+            experiment_branch_ids = {v.get("branch_id") for v in versions}
+            if chosen_branch_id not in experiment_branch_ids:
+                msg = (
+                    f"Branch '{chosen_branch}' is not part of this experiment. Choose the"
+                    f" control ('{control_label}') or the variant ('{variant_label}')."
+                )
+                if output_json:
+                    json_print({"success": False, "error": msg})
+                else:
+                    error(msg)
+                sys.exit(1)
 
         winner_label = branch_map.get(chosen_branch_id, {}).get("name", chosen_branch_id)
+
+        if not output_json and not force:
+            if not questionary.confirm(
+                f"End experiment and send all live traffic to '{winner_label}'?",
+                default=False,
+                auto_enter=False,
+            ).ask():
+                warning("Aborted.")
+                sys.exit(0)
 
         result = project.end_experiment(experiment_id, chosen_branch_id)
 

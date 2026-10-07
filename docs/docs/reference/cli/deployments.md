@@ -403,7 +403,7 @@ poly deployments experiment update --name 'v3 test'
 
 ### `poly deployments experiment end`
 
-End the active experiment and choose which branch wins. Unlike [`poly deployments ab-test end`](#poly-deployments-ab-test-end), the platform redeploys the winning branch to `live` automatically — no separate promotion step.
+End the active experiment and choose which branch wins. The winner must be the experiment's control or variant, and it takes all `live` traffic immediately: unlike [`poly deployments ab-test end`](#poly-deployments-ab-test-end), the platform redeploys it to `live` itself, with no separate promotion step. Asks for confirmation unless `--force` or `--json` is passed.
 
 Examples:
 
@@ -414,7 +414,8 @@ poly deployments experiment end
 
 | Flag | Description |
 |---|---|
-| `--chosen-branch` | Name of the branch to keep as winner. If omitted, an interactive prompt shows the control and variant branches for selection. |
+| `--chosen-branch` | Name of the branch to keep as winner: the experiment's control or variant. If omitted, an interactive prompt shows the control and variant branches for selection. |
+| `--force` | End the experiment and redeploy the winner to `live` without confirmation. This is the default with `--json`. |
 
 !!! info "`--chosen-branch` is required with `--json`"
 

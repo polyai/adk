@@ -1219,7 +1219,7 @@ class ExperimentEndTest(unittest.TestCase):
     @patch("poly.output.console.info")
     def test_end__control_wins_rich_output(self, mock_info, mock_success):
         """Choosing the control ends the experiment without a redeploy message."""
-        DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="main")
+        DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="main", force=True)
 
         self.proj.end_experiment.assert_called_once_with("exp-001", "br-main")
         self.assertIn("Winner: main", mock_success.call_args[0][0])
@@ -1244,7 +1244,7 @@ class ExperimentEndTest(unittest.TestCase):
     @patch("poly.output.console.info")
     def test_end__variant_wins_does_not_promote(self, mock_info, mock_success):
         """Choosing the variant reports the redeploy but never calls promote_deployment."""
-        DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="v2-branch")
+        DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="v2-branch", force=True)
 
         self.proj.end_experiment.assert_called_once_with("exp-001", "br-v2")
         self.proj.promote_deployment.assert_not_called()
@@ -1263,16 +1263,18 @@ class ExperimentEndTest(unittest.TestCase):
 
     # -- Interactive prompt flow --
 
+    @patch("questionary.confirm")
     @patch("questionary.select")
     @patch("questionary.Choice")
     @patch("poly.output.console.success")
     @patch("poly.output.console.info")
     def test_end__interactive_prompt_selects_winner(
-        self, mock_info, mock_success, mock_choice, mock_select
+        self, mock_info, mock_success, mock_choice, mock_select, mock_confirm
     ):
         """Interactive mode offers control and variant by branch name, then ends."""
         mock_choice.side_effect = lambda **kw: kw
         mock_select.return_value.ask.return_value = "br-v2"
+        mock_confirm.return_value.ask.return_value = True
 
         DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch=None)
 
@@ -1328,6 +1330,74 @@ class ExperimentEndTest(unittest.TestCase):
         payload = mock_json.call_args[0][0]
         self.assertFalse(payload["success"])
         self.assertIn("No branch found", payload["error"])
+
+    @patch("poly.output.console.error")
+    @patch("poly.output.console.info")
+    def test_end__branch_outside_experiment_exits_with_error(self, mock_info, mock_error):
+        """An existing branch that isn't the control or variant is refused before ending."""
+        branches = dict(SAMPLE_BRANCHES, other={"branchId": "br-other"})
+        self.proj.get_branches.return_value = ("main", branches)
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="other", force=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("not part of this experiment", mock_error.call_args[0][0])
+        self.proj.end_experiment.assert_not_called()
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_end__branch_outside_experiment_json(self, mock_json):
+        """A branch outside the experiment in JSON mode emits error JSON and exits."""
+        branches = dict(SAMPLE_BRANCHES, other={"branchId": "br-other"})
+        self.proj.get_branches.return_value = ("main", branches)
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="other", output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("not part of this experiment", payload["error"])
+        self.proj.end_experiment.assert_not_called()
+
+    # -- Confirmation --
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.info")
+    def test_end__chosen_branch_confirms_live_redeploy(self, mock_info, mock_success, mock_confirm):
+        """Without --force, --chosen-branch asks to confirm sending live traffic to the winner."""
+        mock_confirm.return_value.ask.return_value = True
+
+        DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="v2-branch")
+
+        prompt = mock_confirm.call_args[0][0]
+        self.assertIn("live", prompt)
+        self.assertIn("v2-branch", prompt)
+        self.proj.end_experiment.assert_called_once_with("exp-001", "br-v2")
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.warning")
+    @patch("poly.output.console.info")
+    def test_end__declining_confirmation_aborts(self, mock_info, mock_warning, mock_confirm):
+        """Declining the confirmation exits with 0 and leaves the experiment running."""
+        mock_confirm.return_value.ask.return_value = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="v2-branch")
+
+        self.assertEqual(ctx.exception.code, 0)
+        mock_warning.assert_called_once()
+        self.proj.end_experiment.assert_not_called()
+
+    @patch("questionary.confirm")
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_end__json_mode_skips_confirmation(self, mock_json, mock_confirm):
+        """--json never prompts."""
+        DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="v2-branch", output_json=True)
+
+        mock_confirm.assert_not_called()
+        self.proj.end_experiment.assert_called_once_with("exp-001", "br-v2")
 
     @patch("poly.cli_commands.deployments.json_print")
     def test_end__json_mode_without_chosen_branch_exits_with_error(self, mock_json):
@@ -1411,7 +1481,7 @@ class ExperimentEndTest(unittest.TestCase):
         )
 
         with self.assertRaises(requests.HTTPError):
-            DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="main")
+            DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="main", force=True)
 
     # -- Legacy A/B test record (versions: []) --
 
