@@ -100,6 +100,25 @@ class FunctionCallArgumentAssertion:
     value_type: str
     assertion_type: str = "equals"
 
+    def __post_init__(self) -> None:
+        # The wire field is a string. Agent Studio decodes it by value_type when
+        # building the projection (agent-stream parseExpectedValue: parseInt for
+        # "integer", parseFloat for "float", raw === "true" for "boolean"), so
+        # the projection -- and therefore every pull -- hands back a native
+        # int/float/bool. Re-encode it here, or the next push passes that native
+        # value into the string proto field and fails with "bad argument type
+        # for built-in operation". Booleans must be exactly "true"/"false": the
+        # decoder compares against lowercase "true", so str(True) == "True"
+        # would silently decode to false. bool is checked before int because
+        # bool is a subclass of int.
+        value = self.expected_value
+        if value is None or isinstance(value, str):
+            return
+        if isinstance(value, bool):
+            self.expected_value = "true" if value else "false"
+        else:
+            self.expected_value = str(value)
+
     def to_yaml_dict(self) -> dict:
         return {
             "parameter_name": self.parameter_name,
