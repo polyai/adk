@@ -1575,11 +1575,19 @@ class DeploymentsCommand(BaseCommand):
         # The control is always the implicit "main" branch, so it's never a
         # valid choice for the variant. The server also only accepts a
         # top-level branch as the variant (assertTopLevelBranch rejects a
-        # child branch with a 400), so child branches are excluded too.
+        # child branch with a 400), and rejects one that's diverged from its
+        # parent (needs 'poly branch sync' first), so both are excluded here.
         def _is_top_level(meta: dict) -> bool:
             return meta.get("parentBranchId") in (None, "main")
 
-        eligible = [n for n, meta in branches.items() if n != "main" and _is_top_level(meta)]
+        def _is_synced(meta: dict) -> bool:
+            return not meta.get("isDiverged")
+
+        eligible = [
+            n
+            for n, meta in branches.items()
+            if n != "main" and _is_top_level(meta) and _is_synced(meta)
+        ]
 
         if branch is None:
             if output_json:
@@ -1587,7 +1595,27 @@ class DeploymentsCommand(BaseCommand):
                 json_print({"success": False, "error": msg})
                 sys.exit(1)
             if not eligible:
-                error("No eligible branches found. Create a branch to test as a variant first.")
+                diverged = [
+                    n
+                    for n, meta in branches.items()
+                    if n != "main" and _is_top_level(meta) and not _is_synced(meta)
+                ]
+                if diverged:
+                    names = ", ".join(sorted(diverged))
+                    if len(diverged) == 1:
+                        error(
+                            f"No eligible branches found — '{names}' is diverged from its"
+                            " parent. Switch to it and run 'poly branch sync' before"
+                            " testing it as a variant."
+                        )
+                    else:
+                        error(
+                            f"No eligible branches found — {names} are diverged from their"
+                            " parents. Switch to each and run 'poly branch sync' before"
+                            " testing it as a variant."
+                        )
+                else:
+                    error("No eligible branches found. Create a branch to test as a variant first.")
                 sys.exit(1)
             branch = questionary.select(
                 "Select branch (variant):",
@@ -1609,6 +1637,16 @@ class DeploymentsCommand(BaseCommand):
                 msg = (
                     f"Branch '{branch}' is not a top-level branch — only a top-level"
                     " branch can be tested as a variant."
+                )
+                if output_json:
+                    json_print({"success": False, "error": msg})
+                else:
+                    error(msg)
+                sys.exit(1)
+            elif branch_meta is not None and not _is_synced(branch_meta):
+                msg = (
+                    f"Branch '{branch}' is diverged from its parent. Switch to it and run"
+                    " 'poly branch sync' before testing it as a variant."
                 )
                 if output_json:
                     json_print({"success": False, "error": msg})

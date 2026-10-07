@@ -270,6 +270,36 @@ class ExperimentStartTest(unittest.TestCase):
 
     @patch("questionary.select")
     @patch("questionary.Choice")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_experiment_detail")
+    def test_start__interactive_branch_picker_excludes_diverged_branches(
+        self, mock_detail, mock_success, mock_choice, mock_select
+    ):
+        """A branch diverged from its parent is excluded — the server rejects it as a variant."""
+        self.proj.get_branches.return_value = (
+            "main",
+            {
+                "main": {"branchId": "br-main"},
+                "v2-branch": {"branchId": "br-v2", "parentBranchId": "main"},
+                "stale-branch": {
+                    "branchId": "br-stale",
+                    "parentBranchId": "main",
+                    "isDiverged": True,
+                },
+            },
+        )
+        mock_choice.side_effect = lambda **kw: kw
+        mock_select.return_value.ask.return_value = "v2-branch"
+
+        DeploymentsCommand.experiment_start(
+            TEST_DIR, name="test", branch=None, traffic_percentage=50
+        )
+
+        choice_titles = [c["title"] for c in mock_select.call_args[1]["choices"]]
+        self.assertEqual(choice_titles, ["v2-branch"])
+
+    @patch("questionary.select")
+    @patch("questionary.Choice")
     @patch("poly.output.console.warning")
     def test_start__interactive_branch_picker_aborted_exits_zero(
         self, mock_warning, mock_choice, mock_select
@@ -297,7 +327,84 @@ class ExperimentStartTest(unittest.TestCase):
             )
 
         self.assertEqual(ctx.exception.code, 1)
-        self.assertIn("No eligible branches", mock_error.call_args[0][0])
+        mock_error.assert_called_once_with(
+            "No eligible branches found. Create a branch to test as a variant first."
+        )
+
+    @patch("poly.output.console.error")
+    def test_start__interactive_only_diverged_child_branch_shows_generic_message(self, mock_error):
+        """A diverged child branch isn't a candidate at all, so the generic message is shown."""
+        self.proj.get_branches.return_value = (
+            "main",
+            {
+                "main": {"branchId": "br-main"},
+                "child": {
+                    "branchId": "br-child",
+                    "parentBranchId": "br-feature",
+                    "isDiverged": True,
+                },
+            },
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_start(
+                TEST_DIR, name="test", branch=None, traffic_percentage=50
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_error.assert_called_once_with(
+            "No eligible branches found. Create a branch to test as a variant first."
+        )
+
+    @patch("poly.output.console.error")
+    def test_start__interactive_single_diverged_branch_names_it(self, mock_error):
+        """If the only candidate is diverged, the error names it and suggests a sync."""
+        self.proj.get_branches.return_value = (
+            "main",
+            {
+                "main": {"branchId": "br-main"},
+                "stale-branch": {
+                    "branchId": "br-stale",
+                    "parentBranchId": "main",
+                    "isDiverged": True,
+                },
+            },
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_start(
+                TEST_DIR, name="test", branch=None, traffic_percentage=50
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_error.assert_called_once_with(
+            "No eligible branches found — 'stale-branch' is diverged from its parent."
+            " Switch to it and run 'poly branch sync' before testing it as a variant."
+        )
+        self.proj.create_experiment.assert_not_called()
+
+    @patch("poly.output.console.error")
+    def test_start__interactive_multiple_diverged_branches_names_all_sorted(self, mock_error):
+        """With several diverged candidates, the error lists them all in sorted order."""
+        self.proj.get_branches.return_value = (
+            "main",
+            {
+                "main": {"branchId": "br-main"},
+                "zeta": {"branchId": "br-zeta", "parentBranchId": "main", "isDiverged": True},
+                "alpha": {"branchId": "br-alpha", "parentBranchId": None, "isDiverged": True},
+            },
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_start(
+                TEST_DIR, name="test", branch=None, traffic_percentage=50
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_error.assert_called_once_with(
+            "No eligible branches found — alpha, zeta are diverged from their parents."
+            " Switch to each and run 'poly branch sync' before testing it as a variant."
+        )
 
     @patch("questionary.text")
     @patch("poly.output.console.error")
@@ -390,6 +497,61 @@ class ExperimentStartTest(unittest.TestCase):
         payload = mock_json.call_args[0][0]
         self.assertFalse(payload["success"])
         self.assertIn("is not a top-level branch", payload["error"])
+        self.proj.create_experiment.assert_not_called()
+
+    @patch("poly.output.console.error")
+    def test_start__explicit_diverged_branch_rejected(self, mock_error):
+        """A branch diverged from its parent is rejected, pointing to 'poly branch sync'."""
+        self.proj.get_branches.return_value = (
+            "main",
+            {
+                "main": {"branchId": "br-main"},
+                "stale-branch": {
+                    "branchId": "br-stale",
+                    "parentBranchId": "main",
+                    "isDiverged": True,
+                },
+            },
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_start(
+                TEST_DIR, name="test", branch="stale-branch", traffic_percentage=50
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("diverged", mock_error.call_args[0][0])
+        self.assertIn("poly branch sync", mock_error.call_args[0][0])
+        self.proj.create_experiment.assert_not_called()
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_start__explicit_diverged_branch_rejected_json(self, mock_json):
+        """A diverged branch in JSON mode emits error JSON and exits."""
+        self.proj.get_branches.return_value = (
+            "main",
+            {
+                "main": {"branchId": "br-main"},
+                "stale-branch": {
+                    "branchId": "br-stale",
+                    "parentBranchId": "main",
+                    "isDiverged": True,
+                },
+            },
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.experiment_start(
+                TEST_DIR,
+                name="test",
+                branch="stale-branch",
+                traffic_percentage=50,
+                output_json=True,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("diverged", payload["error"])
         self.proj.create_experiment.assert_not_called()
 
     @patch("poly.output.console.error")
