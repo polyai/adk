@@ -253,6 +253,53 @@ poly chat --sip-header X-Customer-ID=12345 --sip-header X-Language=en-GB
 functions through `conv.sip_headers`. It does not create a SIP call or reproduce
 carrier-level SIP behaviour.
 
+### `poly sip-trunks`
+
+Run from an ADK project to manage SIP trunks for its account and region. List the trunks,
+export their configuration, edit the YAML, then apply it:
+
+```bash
+poly sip-trunks list
+poly sip-trunks list --output                # write project-root sip-trunks.yaml
+# Edit sip-trunks.yaml, then apply:
+poly sip-trunks manage
+poly sip-trunks list --path /path/to/project  # select a project explicitly
+```
+
+`manage` looks for `sip-trunks.yaml` in the project root, then its immediate parent.
+The parent is useful for sharing configuration between projects in the same account and
+region. Keep separate files for different accounts or regions.
+
+To create a trunk, add an entry such as:
+
+```yaml
+- name: Primary carrier
+  sip_cidr: [203.0.113.0/24]
+  rtp_cidr: [198.51.100.0/24]
+  encrypted: true
+  default_route: null
+  outbound: null
+  inbound_auth:
+    type: digest
+    username: carrier-user
+  extensions:
+    - extension: "1000"
+      agent_id: my-project
+      client_env: live
+```
+
+`manage` previews the changes and asks for confirmation. It prompts securely for any
+required credentials and saves generated trunk IDs and hostnames back to the YAML.
+Use `--force` to apply without confirmation; `--json` also skips confirmation.
+The required `default_route` and `outbound` fields use `null` to disable those features.
+
+An `extensions` list specifies all bindings to keep; removing an entry deletes that
+binding. Removing a trunk from YAML leaves the live trunk unchanged; use
+`poly sip-trunks delete <trunk_id>` to delete it.
+
+See the [SIP trunks reference](https://polyai.github.io/adk/reference/cli/sip-trunks/)
+for the full YAML schema, file options, and command reference.
+
 ### `poly docs`
 
 Output ADK documentation

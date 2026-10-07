@@ -10,6 +10,7 @@ import os
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import quote
 
 import requests
 from ruamel.yaml import YAML
@@ -71,6 +72,10 @@ FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+SIP_TRUNKS_URL = "/v1/accounts/{account_id}/telephony/sip-trunks"
+SIP_TRUNK_URL = SIP_TRUNKS_URL + "/{trunk_id}"
+SIP_TRUNK_EXTENSIONS_URL = SIP_TRUNK_URL + "/extensions"
+SIP_TRUNK_EXTENSION_URL = SIP_TRUNK_EXTENSIONS_URL + "/{extension}"
 
 
 class PlatformAPIHandler:
@@ -1775,3 +1780,186 @@ class PlatformAPIHandler:
         """
         endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    @staticmethod
+    def list_sip_trunks(region: str, account_id: str) -> dict[str, ty.Any]:
+        """List the account's SIP trunks.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+
+        Returns:
+            dict: {"sip_trunks": [...]}, containing the account's SIP trunks.
+        """
+        endpoint = SIP_TRUNKS_URL.format(account_id=account_id)
+        return PlatformAPIHandler.make_request(region, endpoint)
+
+    @staticmethod
+    def create_sip_trunk(
+        region: str, account_id: str, data: dict[str, ty.Any]
+    ) -> dict[str, ty.Any]:
+        """Create an account-level SIP trunk.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            data: The SIP trunk configuration to create.
+
+        Returns:
+            dict: The created SIP trunk, including its generated ID and hostname.
+        """
+        endpoint = SIP_TRUNKS_URL.format(account_id=account_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
+
+    @staticmethod
+    def get_sip_trunk(region: str, account_id: str, trunk_id: str) -> dict[str, ty.Any]:
+        """Get one of the account's SIP trunks.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            trunk_id: The SIP trunk ID.
+
+        Returns:
+            dict: The SIP trunk details.
+        """
+        endpoint = SIP_TRUNK_URL.format(account_id=account_id, trunk_id=trunk_id)
+        return PlatformAPIHandler.make_request(region, endpoint)
+
+    @staticmethod
+    def update_sip_trunk(
+        region: str, account_id: str, trunk_id: str, data: dict[str, ty.Any]
+    ) -> dict[str, ty.Any]:
+        """Patch one of the account's SIP trunks.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            trunk_id: The SIP trunk ID.
+            data: The SIP trunk fields to update.
+
+        Returns:
+            dict: The updated SIP trunk.
+        """
+        endpoint = SIP_TRUNK_URL.format(account_id=account_id, trunk_id=trunk_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
+
+    @staticmethod
+    def delete_sip_trunk(region: str, account_id: str, trunk_id: str) -> dict[str, ty.Any]:
+        """Delete one of the account's SIP trunks.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            trunk_id: The SIP trunk ID.
+
+        Returns:
+            dict: An empty dictionary when deletion succeeds.
+        """
+        endpoint = SIP_TRUNK_URL.format(account_id=account_id, trunk_id=trunk_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "DELETE")
+
+    @staticmethod
+    def list_sip_trunk_extensions(region: str, account_id: str, trunk_id: str) -> dict[str, ty.Any]:
+        """List extensions belonging to a SIP trunk.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            trunk_id: The SIP trunk ID.
+
+        Returns:
+            dict: {"extensions": [...]}, containing the trunk's extension bindings.
+        """
+        endpoint = SIP_TRUNK_EXTENSIONS_URL.format(account_id=account_id, trunk_id=trunk_id)
+        return PlatformAPIHandler.make_request(region, endpoint)
+
+    @staticmethod
+    def create_sip_trunk_extension(
+        region: str, account_id: str, trunk_id: str, data: dict[str, ty.Any]
+    ) -> dict[str, ty.Any]:
+        """Create an extension on a SIP trunk.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            trunk_id: The SIP trunk ID.
+            data: The extension and agent routing target to create.
+
+        Returns:
+            dict: The created extension binding.
+        """
+        endpoint = SIP_TRUNK_EXTENSIONS_URL.format(account_id=account_id, trunk_id=trunk_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
+
+    @staticmethod
+    def get_sip_trunk_extension(
+        region: str, account_id: str, trunk_id: str, extension: str
+    ) -> dict[str, ty.Any]:
+        """Get a SIP trunk extension and its routing target.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            trunk_id: The SIP trunk ID.
+            extension: The dialled number or extension, without URL encoding.
+
+        Returns:
+            dict: The extension binding and its agent routing target.
+        """
+        endpoint = SIP_TRUNK_EXTENSION_URL.format(
+            account_id=account_id,
+            trunk_id=trunk_id,
+            extension=quote(extension, safe=""),
+        )
+        return PlatformAPIHandler.make_request(region, endpoint)
+
+    @staticmethod
+    def update_sip_trunk_extension(
+        region: str,
+        account_id: str,
+        trunk_id: str,
+        extension: str,
+        data: dict[str, ty.Any],
+    ) -> dict[str, ty.Any]:
+        """Patch a SIP trunk extension's routing target.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            trunk_id: The SIP trunk ID.
+            extension: The dialled number or extension, without URL encoding.
+            data: The extension's agent routing fields to update.
+
+        Returns:
+            dict: The updated extension binding.
+        """
+        endpoint = SIP_TRUNK_EXTENSION_URL.format(
+            account_id=account_id,
+            trunk_id=trunk_id,
+            extension=quote(extension, safe=""),
+        )
+        return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
+
+    @staticmethod
+    def delete_sip_trunk_extension(
+        region: str, account_id: str, trunk_id: str, extension: str
+    ) -> dict[str, ty.Any]:
+        """Delete an extension from a SIP trunk.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            trunk_id: The SIP trunk ID.
+            extension: The dialled number or extension, without URL encoding.
+
+        Returns:
+            dict: An empty dictionary when deletion succeeds.
+        """
+        endpoint = SIP_TRUNK_EXTENSION_URL.format(
+            account_id=account_id,
+            trunk_id=trunk_id,
+            extension=quote(extension, safe=""),
+        )
+        return PlatformAPIHandler.make_request(region, endpoint, "DELETE")
