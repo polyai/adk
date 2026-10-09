@@ -8,12 +8,15 @@ Copyright PolyAI Limited
 
 import base64
 import json
+import logging
 import os
 import sys
 from typing import Any, Optional
 
 from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
+
+logger = logging.getLogger(__name__)
 
 PACKAGE_NAME = "polyai-adk"
 # The optional extra carrying the voice calling (`poly call`) dependencies.
@@ -326,6 +329,44 @@ def require_deployment_simplification(
         else:
             error("Command is only available for projects using simplified deployments.")
         sys.exit(1)
+
+
+def resolve_branch_id(branches: dict[str, dict], branch_name: str) -> str | None:
+    """Resolve a branch name to its ID.
+
+    Args:
+        branches: Mapping of branch name to metadata, as returned by
+            ``AgentStudioProject.get_branches``.
+        branch_name: Name of the branch.
+
+    Returns:
+        The branch ID, or None if the branch doesn't exist.
+    """
+    return branches.get(branch_name, {}).get("branchId")
+
+
+def branch_id_map(branches: dict[str, dict]) -> dict[str, dict]:
+    """Invert a name → metadata branch mapping into branch ID → metadata plus ``name``."""
+    return {
+        meta["branchId"]: {"name": name, **meta}
+        for name, meta in branches.items()
+        if meta.get("branchId")
+    }
+
+
+def fetch_branch_id_map(project: AgentStudioProject) -> dict[str, dict]:
+    """Build a branch ID → branch dict map for decorating output with branch names.
+
+    Failures are swallowed since a missing label falls back to the raw ID. Resolving
+    a user-supplied name to an ID is a functional need, so fetch branches directly
+    for that and let failures surface.
+    """
+    try:
+        _, branches = project.get_branches()
+        return branch_id_map(branches)
+    except Exception as e:
+        logger.debug("Failed to fetch branches for display: %s", e)
+        return {}
 
 
 def require_ab_tests_enabled(project: AgentStudioProject, output_json: bool = False) -> None:

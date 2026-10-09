@@ -28,7 +28,7 @@ SAMPLE_BRANCHES = {
     "v2-branch": {"branchId": "br-v2"},
 }
 
-# Branch map as built by DeploymentsCommand._fetch_branch_map from SAMPLE_BRANCHES.
+# Branch map as built by shared.fetch_branch_id_map from SAMPLE_BRANCHES.
 SAMPLE_BRANCH_MAP = {
     "br-main": {"name": "main", "branchId": "br-main"},
     "br-v2": {"name": "v2-branch", "branchId": "br-v2"},

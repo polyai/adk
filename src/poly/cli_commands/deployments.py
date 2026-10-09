@@ -15,7 +15,12 @@ from argparse import (
 from typing import Any, Optional
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
-from poly.cli_commands.shared import load_project
+from poly.cli_commands.shared import (
+    branch_id_map,
+    fetch_branch_id_map,
+    load_project,
+    resolve_branch_id,
+)
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 
@@ -683,25 +688,6 @@ class DeploymentsCommand(BaseCommand):
         if len(matches) == 1:
             return matches[0].get("id")
         return None
-
-    @staticmethod
-    def _resolve_branch_to_id(
-        branch_name: str,
-        branches: dict[str, dict],
-    ) -> str | None:
-        """Resolve a top-level branch name to a branch ID.
-
-        Args:
-            branch_name: Name of the branch.
-            branches: Mapping of branch name to branch metadata (from
-                ``AgentStudioProject.get_branches``), each containing at least
-                ``branchId``.
-
-        Returns:
-            The branch ID if the branch exists, else None.
-        """
-        meta = branches.get(branch_name)
-        return meta.get("branchId") if meta else None
 
     # ── deployment handlers ─────────────────────────────────────────
 
@@ -1486,33 +1472,6 @@ class DeploymentsCommand(BaseCommand):
         return f"{day}{suffix} {now.strftime('%B %Y')} Experiment {now.strftime('%H:%M')}"
 
     @staticmethod
-    def _branch_map_from_branches(branches: dict[str, dict]) -> dict[str, dict]:
-        """Convert a name → branch dict mapping (as returned by get_branches) to ID → branch dict."""
-        branch_map: dict[str, dict] = {}
-        for branch_name, meta in branches.items():
-            branch_id = meta.get("branchId")
-            if branch_id:
-                branch_map[branch_id] = {"name": branch_name, **meta}
-        return branch_map
-
-    @classmethod
-    def _fetch_branch_map(cls, project: AgentStudioProject) -> dict[str, dict]:
-        """Build a branch ID → branch dict map for display enrichment.
-
-        Failures are swallowed — callers use this only to decorate output with
-        branch names, and a missing label falls back to the raw ID. Resolving
-        a user-supplied branch name to an ID is a functional need, not display
-        enrichment, so that must fetch branches directly instead and let
-        failures surface (see ``experiment_end``).
-        """
-        try:
-            _, branches = project.get_branches()
-            return cls._branch_map_from_branches(branches)
-        except Exception as e:
-            logger.debug("Failed to fetch branches for experiment display: %s", e)
-            return {}
-
-    @staticmethod
     def _exit_for_legacy_ab_test_record(output_json: bool, action: str) -> None:
         """Exit with a clear error for an experiment record with no branch-based versions.
 
@@ -1663,7 +1622,7 @@ class DeploymentsCommand(BaseCommand):
                     error(msg)
                 sys.exit(1)
 
-        branch_id = cls._resolve_branch_to_id(branch, branches)
+        branch_id = resolve_branch_id(branches, branch)
         if not branch_id:
             msg = f"No branch found named '{branch}'."
             if output_json:
@@ -1708,7 +1667,7 @@ class DeploymentsCommand(BaseCommand):
             json_print({"success": True, "experiment": result})
         else:
             success("Experiment started.")
-            branch_map = cls._fetch_branch_map(project)
+            branch_map = fetch_branch_id_map(project)
             print_experiment_detail(result, branches=branch_map)
 
     @classmethod
@@ -1730,7 +1689,7 @@ class DeploymentsCommand(BaseCommand):
         if output_json:
             json_print({"success": True, "experiments": experiments})
         else:
-            branch_map = cls._fetch_branch_map(project) if experiments else {}
+            branch_map = fetch_branch_id_map(project) if experiments else {}
             with paged_output():
                 print_experiments(experiments, branches=branch_map)
 
@@ -1751,7 +1710,7 @@ class DeploymentsCommand(BaseCommand):
         if output_json:
             json_print({"success": True, "experiment": experiment or None})
         else:
-            branch_map = cls._fetch_branch_map(project) if experiment else {}
+            branch_map = fetch_branch_id_map(project) if experiment else {}
             print_experiment_detail(experiment, branches=branch_map)
 
     @classmethod
@@ -1825,7 +1784,7 @@ class DeploymentsCommand(BaseCommand):
             json_print({"success": True, "experiment": result})
         else:
             success("Experiment updated.")
-            branch_map = cls._fetch_branch_map(project)
+            branch_map = fetch_branch_id_map(project)
             print_experiment_detail(result, branches=branch_map)
 
     @classmethod
@@ -1872,7 +1831,7 @@ class DeploymentsCommand(BaseCommand):
                 error(msg)
             sys.exit(1)
 
-        branch_map = cls._branch_map_from_branches(branches)
+        branch_map = branch_id_map(branches)
         name_to_branch_id = {meta["name"]: bid for bid, meta in branch_map.items()}
 
         control_version = next((v for v in versions if v.get("kind") == "control"), None)
