@@ -34,6 +34,8 @@ CHAT_END_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conver
 AB_TESTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests"
 AB_TEST_ACTIVE_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/active"
 AB_TEST_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/{ab_test_id}"
+# Experiments endpoints return camelCase keys, unlike the rest of the ADK v1 API, so their
+# responses are passed through camel_to_snake_keys.
 EXPERIMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/experiments"
 EXPERIMENT_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/experiments/{experiment_id}"
 EXPERIMENT_END_URL = (
