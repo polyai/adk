@@ -369,31 +369,6 @@ def fetch_branch_id_map(project: AgentStudioProject) -> dict[str, dict]:
         return {}
 
 
-def require_ab_tests_enabled(project: AgentStudioProject, output_json: bool = False) -> None:
-    """Check if the project is still eligible to use A/B tests and exit if not.
-
-    A/B tests operate on the classic deployment model (fixed control/variant
-    deployment IDs). Projects on the simplified deployment model must use
-    ``poly deployments experiment`` instead — the two are mutually exclusive.
-
-    Args:
-        project: The loaded project.
-        output_json: If True, output JSON and exit on failure.
-    """
-    from poly.output.console import error
-
-    if project.using_simplified_deployments:
-        msg = (
-            "A/B tests are not available for projects using simplified deployments —"
-            " use 'poly deployments experiment' instead."
-        )
-        if output_json:
-            json_print({"success": False, "error": msg})
-        else:
-            error(msg)
-        sys.exit(1)
-
-
 def require_experiments_enabled(project: AgentStudioProject, output_json: bool = False) -> None:
     """Check if the project is eligible to use experiments and exit if not.
 

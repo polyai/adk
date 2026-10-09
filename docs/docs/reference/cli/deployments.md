@@ -154,43 +154,6 @@ Without `--force`, the command prompts for confirmation before proceeding.
 
 Adds `"dry_run": true` instead of rolling back when `--dry-run` is passed.
 
-## `poly deployments ab-test`
-
-!!! warning "Deprecated"
-
-    `poly deployments ab-test` is deprecated and hidden from `--help`. Use [`poly deployments experiment`](#poly-deployments-experiment) instead. Only `ab-test end` is documented here, so a test started before a project adopted simplified deployments can still be ended.
-
-### `poly deployments ab-test end`
-
-End the active A/B test and choose which deployment wins. If the variant wins, it is automatically promoted to `live`. Works on either deployment model.
-
-Examples:
-
-~~~bash
-poly deployments ab-test end --chosen-version <hash>
-poly deployments ab-test end
-~~~
-
-| Flag | Description |
-|---|---|
-| `--chosen-version` | Version hash of the deployment to keep as winner. If omitted, an interactive prompt shows the control and variant deployments for selection. |
-
-!!! info "`--chosen-version` is required with `--json`"
-
-    `--chosen-version` must be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
-
-`--json` output shape:
-
-~~~json
-{
-  "success": true,
-  "ab_test": {},
-  "promoted": false
-}
-~~~
-
-If promoting the winning variant to `live` fails after the test has already ended, `"promoted"` is `false` and a `"promote_error"` key is added instead.
-
 ## `poly deployments experiment`
 
 Manage experiments for projects using the simplified deployment model, testing a top-level branch against the current live version. Only one experiment can run at a time, with a single variant. `poly deployments experiment` requires a subcommand.
@@ -302,7 +265,7 @@ poly deployments experiment update --name 'v3 test'
 
 ### `poly deployments experiment end`
 
-End the active experiment and choose which branch wins. The winner must be the experiment's control or variant, and it takes all `live` traffic immediately: unlike [`poly deployments ab-test end`](#poly-deployments-ab-test-end), the platform redeploys it to `live` itself, with no separate promotion step. Asks for confirmation unless `--force` or `--json` is passed.
+End the active experiment and choose which branch wins. The winner must be the experiment's control or variant, and it takes all `live` traffic immediately: the platform redeploys it to `live` itself, with no separate promotion step. Asks for confirmation unless `--force` or `--json` is passed.
 
 Examples:
 

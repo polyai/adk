@@ -47,18 +47,6 @@ SAMPLE_EXPERIMENT = {
 
 GATE_MESSAGE = "simplified deployments with top-level branches"
 
-# A classic A/B test, which the experiments API also returns, as seen by get_active_experiment.
-LEGACY_AB_TEST_EXPERIMENT = {
-    "id": "exp-legacy",
-    "name": "old ab test",
-    "versions": [],
-    "control_deployment_id": "dep-live",
-    "variant_deployment_id": "dep-variant",
-    "traffic_percentage": 50,
-    "ended_at": None,
-}
-
-
 class ExperimentStartTest(unittest.TestCase):
     """Tests for DeploymentsCommand.experiment_start."""
 
@@ -680,7 +668,7 @@ class ExperimentStartTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertIn("required", payload["error"])
 
-    # -- Validation: traffic_percentage (1-99, unlike ab-test's 0-100) --
+    # -- Validation: traffic_percentage (1-99) --
 
     @patch("poly.output.console.error")
     def test_start__traffic_zero_is_rejected(self, mock_error):
@@ -1139,39 +1127,12 @@ class ExperimentUpdateTest(unittest.TestCase):
         with self.assertRaises(requests.HTTPError):
             DeploymentsCommand.experiment_update(TEST_DIR, traffic_percentage=30)
 
-    # -- Legacy A/B test record (versions: []) --
-
-    @patch("poly.output.console.error")
-    def test_update__legacy_record_exits_with_error(self, mock_error):
-        """A record with no branch-based versions exits cleanly, pointing to ab-test end."""
-        self.proj.get_active_experiment.return_value = dict(LEGACY_AB_TEST_EXPERIMENT)
-
-        with self.assertRaises(SystemExit) as ctx:
-            DeploymentsCommand.experiment_update(TEST_DIR, traffic_percentage=30)
-
-        self.assertEqual(ctx.exception.code, 1)
-        self.assertIn("ab-test end", mock_error.call_args[0][0])
-        self.proj.update_experiment.assert_not_called()
-
-    @patch("poly.cli_commands.deployments.json_print")
-    def test_update__legacy_record_exits_with_error_json(self, mock_json):
-        """A legacy record in JSON mode emits error JSON pointing to ab-test end."""
-        self.proj.get_active_experiment.return_value = dict(LEGACY_AB_TEST_EXPERIMENT)
-
-        with self.assertRaises(SystemExit) as ctx:
-            DeploymentsCommand.experiment_update(TEST_DIR, traffic_percentage=30, output_json=True)
-
-        self.assertEqual(ctx.exception.code, 1)
-        payload = mock_json.call_args[0][0]
-        self.assertFalse(payload["success"])
-        self.assertIn("ab-test end", payload["error"])
-        self.proj.update_experiment.assert_not_called()
 
 
 class ExperimentEndTest(unittest.TestCase):
     """Tests for DeploymentsCommand.experiment_end.
 
-    Unlike ab_test_end, ending an experiment never calls promote_deployment: the
+    Ending an experiment never calls promote_deployment: the
     platform's /end endpoint redeploys the winning branch itself.
     """
 
@@ -1483,45 +1444,6 @@ class ExperimentEndTest(unittest.TestCase):
         with self.assertRaises(requests.HTTPError):
             DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="main", force=True)
 
-    # -- Legacy A/B test record (versions: []) --
-
-    @patch("poly.output.console.error")
-    def test_end__legacy_record_exits_with_error(self, mock_error):
-        """A record with no branch-based versions exits cleanly, pointing to ab-test end."""
-        self.proj.get_active_experiment.return_value = dict(LEGACY_AB_TEST_EXPERIMENT)
-
-        with self.assertRaises(SystemExit) as ctx:
-            DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch=None)
-
-        self.assertEqual(ctx.exception.code, 1)
-        self.assertIn("ab-test end", mock_error.call_args[0][0])
-        self.proj.get_branches.assert_not_called()
-        self.proj.end_experiment.assert_not_called()
-
-    @patch("poly.cli_commands.deployments.json_print")
-    def test_end__legacy_record_exits_with_error_json(self, mock_json):
-        """A legacy record in JSON mode emits error JSON pointing to ab-test end."""
-        self.proj.get_active_experiment.return_value = dict(LEGACY_AB_TEST_EXPERIMENT)
-
-        with self.assertRaises(SystemExit) as ctx:
-            DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch="main", output_json=True)
-
-        self.assertEqual(ctx.exception.code, 1)
-        payload = mock_json.call_args[0][0]
-        self.assertFalse(payload["success"])
-        self.assertIn("ab-test end", payload["error"])
-        self.proj.get_branches.assert_not_called()
-        self.proj.end_experiment.assert_not_called()
-
-    @patch("poly.output.console.error")
-    def test_end__legacy_record_exits_before_building_interactive_prompt(self, mock_error):
-        """The guard fires before the interactive prompt, avoiding a title-as-id Choice."""
-        self.proj.get_active_experiment.return_value = dict(LEGACY_AB_TEST_EXPERIMENT)
-
-        with self.assertRaises(SystemExit):
-            DeploymentsCommand.experiment_end(TEST_DIR, chosen_branch=None)
-
-        self.proj.end_experiment.assert_not_called()
 
 
 if __name__ == "__main__":
