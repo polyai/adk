@@ -156,114 +156,13 @@ Adds `"dry_run": true` instead of rolling back when `--dry-run` is passed.
 
 ## `poly deployments ab-test`
 
-Manage A/B tests for live deployments, on the classic deployment model — projects using simplified deployments use [`poly deployments experiment`](#poly-deployments-experiment) instead. `poly deployments ab-test` requires a subcommand.
+!!! warning "Deprecated"
 
-`ab-test end` works on either deployment model, so a test started before a project adopted simplified deployments can still be ended.
-
-### `poly deployments ab-test start`
-
-Start a new A/B test against the current live deployment. The variant must be a `pre-release` deployment with a version different from the current live deployment.
-
-Examples:
-
-~~~bash
-poly deployments ab-test start --name 'v2 test' --variant-version <hash> --traffic 50
-~~~
-
-| Flag | Description |
-|---|---|
-| `--name`, `-n` | Name/label for the A/B test. If omitted, prompts interactively. |
-| `--variant-version` | Version hash of the pre-release variant. If omitted, prompts interactively. |
-| `--traffic` | Percentage of traffic to route to the variant (0-100). Defaults to 50 interactively. |
-
-!!! info "All flags are required with `--json`"
-
-    `--name`, `--variant-version`, and `--traffic` must all be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
-
-`--json` output shape:
-
-~~~json
-{
-  "success": true,
-  "ab_test": {}
-}
-~~~
-
-### `poly deployments ab-test list`
-
-List A/B tests for the project.
-
-Examples:
-
-~~~bash
-poly deployments ab-test list
-poly deployments ab-test list --limit 20
-~~~
-
-| Flag | Description |
-|---|---|
-| `--limit` | Number of A/B tests to show. Defaults to `10`. |
-
-`--json` output shape:
-
-~~~json
-{
-  "success": true,
-  "ab_tests": []
-}
-~~~
-
-### `poly deployments ab-test active`
-
-Show the currently active A/B test, if any.
-
-Examples:
-
-~~~bash
-poly deployments ab-test active
-~~~
-
-`--json` output shape:
-
-~~~json
-{
-  "success": true,
-  "ab_test": null
-}
-~~~
-
-### `poly deployments ab-test update`
-
-Update the traffic split for the active A/B test.
-
-Examples:
-
-~~~bash
-poly deployments ab-test update --traffic 30
-~~~
-
-| Flag | Description |
-|---|---|
-| `--traffic` | New percentage of traffic to route to the variant (0-100). Prompts if omitted. |
-
-!!! info "`--traffic` is required with `--json`"
-
-    `--traffic` must be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
-
-`--json` output shape:
-
-~~~json
-{
-  "success": true,
-  "ab_test": {}
-}
-~~~
-
-Adds `"unchanged": true` instead of updating when `--traffic` matches the current split.
+    `poly deployments ab-test` is deprecated and hidden from `--help`. Use [`poly deployments experiment`](#poly-deployments-experiment) instead. Only `ab-test end` is documented here, so a test started before a project adopted simplified deployments can still be ended.
 
 ### `poly deployments ab-test end`
 
-End the active A/B test and choose which deployment wins. If the variant wins, it is automatically promoted to `live`. Works on either deployment model — see [`poly deployments ab-test`](#poly-deployments-ab-test) above.
+End the active A/B test and choose which deployment wins. If the variant wins, it is automatically promoted to `live`. Works on either deployment model.
 
 Examples:
 

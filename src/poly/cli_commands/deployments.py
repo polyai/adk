@@ -5,7 +5,13 @@ Copyright PolyAI Limited
 
 import logging
 import sys
-from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
+from argparse import (
+    SUPPRESS,
+    ArgumentParser,
+    Namespace,
+    RawTextHelpFormatter,
+    _SubParsersAction,
+)
 from typing import Any, Optional
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
@@ -199,7 +205,7 @@ class DeploymentsCommand(BaseCommand):
         ab_test_parser = deployments_subparsers.add_parser(
             "ab-test",
             parents=[parents.verbose],
-            help="Manage A/B tests for live deployments. Deprecated: see 'experiment'.",
+            help=SUPPRESS,
             description=(
                 "Manage A/B tests for live deployments.\n\n"
                 "Deprecated, and not available for projects on the simplified\n"
@@ -512,6 +518,13 @@ class DeploymentsCommand(BaseCommand):
                 dry_run=args.dry_run,
             )
         elif args.deployments_subcommand == "ab-test":
+            if not args.json:
+                from poly.output.console import warning
+
+                warning(
+                    "'ab-test' is deprecated. Use 'poly deployments experiment' instead;"
+                    " 'ab-test end' remains available to finish an existing A/B test."
+                )
             if args.ab_test_subcommand == "start":
                 cls.ab_test_start(
                     args.path,
