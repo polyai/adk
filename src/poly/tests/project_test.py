@@ -5836,6 +5836,11 @@ class ExperimentsTest(unittest.TestCase):
             "project_id": self.project.project_id,
         }
 
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "v2": {"branchId": "br-v2", "parentBranchId": "main"},
+        }
+
         self.project.create_experiment("v2", "br-v2", 30)
         self.project.get_experiment("exp-1")
         self.project.end_experiment("exp-1", "br-v2")
@@ -5851,6 +5856,27 @@ class ExperimentsTest(unittest.TestCase):
         self.mock_api.update_experiment.assert_called_once_with(
             **scope, experiment_id="exp-1", name="renamed", branch_id=None, traffic_percentage=None
         )
+
+    def test_create_experiment_rejects_invalid_input(self):
+        """Validation lives on the project so programmatic callers get it too."""
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "child": {"branchId": "br-child", "parentBranchId": "br-v2"},
+            "stale": {"branchId": "br-stale", "parentBranchId": "main", "isDiverged": True},
+        }
+        cases = {
+            "empty name": (" ", "br-stale", 50, "name is required"),
+            "traffic out of range": ("v2", "br-stale", 100, "between 1 and 99"),
+            "unknown branch": ("v2", "br-nope", 50, "No branch found"),
+            "main": ("v2", "main", 50, "Cannot test 'main'"),
+            "child branch": ("v2", "br-child", 50, "not a top-level branch"),
+            "diverged branch": ("v2", "br-stale", 50, "diverged"),
+        }
+        for label, (name, branch_id, traffic, message) in cases.items():
+            with self.subTest(label), self.assertRaisesRegex(ValueError, message):
+                self.project.create_experiment(name, branch_id, traffic)
+
+        self.mock_api.create_experiment.assert_not_called()
 
 
 class DeploymentModePropertyTest(unittest.TestCase):

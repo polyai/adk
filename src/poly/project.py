@@ -3736,7 +3736,39 @@ class AgentStudioProject:
 
         Returns:
             dict: The created experiment record.
+
+        Raises:
+            ValueError: If the name is empty, the traffic percentage is outside 1-99, or
+                the branch doesn't exist or isn't an eligible variant (the platform
+                rejects ``main``, child branches and diverged branches).
         """
+        if not name.strip():
+            raise ValueError("Experiment name is required and cannot be empty.")
+        if not 1 <= traffic_percentage <= 99:
+            raise ValueError("Traffic percentage must be an integer between 1 and 99.")
+
+        _, branches = self.get_branches()
+        branch_name = next(
+            (n for n, meta in branches.items() if meta["branchId"] == branch_id), None
+        )
+        if branch_name is None:
+            raise ValueError(f"No branch found with ID '{branch_id}'.")
+        meta = branches[branch_name]
+        if branch_name == "main":
+            raise ValueError(
+                "Cannot test 'main' against itself — choose a different branch as the variant."
+            )
+        if meta.get("parentBranchId") not in (None, "main"):
+            raise ValueError(
+                f"Branch '{branch_name}' is not a top-level branch — only a top-level"
+                " branch can be tested as a variant."
+            )
+        if meta.get("isDiverged"):
+            raise ValueError(
+                f"Branch '{branch_name}' is diverged from its parent. Switch to it and run"
+                " 'poly branch sync' before testing it as a variant."
+            )
+
         return self.api_handler.create_experiment(
             region=self.region,
             account_id=self.account_id,
