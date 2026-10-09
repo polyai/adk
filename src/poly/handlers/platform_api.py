@@ -1042,10 +1042,10 @@ class PlatformAPIHandler:
             dict: The updated experiment record.
 
         Raises:
-            ValueError: If ``traffic_percentage`` is given without ``branch_id``.
+            ValueError: If only one of ``branch_id`` and ``traffic_percentage`` is given.
         """
-        if traffic_percentage is not None and branch_id is None:
-            raise ValueError("branch_id is required when updating traffic_percentage.")
+        if (branch_id is None) != (traffic_percentage is None):
+            raise ValueError("branch_id and traffic_percentage must be given together.")
         endpoint = EXPERIMENT_URL.format(
             account_id=account_id, project_id=project_id, experiment_id=experiment_id
         )
