@@ -3809,7 +3809,12 @@ class AgentStudioProject:
 
         Returns:
             dict: The updated experiment record.
+
+        Raises:
+            ValueError: If only one of ``branch_id`` and ``traffic_percentage`` is given.
         """
+        if (branch_id is None) != (traffic_percentage is None):
+            raise ValueError("branch_id and traffic_percentage must be given together.")
         return self.api_handler.update_experiment(
             region=self.region,
             account_id=self.account_id,
