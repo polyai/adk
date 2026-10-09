@@ -1154,7 +1154,8 @@ class DeploymentsCommand(BaseCommand):
         result = project.update_experiment(
             experiment["id"],
             name=name,
-            branch_id=variant_branch_id,
+            # The project requires branch_id and traffic_percentage together.
+            branch_id=variant_branch_id if traffic_percentage is not None else None,
             traffic_percentage=traffic_percentage,
         )
         if output_json:

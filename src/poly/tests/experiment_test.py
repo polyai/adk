@@ -975,7 +975,7 @@ class ExperimentUpdateTest(unittest.TestCase):
         DeploymentsCommand.experiment_update(TEST_DIR, name="renamed", output_json=True)
 
         self.proj.update_experiment.assert_called_once_with(
-            "exp-001", name="renamed", branch_id="br-v2", traffic_percentage=None
+            "exp-001", name="renamed", branch_id=None, traffic_percentage=None
         )
 
     @patch("poly.cli_commands.deployments.json_print")
