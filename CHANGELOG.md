@@ -1,6 +1,2171 @@
 # CHANGELOG
 
 
+## v0.67.2 (2026-10-07)
+
+### Bug Fixes
+
+- Use valid region in poly init help example ([#354](https://github.com/polyai/adk/pull/354),
+  [`25b6858`](https://github.com/polyai/adk/commit/25b6858ae3c3177237f7d4d5034031be0e1eda07))
+
+## Summary
+
+Fixes the example in `poly init --help`, which used the invalid region `eu-west-1`.
+
+## Motivation
+
+`--region` only accepts `us-1`, `euw-1`, `uk-1`, `studio`, `staging` or `dev`, so copying the help
+  example failed with an argument error.
+
+## Changes
+
+- Change the `poly init` help example from `--region eu-west-1` to `--region euw-1`.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Chores
+
+- Share contributor rules across coding agents with AGENTS.md and REVIEW.md
+  ([#352](https://github.com/polyai/adk/pull/352),
+  [`c61b79b`](https://github.com/polyai/adk/commit/c61b79b1e6beb26ea9d360204f5a4fbc49785a4f))
+
+## Summary
+
+Replaces the Claude- and Copilot-specific instruction files with tool-neutral ones that both tools
+  read: `AGENTS.md`, `REVIEW.md` and shared contributor skills. Drops guidance that had gone stale,
+  including the instruction to bump versions by hand.
+
+## Motivation
+
+Most PRs here are written with an AI coding agent, but the instructions those agents read were out
+  of date and split across tools:
+
+- `pr-reviewer` and `copilot-instructions.md` told contributors to bump the version in
+  `pyproject.toml`. semantic-release already does that, along with the skill versions and the
+  changelog. The PR title type is the only release input a contributor controls. - `CLAUDE.md`,
+  `pr-reviewer` and `copilot-instructions.md` described a resource-registration process that no
+  longer exists, named a nonexistent `PlatformAPIError`, and showed a stale project tree. - The
+  rules reviewers keep asking for weren't written down anywhere: the CLI → project → interface → API
+  layering, updating both doc trees and the skills, the test fixture, no internal references in
+  public PRs. - The same rules were copied per tool, so they drifted apart.
+
+Claude Code and GitHub Copilot both now read `AGENTS.md` and skills in `.claude/skills/`, so one set
+  of files covers both.
+
+## Changes
+
+- **`AGENTS.md`** (new): commands, the layering rule (anything that acts on a project is an
+  `AgentStudioProject` method holding its logic and validation, user interaction stays in the CLI,
+  and commands that run before a project exists may call the interface directly), what each
+  directory is for, the conventions reviewers enforce, test and docs expectations, and the PR title
+  → release table. Nested `AGENTS.md` files in `src/poly/resources/` (the current registration
+  steps) and `src/poly/cli_commands/` (command-layer rules). - **`REVIEW.md`** (new): a ranked
+  review checklist (blocking, worth raising, nits, ignore). It's self-contained because some review
+  tools read only this file; both files say to keep the two in sync. - **Contributor skills in
+  `.claude/skills/`**, replacing the four subagents in `.claude/agents/`: - `ci-check`: now mirrors
+  CI, adding the PR title, licence, `licenses.json` and skill-version checks. - `review-pr`: applies
+  `REVIEW.md`. - `write-tests`: measures coverage before and after. - `add-resource-type` -
+  `open-pr` (new)
+
+All are marked `metadata.internal: true`, so `poly setup` / `npx skills` don't install them into
+  users' projects. - **Removed** `.claude/CLAUDE.md`, `.claude/agents/` and
+  `.github/copilot-instructions.md`. - **Docs style guides:**
+  `docs/docs/reference/{cli,resources}/CLAUDE.md` renamed to `AGENTS.md` and excluded from the
+  mkdocs build. One was being published as a page on the docs site. - **Release notes:** the Slack
+  release notification and the GitHub release notes now say to upgrade with `poly update`. -
+  **CONTRIBUTING:** full title-type → release table, versions are never edited by hand, stacked-PR
+  merge order. Setup uses `uv run`, with venv activation optional for trying `poly` by hand. Notes
+  that Claude Code must be up to date to read `AGENTS.md` (there's deliberately no `CLAUDE.md`). The
+  skills README explains that skill versions are stamped automatically. - **PR template:** checklist
+  lines for the title type and for docs and skills updates. - **Housekeeping:** untracked `.idea/`;
+  `.gitignore` deduplicated, with cache, coverage and worktree entries added. Fixed the pre-commit
+  comment, which referenced a nonexistent `requirements-dev.txt` and a stale ruff version. Removed
+  43 blank lines that older release commits had left in `pyproject.toml`. -
+  **`.claude/settings.json`:** agents can now read the generated `protobuf/` and `types/` files;
+  editing them is still denied.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+- `npx -y skills@1.5.18 add . --list` lists only the five user skills. Without `metadata.internal:
+  true`, the contributor skills were listed too. - `mkdocs build` succeeds, with no `AGENTS` pages
+  in the output. - Claude Code picks up the five contributor skills from `.claude/skills/`.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+N/A
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.67.1 (2026-10-06)
+
+### Bug Fixes
+
+- Send Studio's real PostHog cluster key when evaluating flags
+  ([#336](https://github.com/polyai/adk/pull/336),
+  [`ac168ba`](https://github.com/polyai/adk/commit/ac168ba9e452f4872bd8b55c409a2a7a40e84267))
+
+## Summary
+
+Flag evaluation from the `studio` region now sends cluster `plg-us-1-prod` with env `plg`, the key
+  Studio and sourcerer use for that deployment. Before, the ADK sent `studio` / `prod`.
+
+## Motivation
+
+Studio (jupiter) and sourcerer both build PostHog groups from `CLUSTERS` in platform_ui's
+  `packages/schemas/src/posthog/index.ts`. There, the PLG deployment is `plg-us-1-prod` / `plg`, and
+  that matches `CLUSTER: plg-us-1-prod` in gitops for jupiter-api and sourcerer. The ADK's
+  `region_to_posthog_cluster` passed `studio` through unchanged, so:
+
+- flags targeted at the `plg-us-1-prod` cluster group never matched from the ADK - project groups
+  were keyed `studio/PROJECT-…`, so they never matched `plg-us-1-prod/PROJECT-…` - conditions on
+  `env = plg` never matched - the ADK created orphan `studio` groups in the prod PostHog project
+
+## Changes
+
+- Map `studio` → cluster `plg-us-1-prod` and env `plg` - Update tests to pin the Studio key and
+  properties, and cover the env mapping per region
+
+`dev → apollo` is unchanged and correct: the `apollo` cluster serves `studio.dev.poly.ai` and
+  `login.dev.poly.ai`, which is where the ADK's `dev` region points.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project
+
+**Not verified against live PostHog:** existing flags targeted at the orphan `studio` groups would
+  stop matching after this change. Worth checking the prod PostHog project for any before merging.
+
+**Dev/staging cluster migration:** the cluster keys here are hardcoded against the clusters serving
+  `api.dev.poly.ai` (`apollo`) and `api.staging.poly.ai` (`us-1-staging`) today. When those
+  hostnames move to the new `dev` and `staging` clusters, `region_to_posthog_cluster` needs updating
+  in the same change. The ADK has no way to detect the move itself.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (changed files) - [x] `pytest` passes (2080
+  passed) - [x] No breaking changes to the `poly` CLI interface - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Follow-up, not in this PR: `distinct_id` is the OS username (`getpass.getuser()`). Sourcerer uses
+  the user's email, so person-level targeting doesn't line up between the ADK and Studio.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Documentation
+
+- Lead the README with sign-up and poly setup (DEVP-788)
+  ([#340](https://github.com/polyai/adk/pull/340),
+  [`d34063d`](https://github.com/polyai/adk/commit/d34063df5ad2113613dcd9f5dc1b9316f8429f20))
+
+## Linear
+
+https://linear.app/poly-ai/issue/DEVP-788/rewrite-adk-readme-to-lead-with-sign-up
+
+## Summary
+
+First-screen-only change to the README so the repo reads as self-serve when someone lands on it from
+  search or a package listing:
+
+- Opening paragraph now says what the ADK is, and that new users sign up at studio.poly.ai and start
+  free (free trial, so "start free" rather than "sign up free"). - `uv tool install` listed before
+  `pip install`. - Adds a `poly setup` step after install. - Documentation link stays on GitHub
+  Pages until docs.poly.ai catches up.
+
+Updated after review: dropped the `poly apikey --region studio` block and the docs.poly.ai link, and
+  merged main to clear the conflict with #338.
+
+Everything below the install section is unchanged.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5.1 <noreply@anthropic.com>
+
+
+## v0.67.0 (2026-10-05)
+
+### Features
+
+- Sync knowledge base topic tags on pull and push ([#345](https://github.com/polyai/adk/pull/345),
+  [`fe2cadd`](https://github.com/polyai/adk/commit/fe2cadde6a12712a4e96ac41afcd66ad5417afd5))
+
+## Summary
+
+Knowledge base topic tags now sync through the ADK. Pull writes an optional `tags:` list into topic
+  files, and push sends tag changes to Agent Studio.
+
+## Motivation
+
+Topic tags set in Agent Studio can't be read or set from the ADK. Pull never writes them, and a
+  `tags:` key in a topic file passes `poly validate` but push drops it without a warning. The
+  platform already supports them: the projection returns `tags`, `create_topic` accepts them, and
+  `set_topic_tags` exists.
+
+## Changes
+
+- **Pull** reads `tags` from the projection and writes `tags:` right after `enabled:`, but only for
+  topics that have tags. Untagged topic files don't change. - **A topic file without a `tags:` key
+  has no tags**, the same as test cases. Deleting the key clears the tags on push. - **Push:** a new
+  topic sends its tags on `create_topic`. On an existing topic, changed tags go out as
+  `set_topic_tags` through a new `TopicTags` sub-resource, like `TestCaseTags`. As with test cases,
+  `update_topic` is also sent when the topic changed. - **Validation:** each tag must be non-empty,
+  unique, and have no leading or trailing whitespace. Tags are case-sensitive. Length isn't checked:
+  the Agent Studio input stops at 16 characters, but imported topics can have longer tags, and
+  validation must pass on what a pull writes. A `tags:` that isn't a list now fails to read instead
+  of being dropped. - **Child topics** stay without tags, since the platform has no command to set
+  them. A non-empty `tags` key in a child topic file is an error. - **Docs:** tags added to both
+  topic reference pages.
+
+## Upgrading
+
+A plain `poly push` pulls and merges first, so topic files pulled before this change pick up their
+  tags before anything is pushed. A force push doesn't pull first: from an older file, it clears the
+  tags set in Agent Studio. After upgrading, run `poly pull` once before any `poly push --force`,
+  including in CI.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Live check, read-only: a force pull plus dry-run pushes into a scratch copy of a project with 104
+  topics, 35 of them tagged. - Compared with a pull from 0.64.0, the only difference is the `tags:`
+  block in those 35 files. - Dry-run pushes:
+
+| Local file | Commands | |---|---| | unchanged | none | | `tags:` key removed | `update_topic`,
+  `set_topic_tags []` | | tags edited | `update_topic`, `set_topic_tags` with the new tags | |
+  `tags: []` | `update_topic`, `set_topic_tags []` |
+
+End to end with `poly pull`/`poly push` against live projects (the test branch was deleted
+  afterwards): - Pulling a project with one tagged topic changed only that topic's file, which
+  gained its `tags:` block. - I edited one topic's tags, tagged an untagged topic, and force-pushed
+  to a new branch. The branch had the new tags, and `main` was unchanged. - On that branch, a plain
+  push cleared tags both by deleting the `tags:` key and with `tags: []`, and created a new topic
+  with its tags. Pulling the branch back gave the same files. - A project with imported tags longer
+  than 16 characters, one of them containing a function reference, pulls and validates cleanly.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.66.1 (2026-10-05)
+
+### Bug Fixes
+
+- Keep conversation language across poly chat turns ([#351](https://github.com/polyai/adk/pull/351),
+  [`6e3e012`](https://github.com/polyai/adk/commit/6e3e0127918a310269edc11d6a2d84473dce3cdc))
+
+## Summary
+
+`poly chat` now sends back the language codes returned by each turn, so a mid-conversation
+  `conv.set_language()` persists across turns and sessions start in the project's default language
+  instead of the API's fallback (`en-GB`).
+
+## Motivation
+
+The platform does not persist the conversation language between chat turns. Each request is
+  processed in the language it carries (falling back to `en-GB` when none is sent), and each reply
+  returns the current language in `metadata.asr_lang_code` / `metadata.tts_lang_code`. Clients are
+  expected to echo these back on the next turn.
+
+`poly chat` sent the same `--lang` value (usually none) on every turn and never read the reply. As a
+  result:
+
+- After a function called `conv.set_language("es-US")`, only the following turn ran in `es-US`;
+  every later turn reverted to `en-GB`, so the agent drifted back to English. The same conversation
+  behaves correctly over voice and the Agent Studio chat panel, which makes `poly chat` misleading
+  for testing multilingual agents. - Every `poly chat` session ran on `en-GB` regardless of the
+  project's configured default language.
+
+## Changes
+
+- `_run_chat_loop` seeds the language codes from the session's start response and updates them from
+  each reply's metadata before the next `send_message`. - An explicit `--lang` / `--input-lang` /
+  `--output-lang` still applies to session creation and is kept when a reply carries no language
+  codes. A language switch made by the agent mid-conversation takes precedence, matching voice
+  behaviour.
+
+## Test strategy
+
+- [x] Added/updated unit tests (`ChatLoopTest`: carry-over after a switch, seeding from the start
+  response, CLI language kept when replies carry no codes) - [x] Manual CLI testing (`poly
+  <command>`) - [x] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (via the repo's pinned pre-commit hooks; a
+  newer unpinned ruff flags an existing `except (KeyboardInterrupt, EOFError)` on `main`, untouched
+  here) - [x] `pytest` passes (2127 passed) - [x] No breaking changes to the `poly` CLI interface
+  (or migration path documented) - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Language sent with each turn, patched vs unpatched, for a conversation where the agent switches to
+  Spanish on turn 3:
+
+``` turn before after 2 en-GB en-US (project default) 3 es-US es-US (switch) 4 en-GB es-US 5 en-GB
+  es-US 6 en-GB es-US ```
+
+With the fix, agent replies stay in Spanish for the rest of the conversation.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
+## v0.66.0 (2026-10-02)
+
+### Features
+
+- Name test runs with `poly test run --name` (AOS-1284)
+  ([#347](https://github.com/polyai/adk/pull/347),
+  [`3d15749`](https://github.com/polyai/adk/commit/3d15749f2b8f753591b769045225ef3621c18254))
+
+## Summary
+
+`poly test run` now sends the platform's current trigger payload and takes an optional `--name`, so
+  runs started from the ADK can be found in Agent Studio run history.
+
+## Motivation
+
+The ADK still posted the legacy `{ testCaseIds, branchId }` body. The platform converts that body to
+  `{ branchId, select }` and drops any other field, so a run name could never arrive. Agent Studio
+  now names runs and shows who started them (PolyAI-LDN/platform_ui#10837), so ADK runs should be
+  nameable too.
+
+Linear:
+  [AOS-1284](https://linear.app/poly-ai/issue/AOS-1284/adk-send-the-new-test-run-trigger-payload-and-allow-naming-runs)
+
+## Changes
+
+- `PlatformAPIHandler.trigger_test_run` sends `{ branchId, select: { mode: "testIds", testIds },
+  name? }`. Same endpoint, `/v1/agents/{project_id}/testing/test-runs/trigger`. - `name` is passed
+  through `AgentStudioInterface.trigger_test_run` and `AgentStudioProject.trigger_tests`. The name
+  is trimmed, a blank one is dropped, and anything over 120 characters fails locally with a
+  `ValueError` instead of a platform 422. - New `poly test run --name "<why> · <what>"` flag.
+  Without it, the platform keeps its default name (the test name or count). - CLI reference
+  (`docs/reference/cli/test.md`) and the `poly-adk-testing` skill document the flag.
+
+## Test strategy
+
+- [x] Added/updated unit tests: the request body shape, the name being sent, trim, blank and
+  over-length handling, and the `--name` flag being parsed and forwarded - [ ] Manual CLI testing
+  (`poly <command>`) - [ ] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (2124) - [x] No breaking
+  changes to the `poly` CLI interface. `--name` is optional, and the platform has accepted the
+  `select` shape since platform_ui#9801 and `name` since #10525. - [x] Commit messages follow
+  conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
+## v0.65.0 (2026-10-01)
+
+### Features
+
+- Limit custom guardrails to 20 per project ([#346](https://github.com/polyai/adk/pull/346),
+  [`351faf7`](https://github.com/polyai/adk/commit/351faf70aaad5df18e54c1e0f1284b3bf8e34efc))
+
+## Summary
+
+Adds a local cap of 20 custom guardrails per project, enforced during `poly validate`/`poly push`.
+
+## Motivation
+
+The platform already rejects a 21st custom guardrail server-side, but that rejection surfaces after
+  the whole push transaction has been submitted — rolling back every resource in the batch, not just
+  the excess guardrails. Catching the count locally avoids that failure mode.
+
+## Changes
+
+- Added `MAX_CUSTOM_GUARDRAILS = 20` constant in `src/poly/resources/guardrails.py`, mirroring the
+  platform's server-side limit - Added `CustomGuardrail.validate_collection()` override that raises
+  `ValueError` when the collection exceeds the limit
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.64.0 (2026-09-28)
+
+### Features
+
+- Send is_asserted with function-call test assertions
+  ([#341](https://github.com/polyai/adk/pull/341),
+  [`84d8264`](https://github.com/polyai/adk/commit/84d82649491a1a822d352c7c6849863faff32508))
+
+## Summary
+
+Function-call assertions written in `test_suite/*.yaml` are now sent with `is_asserted: true`, so
+  test runs actually check them.
+
+## Motivation
+
+`FunctionCallAssertion.is_asserted` is a proto3 bool, so it defaults to false, and `to_proto` never
+  set it. Every function-call assertion pushed from YAML was stored as recorded but not asserted,
+  and test runs reported the call as `(not asserted)` instead of checking its name and arguments.
+  Nothing failed, so the gap was silent.
+
+No linked issue.
+
+## Changes
+
+- `FunctionCallAssertion` carries `is_asserted`, defaulting to true, and sends it in `to_proto`. -
+  YAML: a call is asserted unless it says `is_asserted: false`; the key is written only when false.
+  - Pull: the flag is read from the projection (missing means false, since proto3 omits a false
+  bool), so a call left unasserted in Studio survives a pull and push unchanged. - Migration:
+  assertions pushed before this fix are stored as not asserted, so a pull writes them out with
+  `is_asserted: false`. Deleting that line and pushing turns them on.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`ruff check` passes on both changed files. `ruff format --check` flags one pre-existing unformatted
+  line in `resources_test.py` that this PR does not touch, so the box above is left unticked.
+
+``` $ uv run pytest src/poly/tests -q 2111 passed, 372 subtests passed in 29.50s ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
+## v0.63.1 (2026-09-28)
+
+### Bug Fixes
+
+- Push a renamed test case as an update, keeping its id
+  ([#342](https://github.com/polyai/adk/pull/342),
+  [`5fab4ed`](https://github.com/polyai/adk/commit/5fab4ed94d714653c0f3fa025d316aa687e57074))
+
+## Summary
+
+Renaming a test case no longer deletes it and creates a new one. A push pairs the renamed file with
+  the case it came from and sends an update, so the case keeps its id and its run history.
+
+## Motivation
+
+A test case's file name is derived from its name, so a rename moves the file. The push matched
+  resources by file path only, saw the old path as deleted and the new one as new, and minted a
+  fresh id. The platform already supports renaming through `Update_TestCase.name`; the push just
+  never used it. Every rename dropped the case's run history.
+
+No linked issue.
+
+## Changes
+
+- New pre-push step `prepush.pair_renamed_test_cases`, run first in `_clean_resources_before_push`
+  alongside the other push fixes. It pairs a new test case with a deleted one when their scenario
+  text matches and each side has exactly one candidate. - A paired case takes the saved id and moves
+  from new to updated. Its sub-resources (assertions, tags, SIP headers, integration attributes, API
+  mocks) are re-keyed to that id and re-diffed against the saved case, so only real changes are
+  sent. The pushed state is re-keyed too. - Anything ambiguous (several cases share a scenario, or
+  the scenario changed along with the name) is left as a delete and a create, as before. - Only test
+  cases are paired; other resource types are unchanged.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` $ uv run pytest src/poly/tests -q 2111 passed, 372 subtests passed ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
+## v0.63.0 (2026-09-28)
+
+### Features
+
+- Move poly call voice dependencies into an optional call extra
+  ([#338](https://github.com/polyai/adk/pull/338),
+  [`20157e2`](https://github.com/polyai/adk/commit/20157e21039fafbb769b4a384cb708862586f5d7))
+
+## Summary
+
+The voice-calling dependencies for `poly call` move out of the default install into an optional
+  `call` extra. `pip install polyai-adk` drops from 163 MB to 74 MB. Anyone who uses `poly call`
+  installs `polyai-adk[call]`.
+
+## Motivation
+
+Every install pulled in the full WebRTC and audio stack (aiortc, sounddevice, websockets, numpy,
+  pywebrtc-audio, plus av, cryptography and pylibsrtp through them), about 90 MB of native wheels.
+  That is more than half the install, and only interactive users who place calls need it. CI
+  pipelines and other non-interactive installs paid for it on every run. A `[ci]` extra can't help,
+  because extras only add dependencies, so the voice stack has to leave the core list.
+
+## Changes
+
+- Move `aiortc`, `sounddevice`, `websockets`, `numpy` and `pywebrtc-audio` from `dependencies` into
+  a new `call` extra. `dev` includes `polyai-adk[call]`, so `uv pip install -e ".[dev]"` in CI and
+  in contributor setups still installs them and the call tests keep running. - `poly call` checks
+  for the voice dependencies first, before it loads the project or pushes with `--push`. If they are
+  missing, it exits with the install command that matches how ADK was installed: - uv tool: `uv tool
+  install "polyai-adk[call]"` - pipx: `pipx install --force "polyai-adk[call]"` - uv pip / pip: `uv
+  pip install "polyai-adk[call]"` / `pip install "polyai-adk[call]"` - uvx: `uvx --from
+  "polyai-adk[call]" poly call` - editable: `uv pip install -e ".[call]"` - `poly update` keeps the
+  `call` extra. `poly update --to X` used to run `uv tool install --force polyai-adk==X` (or the
+  pipx equivalent), which rewrites the installer's record without the extra. The requirement is now
+  `polyai-adk[call]` whenever the voice dependencies are importable. Upgrades through pip and uv pip
+  include it too, so the voice dependencies follow new pins. `uv tool upgrade` and `pipx upgrade`
+  already keep the extra. - Escape the `poly call` hint and the `poly update` failure message for
+  Rich, which otherwise treats `[call]` as markup and drops it. - Document the `call` extra in the
+  README, on the docs home page, in the getting-started install step and in the `poly call`
+  reference. Update the echo-cancellation hints to match. - Bump `google-crc32c` from 1.8.0 to 1.9.0
+  in `uv.lock` and mark its licence as Apache-2.0 in `licenses.json`. CI installs `.[dev]` without
+  the lock and gets the latest `google-crc32c` (1.9.0). While it was a core dependency, `uv run`
+  synced it back to the locked version. As a dependency of an extra it no longer does, so the lock
+  has to match what CI installs or the `licenses.json` check fails.
+
+Migration: an existing `uv tool` install loses the voice dependencies on the upgrade that crosses
+  this change, because uv makes the tool environment match the new dependency list. The next `poly
+  call` prints the one-line install command. pip and uv pip venvs are not affected, because pip
+  never removes packages.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+I installed into fresh venvs:
+
+- `.[dev]` installs the voice stack. - `.` installs none of it. `poly --help` works, and `poly call`
+  exits at once with the install hint. - `.[call]` installs the voice stack, and `poly update --to`
+  keeps `[call]`.
+
+I checked how uv tool treats extras on upgrade with a toy package (details under Screenshots /
+  Logs).
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Install size in a fresh Python 3.14 venv:
+
+| Install | Size | |---|---| | `polyai-adk` | 74 MB | | `polyai-adk[call]` | 163 MB |
+
+`poly call` without the extra, in a uv pip venv:
+
+``` Error: `poly call` needs the voice calling dependencies, which are installed
+
+with the `call` extra. Install them with: uv pip install "polyai-adk[call]" ```
+
+How uv 0.11 handles extras, checked with a toy package:
+
+| Scenario | Result | |---|---| | `uv tool install 'pkg[call]'`, then `uv tool upgrade` | Extra kept
+  (it is stored in `uv-receipt.toml`) | | Existing uv tool install upgrades across the split | Voice
+  dependencies removed | | `uv tool install 'pkg[call]'` over an existing plain install | Extra
+  added in place | | `uv tool install --force pkg==X` after installing with the extra | Extra
+  dropped (fixed here for `poly update --to`) | | `pip` / `uv pip install --upgrade` in a venv |
+  Dependencies kept |
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.62.0 (2026-09-25)
+
+### Features
+
+- Add PyPI metadata to pyproject.toml (DEVP-789) ([#334](https://github.com/polyai/adk/pull/334),
+  [`071520b`](https://github.com/polyai/adk/commit/071520bdbe94fb1361676e9c3413406386f8b5ca))
+
+## Summary
+
+Adds `project.urls`, `keywords`, and `classifiers` to `pyproject.toml`, and rewrites the package
+  summary so the PyPI listing for `polyai-adk` points back to real docs instead of showing a generic
+  description with no outbound links.
+
+## Motivation
+
+The `polyai-adk` PyPI listing is among the first results for "poly apikey" and ADK-related queries,
+  but had no `project.urls`, no `keywords`, and no classifiers — nothing pointing back to real docs.
+
+Linear: https://linear.app/poly-ai/issue/DEVP-789/add-pypi-metadata-to-pyprojecttoml
+
+Supersedes #332 (closed by a branch rename)
+
+## Changes
+
+- `description`: rewritten to state what ADK builds — a CLI for PolyAI voice/chat agents, self-serve
+  - `keywords`: voice-ai, conversational-ai, cli, agent-development-kit, voice-agents -
+  `classifiers`: `Topic :: Communications :: Telephony`, `Topic :: Software Development ::
+  Libraries`, `Intended Audience :: Developers` (no existing classifiers to conflict with) -
+  `[project.urls]`: Documentation/Homepage → `docs.poly.ai/adk`, Source → `github.com/polyai/adk`,
+  Changelog → `github.com/polyai/adk/blob/main/CHANGELOG.md` (confirmed this file exists)
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Verified `pyproject.toml` parses correctly (`tomllib.load`) and builds successfully (`uv build
+  --sdist`).
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  conventional commits
+
+## Screenshots / Logs
+
+These fields ship on PyPI automatically with the next release — no separate publish action needed.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+- **release**: Add getting-started block to release notes
+  ([#335](https://github.com/polyai/adk/pull/335),
+  [`5a4b1ab`](https://github.com/polyai/adk/commit/5a4b1ab799818e09ef0841e9d03796e2d56f5289))
+
+## Summary
+
+Adds a "Getting started" block (sign up at studio.poly.ai, install via `uv tool install polyai-adk`,
+  `poly setup`) to every future GitHub release on this repo, generated automatically instead of a
+  manual one-off addition.
+
+## Motivation
+
+GitHub release pages on `polyai/adk` rank for command-name searches (e.g. "poly apikey") but carry
+  no onboarding guidance today — just changelog entries.
+
+Closes DEVP-790
+
+## Changes
+
+- `templates/.release_notes.md.j2` — overrides python-semantic-release's release-notes template to
+  prepend the block; everything below it reproduces the default template's behavior verbatim. -
+  `templates/CHANGELOG.md.j2` + `templates/.components/*` — unmodified vendored copies of PSR's
+  built-in "angular" md templates. These are required: once *any* file exists in a custom
+  `template_dir`, PSR stops falling back to its own default templates for both `{% include %}`
+  resolution and `CHANGELOG.md` generation. Without vendoring these, `CHANGELOG.md` would silently
+  stop updating on release. - `pyproject.toml` — adds `[tool.semantic_release.changelog]
+  template_dir = "templates"`.
+
+## Test strategy
+
+Verified end-to-end in a disposable venv against `python-semantic-release==9.21.2` (the version
+  `.github/workflows/release.yaml`'s `@v9` action resolves to today), covering: - First release
+  notes rendering - Subsequent release notes rendering (including the "Detailed Changes" compare
+  link) - `CHANGELOG.md` generation (byte-identical to default output aside from the new block in
+  release notes)
+
+- [ ] Manual CLI testing (`poly <command>`) — N/A, no CLI change - [x] N/A for pytest — no Python
+  source changed; not covered by `ruff`/`pytest`
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (no Python files changed) - [x] `pytest`
+  passes (no Python files changed) - [x] No breaking changes to the `poly` CLI interface - [x]
+  Commit messages follow conventional commits
+
+**Needs release-process owner sign-off before merge**, per this ticket's acceptance criteria — this
+  changes release automation on a live repo.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## v0.61.4 (2026-09-25)
+
+### Performance Improvements
+
+- Cache function metadata instead of the parsed function
+  ([#337](https://github.com/polyai/adk/pull/337),
+  [`97b41a7`](https://github.com/polyai/adk/commit/97b41a738631e5032bc25a0947ab2a62e1856af8))
+
+## Summary
+
+`Function._get_target_function` now caches a small `FunctionMetadata` (def line number, positional
+  args, decorators) instead of the whole parsed function, so cached entries no longer keep function
+  bodies in memory.
+
+## Motivation
+
+The cache holds up to 2,048 entries, and each one kept the full `ast.FunctionDef` for its function,
+  body included. Measured over real project sources, a full cache held about 116 MiB, and about 33
+  MiB with this change. Long-running processes that reuse the ADK across many requests keep that
+  memory for their whole lifetime. The cache's callers only read the def line number, the positional
+  args and the decorators.
+
+## Changes
+
+- Add a frozen `FunctionMetadata` dataclass holding `lineno`, `args` and `decorator_list`. -
+  `_get_target_function` returns `FunctionMetadata` (or `None`) instead of the AST node. It is still
+  an `lru_cache` of the same size and key. - `_extract_decorators` reads args from
+  `FunctionMetadata.args`. `_generate_raw_output` and `FunctionStep` behave the same.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+The existing decorator, latency control and raw rendering tests cover both callers and pass
+  unchanged.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Memory retained per cache entry, measured with `tracemalloc` over 15,876 distinct function sources
+  from real projects:
+
+| Per cache entry | Mean | Median | p90 | |---|---|---|---| | Key (source string) | 11.9 KiB | 1.7
+  KiB | 24.8 KiB | | Old value (`FunctionDef`) | 46.0 KiB | 19.7 KiB | 106.2 KiB | | New value
+  (`FunctionMetadata`) | 4.7 KiB | 2.7 KiB | 9.9 KiB | | **Old entry** | **57.9 KiB** | 23.9 KiB |
+  133.4 KiB | | **New entry** | **16.6 KiB** | 6.0 KiB | 32.7 KiB |
+
+A full cache (2,048 × mean) goes from about 116 MiB to about 33 MiB. The source-string key is now
+  about 70% of each entry; hashing it would save roughly another 24 MiB, which isn't worth a
+  hand-written cache.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.61.3 (2026-09-25)
+
+### Performance Improvements
+
+- Use the libyaml parser for YAML loads and add a large-project benchmark
+  ([#326](https://github.com/polyai/adk/pull/326),
+  [`c1ea86b`](https://github.com/polyai/adk/commit/c1ea86b80436890a0d0bce25b41620c94f1f2ae2))
+
+## Summary
+
+YAML loads now use ruamel's libyaml-backed parser, and a new offline benchmark measures pull, status
+  and push on a large multi-resource project. In the benchmark, total sync time falls by about 38%
+  and files on disk come out byte-for-byte the same.
+
+## Motivation
+
+A large production project, with a 1.4 MB `variant_attributes.yaml` (about 1,200 variants) and a 400
+  KB `pronunciations.yaml` (about 3,300 rules), spends tens of seconds per pull or push parsing and
+  dumping YAML in pure Python. On a CPU-limited service that was long enough to fail health checks.
+
+Since ruamel.yaml 0.19, its C extension is an optional extra, so we have been running the
+  pure-Python parser. This is the first of three perf changes. It also adds the benchmark the next
+  two use to prove their output is unchanged.
+
+## Changes
+
+- Add `ruamel.yaml.clib` as a runtime dependency. `load_yaml` (`YAML(typ="safe")`) picks up the C
+  parser automatically and keeps YAML 1.2 value resolution, so `yes`, `on`, `12:30` and `0777` read
+  exactly as before. `dump_yaml` is unchanged: the round-trip emitter has no C implementation. - The
+  environment marker installs the extension only on architectures with prebuilt cp314 wheels:
+  CPython on x86_64, AMD64, arm64 and aarch64 (macOS, Linux glibc and musl, Windows x64). It is
+  skipped elsewhere (Windows on ARM, 32-bit, armv7l, ppc64le and similar) and on Python 3.15 or
+  later until wheels ship. Where it is missing, ruamel falls back to pure Python, so installs never
+  need a compiler. Free-threaded 3.14t builds can't be excluded with a marker and would build from
+  source. - Add `scripts/bench_large_project.py`. It builds a synthetic projection at production
+  scale and runs init, force pull, pull with a remote edit, status after a local edit, and a dry-run
+  push. Everything runs offline through the real code paths. `--digest-out` records a sha256 of
+  every file after each phase, and `--profile PHASE` prints a cProfile report. - Add
+  `LoadYamlParserTests`. It checks that every fixture YAML file and an edge-case document (implicit
+  types, dates, ` `, NBSP, emoji, anchors, CRLF, BOM) load identically with the C and pure-Python
+  parsers. It also checks that the C parser is actually in use wherever the marker (read from the
+  installed package metadata) installs it, and fails when the running Python is outside the marker's
+  version bound, so moving CI to 3.15 prompts a re-pin. - Regenerate `uv.lock` and `licenses.json`.
+  Both gain one new MIT entry. The lock also catches up with the 0.60.0 version bump.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+I compared benchmark digests with and without `ruamel.yaml.clib` installed, and every file after
+  every phase is identical. I also built the wheel, installed it into a fresh venv, and confirmed it
+  resolves the extension and uses `CParser`.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`uv run python scripts/bench_large_project.py`: 1,238 variants × 21 attributes (1.42 MB), 3,317
+  pronunciations (0.40 MB). Best of two runs on an M-series laptop:
+
+| Phase | Pure Python | libyaml parser | |---|---|---| | init | 2.44 s | 2.08 s | | force pull |
+  5.63 s | 3.05 s | | pull (one remote edit) | 12.91 s | 7.79 s | | status (one local edit) | 2.62 s
+  | 1.17 s | | dry-run push | 1.27 s | 1.31 s | | **total** | **24.87 s** | **15.45 s** |
+
+Most of the remaining pull time is per-rule dump→load round trips in `Pronunciation.save`, which the
+  next PR removes.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.61.2 (2026-09-24)
+
+### Performance Improvements
+
+- Skip redundant YAML dumps when pulling multi-resource files
+  ([#328](https://github.com/polyai/adk/pull/328),
+  [`8419474`](https://github.com/polyai/adk/commit/8419474ca4f562dabf3394ecfdb1abc356bf4e02))
+
+## Summary
+
+`poly pull` no longer dumps every multi-resource file three times and three-way merges it when at
+  most one side changed it. `Pronunciation.save` stops dumping and re-parsing each entry, and
+  `revert_changes` writes each multi-resource file once instead of once per entry.
+
+## Motivation
+
+On a large production project (about 1,200 variants with 21 attributes each, and about 3,300
+  pronunciation rules), `poly pull` spent most of its time serialising YAML. For every
+  multi-resource file it dumped the original, incoming and local versions of the whole file, then
+  ran a text three-way merge, even when the file was unchanged or only one side had changed it.
+  Pronunciations were also dumped and re-parsed one entry at a time on every save.
+
+This is the second of three performance PRs. It depends on #326 only for
+  `scripts/bench_large_project.py`, which produced the numbers below. The code changes don't depend
+  on it.
+
+## Changes
+
+- `_update_multi_resource_yaml_resources` keeps the original, incoming and local file data as parsed
+  dicts instead of dumping them up front. For each file: - local matches incoming, or only local
+  changed: the file is left alone - only incoming changed: `dump_yaml(incoming)` is written directly
+  - both sides changed: the three versions are dumped and merged with `merge_strings` as before,
+  with the same conflict reporting - force pull, the raw-text fallback for files with no readable
+  local entries, and deleting files that merge to nothing all work as before - New
+  `resource_utils.same_yaml_data(a, b)`. It returns True only when `dump_yaml` is guaranteed to
+  render both sides identically. It compares with `==` and also compares JSON encodings, so
+  differences in key order, `True` vs `1`, `1` vs `1.0` and `-0.0` vs `0.0` count as different. When
+  it returns False, the pull takes the existing merge path. - `Pronunciation.save` builds the entry
+  from `to_yaml_dict()` with `_strip_strings` applied, which is the same data `to_pretty` used to
+  dump. It no longer dumps and re-parses that data, and it updates the cached list in place instead
+  of copying it. `format=True` still formats the entry through a dump and reload. - `revert_changes`
+  saves multi-resource entries to the file cache, then calls `write_cache_to_file()` inside
+  `try/finally`. This is the same pattern `init_project` uses. Other resources still save directly.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+The new tests use real temporary copies of the test project. `PullProjectTest` mocks `save`, so it
+  can't catch changes in output.
+
+- `SameYamlDataTests`: key order (top-level and nested), `True`/`1`, `1`/`1.0`, `-0.0`/`0.0`,
+  `{True: x}`/`{1: x}`, date vs str, int vs str keys, NaN, unserialisable keys, and equal nested
+  data - `MultiResourcePullMergeTest` spies on `merge_strings` and `save_to_file` and checks these
+  cases: - remote-only edit: the file equals `dump_yaml(incoming)` and no merge runs - local-only
+  edit: the file bytes are unchanged and the file isn't written - the same edit on both sides: the
+  file isn't written - different entries edited on each side: the result contains both edits - the
+  same entry edited differently on each side: conflict markers appear and the file is reported -
+  force pull: the local edit is overwritten - file deleted locally: it stays deleted through the
+  text fallback - `PronunciationTests`: a golden file captured on `main` (multiline description,
+  empty replacement, `: #`, unicode), saved both directly and through the cache, plus tests that
+  CRLF and CR in multi-line fields are saved as LF and that a CR in a single-line field is kept -
+  `RevertChangesOnDiskTest`: reverting everything restores every file's bytes, reverting one file
+  leaves local edits in other files alone, and each multi-resource file is written once - Run
+  against `main`, only the assertions specific to this PR fail: "no merge call", "written once". All
+  the assertions about behaviour pass on both. - `bench_large_project.py --digest-out` gives the
+  same per-phase sha256 of every project file before and after this change.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Benchmark: `bench_large_project.py` with the defaults (1,238 variants × 21 attributes, 3,317
+  pronunciations; `variant_attributes.yaml` is 1.42 MB, `pronunciations.yaml` is 0.40 MB). The runs
+  use the pure-Python YAML parser without #326. Each figure is the best of 3 runs. This PR doesn't
+  touch status or push, so their differences are run-to-run noise.
+
+| Phase | Before | After | |---|---|---| | init | 2.59 s | 1.36 s | | force-pull | 6.07 s | 4.33 s |
+  | pull | 14.38 s | 7.38 s | | status | 3.17 s | 2.29 s | | push | 1.71 s | 1.25 s |
+
+`diff before.json after.json` (per-phase file digests) is empty.
+
+After this change, profiling pull shows that about 80% of its time goes to 6 full-file YAML parses.
+  #326 speeds those up by switching to libyaml. The last PR in the series indexes multi-resource
+  lookups.
+
+
+## v0.61.1 (2026-09-23)
+
+### Bug Fixes
+
+- Give each thread its own multi-resource file cache
+  ([#327](https://github.com/polyai/adk/pull/327),
+  [`adadece`](https://github.com/polyai/adk/commit/adadececb81e339e608942ac980315fab81f0908))
+
+## Summary
+
+`MultiResourceYamlResource._file_cache` becomes a thread-local dict instead of one dict shared by
+  the whole process. Every existing call site stays the same, so single-threaded use (CLI, tests)
+  behaves exactly as before.
+
+## Motivation
+
+A service that runs the ADK in-process crashlooped because its handlers ran the ADK inline on the
+  event loop. The fix there moves ADK calls onto a worker thread, but it has to hold them to **one
+  at a time**, because the shared cache isn't safe when two calls run together:
+
+- `project.py` calls `_file_cache.clear()` at 7 points during pull and load. Another thread's writes
+  that were only cached (`save_to_cache=True`) and not yet flushed are dropped. - The merge path
+  builds `original_file_contents` from every cache entry (`project.py:825-828`), so it picks up
+  another thread's files. - `write_cache_to_file()` flushes every entry, including another thread's
+  files, into their temp dirs.
+
+With one cache per thread, callers can run ADK calls in parallel threads safely. It's also a
+  prerequisite for free-threaded Python.
+
+## Changes
+
+- `resource.py`: `_file_cache` is now a small descriptor, `_PerThreadFileCache`, that returns the
+  calling thread's dict. The dict lives in a `threading.local`. - All uses, including
+  `cls._file_cache.get/clear/setdefault`, iteration, subclasses and tests, keep working unchanged. -
+  Subclasses still share the base class's cache within a thread. That matters because projects clear
+  the cache via `MultiResourceYamlResource` while subclasses write via `cls`. - Why
+  `threading.local` and not a `ContextVar`: copied contexts share the same dict object, and on
+  free-threaded 3.14 builds threads inherit their parent's context by default. Either would put the
+  shared cache back. - `resources_test.py`: new `MultiResourceFileCacheTests`. They check that
+  another thread starts with an empty cache, that clearing or flushing in another thread leaves this
+  thread's entries and files alone, and that subclasses share the calling thread's cache.
+
+## Test strategy
+
+- [x] Added/updated unit tests. 3 of the 4 new tests fail on `main` and pass with this change. The
+  fourth, which checks that subclasses share the cache, passes on both. - [ ] Manual CLI testing
+  (`poly <command>`) - [ ] Tested against a live Agent Studio project - [ ] N/A (docs, config, or
+  trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (2052 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.61.0 (2026-09-23)
+
+### Features
+
+- Carry deployment mode over when duplicating a project
+  ([#330](https://github.com/polyai/adk/pull/330),
+  [`b10d075`](https://github.com/polyai/adk/commit/b10d075691dea4778d2cedaa819b2adf4562ac53))
+
+## Summary
+
+`poly project duplicate` now gives the copy the same deployment mode (Simple, Branches or
+  Sub-branches) as the project it was duplicated from.
+
+## Motivation
+
+Projects duplicated with the ADK always came out in Simple mode, whatever mode the source used, and
+  the only way to change it was in Agent Studio. New projects start in Simple by design, so the ADK
+  now copies the source's mode onto the duplicate itself.
+
+## Changes
+
+- After duplicating, `poly project duplicate` reads `config.deployment_mode` from both projects. If
+  they differ, it updates the copy to match the source. - If that step fails, the duplicate still
+  succeeds: the console shows a warning, and `--json` output gets a `deployment_mode_error` key. -
+  Adds `PlatformAPIHandler.update_project` (`PATCH
+  /adk/v1/accounts/{account_id}/projects/{project_id}`) and
+  `AgentStudioInterface.set_deployment_mode`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.60.0 (2026-09-21)
+
+### Build System
+
+- **call**: `poly call` command (ad call 4/N) ([#323](https://github.com/polyai/adk/pull/323),
+  [`4479062`](https://github.com/polyai/adk/commit/447906219f66a262076c5560a5201747b9b681af))
+
+Stacked on #322.
+
+## What - `cli_commands/call.py` — `CallCommand`: `load_project` → branch guard (draft-only) →
+  optional `--push` → `create_call_session` → `run_call`. Args: `--path`, `-e/--environment`,
+  `--variant`, `--mode` (defaults to `DEFAULT_CALL_MODE`), `--push`. - Registered in `cli.py`. Voice
+  stack lazy-imported so other commands stay light.
+
+## Depends on `create_call_session` (#319) + `run_call` (#322).
+
+## Tests `command_test.py` (4): branch guard, run_call wiring, broken-deps hint, push-failure abort.
+
+## Stack
+
+- [x] 1. #319 — model + bootstrap - [x] 2. #320 — signaling protocol - [x] 3. #322 — WebRTC
+  transport - [x] 4. **\`poly call\` CLI ← this PR** - [ ] 5. echo cancellation
+
+## Related https://linear.app/poly-ai/issue/DEVP-703/feature-ad-call
+
+---------
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+- **call**: Acoustic echo cancellation (ad call 5/5)
+  ([#324](https://github.com/polyai/adk/pull/324),
+  [`7153615`](https://github.com/polyai/adk/commit/7153615a6e4034805ef17f20631e3c27d6db3d2f))
+
+Stacked on #323. Final PR in the `ad call` stack.
+
+## What - `call/aec.py` — `EchoCanceller` (wraps the WebRTC APM / AEC3 via `pywebrtc-audio`, the
+  same canceller behind browser `getUserMedia({echoCancellation: true})`) + `FarEndReference`, a
+  thread-safe FIFO carrying the speaker's played audio to the mic path. - `media.py` —
+  `SpeakerPlayer` records the samples it sends to the DAC as the far-end reference;
+  `MicrophoneTrack` runs each captured block through the canceller before sending. - `client.py` —
+  `run_call(..., aec=...)` wires the reference to both ends. - `call.py` — `--echo-cancellation` /
+  `--no-echo-cancellation` (**on by default**). If the APM can't load, warn and continue without it
+  rather than aborting.
+
+## Why On a laptop speaker the agent's TTS is picked up by the mic and sent back, tripping barge-in.
+  AEC3 removes it (~27 dB attenuation measured on real hardware) while preserving genuine barge-in.
+
+## Deps None new — the native wheels already ship in #322.
+
+## Tests `aec_test.py`: `FarEndReference` FIFO semantics (numpy only) + `EchoCanceller` pure-echo
+  attenuation / passthrough (skipped if the APM is absent). `command_test.py`: default-on,
+  graceful-degrade-on-missing-dep.
+
+## Stack
+
+- [x] 1. #319 — model + bootstrap - [x] 2. #320 — signaling protocol - [x] 3. #322 — WebRTC
+  transport - [x] 4. #323 — `poly call` CLI - [x] 5. **echo cancellation ← this PR**
+
+## Related https://linear.app/poly-ai/issue/DEVP-703/feature-ad-call
+
+---------
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+- **call**: Webrtc signaling protocol (ad call 2/N) ([#320](https://github.com/polyai/adk/pull/320),
+  [`a0b12e9`](https://github.com/polyai/adk/commit/a0b12e9ed1225300d7c4b07d9df66d15f984cbdd))
+
+## What Pure JSON-over-WebSocket signaling protocol for the WebRTC gateway. -
+  `build_offer_message()` — the draft-call OFFER, matching the browser's `webrtc-types.ts` (studio
+  `authToken` + `agentVersionOverride` + account/project/variant, `callSid`, `mode`). -
+  `parse_message()` — typed `Answer` / `IceCandidate` / `Error` / `Close`. Error `code`/`message`
+  are read from the gateway's `data` nesting (with a top-level fallback), matching the Go gateway's
+  actual wire format. - `signaling_url()` — appends `/api/v1/webrtc/signal`.
+
+## Depends on `CallSession` from #319 (used to build the OFFER).
+
+## Tests `tests/call/signaling_test.py` (14): URL building, OFFER shape/callSid/variant handling,
+  and all inbound message types incl. both error-nesting shapes.
+
+## Stack
+
+- [x] 1. #319 — model + bootstrap - [x] 2. **signaling ← this PR** - [ ] 3. WebRTC transport (media
+  + driver) — adds the voice deps - [ ] 4. `poly call` CLI - [ ] 5. echo cancellation
+
+## Related https://linear.app/poly-ai/issue/DEVP-703/feature-ad-call
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+- **call**: Webrtc transport (media + driver) (ad call 3/N)
+  ([#322](https://github.com/polyai/adk/pull/322),
+  [`27cc804`](https://github.com/polyai/adk/commit/27cc804ee02c2aae7a196359e5db7a9835ba0ea9))
+
+Stacked on #320.
+
+## What - Voice runtime deps (pinned, cp314 wheels): `aiortc`, `sounddevice`, `websockets`, `numpy`,
+  `pywebrtc-audio` + `licenses.json`/licensecheck updates. - `call/media.py` — `MicrophoneTrack`
+  (sounddevice → aiortc, 48 kHz/mono/int16, bounded queue) and `SpeakerPlayer` (resample + drain to
+  the device). - `call/client.py` — `run_call()`: aiortc peer connection, SDP offer/answer + inbound
+  ICE over the signaling WS, races the loop against a connection-failure event.
+
+## Depends on `CallSession` (#319) + signaling (#320). Lazy-imported, so other commands don't load
+  the WebRTC/audio stack.
+
+## Tests `media_test.py` (frame round-trip) + `client_test.py` (ICE-candidate parse,
+  connection-failure handling) — extras-guarded.
+
+## Stack
+
+- [x] 1. #319 — model + bootstrap - [x] 2. #320 — signaling protocol - [x] 3. **WebRTC transport ←
+  this PR** - [ ] 4. \`poly call\` CLI - [ ] 5. echo cancellation
+
+## Related https://linear.app/poly-ai/issue/DEVP-703/feature-ad-call
+
+---------
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+### Features
+
+- **call**: Agent Studio link, graceful hang-up, simpler options
+  ([#325](https://github.com/polyai/adk/pull/325),
+  [`b2a9f06`](https://github.com/polyai/adk/commit/b2a9f06c4ab6eff36257179de9a0058b4c4d16de))
+
+## Summary
+
+Hardening and UX polish for the shipped `poly call` command — adds a review link, makes Ctrl+C
+  clean, and removes --mode as an option in the CLI.
+
+## Motivation
+
+`poly call` works, but had some rough edges: no easy way to open the call afterwards, a `Task was
+  destroyed but it is pending!` warning on Ctrl+C, and a `--mode` flag the gateway ignores (it
+  resolves the mode from LLeMur config).
+
+## Changes
+
+- **Agent Studio link** — print a direct link to the call. No dependency on the (not-yet-available)
+  rich in-call metadata. - **Graceful hang-up** — `_hangup_on_signal` context manager bridges Ctrl+C
+  to a stop event, terminating the running loop gracefully and without resurfacing KeywordInterrupt.
+  - **Drop `--mode`** — removed the flag and its plumbing (`create_call_session` no longer takes
+  `mode`). The OFFER now always sends `end-to-end` to match the in-browser call panel; the gateway
+  resolves the effective mode from LLeMur regardless. - **`build_offer_message` tidy** — `call_sid`
+  is now required. - **Docs** — new `reference/cli/call.md`, registered in `mkdocs.yml` nav and the
+  `cli.md` index.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly call`) - [x] Tested against a live
+  Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Notes
+
+- Scoped to draft/branch calling (deployed environments are separate, in-progress work). - Merging
+  this as `feat:` cuts a minor release; retitle the squash commit to `build(call):`/`fix(call):` to
+  defer if you want to batch.
+
+---------
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+
+## v0.59.0 (2026-09-15)
+
+### Features
+
+- Add `poly apikey` for one-shot GitHub sign-in and API key setup
+  ([#315](https://github.com/polyai/adk/pull/315),
+  [`a1dd15c`](https://github.com/polyai/adk/commit/a1dd15cefa44c4661c762e7acf4a27263b8e2e55))
+
+## Summary
+
+Adds `poly apikey`, a non-interactive command whose job is to get an API key for the PolyAI APIs and
+  Dialog RSN into a user's environment - not to set up the ADK itself, which stays with `poly
+  setup`/`poly login`. It signs a user in through the device flow, creates their Agent Studio
+  account if needed, mints (or reuses) an account-scoped API key, saves it to the credentials file,
+  and exports `POLY_API_KEY` into the user's shell profile (or user environment on Windows).
+  `--region studio` targets the PLG cluster via a GitHub-only sign-in page, for individual
+  developers; `--region <region>` targets any other cluster (us-1/uk-1/euw-1) via the same email/SSO
+  page `poly login` uses, for enterprise users who need a key for a region other than where their
+  identity lives. It's runnable by an AI coding assistant on the user's behalf, since it never
+  prompts and handles no secrets outside the process.
+
+## Motivation
+
+The studio sign-in page is getting a "Set up with your AI coding assistant" panel: a prompt the user
+  copies into Claude Code, Cursor or Codex. The first version of that prompt had the agent drive the
+  Auth0 device flow and edit dotfiles directly. Agents frequently refused it as a prompt-injection
+  pattern, and when they did run it the token and key passed through the agent's transcript. Moving
+  the flow into the CLI makes the pasted prompt "install the package and run one command", which
+  agents accept, and keeps every secret inside the process. `poly apikey` is scoped narrowly to the
+  API-key/Dialog RSN use case; ADK onboarding for an assistant still goes through `poly setup`/`poly
+  login`, unchanged by this PR.
+
+Sign-up tracking is done on the Auth0 side (post-login Action -> PostHog), so the ADK sends no
+  telemetry.
+
+Why this is a separate command rather than a flag on `poly login`, or part of `poly setup` (#305):
+
+- It authenticates against a different Auth0 application, whose login page shows only "Continue with
+  GitHub". `login` and `setup` keep the email/Google/GitHub page. - It creates an **account-scoped**
+  API key on the accounts API, not a user PAT. - It exports `POLY_API_KEY` for use by the PolyAI
+  SDKs and other tools, which `login` deliberately does not. The ADK itself keeps reading
+  `~/.poly/credentials.json`, so the variable is for everything downstream of onboarding rather than
+  for `poly` commands. - It never prompts, and its `--json` shape is a stable contract for the agent
+  driving it. `setup` is the interactive, human-facing path and stays that way.
+
+## Changes
+
+- Add `poly apikey` (Getting started group) with `--region`, `--key-name`, `--account-id`,
+  `-f/--force`, and the shared `--json` / `--verbose` / `--debug` parents. Exit `0` on success, `1`
+  on sign-in, account or API failure, `2` when `POLY_API_KEY` is already set to a different value
+  and `--force` was not given. After saving credentials it polls (up to 20×, 1 s apart, mirroring
+  `poly login`/`poly setup`) for the key to become active before writing `POLY_API_KEY`, so a
+  command run immediately afterwards doesn't fail against a key the platform hasn't finished
+  activating; if it never activates, it warns and continues rather than failing. - `--region`
+  (required, no default) picks which cluster's Auth0 app to sign in against and which cluster's
+  account/key APIs to call - reusing `REGION_TO_AUTH_DETAILS` and the region-keyed interface methods
+  `poly login` already uses, so no new Auth0 infrastructure was needed. The default key name becomes
+  `cli-generated-key-<region>` for any non-`studio` region, so a key created for one region never
+  collides with or overwrites a key from another - each region's credential also gets its own
+  independent entry in `~/.poly/credentials.json`. - Extract the RFC 8628 device-flow loop from
+  `auth.py` into `poly.auth.device_flow`, taking an `AuthDetails` rather than a region so a caller
+  can target a specific Auth0 application. `login` and `setup` keep their exact output; they now
+  call the shared helper. The poll interval is capped at 30 s under repeated `slow_down`. - Add
+  JWT-authenticated platform calls for listing accounts and listing/creating account API keys, and
+  factor the repeated Bearer header block into `_jwt_headers(jwt, source)`. The `X-Poly-Source`
+  header is parameterised so apikey traffic is distinguishable from the rest of the ADK; existing
+  callers still send `adk`. - Add `poly.utils.api_keys.select_reusable_api_key`: newest active,
+  unexpired key whose `policies[0].name` matches (the creation name lands there, not on the key's
+  own `name`). - Add `poly.utils.env_profile`: detects the profile file from `$SHELL` (`~/.zshrc`,
+  `~/.bash_profile` on macOS / `~/.bashrc` on Linux, fish config, `~/.profile` fallback) and writes
+  the export line with a marker comment, replacing an existing line in place only with `--force`. On
+  Windows it writes the user-scope registry environment and broadcasts `WM_SETTINGCHANGE`, via a
+  small backend seam so the logic is testable on Linux CI. - Never overwrite an existing `studio`
+  entry in `~/.poly/credentials.json`; report that it was kept. - On enterprise regions
+  (`us-1`/`uk-1`/`euw-1`), `/jupiter/v1/authorise` only auto-creates a workspace for `@poly-ai.com`
+  users (verified in `poly_core`, `src/agent_v3/jupiter_api/interactors/auth_interactor.py`) -
+  anyone else who isn't already provisioned in Aegis gets a raw `403`. `apikey` now catches that and
+  raises a friendly message pointing at `--account-id`/PolyAI provisioning instead of surfacing the
+  HTTP error; studio's 403 behaviour (a genuine auth error) is untouched. Also: account resolution
+  now refuses to silently pick among multiple accounts on any region - including studio - erroring
+  and listing them unless `--account-id` is given; the sign-in message no longer reads "with your
+  browser ... in your browser" for non-studio regions, and `--json` output includes `key_active` so
+  an agent can tell whether the activation wait actually succeeded. - Docs: reference page for
+  `apikey`, entries in the CLI overview and nav, a short subsection in Getting started, and a README
+  line.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project
+
+Unit tests (run on both the Ubuntu and Windows CI runners) cover the device flow (first-poll
+  success, pending, slow-down cap, expiry, unknown error, no-browser, custom callback), key
+  selection (policy-name match, inactive, expired, missing expiry, newest wins), profile detection
+  and writing for zsh/bash/fish/fallback and the Windows registry path (fake backend), and the
+  command itself (create and reuse paths, `--account-id`, empty-account timeout, conflict exit 2,
+  `--force` forwarding, `--json` shape, key never printed, region selection - `--region studio` vs.
+  `--region us-1` sign-in target, per-region default key name, `--key-name` overriding it, region
+  threaded into account/credentials calls, `--region` required). Tests make no network calls and do
+  not touch the real `~/.poly`.
+
+Manual runs against studio with a fresh GitHub account, all passing end to end:
+
+| Platform | Shell / store | Paths exercised | |---|---|---| | macOS 15 | zsh, `~/.zshrc` | new
+  account, key created, conflict exit 2, `--force` replace in place | | Debian 12 (Docker) | bash,
+  `~/.bashrc` | key reused, append with marker, fresh login shell sees the variable | | Windows
+  Server 2022 (GCP) | user registry | key reused, `HKCU\Environment` written, value visible from a
+  new process |
+
+In each case `poly project list --region studio` authenticated with the saved credential afterwards.
+
+`--region` for a non-`studio` cluster has not been exercised against a live enterprise tenant in
+  this environment (no credentials for one here) - it reuses the exact `AuthDetails`/device-flow/
+  interface calls `poly login --region <region>` already uses in production, so risk is limited to
+  this file's own plumbing, covered by the unit tests above.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+`--region` went from optional (defaulting to `studio`) to required in a later push of this same PR.
+  `poly apikey` has never shipped in a release, so this is not a break in released behaviour - just
+  tightening the interface before it goes out.
+
+Overlaps with #305 (`poly setup`) in `auth.py` imports, `cli.py`'s command list and the docs index
+  pages; whichever lands second rebases. This branch no longer references `poly start`, so merge
+  order does not change its docs.
+
+## Screenshots / Logs
+
+``` $ poly apikey --region studio Setting up your PolyAI account and API key... To sign in with
+  GitHub, open the following link in your browser and enter the code when prompted.
+
+URL: https://login.studio.poly.ai/activate?user_code=XXXX-XXXX
+
+Code: XXXX-XXXX Authenticated successfully! Setting up your account... Created API key
+  'cli-generated-key': abcd****wxyz Saved to ~/.poly/credentials.json (studio). Wrote to ~/.zshrc:
+  export POLY_API_KEY="abcd****wxyz"
+
+Done. Account: ws-xxxxxxxx
+
+API key: abcd****wxyz (cli-generated-key, created) Saved to: ~/.poly/credentials.json (studio)
+  Profile: ~/.zshrc (export POLY_API_KEY="abcd****wxyz")
+
+Open a new terminal, or run `source ~/.zshrc`, to pick up POLY_API_KEY. ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+Co-authored-by: Andy Mohajeri <Andy.Mohajeri@poly-ai.com>
+
+
+## v0.58.0 (2026-09-15)
+
+### Features
+
+- **call**: Callsession model + draft-call bootstrap (ad call 1/N)
+  ([#319](https://github.com/polyai/adk/pull/319),
+  [`30d2da7`](https://github.com/polyai/adk/commit/30d2da72c26b542482023cd70c441b63e2ad2006))
+
+First slice of the **`ad call`** feature (terminal voice call to your agent), split into stacked
+  PRs. **Pure HTTP + a data model — no new runtime dependencies.** The WebRTC/audio deps come later.
+
+## What - **`poly.call.session.CallSession`** — immutable model holding everything a WebRTC call
+  OFFER needs - **Draft-call bootstrap** - `get_branch_call_info` → sync client → interface (`POST
+  /branches/{id}/deploy`). - `AgentStudioProject.create_call_session(...)` — validates the response
+  and returns a `CallSession`. Draft-only for now (deployed envs raise `NotImplementedError`).
+
+## TODO
+
+- [x] 1. **model + bootstrap ← this PR** - [ ] 2. signaling protocol - [ ] 3. WebRTC transport
+  (media + driver) — *adds the voice deps* - [ ] 4. `poly call` CLI command - [ ] 5. echo
+  cancellation
+
+## Related https://linear.app/poly-ai/issue/DEVP-703/feature-ad-call
+
+---------
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+
+## v0.57.0 (2026-09-14)
+
+### Features
+
+- Support typed variant attributes ([#307](https://github.com/polyai/adk/pull/307),
+  [`3fcf3e2`](https://github.com/polyai/adk/commit/3fcf3e2d1579282c339e102d06613fa21bc3d15b))
+
+## Summary
+
+Variant attributes can now declare a type. ADK reads an attribute's `kind` (and an enum's `config`)
+  from the platform, validates every value against it locally, and dual-writes native typed values
+  on push — matching the `AttributeType` support the platform added in the Variant Attribute Types
+  project.
+
+## Motivation
+
+The platform now stores variant attribute values twice: the legacy stringified `values` map and a
+  native `typedValues` map that wins on read. ADK knew about neither, so it flattened every typed
+  attribute to a string on pull, and its pushes were rejected outright by the backend's type
+  validation once a project had a typed attribute.
+
+Linear project: https://linear.app/poly-ai/project/variant-attribute-types-a7bc31d07a9c/overview
+
+## Changes
+
+- Variant attributes gain an optional `kind` (`string`, `number`, `boolean`, `enum`, `object`) and,
+  for enums, a `config` listing the allowed values. - Push dual-writes both maps and sends the
+  declared type on create and update. - Pull prefers `typedValues`, falls back to the whole `values`
+  map when it is malformed, and parses a legacy string against the declared kind — so an attribute
+  typed in Agent Studio but never re-saved still reads natively. - Values are validated against
+  their kind before push, naming the variant a mismatch came from instead of surfacing it on a live
+  call. - `values` stays a map of strings on disk, with `kind` saying how to read them. An ADK
+  released before typed attributes calls `.strip()` on every value and would fail on a native int,
+  bool or nested map in a file a newer ADK had written. Native YAML is still accepted on input, and
+  both spellings hash identically so neither shows as a diff against the other. - New variants seed
+  typed attributes with a native null rather than `""`, which the platform rejects for any
+  non-string kind. - Docs updated, including two behaviours that aren't discoverable from the file:
+  a blank typed attribute is omitted from the deployed agent (a blank string substitutes empty), and
+  Agent Studio's Date & time / Opening hours / Voice types are stored as `string` or `enum` here.
+
+A project that never adopts a type sees no change to its file at all.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+1585 tests pass. New coverage pins the wire round trip per kind, the projection read including the
+  malformed-`typedValues` fallback, YAML round trips for every kind, and the backward-compatible
+  encoding — including a test that runs the pre-types reader's exact comprehension over what this
+  writes, plus a guard asserting that same reader really does fail on a native value.
+
+Not yet exercised against a live project. Worth a real `poly push` of a typed attribute before
+  merging, since this changes the push payload.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
+## v0.56.0 (2026-09-11)
+
+### Continuous Integration
+
+- Validate ADK skills frontmatter and keep versions in lockstep with the CLI
+  ([#316](https://github.com/polyai/adk/pull/316),
+  [`6fa5c65`](https://github.com/polyai/adk/commit/6fa5c65c693ed294578df32aa099633a8ef711b9))
+
+## Summary
+
+Adds CI validation that every `skills/*/SKILL.md` has well-formed frontmatter with the required
+  fields and a `metadata.version` matching the CLI version in `pyproject.toml`, plus release
+  automation that auto-bumps skill versions in lockstep with the CLI version.
+
+## Motivation
+
+Skill versions had already silently drifted (skills at 0.53.1 while the CLI was at 0.54.0) with no
+  CI signal — a mismatch lets a skill's documented behaviour (`requires.bins`, examples, resource
+  schemas) fall out of sync with the CLI it describes.
+
+## Changes
+
+- New `scripts/validate_skills.py`: checks each skill's YAML frontmatter for the required fields
+  (`name`, `description`, `metadata.author`, `metadata.license`, `metadata.version`,
+  `metadata.requires.bins`) and that `metadata.version` equals `project.version` in `pyproject.toml`
+  - New `validate-skills` workflow running the script, path-filtered to `skills/**`,
+  `pyproject.toml`, and the script itself, so it only runs when relevant files change (and needs no
+  package install) - Registered the five `SKILL.md` files in `[tool.semantic_release]
+  version_variables`, so the release commit stamps skill versions together with `pyproject.toml` -
+  Bumped all five skills from the drifted 0.53.1 to the current 0.54.0
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Verified manually: the validator passes on the repo and correctly rejects fixtures with missing
+  frontmatter, broken YAML, missing fields, empty `bins`, and a mismatched version. The
+  semantic-release stamping was verified end-to-end in a scratch clone — a forced patch bump updated
+  `pyproject.toml` and all five `SKILL.md` files together, touching only the frontmatter `version:`
+  line in each.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` $ uv run --no-project --with "ruamel.yaml>=0.18.0" python scripts/validate_skills.py OK
+  skills/poly-adk-branching/SKILL.md OK skills/poly-adk-conversations/SKILL.md OK
+  skills/poly-adk-rtc/SKILL.md OK skills/poly-adk-testing/SKILL.md OK
+  skills/poly-adk-workflow/SKILL.md
+
+Validated 5 skills against CLI version 0.54.0 ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+### Features
+
+- Add poly metrics commands (list, export, add, edit, import)
+  ([#259](https://github.com/polyai/adk/pull/259),
+  [`041a1a9`](https://github.com/polyai/adk/commit/041a1a9fe79dff10efe2511b19d5f4d538f3410d))
+
+## Summary
+
+Add `poly metrics` CLI commands for managing custom metrics in Agent Studio projects: * list *
+  export / import (YAML) * add * edit
+
+## Motivation
+
+Custom metrics are currently only manageable through the Agent Studio UI. This adds full CLI support
+  so teams can script metric setup, export/import metric definitions across projects, and integrate
+  metric management into CI pipelines.
+
+## Changes
+
+### Commands
+
+- **`poly metrics list`** — display all custom metrics in a Rich table (Name, Type, Active, API,
+  Description) with active/inactive count summary; `--json` for machine-readable output - **`poly
+  metrics export [file]`** — export all metrics as YAML to stdout or a file; `--json` outputs JSON
+  instead - **`poly metrics add`** — create a new metric with `--name`, `--type`, `--description`,
+  `--api`, `--expected-values`; omit required flags for interactive mode (name text input, type
+  selector, description prompt, API confirm via `questionary`) - **`poly metrics edit <name>`** —
+  update an existing metric's `--description`, `--api` (bool), `--active` (bool), or
+  `--expected-values`; `--api`/`--active` accept `true`/`false` or can be used bare to set `true`.
+  When called with just a metric name and no flags, enters **interactive mode**: fetches the metric,
+  displays current values, and prompts with `questionary.checkbox()` to select which fields to
+  update. `--expected-values` is only offered for string-type metrics. Friendly error when metric
+  not found (404). - **`poly metrics import <file>`** — bulk-import metrics from a YAML file;
+  creates new metrics and skips existing ones; `--dry-run` previews what would be created/skipped
+  and warns about remote-only metrics that won't be deleted
+
+### API flag workaround
+
+The server's `create_custom_metric` route hardcodes `api=False`, ignoring the client-supplied value
+  (the AS UI also doesn't set this on create). When `--api` is passed, under the hood the the CLI
+  follows up with a PATCH to set `api=True`.
+
+### Implementation notes
+
+- Platform API: 5 new methods on `PlatformAPIHandler`; `make_request` extended with `files`
+  (multipart upload) and `response_format` (YAML parsing) params . These were needed for import and
+  export YAML as file handling only previously supported JSON. - Tests: 30 unit tests across 8 test
+  classes
+
+import/export flow was chosen here as the implementation details of metrics require that metrics
+  have project scope (not branch scope) and cannot be deleted once written.
+
+In this case, using a local file to manage additions and changes could give way to merge issues and
+  user confusion where deleted items are not actually removed. For this reason I have opted to model
+  this feature on the platform features, with one exception that API can be set on metric creation.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly metrics` for all subcommands) - [x]
+  Tested against a live Agent Studio project
+
+**Manual test spreadsheet**: [Google
+  Sheet](https://docs.google.com/spreadsheets/d/1ahhwLpTKTt_pApH7Z_oESQkX8ki-vj2GrHf2ABO75Zw/edit?gid=246662677#gid=246662677)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+### `poly metrics list` <img width="565" height="296" alt="Screenshot 2026-07-31 at 15 06 03"
+  src="https://github.com/user-attachments/assets/efc5dfb6-b3cb-4783-8bae-2d64c8173106" />
+
+### `poly metrics add` (interactive) <img width="294" height="87" alt="Screenshot 2026-08-04 at 16
+  53 09" src="https://github.com/user-attachments/assets/dc4d33ea-11c2-476b-8593-0bbd6f116857" />
+
+### `poly metrics add` — API flag prompt <img width="225" height="29" alt="Screenshot 2026-07-31 at
+  15 17 40" src="https://github.com/user-attachments/assets/d1ef1e1e-a0c0-453e-bc8e-069bd8f43c84" />
+
+### `poly metrics add --expected-values` (JSON output) <img width="358" height="230" alt="Screenshot
+  2026-07-31 at 15 21 57"
+  src="https://github.com/user-attachments/assets/7d14753f-f65f-418c-ae30-92e5ab7e6582" />
+
+### `poly metrics add --api` (JSON output) <img width="358" height="178" alt="Screenshot 2026-07-31
+  at 15 30 58" src="https://github.com/user-attachments/assets/3f6e919f-db79-427d-98d6-1425238d4ce2"
+  />
+
+
+## v0.55.0 (2026-09-10)
+
+### Features
+
+- Add poly update command and startup version check ([#303](https://github.com/polyai/adk/pull/303),
+  [`4b6d5c9`](https://github.com/polyai/adk/commit/4b6d5c99e7e8cf6e189591ecf9d7d7d561730f6a))
+
+## Summary
+
+Adds a `poly update` command that detects how the CLI was installed, runs the matching upgrade
+  command, and refreshes the installed AI agent skills, supporting `--check`, `--to VERSION`,
+  `--cli-only`, and `--skills-only`. Also adds a passive startup notice that tells users when a
+  newer release exists, limited to standalone tool installs.
+
+Final PR of the stack: stacked on #305 (`poly setup`), whose skills wrapper it reuses.
+
+## Motivation
+
+There is no built-in way to update the CLI. Users have no way of learning that a new version exists,
+  and upgrading means knowing which of several install methods they used and running the right
+  command by hand.
+
+## Changes
+
+- Add `poly update`, which upgrades the CLI to the latest release on PyPI. - Add `poly update
+  --check` to report whether an update is available without installing it. - Add `poly update --to
+  VERSION` to install a specific release, including downgrades and reinstalls. Named `--to` rather
+  than `--version` because the root parser already uses that to print the installed version. The
+  requested version is validated against PyPI first, so a typo fails immediately with a list of
+  recent releases rather than a resolver error. - Detect the install method from `sys.prefix` and
+  package metadata, and pick the matching command for `uv tool`, `pipx`, `uv pip` and `pip`. Pinned
+  installs use `install --force` rather than `upgrade`, since the upgrade subcommands will not move
+  backwards and would silently no-op a downgrade. - Refuse to upgrade an editable/dev install, which
+  would otherwise replace a working checkout with a released package and leave local edits
+  mysteriously inert. - Refuse to upgrade an ephemeral `uvx` / `uv run` environment, where the
+  install is discarded when the command exits. - Add a passive update notice on CLI startup, rate
+  limited to once every 12 hours via a stamp file in `~/.poly`. It is restricted to standalone `uv
+  tool` / `pipx` installs: a project install's version is pinned by that project's manifest, so
+  prompting the user to upgrade it would be advice the next dependency sync silently undoes. -
+  Suppress the startup notice for `--json` and non-TTY output so machine-readable output cannot be
+  corrupted, via `POLY_NO_UPDATE_CHECK`, and in CI. Non-TTY already covered most CI runners, but
+  only incidentally, and that stops holding for any runner that allocates a terminal, so the usual
+  markers are checked explicitly. Jenkins, Azure Pipelines and TeamCity are named individually
+  because they do not set `CI`. Errors are swallowed and logged at debug level so a version check
+  can never break the command the user actually ran. - Mention `POLY_NO_UPDATE_CHECK` in `poly
+  update --help`, so someone who sees the notice can find out how to silence it. No
+  `--no-update-check` flag: the env var already works inline (`POLY_NO_UPDATE_CHECK=1 poly status`),
+  so a flag would only duplicate it across every subcommand's help output. - Gate the startup check
+  cheapest-first — string comparison, then a small file read, then a 2 second network call — so the
+  common case adds no measurable startup cost. Skip recording the stamp when PyPI does not answer,
+  so a transient failure retries on the next run instead of causing 12 hours of silence. - Add PyPI
+  helpers to `cli_commands/shared.py`: `get_latest_version`, `get_available_versions` and
+  `is_newer_version`. Version comparison uses `packaging` rather than string inequality, which
+  previously reported an update available on every run for any build not exactly matching PyPI. -
+  Add a shared `POLY_HOME_DIR` constant and use it for both the credentials file and the update
+  stamp, replacing an inlined `~/.poly` path. - Declare `packaging>=24.0`, which was previously only
+  available transitively.
+
+- Update the installed AI agent skills as part of `poly update` — also when the CLI is already
+  current — via the pinned `npx skills` wrapper this PR inherits from #305. - Add `--cli-only` and
+  `--skills-only` (mutually exclusive) to narrow the update to one half. `--skills-only`
+  deliberately skips the not-upgradable guard, so editable/dev installs can still update their
+  skills. - Treat skill failures in a combined update as best-effort: warn without failing the
+  command. With `--skills-only` they are the whole command failing (exit 1). - Capture npx output in
+  `--json` mode so stdout stays a single object, and report the outcome under a `skills_updated`
+  key.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+101 unit tests covering the skills half of the update (scope flags, best-effort vs required failure
+  handling, quiet npx in `--json` mode), install-method detection, version comparison and ordering,
+  command construction for each install method, target-version validation, the `update` control
+  flow, and every startup-check and suppression gate. Tests make no network calls and never touch
+  the real `~/.poly`.
+
+Manual testing covered `--check`, `--to` with valid, invalid and older versions, and the
+  editable-install guard.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Startup notice gates, verified across every path:
+
+| scenario | network call | stamp written | result | | --- | --- | --- | --- | | `uv tool` install,
+  update available | yes | yes | notice shown | | `pipx` install, update available | yes | yes |
+  notice shown | | project venv | no | no | silent | | ephemeral `uvx` | no | no | silent | |
+  `--json` output | no | no | silent | | piped, not a TTY | no | no | silent | |
+  `POLY_NO_UPDATE_CHECK=1` | no | no | silent | | CI (`CI`, `JENKINS_URL`, `TF_BUILD`,
+  `TEAMCITY_VERSION`) | no | no | silent | | checked within last 12 hours | no | no | silent | |
+  PyPI unreachable | yes | no | silent | | already up to date | yes | yes | silent |
+
+Invalid target version:
+
+``` $ poly update --to 99.99.99 Error: Version '99.99.99' not found on PyPI. Recent versions:
+  0.53.1, 0.53.0, 0.52.0, 0.51.0, 0.50.0 $ echo $? 1 ```
+
+---------
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+
+## v0.54.0 (2026-09-10)
+
+### Features
+
+- Add AI agent skills suite ([#304](https://github.com/polyai/adk/pull/304),
+  [`1ae9187`](https://github.com/polyai/adk/commit/1ae9187daa993879ebca0e476d4209c677e62e29))
+
+## Summary
+
+Adds a `skills/` directory with five agent skills that teach AI coding agents (Claude Code, Cursor,
+  Codex, etc.) the `poly` CLI workflow, plus a README describing the suite. Installable via `npx
+  skills add`.
+
+First PR of a three-part stack: #305 adds `poly setup`, which installs these skills, and #303 makes
+  `poly update` keep them current.
+
+## Motivation
+
+AI coding agents working on ADK projects currently have no contextual knowledge of the `poly`
+  workflow — resource schemas, the no-`main` rule, pushed-state testing semantics, or conflict
+  resolution. These skills provide that context on demand, structured after Google's `agents-cli`
+  skills suite: a workflow entrypoint plus task-specific skills that load only when relevant.
+
+## Changes
+
+- `skills/poly-adk-workflow/SKILL.md` — entrypoint: install/update, auth, `poly docs` habit,
+  resource-choice guidance, project structure, the core edit → validate → push → test → merge loop,
+  and a routing table to the task skills - `skills/poly-adk-testing/SKILL.md` — `poly validate`,
+  scripted `poly chat`, `test_suite/` authoring with `api_mocks`, `poly functions execute/validate`
+  - `skills/poly-adk-branching/SKILL.md` — branch semantics, three-way merge model, conflict
+  markers, non-interactive `merge --resolutions`, review gists -
+  `skills/poly-adk-conversations/SKILL.md` — `poly conversations`, instrumenting with `conv.log` and
+  metrics, real-call → test-case loop - `skills/poly-adk-rtc/SKILL.md` — RTC pull/push cycle, drift
+  protection, live-environment safety - `skills/README.md` — suite overview and install instructions
+
+Resource schemas are deliberately not duplicated — skills instruct agents to run `poly docs`, which
+  ships schemas with the installed CLI. Skill `metadata.version` is pinned to the current release
+  (0.53.1).
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Markdown-only change. Skills were installed locally via `npx skills add` (frontmatter validated by
+  the tool) and exercised in Claude Code sessions against a real project. All CLI commands and flags
+  referenced were cross-checked against `docs/` and, where relevant, the source.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+- Add poly setup command and remove poly start ([#305](https://github.com/polyai/adk/pull/305),
+  [`f647d06`](https://github.com/polyai/adk/commit/f647d0691db6afedff0df72b92a3cc7b209847d6))
+
+## Summary
+
+Adds `poly setup` — a single onboarding command covering authentication, shell completion, AI agent
+  skill installation, and project setup — and removes `poly start`, which it supersedes. Second PR
+  of the stack: stacked on #304 (the skills it installs), and the base for #303, which makes `poly
+  update` keep them current.
+
+## Motivation
+
+Onboarding currently spans several commands users must discover one by one (`poly login`, `poly
+  completion`, `poly project create`), and the new agent skills had no installation path. `poly
+  setup` runs all of it in one command, skipping any step that is already done, so it doubles as a
+  repair command. `poly start` covered a subset of this (auth + project, hardcoded to the `studio`
+  region) and is not referenced in published material, so it is removed rather than left as a second
+  entry point.
+
+## Changes
+
+- New `poly setup` command with `--region`, `--base-path`, `--skip-auth`, `--skip-skills`, `--agent`
+  (repeatable), `--dev`, and `--global/-g` flags - New `cli_commands/skills.py`: wrapper around the
+  pinned `npx skills` package with a Node.js 18+ gate; skill installation is non-fatal — a missing
+  Node warns and setup continues - `poly login` (and setup) now wait up to 20s for a newly created
+  API key to become active before returning - Region selection extracted to a shared picker; `poly
+  start`'s four hardcoded `studio` call sites removed along the way - `poly start` removed from the
+  CLI, docs, and nav - Docs: new `setup` reference page; getting-started restructured to "install,
+  then `poly setup`"; tooling page now leads with skill installation via setup - `poly-adk-workflow`
+  skill updated to mention `poly setup` for fresh machines - Root README quickstart updated from
+  `poly start` to `poly setup`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+60 new tests (node gate, npx argument construction and non-raising failures, per-step skip logic,
+  real rc-file completion installs in throwaway home directories — set via both HOME and USERPROFILE
+  so they are hermetic on Windows — region threading, and activation-poll behavior). Manually
+  verified end-to-end with an isolated `$HOME`: completion install + idempotent re-run, `--dev -g
+  --agent claude-code` installing all five skills via npx, graceful skip without a TTY, and `poly
+  start` now reporting an invalid choice.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) — `poly start` is intentionally
+  removed; `poly setup` / `poly login` are the migration path - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+- Proactively match parent branch ids on push ([#314](https://github.com/polyai/adk/pull/314),
+  [`e0fb4d5`](https://github.com/polyai/adk/commit/e0fb4d5de75d609067a87027572b1a35e1149909))
+
+## Summary
+
+`poly push` now proactively adopts the parent branch's resource ids for new local resources that
+  match by file path, and mints subresource ids (conditions, function parameters, delay responses)
+  deterministically from their scoped names. This keeps ids aligned across branches so merges
+  reconcile resources instead of duplicating them.
+
+## Motivation
+
+When a resource is added on the parent branch and its files reach a child branch (e.g. via a
+  git-side merge of the project repo), pushing previously minted fresh random ids for them. The same
+  logical resource then had a different id on each branch, and merges treated the two copies as
+  unrelated — producing duplicates or name collisions. Adopting existing ids at mint time and
+  deriving subresource ids from stable names removes the main sources of this divergence.
+
+## Changes
+
+- `poly push` fetches the parent branch's resources by file path and passes them into
+  `find_new_kept_deleted`; a new resource whose file path-matches a parent resource adopts the
+  parent's id at mint time. Flows resolve first so composite step ids stay consistent, and steps
+  adopt the parent's bare step id under the local flow prefix. - Parent-id adoption always runs on
+  real pushes; dry runs skip the parent fetch unless `POLY_ADK_SYNC_PARENT_IDS_TEST=1` forces it for
+  testing. - Kept resources inherit parent-only subresources by name, so a condition or parameter
+  added on both the parent and the branch ends up with one shared id. - Condition, function
+  parameter, and delay-response ids are derived from their scoped names (`generate_subresource_id`)
+  instead of minted randomly — repeated reads are idempotent and independently created same-named
+  subresources agree across branches. - `sync_ids_with_sandbox` is generalized to
+  `sync_ids_with_parent`, defaulting to the branch's actual parent and falling back to main. - The
+  parent branch's projection can be supplied directly — `push_project(parent_projection_json=...)`
+  for library consumers (e.g. a service embedding the ADK), mirrored by a hidden
+  `--parent-projection JSON|-` CLI flag. A supplied projection builds the parent-id lookup fully
+  offline (no branch or projection fetch) and enables adoption on dry runs; an empty dict means "no
+  parent"; omitting it keeps the fetch behavior. - Parent fetching and path-keying are split
+  (`_fetch_parent_resources` returning the raw resources + a shared `_resources_by_absolute_path`),
+  and `sync_ids_with_parent` reuses the same fetch for its default-parent resolution. - Retargeted
+  the id-sync tests at the mint site and added coverage for deterministic ids, subresource
+  inheritance, the offline parent-projection path (enforced by a test API handler that fails on any
+  network call), and the new CLI parsing.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Manual test pass:
+
+- [x] 1. New resource from the parent adopts the parent's id on push - [x] 2. New flow with steps —
+  flow id adopted, step ids bare in commands, conditions carry parent ids, references resolve - [x]
+  3. New step in a kept flow adopts the parent's bare step id under the branch flow prefix - [x] 4.
+  Condition added on both sides keeps the parent's condition id (kept step) - [x] 5. Parameter added
+  on both sides keeps the parent's parameter id - [x] 6. Repeated dry runs mint identical condition
+  ids (read idempotence) - [x] 7. Sibling branches mint identical ids for the same-named condition -
+  [x] 8. Delay-response ids stable across pushes - [x] 9. Push from main unchanged - [x] 10. Dry run
+  without the test env var does not fetch the parent - [x] 11. Local-only resource still mints a
+  random id - [x] 12. Parent fetch failure mode on a real push - [x] 13. `sync_ids_with_parent`
+  against a non-main parent - [x] 14. Pull + status clean after a push with adopted ids - [x] 15.
+  Merge with an untouched adopted-id resource auto-resolves (audit-only diff) - [x] 16. Merge with a
+  branch-edited adopted-id resource surfaces a real conflict - [x] 17. Merge without the audit-field
+  auto-resolve deployed (control) - [x] 18. `poly push --dry-run --parent-projection -` (projection
+  piped in) shows adopted ids fully offline
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) — note: real pushes now always
+  attempt parent-id adoption for new resources; dry-run output is unchanged unless the test env var
+  is set - [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+
+## v0.53.4 (2026-09-09)
+
+### Bug Fixes
+
+- Read feature flags from the region's PostHog project
+  ([#313](https://github.com/polyai/adk/pull/313),
+  [`afd5185`](https://github.com/polyai/adk/commit/afd5185702619cd564f5af4129a8cb3e8b195190))
+
+## Summary
+
+Every feature-flag read went to the non-production PostHog project, whose rollouts sit at 100%, so
+  every flag reported as enabled. The client is now built per region's project, and the project
+  group key and properties match what the platform services send.
+
+## Motivation
+
+`deployment-simplification` returned `true` for every input — including project ids that don't
+  exist:
+
+``` before after a migrated project True True a non-migrated project True False a project id that
+  does True False not exist ```
+
+Two separate causes, both needed fixing:
+
+- **Wrong PostHog project.** One key was hardcoded, the non-production one. There are two:
+  `dev`/`staging`/`apollo` share one, the production clusters share the other. - **Wrong group
+  key.** Project ids are minted per-cluster and several clusters share one PostHog project, so the
+  `project` group key is namespaced as `<cluster>/<project_id>`. A bare id matches no group. Release
+  conditions match on group *properties*, which weren't sent at all.
+
+## Changes
+
+- Select the PostHog project by region; cache one client per project key, since a session can touch
+  more than one region. An unlisted region is treated as production, so a new region is never
+  reported as non-production. - Namespace the `project` group key by cluster. - Send
+  `group_properties` for both groups, including `account_id` so account-scoped conditions can match.
+  `account_id` is omitted when unknown rather than sent empty, which would fail an exact condition.
+  - Send the cluster `env` property, which is what separates two deployments sharing a cluster key.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Tested against a live Agent Studio project
+
+Payload assertions for the group key, properties, an omitted account, and a non-production env.
+  Region-to-project mapping covered for production, non-production, mixed casing and unknown
+  regions.
+
+Verified against real projects: `deployment-simplification` now answers `true` for a migrated
+  project and `false` for one that isn't, and `false` for an invented project id.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented)
+
+1565 passed, none failing. `get_posthog_client()` now takes a region — it has one caller in the
+  package.
+
+Note this changes behaviour wherever a flag gates something: flags that read as enabled everywhere
+  will start resolving per project. That is the point, but it is a real change.
+
+
+## v0.53.3 (2026-09-09)
+
+### Bug Fixes
+
+- Compare versions and tag when checking convergence
+  ([#311](https://github.com/polyai/adk/pull/311),
+  [`558203d`](https://github.com/polyai/adk/commit/558203d272d7a629c4c8d0bc123cd26f3d794ef3))
+
+## Summary
+
+`using_simplified_deployments` decides convergence by comparing deployment timestamps, which reports
+  every converged project as unconverged. It now compares version hashes, and treats a tagged
+  sandbox deployment as proof on its own.
+
+## Motivation
+
+The comment states the rule: *"A project is converged if the main == live"*. The code compares
+  timestamps — newest live vs newest sandbox.
+
+`main` has no environment of its own. Its deploys land in sandbox before migration and in live
+  after, so its version is the newest across both.
+
+Two kinds of sandbox deployment sit newer than live:
+
+- the mirror written after each live publish, holding live's version - a tagged branch deployment,
+  holding that branch's version
+
+A project has therefore migrated if any sandbox deployment carries the tag, or if live and main hold
+  the same version hash.
+
+## Changes
+
+- Compare the newest live deployment's `version_hash` against main's newest deployment's, instead of
+  timestamps. - Return converged when a sandbox deployment carries a tag. The rollout flag is still
+  checked first, and a soft-deleted tagged deployment doesn't count. - Require a non-empty hash on
+  both sides. Comparing directly made two absent hashes equal, and draft deploys record an empty
+  hash. - Find each head by `created_at` rather than assuming the API returns newest first. -
+  Convergence extracted into `_has_converged`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Tested against a live Agent Studio project
+
+Convergence cases: a sandbox mirror of live, a sandbox deployment holding its own version, an older
+  sandbox deployment, a tagged deployment, a tagged deployment with the flag off, a soft-deleted
+  tagged deployment, no deployments at all, no live deployment, a missing or empty hash, a deleted
+  head, and unordered API responses.
+
+Verified against two real projects: a converged one now reports `True` where it reported `False`; an
+  unconverged one still reports `False`.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented)
+
+1555 passed; two pre-existing `posthog_test.py` failures also fail on unmodified `main`.
+
+Note this changes behaviour: affected projects will start targeting `live`. Intended, but real.
+
+### Documentation
+
+- Auto-update from 2a7b3be ([#309](https://github.com/polyai/adk/pull/309),
+  [`261bfbd`](https://github.com/polyai/adk/commit/261bfbda72257bff4a16fcbd365629faed6f6be7))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Note keyphrase uniqueness rule ([#310](https://github.com/polyai/adk/pull/310),
+  [`bba4850`](https://github.com/polyai/adk/commit/bba48508e56fe9d465c7ae4386a3ddae9ebfd0d5))
+
+## Summary
+
+Document the keyphrase uniqueness rule on the speech recognition reference page, so the validation
+  added in `21692da` is discoverable before a push fails.
+
+## Motivation
+
+Agent Studio normalizes keyphrases (trim + lowercase) and rejects a push containing two entries that
+  normalize to the same phrase. Nothing in the docs said so, so the constraint was only discoverable
+  by hitting the error.
+
+## Changes
+
+- Add a `Validation` section to the speech recognition page, covering the keyphrase uniqueness rule
+  along with the existing rules for ASR settings, keyphrase boosting, and transcript corrections -
+  Add a matching bullet to the speech recognition best practices list
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.53.2 (2026-09-03)
 
 ### Bug Fixes

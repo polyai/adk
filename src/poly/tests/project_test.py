@@ -12,14 +12,18 @@ import shutil
 import tempfile
 import unittest
 from copy import deepcopy
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
+from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
+from poly.handlers.sdk import SourcererAPIError
 from poly.project import AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
+    AttributeKind,
     ChatGreeting,
     ChatSafetyFilters,
     ChatStylePrompt,
@@ -42,6 +46,7 @@ from poly.resources import (
     TestCaseAssertion,
     TestCaseTags,
     Topic,
+    TopicTags,
     TranscriptCorrection,
     Translation,
     Variable,
@@ -58,9 +63,10 @@ from poly.resources.flows import (
     FlowSettings,
     StepType,
 )
-from poly.resources.function import FunctionType
-from poly.resources.resource import MultiResourceYamlResource
+from poly.resources.function import FunctionParameters, FunctionType
+from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
 from poly.tests.testing_utils import mock_read_from_file
+from poly.utils import merge_strings
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_PROJECT_DIR = os.path.join(DIR, "test_projects")
@@ -1053,6 +1059,40 @@ class GetDiffsTest(unittest.TestCase):
         self.assertIn(other_func_path, message)
 
 
+class TriggerTestsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.trigger_tests."""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_forwards_a_trimmed_name(self):
+        """Surrounding whitespace is stripped before the name is sent."""
+        self.project.trigger_tests(["tc-1"], name="  Nightly · smoke  ")
+
+        self.assertEqual(
+            self.mock_api_handler.trigger_test_run.call_args.kwargs["name"], "Nightly · smoke"
+        )
+
+    def test_sends_no_name_when_blank(self):
+        """A blank name is no name, so the platform picks its default."""
+        self.project.trigger_tests(["tc-1"], name="   ")
+
+        self.assertIsNone(self.mock_api_handler.trigger_test_run.call_args.kwargs["name"])
+
+    def test_rejects_a_name_over_the_platform_limit(self):
+        """Names over 120 characters fail locally instead of as a platform 422."""
+        with self.assertRaises(ValueError):
+            self.project.trigger_tests(["tc-1"], name="x" * 121)
+
+        self.mock_api_handler.trigger_test_run.assert_not_called()
+
+
 class CleanResourcesBeforePushTest(unittest.TestCase):
     """Tests for the _clean_resources_before_push method"""
 
@@ -2042,7 +2082,54 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             deleted_resources,
         )
 
-        self.assertEqual(new_variant.attribute_ids, ["VARIANT_ATTRIBUTES-keep"])
+        self.assertEqual(new_variant.attribute_values, {"VARIANT_ATTRIBUTES-keep": ""})
+
+    def test_new_variant_seeds_typed_attributes_with_null(self):
+        """A typed attribute cannot hold "", so a new variant seeds it as null instead."""
+        string_attr = VariantAttribute(
+            resource_id="VARIANT_ATTRIBUTES-greeting",
+            name="greeting_name",
+            mappings={"v1": "Hello"},
+        )
+        number_attr = VariantAttribute(
+            resource_id="VARIANT_ATTRIBUTES-retries",
+            name="max_retries",
+            mappings={"v1": 3},
+            kind=AttributeKind.NUMBER,
+        )
+        self.project.resources[VariantAttribute] = {
+            "VARIANT_ATTRIBUTES-greeting": string_attr,
+            "VARIANT_ATTRIBUTES-retries": number_attr,
+        }
+
+        new_variant = Variant(
+            resource_id="VARIANTS-new",
+            name="New Variant",
+            is_default=False,
+        )
+
+        self.project._clean_resources_before_push(
+            {},
+            {Variant: {"VARIANTS-new": new_variant}},
+            {},
+            {},
+        )
+
+        self.assertEqual(
+            new_variant.attribute_values,
+            {"VARIANT_ATTRIBUTES-greeting": "", "VARIANT_ATTRIBUTES-retries": None},
+        )
+
+        # Both seeds reach the wire: "" in the legacy string map for every attribute,
+        # and a native null in typed_values for the typed one.
+        proto = new_variant.build_create_proto()
+        self.assertEqual(
+            dict(proto.attribute_values.values),
+            {"VARIANT_ATTRIBUTES-greeting": "", "VARIANT_ATTRIBUTES-retries": ""},
+        )
+        self.assertEqual(
+            dict(proto.attribute_values.typed_values), {"VARIANT_ATTRIBUTES-retries": None}
+        )
 
     def test_non_default_variant_update_is_kept(self):
         """A renamed non-default variant must still be pushed as an update."""
@@ -2060,7 +2147,9 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             {},
         )
 
-        self.assertEqual(push_changes.main.updated[Variant], {"VARIANTS-production": renamed_variant})
+        self.assertEqual(
+            push_changes.main.updated[Variant], {"VARIANTS-production": renamed_variant}
+        )
 
 
 class PushProjectTest(unittest.TestCase):
@@ -2166,6 +2255,65 @@ class PushProjectTest(unittest.TestCase):
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(Function, deleted_resources)
         self.assertIn("FUNCTION-extra_function", deleted_resources[Function])
+
+    def test_push_project_renamed_test_case_is_an_update(self):
+        """A test case renamed locally keeps its id: one update, no delete and create."""
+        project_data = deepcopy(PROJECT_DATA)
+        # Saved under an older name, so its file path differs from the local file's.
+        project_data["resources"]["test_cases"]["TEST-greeting_flow"]["name"] = "Old greeting name"
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        kwargs = self.mock_api_handler.queue_resources.call_args.kwargs
+        self.assertNotIn(TestCase, kwargs["new_resources"])
+        self.assertNotIn(TestCase, kwargs["deleted_resources"])
+        updated = kwargs["updated_resources"][TestCase]
+        self.assertEqual(list(updated), ["TEST-greeting_flow"])
+        self.assertEqual(updated["TEST-greeting_flow"].name, "Greeting flow test")
+        # Only the name changed, so no sub-resource commands are sent.
+        self.assertNotIn(TestCaseAssertion, kwargs["updated_resources"])
+        self.assertNotIn(TestCaseTags, kwargs["updated_resources"])
+        self.assertEqual(
+            set(project.resources[TestCase]), {"TEST-greeting_flow", "TEST-webchat_smoke"}
+        )
+
+    def test_push_project_renamed_test_case_diffs_sub_resources_against_saved_case(self):
+        """A rename with changed tags sends the tags update under the kept id."""
+        project_data = deepcopy(PROJECT_DATA)
+        saved = project_data["resources"]["test_cases"]["TEST-greeting_flow"]
+        saved["name"] = "Old greeting name"
+        saved["tags"]["tags"] = ["booking"]
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        kwargs = self.mock_api_handler.queue_resources.call_args.kwargs
+        self.assertEqual(list(kwargs["updated_resources"][TestCaseTags]), ["TEST-greeting_flow"])
+        self.assertNotIn(TestCaseAssertion, kwargs["updated_resources"])
+
+    def test_push_project_ambiguous_rename_stays_delete_and_create(self):
+        """Two saved cases share the local file's scenario: no pairing is guessed."""
+        project_data = deepcopy(PROJECT_DATA)
+        cases = project_data["resources"]["test_cases"]
+        cases["TEST-greeting_flow"]["name"] = "Old greeting name"
+        twin = deepcopy(cases["TEST-greeting_flow"])
+        twin["resource_id"] = "TEST-greeting_twin"
+        twin["name"] = "Another old greeting name"
+        cases["TEST-greeting_twin"] = twin
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        kwargs = self.mock_api_handler.queue_resources.call_args.kwargs
+        self.assertIn(TestCase, kwargs["new_resources"])
+        self.assertEqual(
+            set(kwargs["deleted_resources"][TestCase]),
+            {"TEST-greeting_flow", "TEST-greeting_twin"},
+        )
 
     def test_push_project_force_does_not_delete_remote_only_resources(self):
         """push --force with load_project: variant_attributes exist remotely but not locally.
@@ -3671,6 +3819,90 @@ class RevertChangesTest(unittest.TestCase):
         self.assertEqual(reverted, [])
 
 
+def _copy_test_project(test_case: unittest.TestCase) -> str:
+    """Copy the test project into a temp dir removed after the test, and return its root."""
+    tmp_dir = tempfile.mkdtemp()
+    test_case.addCleanup(shutil.rmtree, tmp_dir)
+    root = os.path.join(tmp_dir, "test_project")
+    shutil.copytree(TEST_DIR, root)
+    return root
+
+
+def _read_tree(root: str) -> dict[str, bytes]:
+    """Return {relative path: bytes} for every file under root."""
+    contents = {}
+    for dir_path, _, file_names in os.walk(root):
+        for file_name in file_names:
+            path = os.path.join(dir_path, file_name)
+            with open(path, "rb") as f:
+                contents[os.path.relpath(path, root)] = f.read()
+    return contents
+
+
+class RevertChangesOnDiskTest(unittest.TestCase):
+    """revert_changes against a real copy of the test project."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        self.root = _copy_test_project(self)
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        self.sms_file = os.path.join(self.root, "config", "sms_templates.yaml")
+        self.entities_file = os.path.join(self.root, "config", "entities.yaml")
+        # Revert once so every file is in the form revert writes
+        self.project.revert_changes()
+        self.clean_tree = _read_tree(self.root)
+
+    def _replace_in_file(self, path: str, old: str, new: str) -> None:
+        with open(path, encoding="utf-8") as f:
+            contents = f.read()
+        self.assertIn(old, contents)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(contents.replace(old, new, 1))
+
+    def test_revert_all_restores_modified_multi_resource_file(self):
+        """Every file is back to its reverted bytes, including the locally edited one."""
+        self._replace_in_file(self.sms_file, "This is a test template", "Edited locally")
+
+        self.project.revert_changes()
+
+        self.assertEqual(_read_tree(self.root), self.clean_tree)
+
+    def test_revert_one_file_leaves_other_edits_alone(self):
+        """Reverting the SMS templates leaves a local edit in another multi-resource file."""
+        self._replace_in_file(self.sms_file, "This is a test template", "Edited locally")
+        self._replace_in_file(self.entities_file, "customer_name", "customer_full_name")
+        entities_edited = _read_tree(self.root)[os.path.relpath(self.entities_file, self.root)]
+        sms_paths = [
+            resource.get_path(self.root)
+            for resource in self.project.resources[SMSTemplate].values()
+        ]
+
+        self.project.revert_changes(file_paths=sms_paths)
+
+        tree = _read_tree(self.root)
+        sms_rel = os.path.relpath(self.sms_file, self.root)
+        entities_rel = os.path.relpath(self.entities_file, self.root)
+        self.assertEqual(tree[sms_rel], self.clean_tree[sms_rel])
+        self.assertEqual(tree[entities_rel], entities_edited)
+
+    def test_revert_writes_each_multi_resource_file_once(self):
+        """Entries sharing a file are batched into a single write of that file."""
+        multi_resource_files = {
+            _parse_multi_resource_path(resource.get_path(self.root))[0]
+            for resource in self.project.all_resources
+            if isinstance(resource, MultiResourceYamlResource)
+        }
+        self.assertIn(self.sms_file, multi_resource_files)
+
+        with patch.object(Resource, "save_to_file", wraps=Resource.save_to_file) as save_spy:
+            self.project.revert_changes()
+
+        written = [call.args[1] for call in save_spy.call_args_list]
+        for path in multi_resource_files:
+            self.assertEqual(written.count(path), 1, path)
+
+
 class GetRemoteResourcesByNameLocalTest(unittest.TestCase):
     """Tests for the 'local' resolution mode of get_remote_resources_by_name."""
 
@@ -4131,6 +4363,311 @@ class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
             [],
             "Should not delete files for resource types in _not_loaded_resources",
         )
+
+
+class MultiResourcePullMergeTest(unittest.TestCase):
+    """Pulling a multi-resource file into a real copy of the test project.
+
+    Uses config/sms_templates.yaml, which holds test_template_1 and test_template_2.
+    """
+
+    TEMPLATE_1_TEXT = "This is a test template"
+    TEMPLATE_2_TEXT = "This is a second test template"
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        patch.object(AgentStudioProject, "save_config").start()
+        patch("poly.utils.save_imports").start()
+        patch("poly.utils.export_decorators").start()
+        self.merge_spy = patch("poly.utils.merge_strings", wraps=merge_strings).start()
+        self.save_spy = patch.object(
+            Resource, "save_to_file", wraps=Resource.save_to_file
+        ).start()
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+
+        self.root = _copy_test_project(self)
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        self.sms_file = os.path.join(self.root, "config", "sms_templates.yaml")
+
+    def _incoming(self, **text_by_name: str) -> dict:
+        """Return the project's resources with the given SMS template texts changed."""
+        incoming = deepcopy(self.project.resources)
+        for template in incoming[SMSTemplate].values():
+            template.text = text_by_name.get(template.name, template.text)
+        return incoming
+
+    def _pull(self, incoming: dict, force: bool = False) -> list[str]:
+        self.mock_api_handler.pull_resources.return_value = (incoming, [], {})
+        files_with_conflicts, _ = self.project.pull_project(force=force)
+        return files_with_conflicts
+
+    def _edit_local(self, old: str, new: str) -> None:
+        contents = self._read_sms_file()
+        self.assertIn(old, contents)
+        with open(self.sms_file, "w", encoding="utf-8") as f:
+            f.write(contents.replace(old, new, 1))
+
+    def _read_sms_file(self) -> str:
+        with open(self.sms_file, encoding="utf-8") as f:
+            return f.read()
+
+    def _expected_sms_file(self, text_1: str, text_2: str) -> str:
+        phone_numbers = {"sandbox": "", "pre_release": "", "live": "+447700102347"}
+        return resource_utils.dump_yaml(
+            {
+                "sms_templates": [
+                    {"name": "test_template_1", "text": text_1, "env_phone_numbers": phone_numbers},
+                    {"name": "test_template_2", "text": text_2, "env_phone_numbers": phone_numbers},
+                ]
+            }
+        )
+
+    def _sms_merge_calls(self) -> list:
+        return [
+            call
+            for call in self.merge_spy.call_args_list
+            if call.args[2].startswith("sms_templates:")
+        ]
+
+    def _sms_writes(self) -> list:
+        return [call for call in self.save_spy.call_args_list if call.args[1] == self.sms_file]
+
+    def test_remote_only_edit_writes_incoming_without_merging(self):
+        conflicts = self._pull(self._incoming(test_template_1="Edited remotely"))
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            self._read_sms_file(), self._expected_sms_file("Edited remotely", self.TEMPLATE_2_TEXT)
+        )
+        self.assertEqual(self._sms_merge_calls(), [])
+
+    def test_local_only_edit_is_left_untouched(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+        local_contents = self._read_sms_file()
+
+        conflicts = self._pull(self._incoming())
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._read_sms_file(), local_contents)
+        self.assertEqual(self._sms_writes(), [])
+        self.assertEqual(self._sms_merge_calls(), [])
+
+    def test_same_edit_on_both_sides_is_not_rewritten(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited on both sides")
+        local_contents = self._read_sms_file()
+
+        conflicts = self._pull(self._incoming(test_template_1="Edited on both sides"))
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._read_sms_file(), local_contents)
+        self.assertEqual(self._sms_writes(), [])
+
+    def test_edits_to_different_entries_are_merged(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+
+        conflicts = self._pull(self._incoming(test_template_2="Edited remotely"))
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(len(self._sms_merge_calls()), 1)
+        self.assertEqual(
+            self._read_sms_file(), self._expected_sms_file("Edited locally", "Edited remotely")
+        )
+
+    def test_conflicting_edits_to_same_entry_are_reported(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+
+        conflicts = self._pull(self._incoming(test_template_1="Edited remotely"))
+
+        self.assertEqual(conflicts, [self.sms_file])
+        contents = self._read_sms_file()
+        self.assertTrue(resource_utils.contains_merge_conflict(contents))
+        self.assertIn("Edited locally", contents)
+        self.assertIn("Edited remotely", contents)
+
+    def test_force_pull_overwrites_local_edit(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+
+        conflicts = self._pull(self._incoming(test_template_1="Edited remotely"), force=True)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            self._read_sms_file(), self._expected_sms_file("Edited remotely", self.TEMPLATE_2_TEXT)
+        )
+        self.assertEqual(self._sms_merge_calls(), [])
+
+    def test_locally_deleted_file_stays_deleted_when_remote_is_unchanged(self):
+        """With no local entries to normalise, the raw file text (empty) is merged instead."""
+        os.remove(self.sms_file)
+
+        conflicts = self._pull(self._incoming())
+
+        self.assertEqual(conflicts, [])
+        self.assertFalse(os.path.exists(self.sms_file))
+        self.assertEqual(len(self._sms_merge_calls()), 1)
+
+
+class TopicTagsSyncTest(unittest.TestCase):
+    """Pushing and pulling topic tags against a real copy of the test project.
+
+    A force push compares local files straight against Agent Studio. A plain push pulls and
+    merges first.
+    """
+
+    TOPIC_ID = "TOPIC-Topic 1"
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_api_handler.queue_resources = MagicMock(return_value=[])
+        self.mock_api_handler.send_queued_commands = MagicMock(return_value=True)
+        patch.object(AgentStudioProject, "save_config").start()
+        patch.object(AgentStudioProject, "load_project").start()
+        patch.object(AgentStudioProject, "_fetch_parent_resources", return_value={}).start()
+        patch("poly.utils.save_imports").start()
+        patch("poly.utils.export_decorators").start()
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+
+        self.root = _copy_test_project(self)
+        self.topic_file = os.path.join(self.root, "topics", "topic_1.yaml")
+
+    def _project(self, saved_tags: Optional[list[str]] = None) -> AgentStudioProject:
+        """Load the project with Topic 1 saved in Agent Studio with the given tags."""
+        project_data = deepcopy(PROJECT_DATA)
+        if saved_tags is not None:
+            project_data["resources"]["topics"][self.TOPIC_ID]["tags"] = saved_tags
+        return AgentStudioProject.from_dict(project_data, self.root)
+
+    def _read_topic_file(self) -> str:
+        with open(self.topic_file, encoding="utf-8") as f:
+            return f.read()
+
+    def _set_local_tags(self, tags_yaml: str) -> None:
+        """Add a tags block to the local Topic 1 file, after its enabled line."""
+        contents = self._read_topic_file()
+        self.assertIn("enabled: true\n", contents)
+        with open(self.topic_file, "w", encoding="utf-8") as f:
+            f.write(contents.replace("enabled: true\n", f"enabled: true\n{tags_yaml}", 1))
+
+    def _pushed(self) -> dict:
+        return self.mock_api_handler.queue_resources.call_args.kwargs
+
+    def _incoming_with_tags(self, project: AgentStudioProject, tags: list[str]) -> None:
+        """Serve Agent Studio as the project's resources with Topic 1 tagged."""
+        incoming = deepcopy(project.resources)
+        incoming[Topic][self.TOPIC_ID].tags = tags
+        self.mock_api_handler.pull_resources.return_value = (incoming, [], {})
+
+    def test_tagged_topic_in_the_test_project_has_no_changes(self):
+        """Topic 2 is tagged in both its file and the saved state, so nothing is pushed."""
+        project = self._project()
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertEqual(project.resources[Topic]["TOPIC-Topic 2"].tags, ["email", "validation"])
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+
+    def test_force_push_clears_tags_when_file_has_no_tags_key(self):
+        """A force push has no pulled baseline, so a file without tags clears them."""
+        project = self._project(saved_tags=["billing"])
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID].tags, [])
+
+    def test_push_pulls_studio_tags_into_a_file_from_before_tags(self):
+        """A plain push merges first, so a file pulled before tags were supported keeps them."""
+        project = self._project()
+        self._incoming_with_tags(project, ["billing"])
+
+        success, message, _ = project.push_project()
+
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+        self.assertIn("enabled: true\ntags:\n- billing\nactions:", self._read_topic_file())
+
+    def test_push_clears_tags_after_the_tags_key_is_deleted(self):
+        """Deleting the tags key from a pulled file clears the tags on a plain push."""
+        project = self._project(saved_tags=["billing"])
+        self._incoming_with_tags(project, ["billing"])
+
+        success, message, _ = project.push_project()
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID].tags, [])
+        self.assertNotIn("tags:", self._read_topic_file())
+
+    def test_push_sets_changed_tags(self):
+        self._set_local_tags("tags:\n- billing\n- refunds\n")
+        project = self._project(saved_tags=["billing"])
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        tags = self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID]
+        self.assertEqual(tags.tags, ["billing", "refunds"])
+
+    def test_push_clears_tags_set_to_an_empty_list(self):
+        self._set_local_tags("tags: []\n")
+        project = self._project(saved_tags=["billing"])
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._pushed()["updated_resources"][TopicTags][self.TOPIC_ID].tags, [])
+
+    def test_push_sends_a_new_topics_tags_on_create(self):
+        self._set_local_tags("tags:\n- billing\n")
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["topics"].pop(self.TOPIC_ID)
+        project = AgentStudioProject.from_dict(project_data, self.root)
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        pushed = self._pushed()
+        (new_topic,) = [t for t in pushed["new_resources"][Topic].values() if t.name == "Topic 1"]
+        self.assertEqual(list(new_topic.build_create_proto().tags), ["billing"])
+        self.assertNotIn(TopicTags, pushed["updated_resources"])
+
+    def test_push_rejects_duplicate_tags(self):
+        self._set_local_tags("tags:\n- billing\n- billing\n")
+        project = self._project()
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertIn("Duplicate tags: ['billing']", message)
+        self.mock_api_handler.queue_resources.assert_not_called()
+
+    def test_pull_writes_studio_tags_into_a_file_without_tags_key(self):
+        """The first pull after upgrading writes the tags into the topic file."""
+        project = self._project()
+        incoming = deepcopy(project.resources)
+        incoming[Topic][self.TOPIC_ID].tags = ["billing", "refunds"]
+        self.mock_api_handler.pull_resources.return_value = (incoming, [], {})
+
+        files_with_conflicts, _ = project.pull_project()
+
+        self.assertEqual(files_with_conflicts, [])
+        self.assertIn("enabled: true\ntags:\n- billing\n- refunds\nactions:", self._read_topic_file())
+
+    def test_status_file_round_trips_tags(self):
+        """Tags survive the status file, and a status file from before tags loads with none."""
+        project = self._project(saved_tags=["billing"])
+
+        reloaded = AgentStudioProject.from_dict(project.to_dict(), self.root)
+
+        self.assertEqual(reloaded.resources[Topic][self.TOPIC_ID].tags, ["billing"])
+        self.assertEqual(self._project().resources[Topic][self.TOPIC_ID].tags, [])
 
 
 class MigrateFlowStepResourceIdsTest(unittest.TestCase):
@@ -5009,6 +5546,7 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
             key="deployment-simplification",
             region=self.project.region,
             project_id=self.project.project_id,
+            account_id=self.project.account_id,
             default=False,
         )
 
@@ -5041,9 +5579,22 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
         self.assertFalse(project.using_simplified_deployments)
         project.api_handler.get_deployments.assert_not_called()
 
-    def _deployment(self, created_at: str, deleted: bool = False) -> dict:
+    def _deployment(
+        self,
+        created_at: str,
+        version_hash: str = "v1",
+        deleted: bool = False,
+        tag: Optional[str] = None,
+    ) -> dict:
         """Build a minimal deployment dict for convergence checks."""
-        return {"created_at": created_at, "deleted": deleted}
+        deployment = {
+            "created_at": created_at,
+            "version_hash": version_hash,
+            "deleted": deleted,
+        }
+        if tag is not None:
+            deployment["deployment_metadata"] = {"tag": tag}
+        return deployment
 
     def _set_deployments(self, api: MagicMock, live: list, sandbox: list) -> None:
         """Stub get_deployments to return a different list per client_env."""
@@ -5051,44 +5602,152 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
             lambda *args, **kwargs: live if kwargs["client_env"] == "live" else sandbox
         )
 
-    def test_converges_when_no_deployments_exist_in_either_environment(self):
-        """With no deployments anywhere, there's nothing for live to lag behind."""
-        self._set_deployments(self.mock_api, live=[], sandbox=[])
+    def _assert_converged(self, live: list, sandbox: list, expected: bool) -> None:
+        self._set_deployments(self.mock_api, live=live, sandbox=sandbox)
+        self.project.__dict__.pop("using_simplified_deployments", None)
 
-        self.assertTrue(self.project.using_simplified_deployments)
+        self.assertEqual(self.project.using_simplified_deployments, expected)
 
-    def test_convergence_depends_on_relative_head_timestamps(self):
-        """Live is converged once its head is at least as new as sandbox's."""
-        earlier, later = "Mon, 01 Jan 2026 10:00:00 GMT", "Mon, 01 Jan 2026 12:00:00 GMT"
-        cases = {
-            "live newer": ((later, earlier), True),
-            "equal": ((later, later), True),
-            "live older": ((earlier, later), False),
-            "only live has deployments": ((earlier, None), True),
-            "only sandbox has deployments": ((None, earlier), False),
-        }
-        for name, ((live_time, sandbox_time), expected) in cases.items():
-            with self.subTest(name):
-                live = [self._deployment(live_time)] if live_time else []
-                sandbox = [self._deployment(sandbox_time)] if sandbox_time else []
-                self._set_deployments(self.mock_api, live=live, sandbox=sandbox)
-                self.project.__dict__.pop("using_simplified_deployments", None)
+    def test_a_sandbox_mirror_of_live_is_converged(self):
+        """A publish to live is mirrored into sandbox moments later.
 
-                self.assertEqual(self.project.using_simplified_deployments, expected)
-
-    def test_skips_deleted_deployments_to_find_the_head(self):
-        """A deleted deployment at the top of the list is not treated as the head."""
-        self._set_deployments(
-            self.mock_api,
-            live=[
-                self._deployment("Mon, 01 Jan 2026 14:00:00 GMT", deleted=True),
-                self._deployment("Mon, 01 Jan 2026 10:00:00 GMT"),
-            ],
-            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT")],
+        The mirror is newer but holds the same version, so the project is
+        converged. Comparing timestamps instead of versions would report this
+        routine case as diverged and drop the project out of the model.
+        """
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:09 GMT", version_hash="abc")],
+            expected=True,
         )
 
-        # The live head (10:00, ignoring the deleted 14:00 entry) is older than sandbox's (12:00).
+    def test_a_sandbox_deployment_of_its_own_is_not_converged(self):
+        """A sandbox deployment holding a different version means main has moved."""
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 13:00:00 GMT", version_hash="def")],
+            expected=False,
+        )
+
+    def test_an_older_sandbox_deployment_does_not_affect_convergence(self):
+        """Only the newest deployment main owns is compared against live."""
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 10:00:00 GMT", version_hash="old")],
+            expected=True,
+        )
+
+    def test_converges_when_no_deployments_exist_in_either_environment(self):
+        """With no deployments anywhere there is no version to disagree on."""
+        self._assert_converged(live=[], sandbox=[], expected=True)
+
+    def test_a_tagged_sandbox_deployment_proves_simplified_deployments(self):
+        """Tagging a branch deploys it to sandbox, which only simplified allows.
+
+        Its version is the branch's, not main's, so the comparison below would
+        otherwise read it as diverged.
+        """
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[
+                self._deployment(
+                    "Tue, 02 Jan 2026 12:00:00 GMT", version_hash="branch", tag="internal"
+                )
+            ],
+            expected=True,
+        )
+
+    def test_a_tagged_deployment_does_not_override_the_flag(self):
+        """The rollout flag is still the first condition."""
+        project = self._build_project(flag_value=False)
+        self._set_deployments(
+            project.api_handler,
+            live=[],
+            sandbox=[self._deployment("Tue, 02 Jan 2026 12:00:00 GMT", tag="internal")],
+        )
+
+        self.assertFalse(project.using_simplified_deployments)
+
+    def test_a_deleted_tagged_deployment_does_not_prove_anything(self):
+        """Removing the tag soft-deletes its deployment.
+
+        The untagged sandbox deployment alongside it holds main's version, and
+        live has not caught up — so the tag must not short-circuit to converged.
+        """
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[
+                self._deployment(
+                    "Wed, 03 Jan 2026 12:00:00 GMT",
+                    version_hash="branch",
+                    tag="internal",
+                    deleted=True,
+                ),
+                self._deployment("Tue, 02 Jan 2026 12:00:00 GMT", version_hash="def"),
+            ],
+            expected=False,
+        )
+
+    def test_is_not_converged_when_a_version_hash_is_missing(self):
+        """Two unknown versions are not a match.
+
+        Draft deploys record an empty hash. Reporting converged here would claim
+        live holds main's version without being able to know it.
+        """
+        for live_hash, main_hash in (("", "abc"), ("abc", ""), ("", ""), (None, None)):
+            with self.subTest(live=live_hash, main=main_hash):
+                self._assert_converged(
+                    live=[
+                        self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash=live_hash)
+                    ],
+                    sandbox=[
+                        self._deployment("Tue, 02 Jan 2026 12:00:00 GMT", version_hash=main_hash)
+                    ],
+                    expected=False,
+                )
+
+    def test_is_not_converged_when_version_hash_is_absent_entirely(self):
+        """A row with no version_hash key at all is treated the same as an empty one."""
+        self._set_deployments(
+            self.mock_api,
+            live=[{"created_at": "Mon, 01 Jan 2026 12:00:00 GMT", "deleted": False}],
+            sandbox=[{"created_at": "Tue, 02 Jan 2026 12:00:00 GMT", "deleted": False}],
+        )
+        self.project.__dict__.pop("using_simplified_deployments", None)
+
         self.assertFalse(self.project.using_simplified_deployments)
+
+    def test_is_not_converged_without_a_live_deployment(self):
+        """Nothing has reached live, so live cannot hold main's version."""
+        self._assert_converged(
+            live=[],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT")],
+            expected=False,
+        )
+
+    def test_skips_deleted_deployments_to_find_the_head(self):
+        """A deleted deployment is not treated as the head of its environment."""
+        self._assert_converged(
+            live=[
+                self._deployment(
+                    "Mon, 01 Jan 2026 14:00:00 GMT", version_hash="deleted", deleted=True
+                ),
+                self._deployment("Mon, 01 Jan 2026 10:00:00 GMT", version_hash="abc"),
+            ],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            expected=True,
+        )
+
+    def test_head_does_not_depend_on_response_ordering(self):
+        """The newest deployment is found by date, not by list position."""
+        self._assert_converged(
+            live=[
+                self._deployment("Mon, 01 Jan 2026 10:00:00 GMT", version_hash="old"),
+                self._deployment("Mon, 01 Jan 2026 14:00:00 GMT", version_hash="abc"),
+            ],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="mid")],
+            expected=True,
+        )
 
 
 class DeploymentModePropertyTest(unittest.TestCase):
@@ -5894,6 +6553,867 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         self.assertIn("uncommitted changes", str(ctx.exception))
 
 
+class FetchParentResourcesTest(unittest.TestCase):
+    """Tests for _fetch_parent_resources pulling the branch this one was cut from.
+
+    Both push and sync-ids lean on this to learn the ids the parent already assigned, so
+    a branch with no resolvable parent must answer "no parent" rather than fall through
+    to whichever branch happens to be current.
+    """
+
+    PARENT_BRANCH_ID = "main-branch-id"
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": self.PARENT_BRANCH_ID},
+            "feature-a": {"branchId": "branch-1", "parentBranchId": self.PARENT_BRANCH_ID},
+            "orphan": {"branchId": "branch-2"},
+        }
+        self.project._api_handler = self.mock_api
+        self._on_branch("branch-1")
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+
+    def _on_branch(self, branch_id: str) -> None:
+        """Put the project on a branch, as the api handler also reports the current one."""
+        self.project.branch_id = branch_id
+        self.mock_api.branch_id = branch_id
+
+    @patch("poly.project.AgentStudioInterface")
+    def test_resources_are_pulled_from_the_parent_branch(self, mock_interface):
+        """The pull goes to the parent's branch id, not the branch we are standing on."""
+        parent_resources = {Topic: {"TOPIC-parent": "the parent's topic"}}
+        mock_interface.return_value.pull_resources.return_value = (parent_resources, [], [])
+
+        self.assertEqual(self.project._fetch_parent_resources(), parent_resources)
+        self.assertIn(self.PARENT_BRANCH_ID, mock_interface.call_args[0])
+
+    @patch("poly.project.AgentStudioInterface")
+    def test_main_branch_has_no_parent(self, mock_interface):
+        """Main is the root, so there is nothing to pull."""
+        self._on_branch(self.PARENT_BRANCH_ID)
+
+        self.assertEqual(self.project._fetch_parent_resources(), {})
+        mock_interface.assert_not_called()
+
+    @patch("poly.project.AgentStudioInterface")
+    def test_branch_without_a_recorded_parent_has_no_parent(self, mock_interface):
+        """A branch the platform records no parent for is treated as having none."""
+        self._on_branch("branch-2")
+
+        self.assertEqual(self.project._fetch_parent_resources(), {})
+        mock_interface.assert_not_called()
+
+    @patch("poly.project.AgentStudioInterface")
+    def test_branch_that_no_longer_exists_remotely_has_no_parent(self, mock_interface):
+        """A locally known branch that is gone from the remote resolves to no parent."""
+        self._on_branch("deleted-branch-id")
+
+        self.assertEqual(self.project._fetch_parent_resources(), {})
+        mock_interface.assert_not_called()
+
+
+class SyncIdsWithParentTest(unittest.TestCase):
+    """Tests for sync_ids_with_parent resolving the branch's own parent branch.
+
+    Syncing ids without naming a branch means "sync with whatever branch this one was
+    cut from", which is fetched from the platform. Falling back to main is only for
+    when that parent cannot be resolved: a branch cut from another branch would
+    otherwise silently adopt main's ids.
+    """
+
+    LOCAL_FLOW_ID = "FLOW_CONFIG-test_flow"
+    PARENT_FLOW_ID = "FLOW-parent-assigned-id"
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.project.branch_id = "branch-1"
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "branch-1"
+        self.mock_api.send_queued_commands.return_value = True
+        self.project._api_handler = self.mock_api
+        patch.object(AgentStudioProject, "save_config").start()
+        self.mock_get_remote = patch.object(
+            AgentStudioProject, "get_remote_resources_by_name"
+        ).start()
+        self.mock_get_remote.return_value = (self._resources_with_reassigned_flow_id(), [])
+        self.addCleanup(patch.stopall)
+
+    def _resources_with_reassigned_flow_id(self):
+        """The fixture's resources, with test_flow carrying the parent's flow id.
+
+        Mirrors a flow created on the parent after this branch was cut: the same files,
+        under the id the parent's platform assigned, so steps carry a
+        `{parent_flow_id}_{step_id}` composite id.
+        """
+        parent = deepcopy(self.project.resources)
+        for resource_type, resources_by_id in parent.items():
+            rekeyed = {}
+            for resource in resources_by_id.values():
+                if isinstance(resource, FlowConfig) and resource.resource_id == self.LOCAL_FLOW_ID:
+                    resource.resource_id = self.PARENT_FLOW_ID
+                elif getattr(resource, "flow_id", None) == self.LOCAL_FLOW_ID:
+                    resource.flow_id = self.PARENT_FLOW_ID
+                    resource.resource_id = resource.resource_id.replace(
+                        self.LOCAL_FLOW_ID, self.PARENT_FLOW_ID, 1
+                    )
+                rekeyed[resource.resource_id] = resource
+            parent[resource_type] = rekeyed
+        return parent
+
+    def test_unnamed_parent_syncs_against_the_fetched_parent_branch(self):
+        """With no branch named, ids come from the branch's own parent, not from main."""
+        parent_resources = self._resources_with_reassigned_flow_id()
+
+        with patch.object(
+            AgentStudioProject, "_fetch_parent_resources", return_value=parent_resources
+        ):
+            self.assertTrue(self.project.sync_ids_with_parent())
+
+        self.assertIn(self.PARENT_FLOW_ID, self.project.resources[FlowConfig])
+        self.mock_get_remote.assert_not_called()
+
+    def test_unresolvable_parent_falls_back_to_main_with_a_warning(self):
+        """A branch whose parent cannot be fetched syncs with main, and says so.
+
+        An empty parent fetch means the parent is unknown, not that it is empty, so
+        silently syncing against nothing would leave the branch's ids untouched.
+        """
+        with patch.object(AgentStudioProject, "_fetch_parent_resources", return_value={}):
+            with self.assertLogs("poly.project", level="WARNING") as logs:
+                self.assertTrue(self.project.sync_ids_with_parent())
+
+        self.mock_get_remote.assert_called_once_with("main")
+        self.assertIn("defaulting to 'main'", "\n".join(logs.output))
+        self.assertIn(self.PARENT_FLOW_ID, self.project.resources[FlowConfig])
+
+    def test_named_parent_is_looked_up_by_name_without_fetching_the_parent(self):
+        """An explicitly named branch is taken at its word, with no parent lookup."""
+        with patch.object(AgentStudioProject, "_fetch_parent_resources") as mock_fetch:
+            self.assertTrue(self.project.sync_ids_with_parent(parent_name="release"))
+
+        self.mock_get_remote.assert_called_once_with("release")
+        mock_fetch.assert_not_called()
+
+    def test_syncing_on_main_raises_before_any_parent_is_fetched(self):
+        """Main has no parent, so the refusal must come before any network call."""
+        self.project.branch_id = "main"
+
+        with patch.object(AgentStudioProject, "_fetch_parent_resources") as mock_fetch:
+            with self.assertRaises(ValueError) as ctx:
+                self.project.sync_ids_with_parent()
+
+        self.assertIn("Cannot sync ids while on main branch", str(ctx.exception))
+        mock_fetch.assert_not_called()
+        self.mock_get_remote.assert_not_called()
+
+
+class ResourcesByAbsolutePathTest(unittest.TestCase):
+    """Tests for _resources_by_absolute_path flattening a ResourceMap onto file paths."""
+
+    def test_resources_of_every_type_are_keyed_by_their_absolute_path(self):
+        """Types are flattened away: the key is the project root joined with file_path."""
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        topic = Topic(
+            resource_id="TOPIC-1", name="Topic 1", actions="", content="hello", example_queries=[]
+        )
+        function = Function(
+            resource_id="FUNCTION-1",
+            name="lookup_order",
+            description="Looks an order up.",
+            code="def lookup_order(conv):\n    return None\n",
+            parameters=[],
+        )
+
+        by_path = project._resources_by_absolute_path(
+            {Topic: {topic.resource_id: topic}, Function: {function.resource_id: function}}
+        )
+
+        self.assertEqual(
+            by_path,
+            {
+                os.path.join(TEST_DIR, "topics", "topic_1.yaml"): topic,
+                os.path.join(TEST_DIR, "functions", "lookup_order.py"): function,
+            },
+        )
+
+    def test_no_resources_gives_an_empty_lookup(self):
+        """A branch with no parent produces an empty lookup rather than failing."""
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+
+        self.assertEqual(project._resources_by_absolute_path({}), {})
+
+
+class OfflineOnlyApiHandler:
+    """An api_handler that answers offline command staging and refuses everything else.
+
+    Staging commands is local bookkeeping, so those calls are served. Every other call -
+    listing branches, pulling a parent branch, sending commands - would reach the
+    platform, so it raises: that is what makes "the parent projection was used entirely
+    offline" something a test can assert rather than assume.
+    """
+
+    def __init__(self):
+        self.branch_id = "branch-1"
+        self.staged_new_resources: dict[type, dict[str, Resource]] = {}
+
+    def get_queued_commands(self) -> list:
+        """The queue each push starts with: empty."""
+        return []
+
+    def queue_resources(self, *, new_resources, updated_resources, deleted_resources) -> list:
+        """Record the resources push wants to create; building commands needs no network."""
+        for resource_type, resources_by_id in new_resources.items():
+            self.staged_new_resources.setdefault(resource_type, {}).update(resources_by_id)
+        return []
+
+    def clear_command_queue(self) -> None:
+        """Dry runs throw the staged queue away."""
+
+    def __getattr__(self, name: str):
+        """Anything not served offline is a platform call, and must not happen."""
+        raise AssertionError(f"push reached the platform via api_handler.{name}")
+
+
+class PushProjectParentProjectionTest(unittest.TestCase):
+    """Tests for push_project adopting parent ids from a supplied parent projection.
+
+    A caller that already holds the parent branch's projection (the Studio backend does)
+    can hand it to push instead of having push fetch it. The ids are then adopted with no
+    platform call at all, which is what lets a dry run report the ids a real push would
+    mint.
+    """
+
+    PARENT_TOPIC_ID = "TOPIC-parent-assigned-id"
+    # The smallest projection Topic.from_projection accepts: one topic whose name maps
+    # to the fixture's topics/topic_1.yaml.
+    PARENT_PROJECTION = {
+        "knowledgeBase": {
+            "topics": {
+                "ids": [PARENT_TOPIC_ID],
+                "entities": {
+                    PARENT_TOPIC_ID: {
+                        "id": PARENT_TOPIC_ID,
+                        "name": "Topic 1",
+                        "actions": "",
+                        "content": "The parent branch's copy of this topic.",
+                    }
+                },
+            },
+            "uninstantiatedTopics": {"ids": [], "entities": {}},
+        }
+    }
+
+    def setUp(self):
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+
+    def _project_where_topic_1_is_new(self) -> AgentStudioProject:
+        """A project that has forgotten Topic 1, so its file looks newly added."""
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["topics"].pop("TOPIC-Topic 1")
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+        project._api_handler = OfflineOnlyApiHandler()
+        return project
+
+    def _staged_topic_ids(self, project: AgentStudioProject) -> dict[str, str]:
+        """The name -> id of every topic the push staged as new."""
+        return {
+            topic.name: topic.resource_id
+            for topic in project._api_handler.staged_new_resources.get(Topic, {}).values()
+        }
+
+    def test_new_resource_adopts_the_id_from_the_supplied_parent_projection(self):
+        """A new file matching the projection is pushed under the parent's id, offline."""
+        project = self._project_where_topic_1_is_new()
+
+        success, message, _ = project.push_project(
+            dry_run=True,
+            skip_validation=True,
+            parent_projection_json=self.PARENT_PROJECTION,
+        )
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._staged_topic_ids(project), {"Topic 1": self.PARENT_TOPIC_ID})
+
+    def test_empty_parent_projection_means_no_parent_and_mints_a_fresh_id(self):
+        """An empty projection is "this branch has no parent", not "go and look".
+
+        The branch really may have no parent, so an empty dict must be honoured as an
+        answer: ids are minted as they always were, still without a platform call.
+        """
+        project = self._project_where_topic_1_is_new()
+
+        success, message, _ = project.push_project(
+            dry_run=True, skip_validation=True, parent_projection_json={}
+        )
+
+        self.assertTrue(success, message)
+        self.assertRegex(self._staged_topic_ids(project)["Topic 1"], r"^TOPICS-[a-f0-9]{8}$")
+
+    def test_dry_run_without_a_parent_projection_does_not_fetch_the_parent(self):
+        """No projection and no push means no reason to go to the platform for one."""
+        project = self._project_where_topic_1_is_new()
+
+        with patch.object(AgentStudioProject, "_fetch_parent_resources") as mock_fetch:
+            success, message, _ = project.push_project(dry_run=True, skip_validation=True)
+
+        self.assertTrue(success, message)
+        mock_fetch.assert_not_called()
+        self.assertRegex(self._staged_topic_ids(project)["Topic 1"], r"^TOPICS-[a-f0-9]{8}$")
+
+    def test_dry_run_fetches_the_parent_when_the_test_env_var_is_set(self):
+        """The env var is the escape hatch for inspecting the ids a real push would use."""
+        project = self._project_where_topic_1_is_new()
+
+        with patch.object(
+            AgentStudioProject, "_fetch_parent_resources", return_value={}
+        ) as mock_fetch:
+            with patch.dict(os.environ, {"POLY_ADK_SYNC_PARENT_IDS_TEST": "1"}):
+                success, message, _ = project.push_project(dry_run=True, skip_validation=True)
+
+        self.assertTrue(success, message)
+        mock_fetch.assert_called_once_with()
+
+    def test_a_failed_parent_fetch_is_reported_as_an_api_error(self):
+        """Whatever the platform call raised, push must say what actually went wrong.
+
+        The raw error (a transport or auth failure) surfaced to the user as an unhandled
+        crash with no hint that fetching the parent branch was the step that failed.
+        """
+        project = self._project_where_topic_1_is_new()
+        fetch_failure = RuntimeError("boom")
+
+        with patch.object(AgentStudioProject, "_fetch_parent_resources", side_effect=fetch_failure):
+            with patch.dict(os.environ, {"POLY_ADK_SYNC_PARENT_IDS_TEST": "1"}):
+                with self.assertRaises(SourcererAPIError) as raised:
+                    project.push_project(dry_run=True, skip_validation=True)
+
+        self.assertIn("Failed to fetch parent resources", str(raised.exception))
+        self.assertIs(raised.exception.__cause__, fetch_failure)
+
+    def test_a_supplied_parent_projection_never_reaches_the_failing_fetch(self):
+        """The projection is the answer, so a broken platform call cannot fail the push."""
+        project = self._project_where_topic_1_is_new()
+
+        with patch.object(
+            AgentStudioProject, "_fetch_parent_resources", side_effect=RuntimeError("boom")
+        ):
+            success, message, _ = project.push_project(
+                dry_run=True,
+                skip_validation=True,
+                parent_projection_json=self.PARENT_PROJECTION,
+            )
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._staged_topic_ids(project), {"Topic 1": self.PARENT_TOPIC_ID})
+
+
+class FindNewKeptDeletedParentLookupTest(unittest.TestCase):
+    """Tests for find_new_kept_deleted minting new resource ids from the parent branch.
+
+    A resource added locally is minted a fresh id, while the same file on the parent
+    branch already carries a platform assigned id. Pushing the fresh id would leave one
+    file with two ids, which a later merge cannot reconcile, so a new resource whose file
+    path-matches a parent resource adopts the parent's id at mint time.
+    """
+
+    PARENT_FLOW_ID = "FLOW-parent-assigned-id"
+    # The flow id the fixture project already stores, kept when the flow is not new.
+    BRANCH_FLOW_ID = "FLOW_CONFIG-test_flow"
+
+    # Built with os.path.join because they are matched against Resource.file_path,
+    # which carries native separators (backslashes on Windows).
+    FLOW_PATH = os.path.join("flows", "test_flow", "flow_config.yaml")
+    STEP_PATH = os.path.join("flows", "test_flow", "steps", "start_step.yaml")
+    FUNCTION_STEP_PATH = os.path.join("flows", "test_flow", "function_steps", "process_payment.py")
+    FLOW_FUNCTION_PATH = os.path.join("flows", "test_flow", "functions", "process_data.py")
+    TOPIC_PATH = os.path.join("topics", "topic_1.yaml")
+
+    def setUp(self):
+        # The untouched fixture project stands in for the parent branch: the same files,
+        # with ids that tests overwrite with the ones the parent's platform assigned.
+        parent_project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.parent_fixtures: dict[str, Resource] = {
+            resource.file_path: resource
+            for resources_by_id in parent_project.resources.values()
+            for resource in resources_by_id.values()
+        }
+
+    def _project_where_files_are_new(self, **stored_ids_to_drop: str) -> AgentStudioProject:
+        """A project that has forgotten the given resources, so their files look new.
+
+        Args:
+            **stored_ids_to_drop: section of test_project.json -> resource id to drop from
+                it, e.g. ``topics="TOPIC-Topic 1"``.
+        """
+        project_data = deepcopy(PROJECT_DATA)
+        for section, resource_id in stored_ids_to_drop.items():
+            project_data["resources"][section].pop(resource_id)
+        return AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+    def _parent(self, relative_path: str, resource_id: str, flow_id: str = None) -> Resource:
+        """The parent branch's copy of a fixture file, under the parent's assigned ids."""
+        resource = deepcopy(self.parent_fixtures[relative_path])
+        resource.resource_id = resource_id
+        if flow_id is not None:
+            resource.flow_id = flow_id
+        return resource
+
+    def _parent_lookup(self, *resources: Resource) -> dict[str, Resource]:
+        """Parent resources keyed by absolute file path, exactly as push keys them."""
+        return {os.path.join(TEST_DIR, resource.file_path): resource for resource in resources}
+
+    def _mapping_for(self, mappings: list[ResourceMapping], relative_path: str) -> ResourceMapping:
+        """The single mapping covering a fixture file."""
+        file_path = os.path.join(TEST_DIR, relative_path)
+        matches = [mapping for mapping in mappings if mapping.file_path == file_path]
+        self.assertEqual(len(matches), 1, f"expected exactly one mapping for {relative_path}")
+        return matches[0]
+
+    def test_new_flow_adopts_the_parent_flow_id(self):
+        """A new flow config that path-matches the parent takes the parent's id."""
+        project = self._project_where_files_are_new(flow_config="FLOW_CONFIG-test_flow")
+        parent_lookup = self._parent_lookup(self._parent(self.FLOW_PATH, self.PARENT_FLOW_ID))
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        flow_mapping = self._mapping_for(new_mappings, self.FLOW_PATH)
+        self.assertEqual(flow_mapping.resource_id, self.PARENT_FLOW_ID)
+        # A flow's flow_id is its own id, so the whole flow moves together.
+        self.assertEqual(flow_mapping.flow_id, self.PARENT_FLOW_ID)
+
+    def test_new_flow_without_a_parent_match_is_minted_a_fresh_id(self):
+        """A flow with no counterpart on the parent still gets a randomly minted id."""
+        project = self._project_where_files_are_new(flow_config="FLOW_CONFIG-test_flow")
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup={}
+        )
+
+        flow_mapping = self._mapping_for(new_mappings, self.FLOW_PATH)
+        self.assertRegex(flow_mapping.resource_id, r"^FLOW_CONFIG-[a-f0-9]{8}$")
+        self.assertEqual(flow_mapping.flow_id, flow_mapping.resource_id)
+
+    def test_new_step_in_a_new_flow_adopts_the_parent_composite_id(self):
+        """A new step matching a parent step takes that step's id, prefix and all.
+
+        The parent named the step `greeting` while the local file would mint its own id,
+        so the whole composite `{parent_flow_id}_{parent_step_id}` must be adopted.
+        """
+        project = self._project_where_files_are_new(
+            flow_config="FLOW_CONFIG-test_flow",
+            flow_steps="FLOW_CONFIG-test_flow_start_step",
+        )
+        parent_lookup = self._parent_lookup(
+            self._parent(self.FLOW_PATH, self.PARENT_FLOW_ID),
+            self._parent(
+                self.STEP_PATH, f"{self.PARENT_FLOW_ID}_greeting", flow_id=self.PARENT_FLOW_ID
+            ),
+        )
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        step_mapping = self._mapping_for(new_mappings, self.STEP_PATH)
+        self.assertEqual(step_mapping.resource_id, f"{self.PARENT_FLOW_ID}_greeting")
+        self.assertEqual(step_mapping.flow_id, self.PARENT_FLOW_ID)
+
+    def test_new_step_without_a_parent_match_is_minted_under_its_flow_id(self):
+        """A step the parent does not have is minted a fresh id under the flow it belongs to.
+
+        Step ids embed the flow id as a prefix, and start_step / child_step references are
+        resolved by stripping that prefix, so the prefix must agree with the flow_id even
+        when only the flow was adopted from the parent.
+        """
+        project = self._project_where_files_are_new(
+            flow_config="FLOW_CONFIG-test_flow",
+            flow_steps="FLOW_CONFIG-test_flow_start_step",
+        )
+        parent_lookup = self._parent_lookup(self._parent(self.FLOW_PATH, self.PARENT_FLOW_ID))
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        step_mapping = self._mapping_for(new_mappings, self.STEP_PATH)
+        self.assertRegex(
+            step_mapping.resource_id, rf"^{self.PARENT_FLOW_ID}_FLOW_STEPS-[a-f0-9]{{8}}$"
+        )
+        self.assertEqual(step_mapping.flow_id, self.PARENT_FLOW_ID)
+
+    def test_new_step_in_a_kept_flow_adopts_only_the_parent_bare_step_id(self):
+        """A new step in an existing flow keeps this branch's flow id in its prefix.
+
+        The flow is not new, so it keeps this branch's id. Adopting the parent's composite
+        id verbatim would file the step under the parent's flow id instead.
+        """
+        project = self._project_where_files_are_new(flow_steps="FLOW_CONFIG-test_flow_start_step")
+        parent_lookup = self._parent_lookup(
+            self._parent(
+                self.STEP_PATH, f"{self.PARENT_FLOW_ID}_greeting", flow_id=self.PARENT_FLOW_ID
+            )
+        )
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        step_mapping = self._mapping_for(new_mappings, self.STEP_PATH)
+        self.assertEqual(step_mapping.resource_id, f"{self.BRANCH_FLOW_ID}_greeting")
+        self.assertEqual(step_mapping.flow_id, self.BRANCH_FLOW_ID)
+
+    def test_new_function_step_adopts_the_parent_composite_id(self):
+        """Function steps carry composite ids too, so they adopt them the same way."""
+        project = self._project_where_files_are_new(
+            flow_config="FLOW_CONFIG-test_flow",
+            function_steps="FLOW_CONFIG-test_flow_process_payment",
+        )
+        parent_lookup = self._parent_lookup(
+            self._parent(self.FLOW_PATH, self.PARENT_FLOW_ID),
+            self._parent(
+                self.FUNCTION_STEP_PATH,
+                f"{self.PARENT_FLOW_ID}_take_payment",
+                flow_id=self.PARENT_FLOW_ID,
+            ),
+        )
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        function_step_mapping = self._mapping_for(new_mappings, self.FUNCTION_STEP_PATH)
+        self.assertEqual(function_step_mapping.resource_id, f"{self.PARENT_FLOW_ID}_take_payment")
+        self.assertEqual(function_step_mapping.flow_id, self.PARENT_FLOW_ID)
+
+    def test_new_flow_scoped_function_adopts_the_parent_id_without_a_flow_prefix(self):
+        """A function inside a flow has a flow_id but a standalone id.
+
+        Only step ids embed the flow id, so prefixing a function's id with the flow id
+        would corrupt it: the parent's id is adopted exactly as it stands.
+        """
+        project = self._project_where_files_are_new(functions="FUNCTION-process_data")
+        parent_lookup = self._parent_lookup(
+            self._parent(
+                self.FLOW_FUNCTION_PATH,
+                "FUNCTION-parent-process-data",
+                flow_id=self.PARENT_FLOW_ID,
+            )
+        )
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        function_mapping = self._mapping_for(new_mappings, self.FLOW_FUNCTION_PATH)
+        self.assertEqual(function_mapping.resource_id, "FUNCTION-parent-process-data")
+        self.assertEqual(function_mapping.flow_id, self.BRANCH_FLOW_ID)
+
+    def test_new_topic_adopts_the_parent_id(self):
+        """A new topic whose file exists on the parent takes the parent's id."""
+        project = self._project_where_files_are_new(topics="TOPIC-Topic 1")
+        parent_lookup = self._parent_lookup(
+            self._parent(self.TOPIC_PATH, "TOPIC-parent-assigned-id")
+        )
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        topic_mapping = self._mapping_for(new_mappings, self.TOPIC_PATH)
+        self.assertEqual(topic_mapping.resource_id, "TOPIC-parent-assigned-id")
+
+    def test_new_topic_without_a_parent_match_is_minted_a_fresh_id(self):
+        """A topic the parent does not have is minted a random id as before."""
+        project = self._project_where_files_are_new(topics="TOPIC-Topic 1")
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup={}
+        )
+
+        topic_mapping = self._mapping_for(new_mappings, self.TOPIC_PATH)
+        self.assertRegex(topic_mapping.resource_id, r"^TOPICS-[a-f0-9]{8}$")
+
+    def test_parent_ids_are_ignored_when_no_parent_lookup_is_passed(self):
+        """Without a parent lookup, minting stays random even for a path the parent has.
+
+        Adopting parent ids is opt-in: every caller that does not ask for it must see the
+        behaviour it saw before the feature existed.
+        """
+        project = self._project_where_files_are_new(topics="TOPIC-Topic 1")
+        # Built but deliberately not passed.
+        self._parent_lookup(self._parent(self.TOPIC_PATH, "TOPIC-parent-assigned-id"))
+
+        new_mappings, _, _ = project.find_new_kept_deleted(project.discover_local_resources())
+
+        topic_mapping = self._mapping_for(new_mappings, self.TOPIC_PATH)
+        self.assertRegex(topic_mapping.resource_id, r"^TOPICS-[a-f0-9]{8}$")
+
+    def test_kept_resources_keep_their_branch_ids_when_the_parent_matches(self):
+        """A file the branch already knows keeps its own id, however the parent named it.
+
+        Only newly minted ids may follow the parent: rewriting a kept resource's id would
+        orphan every reference the branch has already pushed under the old id.
+        """
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        parent_lookup = self._parent_lookup(
+            self._parent(self.TOPIC_PATH, "TOPIC-parent-assigned-id"),
+            self._parent(
+                self.STEP_PATH, f"{self.PARENT_FLOW_ID}_greeting", flow_id=self.PARENT_FLOW_ID
+            ),
+        )
+
+        new_mappings, kept_mappings, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        self.assertEqual(new_mappings, [])
+        self.assertEqual(
+            self._mapping_for(kept_mappings, self.TOPIC_PATH).resource_id, "TOPIC-Topic 1"
+        )
+        self.assertEqual(
+            self._mapping_for(kept_mappings, self.STEP_PATH).resource_id,
+            f"{self.BRANCH_FLOW_ID}_start_step",
+        )
+
+
+class AugmentOriginalWithParentSubresourcesTest(unittest.TestCase):
+    """Tests for _augment_original_with_parent_subresources merging parent subresources.
+
+    Subresources (function parameters, flow step conditions) are matched by name when a
+    local file is read, so a parameter added on both the parent branch and this branch
+    would mint a fresh id here and diverge from the id the parent already gave it. For a
+    kept resource that path-matches the parent, the parent's subresources are folded into
+    a copy of the branch resource so those names can find an existing id.
+    """
+
+    FLOW_ID = "FLOW-test_flow"
+    STEP_ID = "start_step"
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+
+    def _parameter(self, name: str, parameter_id: str) -> FunctionParameters:
+        """A function parameter carrying the id its branch assigned it."""
+        return FunctionParameters(
+            name=name, type="string", description=f"the {name}", id=parameter_id
+        )
+
+    def _function(self, *parameters: FunctionParameters) -> Function:
+        """A function whose only interesting content is its parameter list."""
+        return Function(
+            resource_id="FUNCTION-book_table",
+            name="book_table",
+            description="Book a table",
+            code="def book_table():\n    pass\n",
+            parameters=list(parameters),
+        )
+
+    def _condition(self, name: str, condition_id: str) -> Condition:
+        """A step condition carrying the id its branch assigned it."""
+        return Condition(
+            resource_id=condition_id,
+            name=name,
+            condition_type="step_condition",
+            step_id=self.STEP_ID,
+            flow_id=self.FLOW_ID,
+        )
+
+    def _flow_step(self, *conditions: Condition) -> FlowStep:
+        """A flow step whose only interesting content is its condition list."""
+        return FlowStep(
+            resource_id=f"{self.FLOW_ID}_{self.STEP_ID}",
+            name="Start step",
+            step_id=self.STEP_ID,
+            flow_id=self.FLOW_ID,
+            flow_name="test_flow",
+            step_type=StepType.DEFAULT_STEP,
+            prompt="Greet the caller",
+            conditions=list(conditions),
+        )
+
+    def test_function_inherits_a_parameter_only_the_parent_has(self):
+        """A parameter name the branch does not know is appended with the parent's id."""
+        branch_function = self._function(self._parameter("party_size", "PARAM-branch-party-size"))
+        parent_function = self._function(
+            self._parameter("party_size", "PARAM-parent-party-size"),
+            self._parameter("seating_area", "PARAM-parent-seating-area"),
+        )
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_function, parent_function
+        )
+
+        self.assertEqual(
+            [(param.name, param.id) for param in augmented.parameters],
+            [
+                ("party_size", "PARAM-branch-party-size"),
+                ("seating_area", "PARAM-parent-seating-area"),
+            ],
+        )
+
+    def test_augmenting_a_function_leaves_the_branch_resource_untouched(self):
+        """The branch function keeps its own parameters after augmentation.
+
+        The branch resource is the one held in self.resources and diffed against later,
+        so mutating it in place would make the parent's parameters look like local edits.
+        """
+        branch_function = self._function(self._parameter("party_size", "PARAM-branch-party-size"))
+        parent_function = self._function(
+            self._parameter("seating_area", "PARAM-parent-seating-area")
+        )
+
+        self.project._augment_original_with_parent_subresources(branch_function, parent_function)
+
+        self.assertEqual(
+            [(param.name, param.id) for param in branch_function.parameters],
+            [("party_size", "PARAM-branch-party-size")],
+        )
+
+    def test_function_parameter_present_on_both_keeps_the_branch_version(self):
+        """A shared parameter name is not duplicated with the parent's copy."""
+        branch_function = self._function(self._parameter("party_size", "PARAM-branch-party-size"))
+        parent_function = self._function(self._parameter("party_size", "PARAM-parent-party-size"))
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_function, parent_function
+        )
+
+        self.assertEqual(
+            [(param.name, param.id) for param in augmented.parameters],
+            [("party_size", "PARAM-branch-party-size")],
+        )
+
+    def test_function_with_nothing_to_inherit_is_returned_as_is(self):
+        """With no parent-only parameters the branch function itself comes back."""
+        branch_function = self._function(self._parameter("party_size", "PARAM-branch-party-size"))
+        parent_function = self._function(self._parameter("party_size", "PARAM-parent-party-size"))
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_function, parent_function
+        )
+
+        self.assertIs(augmented, branch_function)
+
+    def test_flow_step_inherits_a_condition_only_the_parent_has(self):
+        """A condition name the branch does not know is appended with the parent's id."""
+        branch_step = self._flow_step(self._condition("wants_table", "COND-branch-wants-table"))
+        parent_step = self._flow_step(
+            self._condition("wants_table", "COND-parent-wants-table"),
+            self._condition("wants_takeaway", "COND-parent-wants-takeaway"),
+        )
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_step, parent_step
+        )
+
+        self.assertEqual(
+            [(cond.name, cond.resource_id) for cond in augmented.conditions],
+            [
+                ("wants_table", "COND-branch-wants-table"),
+                ("wants_takeaway", "COND-parent-wants-takeaway"),
+            ],
+        )
+
+    def test_augmenting_a_flow_step_leaves_the_branch_resource_untouched(self):
+        """The branch step keeps its own conditions after augmentation."""
+        branch_step = self._flow_step(self._condition("wants_table", "COND-branch-wants-table"))
+        parent_step = self._flow_step(
+            self._condition("wants_takeaway", "COND-parent-wants-takeaway")
+        )
+
+        self.project._augment_original_with_parent_subresources(branch_step, parent_step)
+
+        self.assertEqual(
+            [(cond.name, cond.resource_id) for cond in branch_step.conditions],
+            [("wants_table", "COND-branch-wants-table")],
+        )
+
+    def test_flow_step_condition_present_on_both_keeps_the_branch_version(self):
+        """A shared condition name is not duplicated with the parent's copy."""
+        branch_step = self._flow_step(self._condition("wants_table", "COND-branch-wants-table"))
+        parent_step = self._flow_step(self._condition("wants_table", "COND-parent-wants-table"))
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_step, parent_step
+        )
+
+        self.assertEqual(
+            [(cond.name, cond.resource_id) for cond in augmented.conditions],
+            [("wants_table", "COND-branch-wants-table")],
+        )
+
+    def test_flow_step_with_nothing_to_inherit_is_returned_as_is(self):
+        """With no parent-only conditions the branch step itself comes back."""
+        branch_step = self._flow_step(self._condition("wants_table", "COND-branch-wants-table"))
+        parent_step = self._flow_step(self._condition("wants_table", "COND-parent-wants-table"))
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_step, parent_step
+        )
+
+        self.assertIs(augmented, branch_step)
+
+    def test_function_step_is_returned_unchanged_despite_parent_only_parameters(self):
+        """A function step is not augmented even though it is a Function subclass.
+
+        Reading a function step off disk takes no known_parameters, so handing it merged
+        parameters here would offer ids that the read can never claim.
+        """
+
+        def function_step(*parameters: FunctionParameters) -> FunctionStep:
+            return FunctionStep(
+                resource_id=f"{self.FLOW_ID}_take_payment",
+                name="take_payment",
+                step_id="take_payment",
+                flow_id=self.FLOW_ID,
+                flow_name="test_flow",
+                code="def take_payment():\n    pass\n",
+                parameters=list(parameters),
+            )
+
+        branch_step = function_step(self._parameter("amount", "PARAM-branch-amount"))
+        parent_step = function_step(
+            self._parameter("amount", "PARAM-parent-amount"),
+            self._parameter("currency", "PARAM-parent-currency"),
+        )
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_step, parent_step
+        )
+
+        self.assertIs(augmented, branch_step)
+        self.assertEqual([param.name for param in augmented.parameters], ["amount"])
+
+    def test_resource_without_named_subresources_is_returned_unchanged(self):
+        """A type with no name-matched subresources, such as a topic, is passed through."""
+        branch_topic = Topic(
+            resource_id="TOPIC-branch-id",
+            name="Opening hours",
+            actions="Answer the question",
+            content="We open at 9am",
+            example_queries=["when do you open?"],
+        )
+        parent_topic = Topic(
+            resource_id="TOPIC-parent-id",
+            name="Opening hours",
+            actions="Answer the question",
+            content="We open at 8am",
+            example_queries=["when do you open?", "are you open now?"],
+        )
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_topic, parent_topic
+        )
+
+        self.assertIs(augmented, branch_topic)
+
+
 class TestProjectFixtureIntegrityTest(unittest.TestCase):
     """The test_project fixture must look like a status file a real project would write.
 
@@ -5951,6 +7471,234 @@ class TestProjectFixtureIntegrityTest(unittest.TestCase):
         # Without this the test passes vacuously if the path keying ever breaks.
         self.assertEqual(compared, len(self.mappings))
         self.assertEqual(differing, [])
+
+
+class ProjectCreateCustomMetricTest(unittest.TestCase):
+    """Tests for AgentStudioProject.create_custom_metric validation and orchestration."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @patch("poly.project.AgentStudioInterface.set_custom_metric_api_flag")
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
+    def test_api_flag_triggers_follow_up_update(self, mock_create, mock_set_api):
+        """When api=True, a follow-up call sets the api flag after create."""
+        mock_create.return_value = {"name": "SCORE", "type": "int"}
+        mock_set_api.return_value = {"name": "SCORE", "type": "int", "api": True}
+
+        result = self.project.create_custom_metric({"name": "SCORE", "type": "int", "api": True})
+
+        mock_create.assert_called_once()
+        mock_set_api.assert_called_once_with(
+            self.project.region, self.project.account_id, self.project.project_id, "SCORE", True
+        )
+        self.assertTrue(result["api"])
+
+    @patch("poly.project.AgentStudioInterface.set_custom_metric_api_flag")
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
+    def test_no_api_flag_skips_follow_up(self, mock_create, mock_set_api):
+        """When api is not set, no follow-up call is issued."""
+        mock_create.return_value = {"name": "SCORE", "type": "int"}
+
+        self.project.create_custom_metric({"name": "SCORE", "type": "int"})
+
+        mock_create.assert_called_once()
+        mock_set_api.assert_not_called()
+
+    def test_expected_values_rejected_for_non_string(self):
+        """Raises ValueError when expected_values is set on a non-string metric."""
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_custom_metric(
+                {"name": "SCORE", "type": "int", "expected_values": ["a", "b"]},
+            )
+
+        self.assertIn("only valid for string", str(ctx.exception))
+
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
+    def test_expected_values_allowed_for_string(self, mock_create):
+        """Does not raise when expected_values is set on a string metric."""
+        mock_create.return_value = {"name": "STATUS", "type": "string"}
+
+        self.project.create_custom_metric(
+            {"name": "STATUS", "type": "string", "expected_values": ["open", "closed"]},
+        )
+
+        mock_create.assert_called_once()
+
+
+class ProjectUpdateCustomMetricTest(unittest.TestCase):
+    """Tests for AgentStudioProject.update_custom_metric validation and orchestration."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @patch("poly.project.AgentStudioInterface.update_custom_metric")
+    @patch("poly.project.AgentStudioInterface.get_custom_metrics")
+    def test_expected_values_rejected_for_non_string(self, mock_get, mock_update):
+        """Raises ValueError when expected_values targets a non-string metric."""
+        mock_get.return_value = [{"name": "SCORE", "type": "int"}]
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.update_custom_metric("SCORE", {"expected_values": ["a", "b"]})
+
+        self.assertIn("only valid for string", str(ctx.exception))
+        mock_update.assert_not_called()
+
+    @patch("poly.project.AgentStudioInterface.update_custom_metric")
+    @patch("poly.project.AgentStudioInterface.get_custom_metrics")
+    def test_expected_values_allowed_for_string(self, mock_get, mock_update):
+        """Does not raise when expected_values targets a string metric."""
+        mock_get.return_value = [{"name": "STATUS", "type": "string"}]
+        mock_update.return_value = {"name": "STATUS"}
+
+        self.project.update_custom_metric("STATUS", {"expected_values": ["open"]})
+
+        mock_update.assert_called_once()
+
+    @patch("poly.project.AgentStudioInterface.update_custom_metric")
+    def test_no_expected_values_skips_type_check(self, mock_update):
+        """When expected_values is not in data, no type lookup is made."""
+        mock_update.return_value = {"name": "SCORE"}
+
+        self.project.update_custom_metric("SCORE", {"description": "new desc"})
+
+        mock_update.assert_called_once()
+
+
+class ProjectImportMetricsFromFileTest(unittest.TestCase):
+    """Tests for AgentStudioProject.import_metrics_from_file file reading and delegation."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_file_not_found_raises(self):
+        """Raises FileNotFoundError for a missing file."""
+        with self.assertRaises(FileNotFoundError):
+            self.project.import_metrics_from_file("/nonexistent/metrics.yaml")
+
+    def test_invalid_yaml_raises(self):
+        """Raises ValueError for unparseable YAML."""
+        bad_file = os.path.join(self.temp_dir, "bad.yaml")
+        with open(bad_file, "w") as f:
+            f.write("{{invalid")
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.import_metrics_from_file(bad_file)
+
+        self.assertIn("Invalid YAML", str(ctx.exception))
+
+    @patch("poly.project.AgentStudioInterface.import_metrics_from_file")
+    def test_delegates_parsed_content_to_interface(self, mock_import):
+        """Reads and parses the file, then delegates to the interface layer."""
+        metrics_file = os.path.join(self.temp_dir, "metrics.yaml")
+        with open(metrics_file, "w") as f:
+            f.write("SCORE:\n  type: int\n")
+        mock_import.return_value = {"metadata": {"created": ["SCORE"], "ignored": []}}
+
+        result = self.project.import_metrics_from_file(metrics_file, dry_run=True)
+
+        mock_import.assert_called_once_with(
+            self.project.region,
+            self.project.account_id,
+            self.project.project_id,
+            "SCORE:\n  type: int\n",
+            {"SCORE"},
+            True,
+        )
+        self.assertEqual(result["metadata"]["created"], ["SCORE"])
+
+
+class CreateCallSessionTest(unittest.TestCase):
+    """Tests for the create_call_session method."""
+
+    def setUp(self):
+        """Mock the api_handler and build a project from fixture data."""
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def tearDown(self):
+        """Clean up patches."""
+        patch.stopall()
+
+    @staticmethod
+    def _valid_call_info() -> dict:
+        """A complete branch call-info response."""
+        return {
+            "artifactVersion": "artifact-v1",
+            "lambdaDeploymentVersion": "lambda-v1",
+            "authToken": "studio-token",
+            "gatewayWsUrl": "wss://webrtc-gateway.test.polyai.app",
+        }
+
+    def test_draft_returns_call_session(self):
+        """A draft call maps the deploy response onto a CallSession."""
+        self.mock_api_handler.get_branch_call_info.return_value = self._valid_call_info()
+
+        session = self.project.create_call_session("draft", variant="VARIANT-x")
+
+        self.mock_api_handler.get_branch_call_info.assert_called_once_with(self.project.branch_id)
+        self.assertEqual(session.account_id, self.project.account_id)
+        self.assertEqual(session.project_id, self.project.project_id)
+        self.assertEqual(session.variant_id, "VARIANT-x")
+        self.assertEqual(session.artifact_version, "artifact-v1")
+        self.assertEqual(session.lambda_deployment_version, "lambda-v1")
+        self.assertEqual(session.auth_token, "studio-token")
+        self.assertEqual(session.gateway_ws_url, "wss://webrtc-gateway.test.polyai.app")
+        self.assertEqual(session.mode, DEFAULT_CALL_MODE)
+
+    def test_draft_defaults_empty_variant(self):
+        """A missing variant is normalised to an empty string."""
+        self.mock_api_handler.get_branch_call_info.return_value = self._valid_call_info()
+
+        session = self.project.create_call_session("draft")
+
+        self.assertEqual(session.variant_id, "")
+
+    def test_non_draft_raises_not_implemented(self):
+        """Deployed environments are not yet supported and must not call the API."""
+        with self.assertRaises(NotImplementedError):
+            self.project.create_call_session("sandbox")
+
+        self.mock_api_handler.get_branch_call_info.assert_not_called()
+
+    def test_incomplete_response_raises_value_error(self):
+        """A response missing any required field is rejected, naming the field."""
+        for missing in (
+            "artifactVersion",
+            "lambdaDeploymentVersion",
+            "authToken",
+            "gatewayWsUrl",
+        ):
+            info = self._valid_call_info()
+            info[missing] = ""
+            self.mock_api_handler.get_branch_call_info.return_value = info
+            with self.assertRaises(ValueError) as ctx:
+                self.project.create_call_session("draft")
+            self.assertIn(missing, str(ctx.exception))
+
+    def test_incomplete_response_does_not_leak_auth_token(self):
+        """The validation error must never echo the authToken credential."""
+        info = self._valid_call_info()
+        info["authToken"] = "super-secret-token"
+        info["gatewayWsUrl"] = ""  # trigger the error with the token still present
+        self.mock_api_handler.get_branch_call_info.return_value = info
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_call_session("draft")
+        self.assertNotIn("super-secret-token", str(ctx.exception))
 
 
 if __name__ == "__main__":

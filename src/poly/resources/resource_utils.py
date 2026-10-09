@@ -137,6 +137,26 @@ def load_yaml(content):
     return _yaml_loader.load(content)
 
 
+def same_yaml_data(a, b) -> bool:
+    """Return True if a and b are plain YAML data that dump_yaml renders identically.
+
+    Equality alone is not enough: dicts compare equal regardless of key order, and
+    True == 1 == 1.0, yet each of these dumps differently. Comparing the JSON encodings as
+    well catches those cases. A False result only means the dumps may differ.
+
+    Args:
+        a: Parsed YAML data (dicts, lists and scalars).
+        b: Parsed YAML data (dicts, lists and scalars).
+
+    Returns:
+        bool: True if dump_yaml(a) == dump_yaml(b) is guaranteed.
+    """
+    try:
+        return a == b and json.dumps(a, default=str) == json.dumps(b, default=str)
+    except (TypeError, ValueError):
+        return False
+
+
 def get_diff(original: str, updated: str) -> str:
     """Get the diff between original and updated strings."""
 
@@ -600,6 +620,27 @@ def format_json(json_content: str) -> str:
 SPACES_REGEX = re.compile(r"\s+")
 NON_LETTER_REGEX = re.compile(r"[^\w\s]", re.UNICODE)
 MULTI_UNDERSCORE_REGEX = re.compile(r"_+")
+
+
+def generate_subresource_id(prefix: str, *scope: str) -> str:
+    """Derive a stable subresource id from its scoped name.
+
+    Subresources (function parameters, step conditions, delay responses) are matched by
+    name within their parent, so deriving the id from the scoped name means any two
+    reads - and any two branches - mint the same id for the same subresource. Parent
+    NAMES form the scope, never parent ids: ids are what diverge across branches.
+
+    Args:
+        prefix (str): The id prefix, e.g. "CONDITION".
+        *scope (str): The scoped name parts, outermost first (e.g. flow name, step
+            name, condition name).
+
+    Returns:
+        str: ``{prefix}-{8 hex chars}`` derived from the scope, matching the shape of
+            randomly minted ids.
+    """
+    digest = hashlib.sha1("/".join(scope).encode("utf-8")).hexdigest()
+    return f"{prefix}-{digest[:8]}"
 
 
 @functools.cache

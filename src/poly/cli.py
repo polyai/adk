@@ -8,12 +8,12 @@ import os
 import sys
 import traceback
 from argparse import ArgumentParser
-from importlib.metadata import version as get_package_version
 
 import argcomplete
 
+from poly.cli_commands.apikey import ApiKeyCommand
 from poly.cli_commands.audio_cache import AudioCacheCommand
-from poly.cli_commands.auth import LoginCommand, StartCommand
+from poly.cli_commands.auth import LoginCommand
 from poly.cli_commands.base import (
     COMMAND_GROUP_ORDER,
     BaseCommand,
@@ -23,13 +23,17 @@ from poly.cli_commands.base import (
     group_subcommands,
 )
 from poly.cli_commands.branch import BranchCommand
+from poly.cli_commands.call import CallCommand
 from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
 from poly.cli_commands.functions import FunctionsCommand
+from poly.cli_commands.metrics import MetricsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.rtc import RTCCommand
+from poly.cli_commands.setup import SetupCommand
+from poly.cli_commands.shared import get_package_version
 from poly.cli_commands.sync import (
     DiffCommand,
     FetchCommand,
@@ -42,6 +46,7 @@ from poly.cli_commands.sync import (
 )
 from poly.cli_commands.template import TemplateCommand
 from poly.cli_commands.testing import TestingCommand
+from poly.cli_commands.update import UpdateCommand, display_update_message
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
 from poly.cli_commands.wren import WrenCommand
 from poly.handlers.interface import REGIONS
@@ -51,8 +56,9 @@ logger = logging.getLogger(__name__)
 
 COMMANDS = [
     InitCommand,
-    StartCommand,
+    SetupCommand,
     LoginCommand,
+    ApiKeyCommand,
     StudioCommand,
     ProjectCommand,
     TemplateCommand,
@@ -67,6 +73,7 @@ COMMANDS = [
     ReviewCommand,
     BranchCommand,
     DeploymentsCommand,
+    MetricsCommand,
     ConversationsCommand,
     AudioCacheCommand,
     FunctionsCommand,
@@ -74,8 +81,10 @@ COMMANDS = [
     RTCCommand,
     WrenCommand,
     ChatCommand,
+    CallCommand,
     DocsCommand,
     CompletionCommand,
+    UpdateCommand,
 ]
 
 
@@ -90,7 +99,7 @@ class AgentStudioCLI:
 
     def _create_parser(self):
         try:
-            _version = get_package_version("polyai-adk")
+            _version = get_package_version()
         except Exception:
             _version = "unknown"
         parser = ArgumentParser(formatter_class=GroupedHelpFormatter)
@@ -192,7 +201,7 @@ class AgentStudioCLI:
                     command.run(args)
                     return
         except Exception as e:
-            if hasattr(args, "json") and args.json:
+            if getattr(args, "json", False) or getattr(args, "output_json_commands", False):
                 json_print({"success": False, "error": str(e), "traceback": traceback.format_exc()})
                 sys.exit(1)
             else:
@@ -215,6 +224,9 @@ class AgentStudioCLI:
             from poly.output.console import set_verbose
 
             set_verbose(getattr(args, "verbose", False))
+            # 'poly update' does its own, more thorough check, so skip the passive one.
+            if args.command != UpdateCommand.command:
+                display_update_message(output_json=getattr(args, "json", False))
             self._run_command(args)
         except SystemExit:
             raise

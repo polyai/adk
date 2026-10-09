@@ -17,6 +17,102 @@ from poly.handlers.platform_api import (
 from poly.tests.testing_utils import make_mock_response
 
 
+class JwtAuthedAccountAndKeyCalls(unittest.TestCase):
+    """Tests for the JWT-authenticated account/key methods used by `poly apikey`."""
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_authorise_sends_bearer_and_default_source(self, mock_make_request):
+        """authorise() keeps sending the Bearer header and the default 'adk' source."""
+        PlatformAPIHandler.authorise("studio", "jwt-token")
+
+        args, kwargs = mock_make_request.call_args
+        self.assertEqual(args[0], "studio")
+        self.assertEqual(args[1], "/jupiter/v1/authorise")
+        self.assertEqual(args[2], "GET")
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer jwt-token")
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "adk")
+        self.assertTrue(kwargs["use_jupiter_api"])
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_get_accounts_internal_hits_expected_url(self, mock_make_request):
+        """get_accounts_internal() GETs /jupiter/v2/accounts with Bearer auth."""
+        mock_make_request.return_value = [{"id": "acc-1"}]
+
+        result = PlatformAPIHandler.get_accounts_internal("studio", "jwt-token")
+
+        args, kwargs = mock_make_request.call_args
+        self.assertEqual(args[0], "studio")
+        self.assertEqual(args[1], "/jupiter/v2/accounts")
+        self.assertEqual(args[2], "GET")
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer jwt-token")
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "adk")
+        self.assertTrue(kwargs["use_jupiter_api"])
+        self.assertEqual(result, [{"id": "acc-1"}])
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_get_accounts_internal_sends_given_source(self, mock_make_request):
+        """get_accounts_internal() sends the caller-supplied X-Poly-Source."""
+        PlatformAPIHandler.get_accounts_internal("studio", "jwt-token", source="apikey")
+
+        kwargs = mock_make_request.call_args.kwargs
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "apikey")
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_list_account_api_keys_internal_hits_expected_url(self, mock_make_request):
+        """list_account_api_keys_internal() GETs the account's api-keys endpoint."""
+        mock_make_request.return_value = [{"key": "sk-1"}]
+
+        result = PlatformAPIHandler.list_account_api_keys_internal(
+            "studio", "jwt-token", "acc-1"
+        )
+
+        args, kwargs = mock_make_request.call_args
+        self.assertEqual(args[0], "studio")
+        self.assertEqual(args[1], "/jupiter/v2/accounts/acc-1/api-keys")
+        self.assertEqual(args[2], "GET")
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer jwt-token")
+        self.assertTrue(kwargs["use_jupiter_api"])
+        self.assertEqual(result, [{"key": "sk-1"}])
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_list_account_api_keys_internal_sends_given_source(self, mock_make_request):
+        """list_account_api_keys_internal() sends the caller-supplied X-Poly-Source."""
+        PlatformAPIHandler.list_account_api_keys_internal(
+            "studio", "jwt-token", "acc-1", source="apikey"
+        )
+
+        kwargs = mock_make_request.call_args.kwargs
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "apikey")
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_create_account_api_key_internal_posts_name(self, mock_make_request):
+        """create_account_api_key_internal() POSTs {"name": ...} to the api-keys endpoint."""
+        mock_make_request.return_value = {"key": "sk-new", "name": ""}
+
+        result = PlatformAPIHandler.create_account_api_key_internal(
+            "studio", "jwt-token", "acc-1", "cli-generated-key"
+        )
+
+        args, kwargs = mock_make_request.call_args
+        self.assertEqual(args[0], "studio")
+        self.assertEqual(args[1], "/jupiter/v2/accounts/acc-1/api-keys")
+        self.assertEqual(args[2], "POST")
+        self.assertEqual(kwargs["data"], {"name": "cli-generated-key"})
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer jwt-token")
+        self.assertTrue(kwargs["use_jupiter_api"])
+        self.assertEqual(result, {"key": "sk-new", "name": ""})
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_create_account_api_key_internal_sends_given_source(self, mock_make_request):
+        """create_account_api_key_internal() sends the caller-supplied X-Poly-Source."""
+        PlatformAPIHandler.create_account_api_key_internal(
+            "studio", "jwt-token", "acc-1", "cli-generated-key", source="apikey"
+        )
+
+        kwargs = mock_make_request.call_args.kwargs
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "apikey")
+
+
 class GetBaseUrl(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_base_url region mapping."""
 
@@ -214,6 +310,31 @@ class GetAccounts(unittest.TestCase):
             PlatformAPIHandler.get_accounts("studio")
 
 
+class GetAccountsWithKey(unittest.TestCase):
+    """Tests for PlatformAPIHandler.get_accounts_with_key."""
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_authenticates_with_the_given_key_not_the_on_disk_credential(
+        self, mock_make_request
+    ):
+        """The explicit key is sent as X-API-KEY, bypassing retrieve_api_key entirely."""
+        mock_make_request.return_value = [{"id": "a1", "name": "Active One", "active": True}]
+
+        accounts = PlatformAPIHandler.get_accounts_with_key("studio", "explicit-key-123")
+
+        self.assertEqual(accounts, {"a1": "Active One"})
+        _, kwargs = mock_make_request.call_args
+        self.assertEqual(kwargs["headers"]["X-API-KEY"], "explicit-key-123")
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_non_list_response_raises_value_error(self, mock_make_request):
+        """A response that is not a list raises ValueError, same as get_accounts."""
+        mock_make_request.return_value = {"unexpected": "shape"}
+
+        with self.assertRaises(ValueError):
+            PlatformAPIHandler.get_accounts_with_key("studio", "explicit-key-123")
+
+
 class GetProjects(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_projects."""
 
@@ -231,6 +352,51 @@ class GetProjects(unittest.TestCase):
         projects = PlatformAPIHandler.get_projects("studio", "acc-1")
 
         self.assertEqual(projects, {"p1": "Project One", "p2": "Project Two"})
+
+
+class UpdateProject(unittest.TestCase):
+    """Tests for PlatformAPIHandler.update_project."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_patches_the_project_with_the_given_fields(self, mock_request, _mock_key):
+        """The patch is sent as the JSON body of a PATCH to the project's URL."""
+        mock_request.return_value = make_mock_response(200, json_body={"id": "proj1"})
+
+        PlatformAPIHandler.update_project(
+            "studio", "acc1", "proj1", {"config": {"deployment_mode": "simple"}}
+        )
+
+        sent = mock_request.call_args.kwargs
+        self.assertEqual(sent["method"], "PATCH")
+        self.assertEqual(
+            sent["url"], "https://api.studio.poly.ai/adk/v1/accounts/acc1/projects/proj1"
+        )
+        self.assertEqual(json.loads(sent["data"]), {"config": {"deployment_mode": "simple"}})
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_returns_the_updated_project(self, mock_request, _mock_key):
+        """The platform's response body is returned to the caller."""
+        updated = {"id": "proj1", "config": {"deployment_mode": "simple"}}
+        mock_request.return_value = make_mock_response(200, json_body=updated)
+
+        result = PlatformAPIHandler.update_project(
+            "studio", "acc1", "proj1", {"config": {"deployment_mode": "simple"}}
+        )
+
+        self.assertEqual(result, updated)
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_rejected_update_raises_http_error(self, mock_request, _mock_key):
+        """A refused update (e.g. no permission) propagates as requests.HTTPError."""
+        mock_request.return_value = make_mock_response(403, json_body={"error": "forbidden"})
+
+        with self.assertRaises(requests.HTTPError):
+            PlatformAPIHandler.update_project(
+                "studio", "acc1", "proj1", {"config": {"deployment_mode": "simple"}}
+            )
 
 
 class GetConversationAudio(unittest.TestCase):
@@ -458,6 +624,148 @@ class SynthesizeAudioCache(unittest.TestCase):
         with self.assertRaises(requests.HTTPError):
             PlatformAPIHandler.synthesize_audio_cache("studio", "agent-1", "entry-1", "hi", {})
 
+class GetCustomMetrics(unittest.TestCase):
+    """Tests for PlatformAPIHandler.get_custom_metrics."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_returns_list_directly(self, mock_request, _mock_key):
+        """When the API returns a bare list, it is returned as-is."""
+        metrics = [{"name": "SCORE", "type": "int"}]
+        mock_request.return_value = make_mock_response(200, json_body=metrics)
+
+        result = PlatformAPIHandler.get_custom_metrics("studio", "acc1", "proj1")
+
+        self.assertEqual(result, metrics)
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_extracts_from_metrics_key(self, mock_request, _mock_key):
+        """When the API wraps the list in a 'metrics' key, it is unwrapped."""
+        metrics = [{"name": "SCORE", "type": "int"}]
+        mock_request.return_value = make_mock_response(200, json_body={"metrics": metrics})
+
+        result = PlatformAPIHandler.get_custom_metrics("studio", "acc1", "proj1")
+
+        self.assertEqual(result, metrics)
+
+
+class CreateCustomMetric(unittest.TestCase):
+    """Tests for PlatformAPIHandler.create_custom_metric."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_posts_data_to_correct_endpoint(self, mock_request, _mock_key):
+        """create_custom_metric sends a POST with the metric payload."""
+        mock_request.return_value = make_mock_response(200, json_body={"name": "SCORE"})
+
+        data = {"name": "SCORE", "type": "int"}
+        PlatformAPIHandler.create_custom_metric("studio", "acc1", "proj1", data)
+
+        call_kwargs = mock_request.call_args
+        self.assertEqual(call_kwargs.kwargs["method"], "POST")
+        self.assertIn("/custom-metrics", call_kwargs.kwargs["url"])
+
+
+class TriggerTestRun(unittest.TestCase):
+    """Tests for PlatformAPIHandler.trigger_test_run."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_the_select_shape(self, mock_request, _mock_key):
+        """The body uses select, not the legacy testCaseIds that drops other fields."""
+        mock_request.return_value = make_mock_response(200, json_body={"id": "run-1"})
+
+        PlatformAPIHandler.trigger_test_run("studio", "proj1", ["tc-1", "tc-2"], "main")
+
+        call_kwargs = mock_request.call_args.kwargs
+        self.assertEqual(call_kwargs["method"], "POST")
+        self.assertIn("/v1/agents/proj1/testing/test-runs/trigger", call_kwargs["url"])
+        self.assertEqual(
+            json.loads(call_kwargs["data"]),
+            {"branchId": "main", "select": {"mode": "testIds", "testIds": ["tc-1", "tc-2"]}},
+        )
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_includes_the_run_name_when_given(self, mock_request, _mock_key):
+        """A name is sent alongside the selection."""
+        mock_request.return_value = make_mock_response(200, json_body={"id": "run-1"})
+
+        PlatformAPIHandler.trigger_test_run(
+            "studio", "proj1", ["tc-1"], "main", name="Pre-release check · booking flow"
+        )
+
+        body = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(body["name"], "Pre-release check · booking flow")
+
+
+class UpdateCustomMetric(unittest.TestCase):
+    """Tests for PlatformAPIHandler.update_custom_metric."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_patches_correct_metric(self, mock_request, _mock_key):
+        """update_custom_metric sends a PATCH to the metric-specific URL."""
+        mock_request.return_value = make_mock_response(200, json_body={"name": "SCORE"})
+
+        PlatformAPIHandler.update_custom_metric("studio", "acc1", "proj1", "SCORE", {"api": True})
+
+        call_kwargs = mock_request.call_args
+        self.assertEqual(call_kwargs.kwargs["method"], "PATCH")
+        self.assertIn("/custom-metrics/SCORE", call_kwargs.kwargs["url"])
+
+
+class ExportCustomMetrics(unittest.TestCase):
+    """Tests for PlatformAPIHandler.export_custom_metrics."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_requests_yaml_format(self, mock_request, _mock_key):
+        """export_custom_metrics hits the export endpoint with a GET."""
+        yaml_body = b"SCORE:\n  type: int\n"
+        mock_request.return_value = make_mock_response(200, content=yaml_body)
+
+        PlatformAPIHandler.export_custom_metrics("studio", "acc1", "proj1")
+
+        call_kwargs = mock_request.call_args
+        self.assertEqual(call_kwargs.kwargs["method"], "GET")
+        self.assertIn("/export", call_kwargs.kwargs["url"])
+
+
+class ImportCustomMetrics(unittest.TestCase):
+    """Tests for PlatformAPIHandler.import_custom_metrics."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_multipart_upload(self, mock_request, _mock_key):
+        """import_custom_metrics POSTs a multipart file upload."""
+        mock_request.return_value = make_mock_response(
+            200, json_body={"metadata": {"created": [], "ignored": []}}
+        )
+
+        PlatformAPIHandler.import_custom_metrics("studio", "acc1", "proj1", "SCORE:\n  type: int\n")
+
+        call_kwargs = mock_request.call_args
+        self.assertIn("/import", call_kwargs.kwargs["url"])
+        self.assertIn("yaml", call_kwargs.kwargs.get("files", {}))
+
+
+class PreviewMetricsImport(unittest.TestCase):
+    """Tests for PlatformAPIHandler.preview_metrics_import."""
+
+    @patch.object(PlatformAPIHandler, "get_custom_metrics")
+    def test_computes_set_diff(self, mock_get):
+        """Correctly partitions local vs remote metric names."""
+        mock_get.return_value = [{"name": "EXISTING"}, {"name": "REMOTE_ONLY"}]
+
+        result = PlatformAPIHandler.preview_metrics_import(
+            "studio", "acc1", "proj1", {"EXISTING", "NEW_ONE"}
+        )
+
+        self.assertEqual(result["would_create"], ["NEW_ONE"])
+        self.assertEqual(result["would_skip"], ["EXISTING"])
+        self.assertEqual(result["remote_only"], ["REMOTE_ONLY"])
 
 class ListFunctions(unittest.TestCase):
     """Tests for PlatformAPIHandler.list_functions."""
@@ -612,7 +920,6 @@ class UserEmailHeader(unittest.TestCase):
                 patch.dict(os.environ, {}, clear=True),
             ):
                 self.assertNotIn("X-PolyAI-Email", send_request())
-
 
 if __name__ == "__main__":
     unittest.main()

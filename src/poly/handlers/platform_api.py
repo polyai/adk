@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import io
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
+from ruamel.yaml import YAML
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
 from poly.utils import any_credentials_exist, retrieve_api_key
@@ -31,6 +33,16 @@ CHAT_END_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conver
 AB_TESTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests"
 AB_TEST_ACTIVE_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/active"
 AB_TEST_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/{ab_test_id}"
+CUSTOM_METRICS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics"
+CUSTOM_METRIC_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/{metric_name}"
+)
+CUSTOM_METRICS_EXPORT_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/export"
+)
+CUSTOM_METRICS_IMPORT_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/import"
+)
 # These use public APIs not /adk endpoints
 PROMOTE_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/promote"
 ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
@@ -108,19 +120,28 @@ class PlatformAPIHandler:
         data: ty.Optional[dict] = None,
         params: ty.Optional[dict] = None,
         headers: ty.Optional[dict] = None,
+        files: ty.Optional[dict] = None,
+        response_format: str = "json",
         use_jupiter_api: bool = False,
     ) -> dict:
         """Make a request to the Platform API.
 
         Args:
-            region (str): The region name
-            endpoint (str): The API endpoint
-            method (str): The HTTP method
-            data (dict | None): The request body for POST/PUT requests
-            params (dict | None): Query string parameters
+            region (str): The region name.
+            endpoint (str): The API endpoint.
+            method (str): The HTTP method.
+            data (dict | None): The request body for POST/PUT requests.
+            params (dict | None): Query string parameters.
+            headers (dict | None): Override headers. Built automatically when None.
+            files (dict | None): Multipart file upload fields. When set, ``data``
+                is ignored and ``Content-Type`` is omitted so ``requests`` can set
+                the multipart boundary automatically.
+            response_format (str): How to parse the response. "json" (default)
+                or "yaml".
+            use_jupiter_api (bool): Whether to use the Jupiter API.
 
         Returns:
-            dict: The response JSON
+            dict: The parsed response.
         """
         url = PlatformAPIHandler.get_base_url(region, use_jupiter_api) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -129,9 +150,10 @@ class PlatformAPIHandler:
             headers = {
                 "X-API-KEY": retrieve_api_key(region),
                 "X-PolyAI-Correlation-Id": correlation_id,
-                "Content-Type": "application/json",
                 "X-Poly-Source": "adk",
             }
+            if not files:
+                headers["Content-Type"] = "application/json"
 
         if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
             headers["X-PolyAI-Email"] = email
@@ -145,7 +167,8 @@ class PlatformAPIHandler:
             headers=headers,
             params=params,
             allow_redirects=False,
-            data=json.dumps(data) if data else None,
+            files=files,
+            data=json.dumps(data) if data and not files else None,
         )
 
         logger.debug(
@@ -157,7 +180,8 @@ class PlatformAPIHandler:
             api_response.raise_for_status()
         except requests.HTTPError:
             logger.debug(
-                f"Error in request status_code={api_response.status_code!r} response={api_response.text!r}"
+                f"Error in request status_code={api_response.status_code!r}"
+                f" response={api_response.text!r}"
             )
             raise
 
@@ -165,13 +189,21 @@ class PlatformAPIHandler:
             logger.info(f"Request to {url} successful (no content)")
             return {}
 
+        if response_format == "yaml":
+            content = api_response.text.strip()
+            if not content:
+                return {}
+            ry = YAML()
+            result = ry.load(content)
+            return dict(result) if result else {}
+
         try:
-            api_response = api_response.json()
+            parsed = api_response.json()
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse JSON response: {e}")
 
         logger.info(f"Request to {url} successful")
-        return api_response
+        return parsed
 
     @staticmethod
     def get_accessible_regions(regions: list[str]) -> list[str]:
@@ -223,12 +255,44 @@ class PlatformAPIHandler:
         Returns:
             dict[str, str]: A dictionary mapping account ids to account names
         """
-        accounts = {}
         accounts_data = PlatformAPIHandler.make_request(region, ACCOUNTS_URL, "GET")
+        return PlatformAPIHandler._parse_accounts(accounts_data)
 
+    @staticmethod
+    def get_accounts_with_key(region: str, api_key: str) -> dict[str, str]:
+        """Get the accounts for a region, authenticating with `api_key` directly.
+
+        Unlike `get_accounts`, which always authenticates via the on-disk credential,
+        this lets a caller verify that a *specific* key (e.g. one just created or
+        reused, not necessarily the one saved to disk) actually works.
+
+        Args:
+            region (str): The region name.
+            api_key (str): The API key to authenticate with.
+
+        Returns:
+            dict[str, str]: A dictionary mapping account ids to account names.
+        """
+        accounts_data = PlatformAPIHandler.make_request(
+            region,
+            ACCOUNTS_URL,
+            "GET",
+            headers={
+                "X-API-KEY": api_key,
+                "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+                "X-Poly-Source": "adk",
+                "Content-Type": "application/json",
+            },
+        )
+        return PlatformAPIHandler._parse_accounts(accounts_data)
+
+    @staticmethod
+    def _parse_accounts(accounts_data: object) -> dict[str, str]:
+        """Parse a raw accounts-list API response into an id-to-name mapping."""
         if not isinstance(accounts_data, list):
             raise ValueError("Expected a list of accounts")
 
+        accounts = {}
         for account in accounts_data:
             if account.get("active", False) and account.get("id") and account.get("name"):
                 accounts[account.get("id")] = account.get("name")
@@ -249,6 +313,24 @@ class PlatformAPIHandler:
         """
         endpoint = PROJECT_URL.format(account_id=account_id, project_id=project_id)
         return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def update_project(region: str, account_id: str, project_id: str, patch: dict) -> dict:
+        """Update a project's name or project-level config.
+
+        Config keys are merged into the project's existing config server-side.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_id (str): The project ID
+            patch (dict): The fields to update, e.g. ``{"config": {"deployment_mode": "simple"}}``
+
+        Returns:
+            dict: The updated project details
+        """
+        endpoint = PROJECT_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=patch)
 
     @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
@@ -817,6 +899,25 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
 
     @staticmethod
+    def _jwt_headers(jwt_token: str, source: str = "adk") -> dict[str, str]:
+        """Build the header set for a JWT-authenticated Jupiter API call.
+
+        Args:
+            jwt_token: A valid JWT access token.
+            source: Value for the ``X-Poly-Source`` header, used to distinguish
+                which command/flow a call originated from.
+
+        Returns:
+            dict[str, str]: Headers for a Bearer-authenticated request.
+        """
+        return {
+            "Authorization": f"Bearer {jwt_token}",
+            "Content-Type": "application/json",
+            "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+            "X-Poly-Source": source,
+        }
+
+    @staticmethod
     def authorise(region: str, jwt_token: str) -> dict:
         """Authorise the user via JWT, creating their account if needed.
 
@@ -827,16 +928,12 @@ class PlatformAPIHandler:
         Returns:
             dict: The user record.
         """
-        correlation_id = f"adk-{uuid.uuid4()}"
-        headers = {
-            "Authorization": f"Bearer {jwt_token}",
-            "Content-Type": "application/json",
-            "X-PolyAI-Correlation-Id": correlation_id,
-            "X-Poly-Source": "adk",
-        }
-
         return PlatformAPIHandler.make_request(
-            region, "/jupiter/v1/authorise", "GET", headers=headers, use_jupiter_api=True
+            region,
+            "/jupiter/v1/authorise",
+            "GET",
+            headers=PlatformAPIHandler._jwt_headers(jwt_token),
+            use_jupiter_api=True,
         )
 
     @staticmethod
@@ -850,16 +947,12 @@ class PlatformAPIHandler:
         Returns:
             list[dict]: List of PAT records.
         """
-        correlation_id = f"adk-{uuid.uuid4()}"
-        headers = {
-            "Authorization": f"Bearer {jwt_token}",
-            "Content-Type": "application/json",
-            "X-PolyAI-Correlation-Id": correlation_id,
-            "X-Poly-Source": "adk",
-        }
-
         return PlatformAPIHandler.make_request(
-            region, "/jupiter/v2/pats", "GET", headers=headers, use_jupiter_api=True
+            region,
+            "/jupiter/v2/pats",
+            "GET",
+            headers=PlatformAPIHandler._jwt_headers(jwt_token),
+            use_jupiter_api=True,
         )
 
     @staticmethod
@@ -874,23 +967,86 @@ class PlatformAPIHandler:
         Returns:
             str: The PAT token.
         """
-        correlation_id = f"adk-{uuid.uuid4()}"
-        headers = {
-            "Authorization": f"Bearer {jwt_token}",
-            "Content-Type": "application/json",
-            "X-PolyAI-Correlation-Id": correlation_id,
-            "X-Poly-Source": "adk",
-        }
-
         response = PlatformAPIHandler.make_request(
             region,
             "/jupiter/v2/pats",
             "POST",
             data={"name": name},
-            headers=headers,
+            headers=PlatformAPIHandler._jwt_headers(jwt_token),
             use_jupiter_api=True,
         )
         return response.get("key")
+
+    @staticmethod
+    def get_accounts_internal(region: str, jwt_token: str, source: str = "adk") -> list[dict]:
+        """Get the accounts visible to the authenticated user, via JWT auth.
+
+        Unlike ``get_accounts`` (API-key auth, filtered to a name mapping),
+        this returns the raw account records for a JWT-authenticated caller.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The raw list of account records.
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            "/jupiter/v2/accounts",
+            "GET",
+            headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
+            use_jupiter_api=True,
+        )
+
+    @staticmethod
+    def list_account_api_keys_internal(
+        region: str, jwt_token: str, account_id: str, source: str = "adk"
+    ) -> list[dict]:
+        """List the account-scoped API keys for an account, via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The raw list of API key records.
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            f"/jupiter/v2/accounts/{account_id}/api-keys",
+            "GET",
+            headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
+            use_jupiter_api=True,
+        )
+
+    @staticmethod
+    def create_account_api_key_internal(
+        region: str, jwt_token: str, account_id: str, name: str, source: str = "adk"
+    ) -> dict:
+        """Create an account-scoped API key, via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID to scope the key to.
+            name: A label for the API key.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            dict: The full API key record, including the secret under ``key``.
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            f"/jupiter/v2/accounts/{account_id}/api-keys",
+            "POST",
+            data={"name": name},
+            headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
+            use_jupiter_api=True,
+        )
 
     @staticmethod
     def list_conversations(
@@ -1327,6 +1483,7 @@ class PlatformAPIHandler:
         project_id: str,
         test_case_ids: list[str],
         branch_id: str,
+        name: str | None = None,
     ) -> dict:
         """Trigger a test run for a project.
 
@@ -1335,18 +1492,153 @@ class PlatformAPIHandler:
             project_id: The project ID (agent ID).
             test_case_ids: List of test case IDs to run.
             branch_id: The branch ID to run tests against.
+            name: Optional name for the run.
 
         Returns:
             dict: The created test run response.
         """
         endpoint = TRIGGER_TEST_RUN_URL.format(project_id=project_id)
-        data = {
-            "testCaseIds": test_case_ids,
+        data: dict = {
             "branchId": branch_id,
+            "select": {"mode": "testIds", "testIds": test_case_ids},
         }
+        if name:
+            data["name"] = name
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
+    def export_custom_metrics(region: str, account_id: str, project_id: str) -> dict:
+        """Export all custom metrics for a project as a YAML-parsed dict.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            dict: Mapping of metric name to metric definition.
+        """
+        endpoint = CUSTOM_METRICS_EXPORT_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET", response_format="yaml")
+
+    @staticmethod
+    def get_custom_metrics(region: str, account_id: str, project_id: str) -> list[dict]:
+        """List all custom metrics for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            list[dict]: List of custom metric records.
+        """
+        endpoint = CUSTOM_METRICS_URL.format(account_id=account_id, project_id=project_id)
+        result = PlatformAPIHandler.make_request(region, endpoint, "GET")
+        if isinstance(result, list):
+            return result
+        return result.get("metrics", result.get("data", []))
+
+    @staticmethod
+    def create_custom_metric(region: str, account_id: str, project_id: str, data: dict) -> dict:
+        """Create a new custom metric.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            data: Metric payload — name, type, description, expected_values, api.
+
+        Returns:
+            dict: The created metric record.
+        """
+        endpoint = CUSTOM_METRICS_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
+
+    @staticmethod
+    def update_custom_metric(
+        region: str,
+        account_id: str,
+        project_id: str,
+        metric_name: str,
+        data: dict,
+    ) -> dict:
+        """Update an existing custom metric.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            metric_name: Name of the metric to update.
+            data: Fields to update — description, expected_values, active, api.
+
+        Returns:
+            dict: The updated metric record.
+        """
+        endpoint = CUSTOM_METRIC_URL.format(
+            account_id=account_id, project_id=project_id, metric_name=metric_name
+        )
+        return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
+
+    @staticmethod
+    def import_custom_metrics(
+        region: str,
+        account_id: str,
+        project_id: str,
+        yaml_content: str,
+        dry_run: bool = False,
+    ) -> dict:
+        """Bulk-import custom metrics from YAML content.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            yaml_content: Raw YAML string with metric definitions.
+            dry_run: If True, preview changes without applying.
+
+        Returns:
+            dict: Import result with metadata.created and metadata.ignored.
+        """
+        endpoint = CUSTOM_METRICS_IMPORT_URL.format(account_id=account_id, project_id=project_id)
+        params = {"type": "yaml", "dry_run": str(dry_run).lower()}
+        files = {
+            "yaml": (
+                "metrics.yaml",
+                io.BytesIO(yaml_content.encode("utf-8")),
+                "application/x-yaml",
+            )
+        }
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", params=params, files=files)
+
+    @staticmethod
+    def preview_metrics_import(
+        region: str,
+        account_id: str,
+        project_id: str,
+        local_metric_names: set[str],
+    ) -> dict[str, list[str]]:
+        """Compare local metric names against remote to preview an import.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            local_metric_names: Set of metric names from the local YAML file.
+
+        Returns:
+            dict with keys ``would_create``, ``would_skip``, and ``remote_only``,
+            each a sorted list of metric names.
+        """
+        remote_metrics = PlatformAPIHandler.get_custom_metrics(region, account_id, project_id)
+        remote_names = {m["name"] for m in remote_metrics if "name" in m}
+
+        return {
+            "would_create": sorted(local_metric_names - remote_names),
+            "would_skip": sorted(local_metric_names & remote_names),
+            "remote_only": sorted(remote_names - local_metric_names),
+        }
+
     def list_rtc_configs(
         region: str,
         project_id: str,

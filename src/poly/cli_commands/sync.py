@@ -327,6 +327,13 @@ class PushCommand(BaseCommand):
             default=None,
         )
         push_parser.add_argument(
+            "--parent-projection",
+            type=str,
+            metavar="JSON|-",
+            help=SUPPRESS,
+            default=None,
+        )
+        push_parser.add_argument(
             "--output-json-commands",
             action="store_true",
             help=SUPPRESS,
@@ -361,6 +368,7 @@ class PushCommand(BaseCommand):
             args.dry_run,
             args.format,
             args.from_projection,
+            parent_projection=args.parent_projection,
             output_json=args.json,
             output_commands=args.output_json_commands,
             include_rtc=args.include_rtc,
@@ -376,6 +384,7 @@ class PushCommand(BaseCommand):
         dry_run: bool = False,
         format: bool = False,
         from_projection: str = None,
+        parent_projection: str = None,
         output_json: bool = False,
         output_commands: bool = False,
         include_rtc: bool = False,
@@ -390,9 +399,23 @@ class PushCommand(BaseCommand):
                 f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
             )
 
+        json_errors = output_json or output_commands
+        if (from_projection or "").strip() == "-" and (parent_projection or "").strip() == "-":
+            msg = "Only one of --from-projection and --parent-projection may read from stdin."
+            if json_errors:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
         projection_json = parse_from_projection_json(
             from_projection,
-            json_errors=output_json or output_commands,
+            json_errors=json_errors,
+        )
+        parent_projection_json = parse_from_projection_json(
+            parent_projection,
+            json_errors=json_errors,
+            flag_name="--parent-projection",
         )
 
         original_branch_id = project.branch_id
@@ -402,6 +425,7 @@ class PushCommand(BaseCommand):
             dry_run=dry_run,
             format=format,
             projection_json=projection_json,
+            parent_projection_json=parent_projection_json,
         )
         new_branch_name = None
         if original_branch_id != project.branch_id:

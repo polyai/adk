@@ -20,3 +20,9 @@ function_call_assertions:
   - parameter_name: param1
     expected_value: hello
     value_type: string
+- name: test_function_with_parameters
+  arguments:
+  - parameter_name: param1
+    expected_value: booking
+    value_type: string
+  is_asserted: false

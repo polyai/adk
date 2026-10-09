@@ -66,7 +66,7 @@ class AgentStudioInterface:
         if response is not None:
             try:
                 return response.json().get("error_code")
-            except (json.JSONDecodeError, ValueError, AttributeError):
+            except json.JSONDecodeError, ValueError, AttributeError:
                 pass
         return None
 
@@ -138,6 +138,20 @@ class AgentStudioInterface:
         return PlatformAPIHandler.get_accounts(region)
 
     @staticmethod
+    def get_accounts_with_key(region: str, api_key: str) -> dict[str, str]:
+        """Get the accounts for a region, authenticating with `api_key` directly.
+
+        Args:
+            region (str): The region name.
+            api_key (str): The API key to authenticate with, rather than the
+                on-disk credential `get_accounts` would otherwise use.
+
+        Returns:
+            dict[str, str]: A dictionary mapping account ids to account names.
+        """
+        return PlatformAPIHandler.get_accounts_with_key(region, api_key)
+
+    @staticmethod
     def get_project(region: str, account_id: str, project_id: str) -> dict[str, Any]:
         """Get the details of a specific project.
 
@@ -150,6 +164,25 @@ class AgentStudioInterface:
             dict[str, Any]: A dictionary containing the project's details
         """
         return PlatformAPIHandler.get_project(region, account_id, project_id)
+
+    @staticmethod
+    def set_deployment_mode(
+        region: str, account_id: str, project_id: str, deployment_mode: str
+    ) -> dict[str, Any]:
+        """Set the deployment mode of a project.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_id (str): The project ID
+            deployment_mode (str): One of "simple", "releases" or "releases_branches"
+
+        Returns:
+            dict[str, Any]: The updated project's details
+        """
+        return PlatformAPIHandler.update_project(
+            region, account_id, project_id, {"config": {"deployment_mode": deployment_mode}}
+        )
 
     @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
@@ -754,6 +787,24 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
+    def get_branch_call_info(self, branch_id: str) -> dict:
+        """Get deployment info needed to start a draft voice call on a branch.
+
+        Fetches the branch projection sequence from sourcerer, then prepares the
+        deployment to obtain artifactVersion, lambdaDeploymentVersion and a
+        studio authToken for the WebRTC call.
+
+        Args:
+            branch_id: The branch ID
+
+        Returns:
+            dict with 'artifactVersion', 'lambdaDeploymentVersion' and 'authToken'.
+        """
+        try:
+            return self.sync_client.get_branch_call_info(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
     @staticmethod
     def create_draft_chat(
         region: str,
@@ -1039,6 +1090,59 @@ class AgentStudioInterface:
         return PlatformAPIHandler.create_pat_internal(region, jwt_token, name)
 
     @staticmethod
+    def get_accounts_internal(region: str, jwt_token: str, source: str = "adk") -> list[dict]:
+        """Get the accounts visible to the authenticated user, via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The raw list of account records.
+        """
+        return PlatformAPIHandler.get_accounts_internal(region, jwt_token, source=source)
+
+    @staticmethod
+    def list_account_api_keys_internal(
+        region: str, jwt_token: str, account_id: str, source: str = "adk"
+    ) -> list[dict]:
+        """List the account-scoped API keys for an account, via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The raw list of API key records.
+        """
+        return PlatformAPIHandler.list_account_api_keys_internal(
+            region, jwt_token, account_id, source=source
+        )
+
+    @staticmethod
+    def create_account_api_key_internal(
+        region: str, jwt_token: str, account_id: str, name: str, source: str = "adk"
+    ) -> dict:
+        """Create an account-scoped API key, via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID to scope the key to.
+            name: A label for the API key.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            dict: The full API key record, including the secret under ``key``.
+        """
+        return PlatformAPIHandler.create_account_api_key_internal(
+            region, jwt_token, account_id, name, source=source
+        )
+
+    @staticmethod
     def list_conversations(
         region: str,
         project_id: str,
@@ -1310,6 +1414,7 @@ class AgentStudioInterface:
         project_id: str,
         test_case_ids: list[str],
         branch_id: str,
+        name: str | None = None,
     ) -> dict:
         """Trigger a test run for a project.
 
@@ -1318,13 +1423,233 @@ class AgentStudioInterface:
             project_id: The project ID (agent ID).
             test_case_ids: List of test case IDs to run.
             branch_id: The branch ID to run tests against.
+            name: Optional name for the run.
 
         Returns:
             dict: The created test run response.
         """
-        return PlatformAPIHandler.trigger_test_run(region, project_id, test_case_ids, branch_id)
+        return PlatformAPIHandler.trigger_test_run(
+            region, project_id, test_case_ids, branch_id, name=name
+        )
 
     @staticmethod
+    def get_custom_metrics(
+        region: str,
+        account_id: str,
+        project_id: str,
+    ) -> list[dict]:
+        """List all custom metrics for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            list[dict]: List of custom metric records.
+        """
+        return PlatformAPIHandler.get_custom_metrics(region, account_id, project_id)
+
+    @staticmethod
+    def create_custom_metric(
+        region: str,
+        account_id: str,
+        project_id: str,
+        data: dict,
+    ) -> dict:
+        """Create a new custom metric.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            data: Metric payload — name, type, description, expected_values, api.
+
+        Returns:
+            dict: The created metric record.
+
+        Raises:
+            ValueError: If the metric already exists, or the API call fails.
+        """
+        try:
+            return PlatformAPIHandler.create_custom_metric(region, account_id, project_id, data)
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 409:
+                raise ValueError(f"Metric '{data.get('name')}' already exists.") from e
+            raise ValueError(
+                f"Failed to create metric: {e.response.text if e.response else e}"
+            ) from e
+
+    @staticmethod
+    def set_custom_metric_api_flag(
+        region: str,
+        account_id: str,
+        project_id: str,
+        metric_name: str,
+        api: bool,
+    ) -> dict:
+        """Set the ``api`` flag on an existing custom metric.
+
+        The server ignores the ``api`` flag when passed to create, so callers
+        creating an API metric must follow up with this call.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            metric_name: Name of the metric to update.
+            api: The desired value of the api flag.
+
+        Returns:
+            dict: The updated metric record.
+        """
+        return PlatformAPIHandler.update_custom_metric(
+            region, account_id, project_id, metric_name, {"api": api}
+        )
+
+    @staticmethod
+    def update_custom_metric(
+        region: str,
+        account_id: str,
+        project_id: str,
+        metric_name: str,
+        data: dict,
+    ) -> dict:
+        """Update an existing custom metric.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            metric_name: Name of the metric to update.
+            data: Fields to update — description, expected_values, active, api.
+
+        Returns:
+            dict: The updated metric record.
+
+        Raises:
+            ValueError: If the metric does not exist, or the API call fails.
+        """
+        try:
+            return PlatformAPIHandler.update_custom_metric(
+                region, account_id, project_id, metric_name, data
+            )
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                raise ValueError(f"Metric '{metric_name}' not found.") from e
+            raise ValueError(
+                f"Failed to update metric: {e.response.text if e.response else e}"
+            ) from e
+
+    @staticmethod
+    def export_custom_metrics(
+        region: str,
+        account_id: str,
+        project_id: str,
+    ) -> dict:
+        """Export all custom metrics as a YAML-parsed dict.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            dict: Mapping of metric name to metric definition.
+        """
+        return PlatformAPIHandler.export_custom_metrics(region, account_id, project_id)
+
+    @staticmethod
+    def preview_metrics_import(
+        region: str,
+        account_id: str,
+        project_id: str,
+        local_metric_names: set[str],
+    ) -> dict[str, list[str]]:
+        """Fetch remote metrics and compute what an import would do.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            local_metric_names: Set of metric names from the local YAML file.
+
+        Returns:
+            dict with keys ``would_create``, ``would_skip``, and ``remote_only``,
+            each a sorted list of metric names.
+        """
+        return PlatformAPIHandler.preview_metrics_import(
+            region, account_id, project_id, local_metric_names
+        )
+
+    @staticmethod
+    def import_custom_metrics(
+        region: str,
+        account_id: str,
+        project_id: str,
+        yaml_content: str,
+        dry_run: bool = False,
+    ) -> dict:
+        """Bulk-import custom metrics from YAML content.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            yaml_content: Raw YAML string with metric definitions.
+            dry_run: If True, preview changes without applying.
+
+        Returns:
+            dict: Import result with metadata.created and metadata.ignored.
+        """
+        return PlatformAPIHandler.import_custom_metrics(
+            region, account_id, project_id, yaml_content, dry_run
+        )
+
+    @staticmethod
+    def import_metrics_from_file(
+        region: str,
+        account_id: str,
+        project_id: str,
+        yaml_content: str,
+        local_names: set[str],
+        dry_run: bool = False,
+    ) -> dict:
+        """Import metrics from already-loaded YAML content, or preview the import.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            yaml_content: Raw YAML string with metric definitions.
+            local_names: Set of metric names parsed from ``yaml_content``.
+            dry_run: If True, return a preview without applying changes.
+
+        Returns:
+            dict: In dry-run mode, a preview dict with ``would_create``,
+            ``would_skip``, and ``remote_only``. Otherwise, the import result
+            with ``metadata.created`` and ``metadata.ignored``.
+        """
+        if dry_run:
+            return {
+                "dry_run": True,
+                **PlatformAPIHandler.preview_metrics_import(
+                    region, account_id, project_id, local_names
+                ),
+            }
+
+        preview = PlatformAPIHandler.preview_metrics_import(
+            region, account_id, project_id, local_names
+        )
+
+        result = PlatformAPIHandler.import_custom_metrics(
+            region, account_id, project_id, yaml_content, dry_run=False
+        )
+
+        result["remote_only"] = preview["remote_only"]
+
+        return result
+
     def list_rtc_configs(
         region: str,
         project_id: str,
@@ -1539,6 +1864,7 @@ class AgentStudioInterface:
         identity: Optional[str] = None,
         region: Optional[str] = None,
         project_id: Optional[str] = None,
+        account_id: Optional[str] = None,
         default: bool = False,
     ) -> bool:
         """Check if a feature flag is enabled for a given identity.
@@ -1548,6 +1874,7 @@ class AgentStudioInterface:
             identity (Optional[str]): The unique identifier for the user or entity.
             region (Optional[str]): The region name for grouping.
             project_id (Optional[str]): The project ID for grouping.
+            account_id (Optional[str]): The account ID, for account-scoped conditions.
             default (bool): The default value to return if the flag cannot be evaluated.
 
         Returns:
@@ -1558,4 +1885,5 @@ class AgentStudioInterface:
             key=key,
             default=default,
             project_id=project_id,
+            account_id=account_id,
         )

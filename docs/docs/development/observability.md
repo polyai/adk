@@ -25,6 +25,8 @@ Good logging explains the *shape* of a call — which paths it took, which exter
 
 Metrics count things you want to aggregate across calls — how often a flow completes, how often a handoff fires, how often an API falls back.
 
+Metrics in a project are managed with [`poly metrics`](../reference/cli/metrics.md), which are then invoked in project code via `conv.write_metric(...)`. See [custom metrics](./custom-metrics.md) for managing the definitions.
+
 The common mistake is emitting the same metric repeatedly. A metric written inside a loop, or on every turn, inflates the count and tells you nothing:
 
 | Avoid | Prefer |
@@ -58,6 +60,7 @@ Agent Studio provides the aggregate view — containment, CSAT, handle time, and
 
 Instrumentation is something you add while building, and it only pays off later. Logs and metrics you did not add are not available retroactively, so the time to think about them is while you are writing the function, not while you are debugging a call from last week.
 
+- [Custom metrics](./custom-metrics.md) — defining the metrics function code writes to
 - [Simulated conversation tests](./testing.md#simulated-conversation-tests) — turning a surprising real conversation into a repeatable test case
 - [Environments and deployment](./environments-and-deployment.md) — which environment a conversation came from
 - Every flag for these commands is in the [CLI reference](../reference/cli/conversations.md)

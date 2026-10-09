@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import json
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -174,9 +175,11 @@ class QueueResources(unittest.TestCase):
     def test_priority_create_types_are_queued_first(self):
         """Variables (a priority-create type) are created before non-priority types."""
         new = {
-            Topic: {"TOPIC-1": Topic(
-                resource_id="TOPIC-1", name="t", actions="", content="c", example_queries=[]
-            )},
+            Topic: {
+                "TOPIC-1": Topic(
+                    resource_id="TOPIC-1", name="t", actions="", content="c", example_queries=[]
+                )
+            },
             Variable: {"VAR-1": Variable(resource_id="VAR-1", name="balance")},
         }
 
@@ -190,9 +193,11 @@ class QueueResources(unittest.TestCase):
     def test_priority_delete_types_are_queued_first(self):
         """Variables (a priority-delete type) are deleted before non-priority types."""
         deleted = {
-            Topic: {"TOPIC-1": Topic(
-                resource_id="TOPIC-1", name="t", actions="", content="c", example_queries=[]
-            )},
+            Topic: {
+                "TOPIC-1": Topic(
+                    resource_id="TOPIC-1", name="t", actions="", content="c", example_queries=[]
+                )
+            },
             Variable: {"VAR-1": Variable(resource_id="VAR-1", name="balance")},
         }
 
@@ -336,6 +341,162 @@ class RestoreBranchInterface(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.interface.restore_branch("branch-1")
+
+
+class ImportMetricsFromFileInterfaceTest(unittest.TestCase):
+    """Tests for AgentStudioInterface.import_metrics_from_file orchestration."""
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.preview_metrics_import")
+    def test_dry_run_returns_preview(self, mock_preview):
+        """In dry-run mode, returns preview without importing."""
+        mock_preview.return_value = {
+            "would_create": ["SCORE"],
+            "would_skip": [],
+            "remote_only": [],
+        }
+
+        result = AgentStudioInterface.import_metrics_from_file(
+            "us", "acc1", "proj1", "SCORE:\n  type: int\n", {"SCORE"}, dry_run=True
+        )
+
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["would_create"], ["SCORE"])
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.import_custom_metrics")
+    @patch("poly.handlers.interface.PlatformAPIHandler.preview_metrics_import")
+    def test_import_returns_result_with_remote_only(self, mock_preview, mock_import):
+        """Full import merges remote_only from preview into the result."""
+        mock_preview.return_value = {
+            "would_create": ["SCORE"],
+            "would_skip": [],
+            "remote_only": ["OLD_METRIC"],
+        }
+        mock_import.return_value = {
+            "metadata": {"created": ["SCORE"], "ignored": []},
+        }
+
+        result = AgentStudioInterface.import_metrics_from_file(
+            "us", "acc1", "proj1", "SCORE:\n  type: int\n", {"SCORE"}, dry_run=False
+        )
+
+        self.assertEqual(result["remote_only"], ["OLD_METRIC"])
+        self.assertEqual(result["metadata"]["created"], ["SCORE"])
+        mock_import.assert_called_once()
+
+
+class CustomMetricErrorTranslation(unittest.TestCase):
+    """Tests that create/update_custom_metric translate HTTPError into ValueError."""
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
+    def test_create_conflict_gives_already_exists_message(self, mock_create):
+        """A 409 on create is translated into a friendly 'already exists' error."""
+        response = MagicMock(status_code=409, text="conflict")
+        mock_create.side_effect = requests.HTTPError("conflict", response=response)
+
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioInterface.create_custom_metric(
+                "us", "acc1", "proj1", {"name": "SCORE", "type": "int"}
+            )
+
+        self.assertIn("SCORE", str(ctx.exception))
+        self.assertIn("already exists", str(ctx.exception))
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
+    def test_create_other_error_gives_generic_message(self, mock_create):
+        """A non-409 error on create falls back to a generic failure message."""
+        response = MagicMock(status_code=500, text="server error")
+        mock_create.side_effect = requests.HTTPError("boom", response=response)
+
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioInterface.create_custom_metric(
+                "us", "acc1", "proj1", {"name": "SCORE", "type": "int"}
+            )
+
+        self.assertIn("Failed to create metric", str(ctx.exception))
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
+    def test_update_not_found_gives_not_found_message(self, mock_update):
+        """A 404 on update is translated into a friendly 'not found' error."""
+        response = MagicMock(status_code=404, text="missing")
+        mock_update.side_effect = requests.HTTPError("missing", response=response)
+
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioInterface.update_custom_metric(
+                "us", "acc1", "proj1", "GHOST", {"active": False}
+            )
+
+        self.assertIn("GHOST", str(ctx.exception))
+        self.assertIn("not found", str(ctx.exception))
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
+    def test_update_other_error_gives_generic_message(self, mock_update):
+        """A non-404 error on update falls back to a generic failure message."""
+        response = MagicMock(status_code=500, text="server error")
+        mock_update.side_effect = requests.HTTPError("boom", response=response)
+
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioInterface.update_custom_metric(
+                "us", "acc1", "proj1", "SCORE", {"active": False}
+            )
+
+        self.assertIn("Failed to update metric", str(ctx.exception))
+
+
+class SetDeploymentModeInterface(unittest.TestCase):
+    """Tests for AgentStudioInterface.set_deployment_mode."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_patches_only_the_deployment_mode_in_the_project_config(
+        self, mock_request, _mock_key
+    ):
+        """The mode is sent nested under config, so no other project fields are touched."""
+        mock_request.return_value = make_mock_response(200, json_body={"id": "proj1"})
+
+        AgentStudioInterface.set_deployment_mode("studio", "acc1", "proj1", "releases_branches")
+
+        sent = mock_request.call_args.kwargs
+        self.assertEqual(sent["method"], "PATCH")
+        self.assertTrue(sent["url"].endswith("/adk/v1/accounts/acc1/projects/proj1"))
+        self.assertEqual(
+            json.loads(sent["data"]), {"config": {"deployment_mode": "releases_branches"}}
+        )
+
+
+class GetBranchCallInfoInterface(unittest.TestCase):
+    """Tests for AgentStudioInterface.get_branch_call_info."""
+
+    def setUp(self):
+        self.interface = AgentStudioInterface()
+        self.interface.sync_client = MagicMock()
+
+    def test_returns_call_info_from_sync_client(self):
+        """The interface delegates to sync_client and returns the result."""
+        expected = {
+            "artifactVersion": "art-1",
+            "lambdaDeploymentVersion": "lambda-1",
+            "authToken": "studio-token",
+        }
+        self.interface.sync_client.get_branch_call_info.return_value = expected
+
+        result = self.interface.get_branch_call_info("branch-1")
+
+        self.assertEqual(result, expected)
+        self.interface.sync_client.get_branch_call_info.assert_called_once_with("branch-1")
+
+    def test_translates_http_error(self):
+        """An HTTPError from the sync client is translated into a ValueError."""
+        self.interface.sync_client.get_branch_call_info.side_effect = requests.HTTPError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.get_branch_call_info("branch-1")
+
+    def test_translates_sourcerer_api_error(self):
+        """A SourcererAPIError from the sync client is translated into a ValueError."""
+        self.interface.sync_client.get_branch_call_info.side_effect = SourcererAPIError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.get_branch_call_info("branch-1")
 
 
 if __name__ == "__main__":
