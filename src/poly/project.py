@@ -3598,6 +3598,15 @@ class AgentStudioProject:
 
     # ── A/B tests ───────────────────────────────────────────────────
     # Classic deployment model only; simplified deployments use experiments.
+    # ``end_ab_test`` is exempt so a test started before migrating can still be ended.
+
+    def _require_classic_deployments(self) -> None:
+        """Raise if the project uses simplified deployments, where A/B tests don't apply."""
+        if self.using_simplified_deployments:
+            raise ValueError(
+                "A/B tests are not available for projects using simplified deployments —"
+                " use experiments instead."
+            )
 
     def create_ab_test(
         self, name: str, variant_deployment_id: str, traffic_percentage: int
@@ -3611,7 +3620,11 @@ class AgentStudioProject:
 
         Returns:
             dict: The created A/B test record.
+
+        Raises:
+            ValueError: If the project uses simplified deployments.
         """
+        self._require_classic_deployments()
         return self.api_handler.create_ab_test(
             region=self.region,
             account_id=self.account_id,
@@ -3629,7 +3642,11 @@ class AgentStudioProject:
 
         Returns:
             list[dict]: A list of A/B test records.
+
+        Raises:
+            ValueError: If the project uses simplified deployments.
         """
+        self._require_classic_deployments()
         result = self.api_handler.list_ab_tests(
             region=self.region,
             account_id=self.account_id,
@@ -3643,7 +3660,11 @@ class AgentStudioProject:
 
         Returns:
             dict: The active A/B test record, or empty dict if none.
+
+        Raises:
+            ValueError: If the project uses simplified deployments.
         """
+        self._require_classic_deployments()
         return self.api_handler.get_active_ab_test(
             region=self.region,
             account_id=self.account_id,
@@ -3679,7 +3700,11 @@ class AgentStudioProject:
 
         Returns:
             dict: The updated A/B test record.
+
+        Raises:
+            ValueError: If the project uses simplified deployments.
         """
+        self._require_classic_deployments()
         return self.api_handler.update_ab_test(
             region=self.region,
             account_id=self.account_id,
