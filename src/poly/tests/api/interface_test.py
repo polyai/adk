@@ -447,9 +447,7 @@ class SetDeploymentModeInterface(unittest.TestCase):
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("poly.handlers.platform_api.requests.request")
-    def test_patches_only_the_deployment_mode_in_the_project_config(
-        self, mock_request, _mock_key
-    ):
+    def test_patches_only_the_deployment_mode_in_the_project_config(self, mock_request, _mock_key):
         """The mode is sent nested under config, so no other project fields are touched."""
         mock_request.return_value = make_mock_response(200, json_body={"id": "proj1"})
 
@@ -497,6 +495,62 @@ class GetBranchCallInfoInterface(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.interface.get_branch_call_info("branch-1")
+
+
+class ExperimentPassThroughTest(unittest.TestCase):
+    """Tests for the AgentStudioInterface experiment wrappers."""
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.create_experiment")
+    def test_create_experiment_returns_platform_response(self, mock_create):
+        """Create forwards its arguments and returns the platform's record."""
+        mock_create.return_value = {"id": "exp-1"}
+
+        result = AgentStudioInterface.create_experiment("eu", "acc", "proj", "v2", "br-v2", 30)
+
+        self.assertEqual(result, {"id": "exp-1"})
+        mock_create.assert_called_once_with("eu", "acc", "proj", "v2", "br-v2", 30)
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.list_experiments")
+    def test_list_experiments_returns_platform_response(self, mock_list):
+        """List forwards limit/offset and returns the platform's response."""
+        mock_list.return_value = {"experiments": []}
+
+        result = AgentStudioInterface.list_experiments("eu", "acc", "proj", 5, 10)
+
+        self.assertEqual(result, {"experiments": []})
+        mock_list.assert_called_once_with("eu", "acc", "proj", 5, 10)
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.get_experiment")
+    def test_get_experiment_returns_platform_response(self, mock_get):
+        """Get forwards the experiment ID and returns the platform's record."""
+        mock_get.return_value = {"id": "exp-1"}
+
+        result = AgentStudioInterface.get_experiment("eu", "acc", "proj", "exp-1")
+
+        self.assertEqual(result, {"id": "exp-1"})
+        mock_get.assert_called_once_with("eu", "acc", "proj", "exp-1")
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.end_experiment")
+    def test_end_experiment_returns_platform_response(self, mock_end):
+        """End forwards the chosen branch and returns the ended record."""
+        mock_end.return_value = {"id": "exp-1"}
+
+        result = AgentStudioInterface.end_experiment("eu", "acc", "proj", "exp-1", "br-v2")
+
+        self.assertEqual(result, {"id": "exp-1"})
+        mock_end.assert_called_once_with("eu", "acc", "proj", "exp-1", "br-v2")
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.update_experiment")
+    def test_update_experiment_returns_platform_response(self, mock_update):
+        """Update forwards name/traffic and returns the updated record."""
+        mock_update.return_value = {"id": "exp-1"}
+
+        result = AgentStudioInterface.update_experiment(
+            "eu", "acc", "proj", "exp-1", name="renamed", branch_id="br-v2", traffic_percentage=40
+        )
+
+        self.assertEqual(result, {"id": "exp-1"})
+        mock_update.assert_called_once_with("eu", "acc", "proj", "exp-1", "renamed", "br-v2", 40)
 
 
 if __name__ == "__main__":

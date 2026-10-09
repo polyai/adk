@@ -154,71 +154,75 @@ Without `--force`, the command prompts for confirmation before proceeding.
 
 Adds `"dry_run": true` instead of rolling back when `--dry-run` is passed.
 
-## `poly deployments ab-test`
+## `poly deployments experiment`
 
-Manage A/B tests for live deployments. `poly deployments ab-test` requires a subcommand.
+Manage experiments for projects using the simplified deployment model, testing a top-level branch against the current live version. Only one experiment can run at a time, with a single variant. `poly deployments experiment` requires a subcommand.
 
-### `poly deployments ab-test start`
+### `poly deployments experiment start`
 
-Start a new A/B test against the current live deployment. The variant must be a `pre-release` deployment with a version different from the current live deployment.
+Start a new experiment against the current live version. `main` is always the implicit control.
 
 Examples:
 
 ~~~bash
-poly deployments ab-test start --name 'v2 test' --variant-version <hash> --traffic 50
+poly deployments experiment start --name 'v2 test' --branch my-branch --traffic 50
 ~~~
+
+The variant must be a top-level branch (a direct child of `main`) that isn't diverged from it — sync a stale branch with its parent first.
 
 | Flag | Description |
 |---|---|
-| `--name`, `-n` | Name/label for the A/B test. If omitted, prompts interactively. |
-| `--variant-version` | Version hash of the pre-release variant. If omitted, prompts interactively. |
-| `--traffic` | Percentage of traffic to route to the variant (0-100). Defaults to 50 interactively. |
+| `--name`, `-n` | Name/label for the experiment. If omitted, prompts interactively. |
+| `--branch` | Name of the top-level branch to test as the variant. If omitted, prompts interactively. |
+| `--traffic` | Percentage of traffic to route to the variant (1-99). Defaults to 50 interactively. |
 
 !!! info "All flags are required with `--json`"
 
-    `--name`, `--variant-version`, and `--traffic` must all be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
+    `--name`, `--branch`, and `--traffic` must all be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
 
 `--json` output shape:
 
 ~~~json
 {
   "success": true,
-  "ab_test": {}
+  "experiment": {}
 }
 ~~~
 
-### `poly deployments ab-test list`
+### `poly deployments experiment list`
 
-List A/B tests for the project.
+List experiments for the project.
 
 Examples:
 
 ~~~bash
-poly deployments ab-test list
-poly deployments ab-test list --limit 20
+poly deployments experiment list
+poly deployments experiment list --limit 20
+poly deployments experiment list --offset 10
 ~~~
 
 | Flag | Description |
 |---|---|
-| `--limit` | Number of A/B tests to show. Defaults to `10`. |
+| `--limit` | Number of experiments to show. Defaults to `10`. |
+| `--offset` | Number of experiments to skip before showing results. |
 
 `--json` output shape:
 
 ~~~json
 {
   "success": true,
-  "ab_tests": []
+  "experiments": []
 }
 ~~~
 
-### `poly deployments ab-test active`
+### `poly deployments experiment active`
 
-Show the currently active A/B test, if any.
+Show the currently active experiment, if any.
 
 Examples:
 
 ~~~bash
-poly deployments ab-test active
+poly deployments experiment active
 ~~~
 
 `--json` output shape:
@@ -226,69 +230,67 @@ poly deployments ab-test active
 ~~~json
 {
   "success": true,
-  "ab_test": null
+  "experiment": null
 }
 ~~~
 
-### `poly deployments ab-test update`
+### `poly deployments experiment update`
 
-Update the traffic split for the active A/B test.
+Update the name and/or traffic split for the active experiment. At least one of `--name` or `--traffic` must be given.
 
 Examples:
 
 ~~~bash
-poly deployments ab-test update --traffic 30
+poly deployments experiment update --traffic 30
+poly deployments experiment update --name 'v3 test'
 ~~~
 
 | Flag | Description |
 |---|---|
-| `--traffic` | New percentage of traffic to route to the variant (0-100). Prompts if omitted. |
+| `--name`, `-n` | New name for the experiment. |
+| `--traffic` | New percentage of traffic to route to the variant (1-99). Prompts if omitted. |
 
-!!! info "`--traffic` is required with `--json`"
+!!! info "At least one of `--name` or `--traffic` is required with `--json`"
 
-    `--traffic` must be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
+    One of them must be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
 
 `--json` output shape:
 
 ~~~json
 {
   "success": true,
-  "ab_test": {}
+  "experiment": {}
 }
 ~~~
 
-Adds `"unchanged": true` instead of updating when `--traffic` matches the current split.
+### `poly deployments experiment end`
 
-### `poly deployments ab-test end`
-
-End the active A/B test and choose which deployment wins. If the variant wins, it is automatically promoted to `live`.
+End the active experiment and choose which branch wins. The winner must be the experiment's control or variant, and it takes all `live` traffic immediately: the platform redeploys it to `live` itself, with no separate promotion step. Asks for confirmation unless `--force` or `--json` is passed.
 
 Examples:
 
 ~~~bash
-poly deployments ab-test end --chosen-version <hash>
-poly deployments ab-test end
+poly deployments experiment end --chosen-branch my-branch
+poly deployments experiment end
 ~~~
 
 | Flag | Description |
 |---|---|
-| `--chosen-version` | Version hash of the deployment to keep as winner. If omitted, an interactive prompt shows the control and variant deployments for selection. |
+| `--chosen-branch` | Name of the branch to keep as winner: the experiment's control or variant. If omitted, an interactive prompt shows the control and variant branches for selection. |
+| `--force` | End the experiment and redeploy the winner to `live` without confirmation. This is the default with `--json`. |
 
-!!! info "`--chosen-version` is required with `--json`"
+!!! info "`--chosen-branch` is required with `--json`"
 
-    `--chosen-version` must be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
+    `--chosen-branch` must be passed explicitly when using `--json`, since interactive prompts aren't available non-interactively.
 
 `--json` output shape:
 
 ~~~json
 {
   "success": true,
-  "ab_test": {},
-  "promoted": false
+  "experiment": {}
 }
 ~~~
-
-If promoting the winning variant to `live` fails after the test has already ended, `"promoted"` is `false` and a `"promote_error"` key is added instead.
 
 ## Related pages
 

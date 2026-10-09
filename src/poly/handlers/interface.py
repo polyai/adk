@@ -938,115 +938,124 @@ class AgentStudioInterface:
         return PlatformAPIHandler.rollback_deployment(region, project_id, deployment_id, message)
 
     @staticmethod
-    def create_ab_test(
+    def create_experiment(
         region: str,
         account_id: str,
         project_id: str,
         name: str,
-        variant_deployment_id: str,
+        branch_id: str,
         traffic_percentage: int,
     ) -> dict:
-        """Create a new A/B test.
+        """Create a new experiment.
 
         Args:
             region: The region name.
             account_id: The account ID.
             project_id: The project ID.
-            name: Display name for the A/B test.
-            variant_deployment_id: ID of the pre-release variant deployment.
-            traffic_percentage: Percentage of traffic routed to variant (0-100).
+            name: Display name for the experiment.
+            branch_id: ID of the top-level branch to test as the variant.
+            traffic_percentage: Percentage of traffic routed to the variant (1-99).
 
         Returns:
-            dict: The created A/B test record.
+            dict: The created experiment record.
         """
-        return PlatformAPIHandler.create_ab_test(
-            region, account_id, project_id, name, variant_deployment_id, traffic_percentage
+        return PlatformAPIHandler.create_experiment(
+            region, account_id, project_id, name, branch_id, traffic_percentage
         )
 
     @staticmethod
-    def list_ab_tests(
+    def list_experiments(
         region: str,
         account_id: str,
         project_id: str,
         limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> dict:
-        """List A/B tests for a project.
+        """List experiments for a project.
 
         Args:
             region: The region name.
             account_id: The account ID.
             project_id: The project ID.
-            limit: Maximum number of tests to return.
+            limit: Maximum number of experiments to return.
+            offset: Number of experiments to skip before collecting results.
 
         Returns:
-            dict: Response containing an ``ab_tests`` list.
+            dict: Response containing an ``experiments`` list.
         """
-        return PlatformAPIHandler.list_ab_tests(region, account_id, project_id, limit)
+        return PlatformAPIHandler.list_experiments(region, account_id, project_id, limit, offset)
 
     @staticmethod
-    def get_active_ab_test(
+    def get_experiment(
         region: str,
         account_id: str,
         project_id: str,
+        experiment_id: str,
     ) -> dict:
-        """Get the active A/B test for a project.
+        """Get a single experiment by ID.
 
         Args:
             region: The region name.
             account_id: The account ID.
             project_id: The project ID.
+            experiment_id: The experiment ID.
 
         Returns:
-            dict: The active A/B test record, or empty dict if none.
+            dict: The experiment record.
         """
-        return PlatformAPIHandler.get_active_ab_test(region, account_id, project_id)
+        return PlatformAPIHandler.get_experiment(region, account_id, project_id, experiment_id)
 
     @staticmethod
-    def end_ab_test(
+    def end_experiment(
         region: str,
         account_id: str,
         project_id: str,
-        ab_test_id: str,
-        chosen_deployment_id: str,
+        experiment_id: str,
+        chosen_branch_id: str,
     ) -> dict:
-        """End an A/B test and choose a winner.
+        """End an experiment and choose a winning branch.
 
         Args:
             region: The region name.
             account_id: The account ID.
             project_id: The project ID.
-            ab_test_id: The A/B test ID.
-            chosen_deployment_id: Deployment ID to keep (control or variant).
+            experiment_id: The experiment ID.
+            chosen_branch_id: ID of the branch to keep (control or variant).
 
         Returns:
-            dict: The ended A/B test record.
+            dict: The ended experiment record.
         """
-        return PlatformAPIHandler.end_ab_test(
-            region, account_id, project_id, ab_test_id, chosen_deployment_id
+        return PlatformAPIHandler.end_experiment(
+            region, account_id, project_id, experiment_id, chosen_branch_id
         )
 
     @staticmethod
-    def update_ab_test(
+    def update_experiment(
         region: str,
         account_id: str,
         project_id: str,
-        ab_test_id: str,
-        traffic_percentage: int,
+        experiment_id: str,
+        name: Optional[str] = None,
+        branch_id: Optional[str] = None,
+        traffic_percentage: Optional[int] = None,
     ) -> dict:
-        """Update traffic percentage for an A/B test.
+        """Update the name and/or traffic split for an experiment.
 
         Args:
             region: The region name.
             account_id: The account ID.
             project_id: The project ID.
-            ab_test_id: The A/B test ID.
-            traffic_percentage: New traffic percentage (0-100).
+            experiment_id: The experiment ID.
+            name: New display name, if renaming.
+            branch_id: ID of the variant branch whose traffic share is changing.
+                Required together with ``traffic_percentage``.
+            traffic_percentage: New percentage of traffic to route to the variant (1-99).
 
         Returns:
-            dict: The updated A/B test record.
+            dict: The updated experiment record.
         """
-        return PlatformAPIHandler.update_ab_test(
-            region, account_id, project_id, ab_test_id, traffic_percentage
+        return PlatformAPIHandler.update_experiment(
+            region, account_id, project_id, experiment_id, name, branch_id, traffic_percentage
         )
 
     @staticmethod

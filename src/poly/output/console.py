@@ -884,101 +884,96 @@ def print_deployment_show(
         print_deployments(included_deployments, {})
 
 
-# ── A/B Tests ────────────────────────────────────────────────────────
+# ── Experiments ──────────────────────────────────────────────────────
 
 
-def _ab_test_status(ab_test: dict[str, Any]) -> str:
-    """Derive a styled status string from an A/B test record."""
-    if ab_test.get("ended_at"):
+def _experiment_status(experiment: dict[str, Any]) -> str:
+    """Derive a styled status string from an experiment record."""
+    if experiment.get("ended_at"):
         return "[dim]ended[/dim]"
     return "[bold green]active[/bold green]"
 
 
-def print_ab_tests(
-    ab_tests: list[dict[str, Any]],
-    deployments: dict[str, dict[str, Any]] | None = None,
+def _format_branch_label(branch: dict[str, Any] | None, branch_id: str) -> str:
+    """Build a human-readable label for a branch."""
+    if not branch:
+        return branch_id
+    return branch.get("name", branch_id)
+
+
+def print_experiments(
+    experiments: list[dict[str, Any]],
+    branches: dict[str, dict[str, Any]] | None = None,
 ) -> None:
-    """Print a table of A/B tests.
+    """Print a table of experiments.
 
     Args:
-        ab_tests: List of A/B test records.
-        deployments: Optional mapping of deployment ID to deployment dict
-            for enriched display (version hash, message).
+        experiments: List of experiment records.
+        branches: Optional mapping of branch ID to branch dict (with a
+            ``name`` key) for enriched display.
     """
-    if not ab_tests:
-        info("No A/B tests found.")
+    if not experiments:
+        info("No experiments found.")
         return
-    deps = deployments or {}
+    branch_map = branches or {}
     table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
     table.add_column("ID", style="bold yellow", no_wrap=True)
     table.add_column("Name", overflow="fold")
     table.add_column("Status", no_wrap=True)
     table.add_column("Traffic %", justify="right", no_wrap=True)
-    table.add_column("Control", no_wrap=True)
-    table.add_column("Variant", no_wrap=True)
+    table.add_column("Variant Branch", no_wrap=True)
     table.add_column("Created", no_wrap=True)
-    for t in ab_tests:
-        control_id = t.get("control_deployment_id") or "—"
-        variant_id = t.get("variant_deployment_id") or "—"
+    for e in experiments:
+        versions = e.get("versions", [])
+        variant = next((v for v in versions if v.get("kind") != "control"), None)
+        variant_branch_id = (variant or {}).get("branch_id") or "—"
+        traffic = (variant or {}).get("traffic_percentage")
         table.add_row(
-            t.get("id", "—"),
-            t.get("name", "—"),
-            _ab_test_status(t),
-            str(t.get("traffic_percentage", "—")),
-            _format_dep_label(deps.get(control_id), control_id),
-            _format_dep_label(deps.get(variant_id), variant_id),
-            _format_iso_timestamp(t.get("created_at", "")),
+            e.get("id", "—"),
+            e.get("name", "—"),
+            _experiment_status(e),
+            str(traffic) if traffic is not None else "—",
+            _format_branch_label(branch_map.get(variant_branch_id), variant_branch_id),
+            _format_iso_timestamp(e.get("created_at", "")),
         )
     console.print(table)
 
 
-def _format_dep_label(dep: dict[str, Any] | None, dep_id: str) -> str:
-    """Build a human-readable label for a deployment."""
-    if not dep:
-        return dep_id
-    version = (dep.get("version_hash") or "")[:9]
-    msg = (dep.get("deployment_metadata") or {}).get("deployment_message", "") or ""
-    if version and msg:
-        return f"{version}  [bold]{msg}[/bold]"
-    if version:
-        return version
-    return dep_id
-
-
-def print_ab_test_detail(
-    ab_test: dict[str, Any] | None,
-    deployments: dict[str, dict[str, Any]] | None = None,
+def print_experiment_detail(
+    experiment: dict[str, Any] | None,
+    branches: dict[str, dict[str, Any]] | None = None,
 ) -> None:
-    """Print detailed information for a single A/B test.
+    """Print detailed information for a single experiment.
 
     Args:
-        ab_test: A single A/B test record, or None.
-        deployments: Optional mapping of deployment ID to deployment dict
-            for enriched display (version hash, message).
+        experiment: A single experiment record, or None.
+        branches: Optional mapping of branch ID to branch dict (with a
+            ``name`` key) for enriched display.
     """
-    if not ab_test:
-        info("No active A/B test.")
+    if not experiment:
+        info("No active experiment.")
         return
 
-    deps = deployments or {}
-    traffic = ab_test.get("traffic_percentage", "—")
-    control_id = ab_test.get("control_deployment_id", "—")
-    variant_id = ab_test.get("variant_deployment_id", "—")
-    control_label = _format_dep_label(deps.get(control_id), control_id)
-    variant_label = _format_dep_label(deps.get(variant_id), variant_id)
+    branch_map = branches or {}
+    versions = experiment.get("versions", [])
+    control = next((v for v in versions if v.get("kind") == "control"), None)
+    variant = next((v for v in versions if v.get("kind") != "control"), None)
 
-    if isinstance(traffic, int):
-        control_traffic = f"{100 - traffic}%"
-        variant_traffic = f"{traffic}%"
-    else:
-        control_traffic = "—"
-        variant_traffic = "—"
+    control_id = (control or {}).get("branch_id", "—")
+    variant_id = (variant or {}).get("branch_id", "—")
+    control_label = _format_branch_label(branch_map.get(control_id), control_id)
+    variant_label = _format_branch_label(branch_map.get(variant_id), variant_id)
+
+    control_traffic_pct = (control or {}).get("traffic_percentage")
+    variant_traffic_pct = (variant or {}).get("traffic_percentage")
+    control_traffic = f"{control_traffic_pct}%" if control_traffic_pct is not None else "—"
+    variant_traffic = f"{variant_traffic_pct}%" if variant_traffic_pct is not None else "—"
 
     table = Table(show_header=False, box=None, padding=(0, 1))
     table.add_column("Key", style="cyan", no_wrap=True)
     table.add_column("Value")
-    table.add_row("Name", ab_test.get("name", "—"))
-    table.add_row("Status", _ab_test_status(ab_test))
+    table.add_row("Name", experiment.get("name", "—"))
+    table.add_row("Status", _experiment_status(experiment))
     table.add_row(
         "Control",
         f"[dim]({control_traffic} traffic)[/dim]  {control_label}",
@@ -987,15 +982,16 @@ def print_ab_test_detail(
         "Variant",
         f"[dim]({variant_traffic} traffic)[/dim]  {variant_label}",
     )
-    table.add_row("Created By", ab_test.get("created_by", "—"))
-    table.add_row("Created", _format_iso_timestamp(ab_test.get("created_at", "")))
-    if ab_test.get("ended_at"):
-        table.add_row("Ended", _format_iso_timestamp(ab_test["ended_at"]))
-    if ab_test.get("chosen_deployment_id"):
-        winner_id = ab_test["chosen_deployment_id"]
-        winner_label = _format_dep_label(deps.get(winner_id), winner_id)
+    table.add_row("Created By", experiment.get("created_by", "—"))
+    table.add_row("Created", _format_iso_timestamp(experiment.get("created_at", "")))
+    if experiment.get("ended_at"):
+        table.add_row("Ended", _format_iso_timestamp(experiment["ended_at"]))
+    chosen_version = experiment.get("chosen_version")
+    if chosen_version:
+        winner_id = chosen_version.get("branch_id", "—")
+        winner_label = _format_branch_label(branch_map.get(winner_id), winner_id)
         table.add_row("Winner", winner_label)
-    console.print(Panel(table, title="[bold]A/B Test[/bold]", border_style="cyan"))
+    console.print(Panel(table, title="[bold]Experiment[/bold]", border_style="cyan"))
 
 
 # ── Conversations ────────────────────────────────────────────────────
