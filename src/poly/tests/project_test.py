@@ -4385,9 +4385,7 @@ class MultiResourcePullMergeTest(unittest.TestCase):
         patch("poly.utils.save_imports").start()
         patch("poly.utils.export_decorators").start()
         self.merge_spy = patch("poly.utils.merge_strings", wraps=merge_strings).start()
-        self.save_spy = patch.object(
-            Resource, "save_to_file", wraps=Resource.save_to_file
-        ).start()
+        self.save_spy = patch.object(Resource, "save_to_file", wraps=Resource.save_to_file).start()
         self.addCleanup(patch.stopall)
         MultiResourceYamlResource._file_cache.clear()
         self.addCleanup(MultiResourceYamlResource._file_cache.clear)
@@ -4661,7 +4659,9 @@ class TopicTagsSyncTest(unittest.TestCase):
         files_with_conflicts, _ = project.pull_project()
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertIn("enabled: true\ntags:\n- billing\n- refunds\nactions:", self._read_topic_file())
+        self.assertIn(
+            "enabled: true\ntags:\n- billing\n- refunds\nactions:", self._read_topic_file()
+        )
 
     def test_status_file_round_trips_tags(self):
         """Tags survive the status file, and a status file from before tags loads with none."""
@@ -5767,35 +5767,53 @@ class DeploymentModePropertyTest(unittest.TestCase):
     def tearDown(self):
         self.save_config_patcher.stop()
 
-    def test_reads_mode_from_remote_project_config(self):
-        """Each recognised config value maps to the matching enum member."""
-        for value, expected in (
-            ("simple", DeploymentMode.SIMPLE),
-            ("releases", DeploymentMode.RELEASES),
-            ("releases_branches", DeploymentMode.RELEASES_BRANCHES),
-        ):
-            with self.subTest(value=value):
-                self.project._deployment_mode = None
-                self.mock_api.get_project.return_value = {"config": {"deployment_mode": value}}
+    def _resolve(self, project_info: dict, simplified: bool) -> DeploymentMode:
+        """Resolve the mode for the given remote project and simplified state."""
+        self.project._deployment_mode = None
+        self.project.__dict__["using_simplified_deployments"] = simplified
+        self.mock_api.get_project.return_value = project_info
+        return self.project.deployment_mode
 
-                self.assertEqual(self.project.deployment_mode, expected)
+    def test_template_child_is_simple(self):
+        """A project with a parent template ref is simple, whether or not simplified is on."""
+        for simplified in (True, False):
+            with self.subTest(simplified=simplified):
+                mode = self._resolve({"parent_template_ref_id": "tmpl-1"}, simplified)
 
-    def test_defaults_to_releases_when_config_missing(self):
-        """A missing 'config', missing 'deployment_mode', or null config all default to releases."""
+                self.assertEqual(mode, DeploymentMode.SIMPLE)
+
+    def test_simplified_project_gets_sub_branches(self):
+        """A non-template project gets releases_branches once simplified is on."""
         for payload in (
             {"projectId": "test_project"},
-            {"config": {"other_setting": True}},
-            {"config": None},
+            {"parent_template_ref_id": None, "config": None},
         ):
             with self.subTest(payload=payload):
-                self.project._deployment_mode = None
-                self.mock_api.get_project.return_value = payload
+                mode = self._resolve(payload, simplified=True)
 
-                self.assertEqual(self.project.deployment_mode, DeploymentMode.RELEASES)
+                self.assertEqual(mode, DeploymentMode.RELEASES_BRANCHES)
+
+    def test_non_simplified_project_is_releases(self):
+        """A non-template project stays on releases while simplified is off."""
+        mode = self._resolve({"parent_template_ref_id": None}, simplified=False)
+
+        self.assertEqual(mode, DeploymentMode.RELEASES)
+
+    def test_stored_config_mode_is_ignored(self):
+        """The stored config.deployment_mode no longer affects the resolved mode."""
+        for stored in ("simple", "releases", "releases_branches"):
+            for simplified, expected in (
+                (True, DeploymentMode.RELEASES_BRANCHES),
+                (False, DeploymentMode.RELEASES),
+            ):
+                with self.subTest(stored=stored, simplified=simplified):
+                    mode = self._resolve({"config": {"deployment_mode": stored}}, simplified)
+
+                    self.assertEqual(mode, expected)
 
     def test_mode_is_fetched_once_and_cached(self):
         """Repeated reads reuse the cached mode instead of re-querying the API."""
-        self.mock_api.get_project.return_value = {"config": {"deployment_mode": "simple"}}
+        self.mock_api.get_project.return_value = {"parent_template_ref_id": "tmpl-1"}
 
         first = self.project.deployment_mode
         second = self.project.deployment_mode
@@ -5820,8 +5838,8 @@ class CreateBranchDeploymentModeTest(unittest.TestCase):
         self.save_config_patcher.stop()
 
     def _set_deployment_mode(self, mode: str) -> None:
-        """Make the remote project report the given deployment mode."""
-        self.mock_api.get_project.return_value = {"config": {"deployment_mode": mode}}
+        """Put the project in the given deployment mode."""
+        self.project._deployment_mode = DeploymentMode(mode)
 
     def _set_current_branch(self, branch_id: str) -> None:
         """Put the project and its API handler on the given branch."""
