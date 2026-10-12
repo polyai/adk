@@ -1,6 +1,68 @@
 # CHANGELOG
 
 
+## v0.68.0 (2026-10-12)
+
+### Features
+
+- Add poly deployments experiment ([#344](https://github.com/polyai/adk/pull/344),
+  [`d04a19f`](https://github.com/polyai/adk/commit/d04a19f26d8c64108bcb5a22b026a34bba628f69))
+
+## Summary
+
+Adds `poly deployments experiment` (start/list/active/update/end) for projects on the simplified
+  deployment model, backed by the new sourcerer experiment endpoints, and removes the deprecated
+  `poly deployments ab-test`.
+
+## Motivation
+
+Agent Studio is replacing A/B tests with a new "Experiment" feature for projects on the simplified
+  deployment model: instead of pinning control/variant to fixed deployment IDs, an experiment tests
+  a top-level branch against live, and the platform itself redeploys the winning branch when it
+  ends. ADK needs a CLI surface for this, and `ab-test` is fully deprecated, so it is removed rather
+  than maintained.
+
+## Changes
+
+- Add `poly deployments experiment {start,list,active,update,end}`, wired through all four layers
+  (`platform_api.py` → `interface.py` → `project.py` → `cli_commands/deployments.py`), with matching
+  rich/JSON output in `output/console.py`. - Add `AgentStudioProject.experiments_enabled` and a
+  `require_experiments_enabled` CLI guard: experiments require both the simplified deployment model
+  and a branch-capable `deployment_mode`. - Validate in `project.py` so programmatic callers get the
+  same checks as the CLI: `create_experiment` checks the name, the traffic range (1-99) and that the
+  variant is an eligible branch (not `main`, top-level, not diverged), and `update_experiment`
+  requires `branch_id` and `traffic_percentage` together. - Share branch name/ID helpers
+  (`resolve_branch_id`, `branch_id_map`, `fetch_branch_id_map`) in `cli_commands/shared.py`, now
+  also used by `branch.py`. - Remove `poly deployments ab-test` entirely (CLI, project/interface/API
+  methods, console output, docs, tests). - Normalize sourcerer's camelCase API responses to ADK's
+  snake_case convention at the API boundary (`handlers/utils.py::camel_to_snake_keys`), since the
+  experiment endpoints don't follow the existing snake_case convention. - `experiment update`'s
+  traffic change is nested under a branch's `versions` entry server-side, not a bare scalar - the
+  CLI derives the active experiment's variant branch automatically so callers only ever pass
+  `--traffic`/`--name`. - `experiment end` does not call `promote_deployment` afterward - the
+  platform redeploys the winner itself as part of ending the experiment. - `get_active_experiment`
+  is derived client-side (no server-side "active" endpoint exists) by paginating `list_experiments`
+  until the unended record is found or the list is exhausted.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Added `src/poly/tests/experiment_test.py` plus coverage in `cli_test.py`, `project_test.py`,
+  `console_test.py`, and both API test files; `ab_test_test.py` is deleted along with the command
+  (2234 tests passing total). Manually smoke-tested `--help` output, the full argparse dispatch
+  tree, the camelCase→snake_case conversion, the create→re-fetch flow, and branch_id derivation on
+  update, outside the mocked test suite.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] Breaking change to
+  the `poly` CLI interface with a migration path: `ab-test` is removed; use `poly deployments
+  experiment` instead - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+
 ## v0.67.3 (2026-10-12)
 
 ### Bug Fixes
