@@ -25,9 +25,10 @@ __all__ = [
     "XaiVoice",
     "GradiumVoice",
     "HamsaVoice",
+    "GoogleGeminiVoice",
+    "GoogleGeminiTtsModel",
     "VoiceType",
     "VoiceWeighting",
-    "UnknownNamedVoice",
     "Variant",
     "State",
     "Conversation",
@@ -114,6 +115,9 @@ class ElevenLabsVoice(TTSVoice):
             "eleven_turbo_v2_5",
             "eleven_flash_v2_5",
             "eleven_v3",
+            "eleven_v3_conversational",
+            "eleven_v4",
+            "eleven_v4_turbo",
         ]
         | None = "eleven_turbo_v2_5",
         speed: float | None = None,
@@ -278,6 +282,18 @@ class HamsaVoice(TTSVoice):
     ) -> None: ...
 
 
+GoogleGeminiTtsModel: Any = ...
+
+
+class GoogleGeminiVoice(TTSVoice):
+    def __init__(
+        self,
+        provider_voice_id: str,
+        model: GoogleGeminiTtsModel | None = "gemini-3.8-flash-tts",
+        prompt: str | None = None,
+    ) -> None: ...
+
+
 VoiceType = (
     CustomVoice
     | ElevenLabsVoice
@@ -290,13 +306,8 @@ VoiceType = (
     | XaiVoice
     | GradiumVoice
     | HamsaVoice
+    | GoogleGeminiVoice
 )
-
-
-class UnknownNamedVoice(Exception):
-    def __init__(self, name: str) -> None: ...
-
-
 SupportedLanguageCodes: Any = ...
 
 
@@ -354,7 +365,7 @@ class ApiIntegrationData:
     id: str
     name: str
     environments: dict[str, dict[str, str]]
-    operations: list[dict[str, str]]
+    operations: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, Any]: ...
     @classmethod
@@ -461,6 +472,7 @@ class Conversation:
         transcript_alternatives: list[str] | None = None,
         handoffs: dict[str, HandoffConfig] | None = None,
         integration_attributes: dict[str, Any] | None = None,
+        outbound_campaign: dict[str, Any] | None = None,
         memory: Memory | None = None,
         verified_context: VerifiedContext | None = None,
         metric_events: list[MetricEvent] | None = None,
@@ -476,7 +488,6 @@ class Conversation:
         translations: dict[str, TranslationEntry] | None = None,
         agentic_dial: AgenticDialData | None = None,
         provider_voice_id: str | None = None,
-        named_voices: dict[str, dict] | None = None,
         integrations_config: dict[str, Any] | None = None,
         clock: Clock | None = None,
         api_overrides: dict | None = None,
@@ -511,6 +522,8 @@ class Conversation:
     def cxone(self) -> CxOne: ...
     @property
     def integration_attributes(self) -> dict[str, Any] | None: ...
+    @property
+    def outbound_campaign(self) -> dict[str, Any] | None: ...
     @property
     def caller_number(self) -> str | None: ...
     @property
@@ -570,15 +583,9 @@ class Conversation:
     @property
     def provider_voice_id(self) -> str: ...
     @property
-    def current_voice(self) -> VoiceType | None: ...
-    @property
-    def current_voice_name(self) -> str | None: ...
-    def get_voice_by_name(self, name: str) -> VoiceType: ...
-    @property
     def integrations(self) -> Integrations: ...
     def send_email(self, to: str, body: str, subject: str = "") -> None: ...
-    def set_voice(self, voice: VoiceType | str): ...
-    def set_voice_speed(self, speed: float) -> bool: ...
+    def set_voice(self, voice: VoiceType): ...
     def set_language(self, language: SupportedLanguageCodes): ...
     def set_asr_biasing(
         self, keywords: list[str] | None = None, custom_biases: dict[str, float] | None = None

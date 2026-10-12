@@ -4,15 +4,16 @@
 # type: ignore
 from __future__ import annotations
 
-from typing import Any
 from dataclasses import dataclass
 from datetime import datetime
 from requests import PreparedRequest as PreparedRequest
 from requests.auth import AuthBase
+from typing import Any
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .conversation import ApiIntegrationData as ApiIntegrationData
+    from .log_utils import ConversationLogger as ConversationLogger
 
 
 NORMALIZED_ENVIRONMENT_NAMES: dict[str, str] = ...
@@ -88,6 +89,7 @@ class ApiConnector:
         account_id: str | None = None,
         janus_token: str | None = None,
         consumed: dict[str, int] | None = None,
+        conversation_logger: ConversationLogger | None = None,
     ) -> None: ...
     @property
     def client(self) -> ApiClient: ...
@@ -109,13 +111,18 @@ class ApiIntegrations:
         account_id: str | None = None,
         janus_token: str | None = None,
         consumed: dict[str, dict[str, int]] | None = None,
+        conversation_logger: ConversationLogger | None = None,
     ) -> None: ...
     def get_consumed_snapshot(self) -> dict[str, dict[str, int]]: ...
     def flush_logs(self) -> None: ...
     def __getattr__(self, api_name: str) -> ApiConnector: ...
 
 
+def path_variable_values(url: str, *args, **kwargs) -> dict[str, Any]: ...
 def replace_path_variables(url: str, *args, **kwargs) -> tuple[str, set[str]]: ...
+def merge_headers(
+    stored: dict[str, str] | None, override: dict[str, str] | None
+) -> dict[str, str]: ...
 
 
 class ApiClient:

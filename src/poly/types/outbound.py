@@ -20,10 +20,13 @@ class ContactMetadata(TypedDict): ...
 
 class StepAttempt(TypedDict):
     node_id: str
-    attempt_number: int
+    node_label: str | None
+    action_type: str
     channel: str | None
+    attempt_number: int
     status: str
     result: str | None
+    step_data: dict
     attempted_at: str
     completed_at: str | None
 
@@ -37,10 +40,16 @@ class ContactJourney(TypedDict):
 
 
 class OutboundContact(TypedDict):
+    contact_id: str
+    enrolment_id: str | None
     phone: str
     first_name: str | None
     last_name: str | None
     external_id: str | None
+    timezone: str
+    variant_id: str | None
+    consent_verified: bool
+    consent_timestamp: str | None
     metadata: ContactMetadata
     journey: ContactJourney
 

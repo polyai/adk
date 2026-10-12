@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from typing import Any
+from ..log_utils import ConversationLogger
 from ..api_connector import ApiConnector
 
 __all__ = ["JanusApiConnector"]
@@ -28,4 +29,6 @@ class JanusApiConnector(ApiConnector):
         account_id: str | None = None,
         janus_token: str | None = None,
         consumed: dict[str, int] | None = None,
+        conversation_logger: ConversationLogger | None = None,
     ) -> None: ...
+    def __getattr__(self, operation_name: str): ...
