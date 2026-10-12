@@ -52,6 +52,7 @@ from poly.resources import (
     Variable,
     Variant,
     VariantAttribute,
+    VoiceBargeInConfig,
     VoiceDisclaimerMessage,
     VoiceGreeting,
     VoiceStylePrompt,
@@ -2599,6 +2600,8 @@ class PushProjectTest(unittest.TestCase):
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(AsrSettings, updated_resources)
         self.assertIn("asr_settings", updated_resources[AsrSettings])
+        # The fixture file has barge_in: false, so barge-in is switched off
+        self.assertFalse(updated_resources[VoiceBargeInConfig]["asr_settings"].enabled)
 
     def test_push_project_validation_error(self):
         project_data = deepcopy(PROJECT_DATA)
