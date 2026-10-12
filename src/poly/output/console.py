@@ -564,8 +564,11 @@ def _merge_field_diff_rows(
     for field, main_value, branch_value in shown:
         rows.add_row("", "")
         rows.add_row("Field differs", Text(field or "(whole value)", style="bright_cyan"))
-        rows.add_row("Main", _merge_preview_cell(str(main_value)))
-        rows.add_row(f"Branch ({branch_label})", _merge_preview_cell(str(branch_value)))
+        rows.add_row("Main", _merge_preview_cell("" if main_value is None else str(main_value)))
+        rows.add_row(
+            f"Branch ({branch_label})",
+            _merge_preview_cell("" if branch_value is None else str(branch_value)),
+        )
 
     if len(diffs) > len(shown):
         rows.add_row("", "")
