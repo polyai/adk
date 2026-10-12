@@ -49,8 +49,21 @@ def save_api_key_credential_file(api_key: str, region: str) -> None:
     os.chmod(CREDENTIALS_FILE_PATH, 0o600)
 
 
-def _load_api_key_from_credential_file(region: str) -> Optional[str]:
-    """Load the API key for the given region from the credential file, if it exists."""
+def load_api_key_from_credential_file(region: str) -> Optional[str]:
+    """Look up the API key stored for `region` in the credential file, if any.
+
+    Unlike `retrieve_api_key`, this never falls back to an environment
+    variable and never raises - it answers "is there already a stored
+    credential for this region", which is all a caller deciding whether to
+    overwrite one needs.
+
+    Args:
+        region: The region to look up.
+
+    Returns:
+        The stored API key, or None if the credential file has no entry for
+        `region`.
+    """
     if os.path.isfile(CREDENTIALS_FILE_PATH):
         with open(CREDENTIALS_FILE_PATH, "r", encoding="utf-8") as f:
             try:
@@ -73,7 +86,7 @@ def retrieve_api_key(region: str) -> str:
 
     Raises ``ValueError`` with a helpful message when no key is found.
     """
-    api_key = _load_api_key_from_credential_file(region)
+    api_key = load_api_key_from_credential_file(region)
     if api_key:
         return api_key
 

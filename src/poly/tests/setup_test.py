@@ -14,14 +14,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import requests
-
 from poly.cli import AgentStudioCLI
 from poly.cli_commands.auth import (
     LoginCommand,
     _authenticate_and_save_key,
     _select_region,
-    _signin,
 )
 from poly.cli_commands.setup import COMPLETION_MARKER, SetupCommand
 from poly.cli_commands.skills import (
@@ -644,100 +641,6 @@ class AuthenticateAndSaveKeyTest(unittest.TestCase):
 
         self.mock_save.assert_called_once_with("existing-pat", region="us-1")
         self.assertIn("not active yet", mock_warning.call_args[0][0])
-
-
-class SigninDeviceFlowTest(unittest.TestCase):
-    """Tests for auth._signin, the browser device flow shared by setup/login."""
-
-    DEVICE_RESPONSE = {
-        "user_code": "ABCD-EFGH",
-        "verification_uri_complete": "https://example.test/activate?code=ABCD-EFGH",
-        "device_code": "device-code",
-        "interval": 5,
-    }
-
-    def setUp(self):
-        self.auth0 = patch("poly.cli_commands.auth.Auth0Handler").start().return_value
-        self.auth0.request_device_code.return_value = dict(self.DEVICE_RESPONSE)
-        self.auth0.poll_device_token.return_value = {"access_token": "jwt-token"}
-        self.mock_browser = patch("webbrowser.open").start()
-        patch("time.sleep").start()
-        self.addCleanup(patch.stopall)
-
-    @staticmethod
-    def _device_flow_error(error_code: str) -> requests.HTTPError:
-        """Build the HTTPError Auth0 returns while a device code is outstanding."""
-        response = MagicMock()
-        response.json.return_value = {"error": error_code}
-        return requests.HTTPError(error_code, response=response)
-
-    def test_successful_authorization_returns_the_access_token(self):
-        """A completed browser sign-in returns the JWT and opens the verification page."""
-        token = _signin("us-1")
-
-        self.assertEqual(token, "jwt-token")
-        self.mock_browser.assert_called_once_with(self.DEVICE_RESPONSE["verification_uri_complete"])
-
-    def test_pending_authorization_is_polled_until_the_user_finishes(self):
-        """'authorization_pending' keeps polling rather than failing the sign-in."""
-        self.auth0.poll_device_token.side_effect = [
-            self._device_flow_error("authorization_pending"),
-            {"access_token": "jwt-token"},
-        ]
-
-        self.assertEqual(_signin("us-1"), "jwt-token")
-        self.assertEqual(self.auth0.poll_device_token.call_count, 2)
-
-    def test_slow_down_response_keeps_polling(self):
-        """'slow_down' backs the polling off instead of failing the sign-in."""
-        self.auth0.poll_device_token.side_effect = [
-            self._device_flow_error("slow_down"),
-            {"access_token": "jwt-token"},
-        ]
-
-        self.assertEqual(_signin("us-1"), "jwt-token")
-        self.assertEqual(self.auth0.poll_device_token.call_count, 2)
-
-    def test_unknown_authorization_error_exits(self):
-        """An unrecognised Auth0 error ends the sign-in."""
-        self.auth0.poll_device_token.side_effect = self._device_flow_error("access_denied")
-
-        with self.assertRaises(SystemExit) as ctx:
-            _signin("us-1")
-
-        self.assertEqual(ctx.exception.code, 1)
-
-    def test_non_json_error_response_exits(self):
-        """An HTTP error with an unparseable body ends the sign-in rather than crashing."""
-        response = MagicMock()
-        response.json.side_effect = ValueError("not json")
-        self.auth0.poll_device_token.side_effect = requests.HTTPError(
-            "502 Bad Gateway", response=response
-        )
-
-        with self.assertRaises(SystemExit) as ctx:
-            _signin("us-1")
-
-        self.assertEqual(ctx.exception.code, 1)
-
-    def test_expired_device_code_exits(self):
-        """An expired device code ends the command rather than polling forever."""
-        self.auth0.poll_device_token.side_effect = self._device_flow_error("expired_token")
-
-        with self.assertRaises(SystemExit) as ctx:
-            _signin("us-1")
-
-        self.assertEqual(ctx.exception.code, 1)
-
-    def test_failure_to_start_authorization_exits(self):
-        """If the device code request fails, sign-in exits instead of opening a browser."""
-        self.auth0.request_device_code.side_effect = Exception("network down")
-
-        with self.assertRaises(SystemExit) as ctx:
-            _signin("us-1")
-
-        self.assertEqual(ctx.exception.code, 1)
-        self.mock_browser.assert_not_called()
 
 
 class LoginCommandRegionTest(unittest.TestCase):

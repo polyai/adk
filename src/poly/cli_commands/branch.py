@@ -20,7 +20,12 @@ from poly.cli_commands.base import (
     add_grouped_subparsers,
     group_subcommands,
 )
-from poly.cli_commands.shared import load_project, parse_from_projection_json, read_project_config
+from poly.cli_commands.shared import (
+    load_project,
+    parse_from_projection_json,
+    read_project_config,
+    resolve_branch_id,
+)
 from poly.output.json_output import json_print
 from poly.project import DeploymentMode
 from poly.resources.resource_utils import contains_merge_conflict
@@ -646,7 +651,7 @@ class BranchCommand(BaseCommand):
         if source_branch:
             base_branch_name = source_branch
             _, branches = project.get_branches()
-            base_branch_id = branches.get(source_branch, {}).get("branchId")
+            base_branch_id = resolve_branch_id(branches, source_branch)
         else:
             base_branch_id = project.branch_id
             base_branch_name = project.get_current_branch()
@@ -1653,7 +1658,7 @@ class BranchCommand(BaseCommand):
                 warning("No current branch found. Please specify a branch name.")
             return
 
-        branch_id = branches.get(branch_name, {}).get("branchId")
+        branch_id = resolve_branch_id(branches, branch_name)
         if not branch_id:
             if output_json:
                 json_print({"success": False, "error": f"Branch '{branch_name}' does not exist."})

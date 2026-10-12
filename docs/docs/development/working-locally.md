@@ -72,7 +72,7 @@ A typical cycle looks like this:
 4. **Inspect your local edits** — `poly status` and `poly diff`
 5. **Validate** — `poly validate`
 6. **Push to the branch** — `poly push`
-7. **Test the agent** — `poly chat` to talk to it, or `poly test run` for the simulated conversation tests in `test_suite/`
+7. **Test the agent** — `poly chat` to talk to it, `poly call` to call it (mic + speaker), or `poly test run` for the simulated conversation tests in `test_suite/`
 8. **Iterate** — repeat steps 3–7
 9. **Review the whole branch** — `poly branch status` and `poly branch diff` show every change since the branch was created; share them with `poly branch review` if you want a second pair of eyes
 10. **Merge** — [`poly branch merge`](../reference/cli/branch.md#poly-branch-merge) `'<message>'`

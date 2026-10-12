@@ -29,6 +29,14 @@ Confirm it worked:
 poly --help
 ```
 
+!!! tip "Optional — voice calling"
+
+    To call your agent with [`poly call`](../reference/cli/call.md), install the `call` extra instead. It adds the audio and WebRTC dependencies, which are left out of the default install to keep it small:
+
+    ```bash
+    uv tool install "polyai-adk[call]"
+    ```
+
 !!! tip "Optional — install the VS Code / Cursor extension"
 
     If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../tooling/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.
@@ -78,6 +86,14 @@ poly login --region us-1
 ```
 
 To sign in to more than one region from the same machine, re-run `poly login` for each — the credential file stores them side by side.
+
+### Need an API key for the PolyAI APIs or Dialog RSN? — `poly apikey`
+
+`poly apikey --region studio` signs you in, creates an account-scoped API key, and exports `POLY_API_KEY` into your shell profile for use in your own code. It's non-interactive, so an AI coding assistant can run it for you. For setting up the ADK itself, `poly setup`/`poly login` above is the path — the ADK doesn't need `POLY_API_KEY`.
+
+```bash
+poly apikey --region studio
+```
 
 ### Manual API key export { #manual-api-key-export }
 
