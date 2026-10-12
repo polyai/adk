@@ -85,7 +85,7 @@ poly push --help
 
 | Command | Purpose |
 |---|---|
-| [`poly deployments`](./cli/deployments.md) | List, promote, and roll back deployments |
+| [`poly deployments`](./cli/deployments.md) | List, promote, roll back deployments, and manage experiments |
 | [`poly rtc`](./cli/rtc.md) | Manage per-environment Real-Time Configuration |
 | [`poly audio-cache`](./cli/audio-cache.md) | Inspect and replace cached TTS audio |
 | [`poly functions`](./cli/functions.md) | Run and validate Functions via the REST API |
@@ -133,6 +133,11 @@ poly deployments show abc123def --json
 poly deployments list --json
 poly deployments promote --from <id> --to pre-release --force --json
 poly deployments rollback --to <id> --force --json
+poly deployments experiment start --name 'v2 test' --branch my-branch --traffic 50 --json
+poly deployments experiment list --json
+poly deployments experiment active --json
+poly deployments experiment update --traffic 30 --json
+poly deployments experiment end --chosen-branch my-branch --json
 poly metrics list --json
 poly metrics export --json
 poly metrics add --name BOOKING_CONFIRMED --type bool --json
@@ -169,7 +174,7 @@ The exact top-level keys vary by command — each command's page documents its o
 
 !!! info "`--json` implies `--force` for deployments commands"
 
-    When `--json` is used with `poly deployments promote` or `poly deployments rollback`, the confirmation prompt is automatically skipped (equivalent to passing `--force`).
+    When `--json` is used with `poly deployments promote` or `poly deployments rollback`, the confirmation prompt is automatically skipped (equivalent to passing `--force`). Similarly, `poly deployments experiment end --json` skips the confirmation prompt (equivalent to passing `--force`).
 
 ### Advanced JSON-driven workflows
 
