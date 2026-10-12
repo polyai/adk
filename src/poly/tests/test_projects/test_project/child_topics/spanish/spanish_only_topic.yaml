@@ -1,6 +1,6 @@
 name: Spanish Only Topic
 enabled: true
-actions: Handle this request in Spanish using {{fn:test_function}} and {{attr:customer-name}}.
+actions: Handle this request in Spanish using {{fn:test_function}} and {{attr:customer_name}}.
 content: This topic only applies when the Spanish variant is active.
 example_queries:
 - How can I help you?

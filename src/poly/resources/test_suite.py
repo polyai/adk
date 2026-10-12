@@ -119,26 +119,38 @@ class FunctionCallArgumentAssertion:
 class FunctionCallAssertion:
     name: str
     arguments: list[FunctionCallArgumentAssertion]
+    is_asserted: bool = True
 
-    def __init__(self, name: str, arguments: list[FunctionCallArgumentAssertion | dict]):
+    def __init__(
+        self,
+        name: str,
+        arguments: list[FunctionCallArgumentAssertion | dict],
+        is_asserted: bool = True,
+    ):
         self.name = name
         self.arguments = [
             FunctionCallArgumentAssertion(**argument) if isinstance(argument, dict) else argument
             for argument in arguments
         ]
+        self.is_asserted = is_asserted
 
     def to_yaml_dict(self) -> dict:
-        return {
+        output = {
             "name": self.name,
             "arguments": [
                 arg.to_yaml_dict()
                 for arg in sorted(self.arguments, key=lambda arg: arg.parameter_name)
             ],
         }
+        if not self.is_asserted:
+            output["is_asserted"] = False
+        return output
 
     def to_proto(self) -> FunctionCallAssertionProto:
         return FunctionCallAssertionProto(
-            name=self.name, arguments={arg.parameter_name: arg.to_proto() for arg in self.arguments}
+            name=self.name,
+            arguments={arg.parameter_name: arg.to_proto() for arg in self.arguments},
+            is_asserted=self.is_asserted,
         )
 
 
@@ -690,7 +702,12 @@ class TestCase(YamlResource):
                         for arg, arg_values in assertion_value.get("arguments").items()
                     ]
                     function_assertions.append(
-                        FunctionCallAssertion(name=assertion_value.get("name"), arguments=arguments)
+                        FunctionCallAssertion(
+                            name=assertion_value.get("name"),
+                            arguments=arguments,
+                            # proto3 drops a false bool from the projection.
+                            is_asserted=bool(assertion_value.get("isAsserted", False)),
+                        )
                     )
             assertions = TestCaseAssertion(
                 resource_id=test_case_id,
@@ -852,6 +869,7 @@ class TestCase(YamlResource):
             FunctionCallAssertion(
                 name=function_call.get("name"),
                 arguments=function_call.get("arguments", []),
+                is_asserted=function_call.get("is_asserted", True) is not False,
             )
             for function_call in function_calls
         ]

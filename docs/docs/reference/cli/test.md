@@ -20,6 +20,7 @@ poly test run --files test_suite/greeting_flow_test.yaml
 poly test run --dry-run
 poly test run --dont-poll
 poly test run --push
+poly test run --tag smoke --name "Pre-release check · booking flow"
 ~~~
 
 After triggering, the CLI polls for results every 5 seconds and displays a live-updating table. For projects with 20 or fewer tests the full table is shown; for larger suites a compact rolling view is used instead. Both views update in place until the run completes.
@@ -29,6 +30,7 @@ After triggering, the CLI polls for results every 5 seconds and displays a live-
 | `--files` | One or more specific test YAML files to run. |
 | `--tag` | Run only tests that carry the specified tag(s). Multiple tags are OR-matched. |
 | `--dry-run` | Preview which tests would run without triggering them. |
+| `--name` | Name for the run in Agent Studio. Defaults to the test name or count. |
 | `--dont-poll` | Trigger the run and exit immediately. Use `poly test show <run_id>` to check results later. |
 | `--push` | Push the project before running tests. Equivalent to running `poly push` then `poly test run`. |
 

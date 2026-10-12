@@ -286,5 +286,59 @@ class MergeBranch(unittest.TestCase):
             sdk.merge_branch(deployment_message="msg")
 
 
+class GetBranchCallInfo(unittest.TestCase):
+    """Tests for SourcererSDK.get_branch_call_info."""
+
+    def _sdk_with_response(self, status: int, json_body: dict):
+        sdk = build_sdk(branch_id="branch-1")
+        session = MagicMock()
+        session.post.return_value = make_mock_response(status, json_body=json_body)
+        sdk._session = session
+        return sdk, session
+
+    def test_posts_to_deploy_endpoint_with_cached_sequence(self):
+        """The prepared deploy call hits /deploy and sends the cached sequence."""
+        sdk, session = self._sdk_with_response(200, {"artifactVersion": "art-1"})
+        sdk._last_known_sequence = 99
+
+        sdk.get_branch_call_info("branch-1")
+
+        expected_url = (
+            "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/branch-1/deploy"
+        )
+        session.post.assert_called_once_with(
+            expected_url, json={"expectedBranchLastKnownSequence": 99}
+        )
+
+    def test_returns_deployment_info_json(self):
+        """The parsed JSON body from the deploy response is returned unchanged."""
+        body = {
+            "artifactVersion": "art-1",
+            "lambdaDeploymentVersion": "lambda-1",
+            "authToken": "studio-token",
+        }
+        sdk, _ = self._sdk_with_response(200, body)
+        sdk._last_known_sequence = 5
+
+        self.assertEqual(sdk.get_branch_call_info("branch-1"), body)
+
+    def test_missing_sequence_defaults_to_zero(self):
+        """With no known sequence the payload falls back to sequence 0."""
+        sdk, session = self._sdk_with_response(200, {"artifactVersion": "art-1"})
+        with patch.object(sdk, "get_last_known_sequence", return_value=None):
+            sdk.get_branch_call_info("branch-1")
+
+        payload = session.post.call_args.kwargs["json"]
+        self.assertEqual(payload["expectedBranchLastKnownSequence"], 0)
+
+    def test_request_failure_raises_sourcerer_error(self):
+        """A failing deploy request is wrapped in a SourcererAPIError."""
+        sdk, _ = self._sdk_with_response(500, {"error": "boom"})
+        sdk._last_known_sequence = 1
+
+        with self.assertRaises(SourcererAPIError):
+            sdk.get_branch_call_info("branch-1")
+
+
 if __name__ == "__main__":
     unittest.main()

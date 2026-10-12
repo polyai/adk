@@ -13,6 +13,7 @@ import copy
 from typing import Callable, TypeAlias
 
 from poly.resources import (
+    AttributeKind,
     ChatGreeting,
     ChatSafetyFilters,
     ChatStylePrompt,
@@ -24,9 +25,17 @@ from poly.resources import (
     Resource,
     ResourceMapping,
     StepType,
+    TestCase,
+    TestCaseAssertion,
+    TestCaseTags,
     Variable,
     Variant,
     VariantAttribute,
+)
+from poly.resources.test_suite import (
+    TestCaseApiOperationMock,
+    TestCaseIntegrationAttributes,
+    TestCaseSipHeaders,
 )
 from poly.utils.commands import (
     create_command_clear_flow_settings,
@@ -186,6 +195,86 @@ def group_new_flow_resources(
             post_push_deleted_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
 
 
+def pair_renamed_test_cases(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+) -> None:
+    """Push a renamed test case as an update of the saved case, keeping its id.
+
+    A test case's file name comes from its name, so a rename reads as a delete of
+    the old file and a create of the new one: the case would get a new id and lose
+    its run history. A new case whose scenario matches exactly one deleted case (and
+    no other new case) takes that case's id and becomes an update. Its sub-resources
+    are re-diffed against the saved case. Anything ambiguous stays a delete and a
+    create.
+    """
+    new_cases = new_resources.get(TestCase, {})
+    deleted_cases = deleted_resources.get(TestCase, {})
+    if not new_cases or not deleted_cases:
+        return
+
+    def by_scenario(cases: dict[str, Resource]) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for case_id, case in cases.items():
+            scenario = (case.scenario or "").strip() if isinstance(case, TestCase) else ""
+            if scenario:
+                grouped.setdefault(scenario, []).append(case_id)
+        return grouped
+
+    new_ids_by_scenario = by_scenario(new_cases)
+    for scenario, old_ids in by_scenario(deleted_cases).items():
+        new_ids = new_ids_by_scenario.get(scenario, [])
+        if len(old_ids) != 1 or len(new_ids) != 1:
+            continue
+        old_id, new_id = old_ids[0], new_ids[0]
+        case = new_cases.pop(new_id)
+        saved_case = deleted_cases.pop(old_id)
+
+        # Drop the sub-resource changes staged for the case as new, under its new id.
+        for changes in (new_resources, updated_resources, deleted_resources):
+            for sub_type in _TEST_CASE_SUBRESOURCE_TYPES:
+                for sub_id in list(changes.get(sub_type, {})):
+                    if sub_id == new_id or sub_id.startswith(f"{new_id}:"):
+                        changes[sub_type].pop(sub_id)
+
+        case.resource_id = old_id
+        for sub_resource in (
+            case.assertions,
+            case.tags,
+            case.sip_headers,
+            case.integration_attributes,
+        ):
+            if sub_resource is not None:
+                sub_resource.resource_id = old_id
+        updated_resources.setdefault(TestCase, {})[old_id] = case
+        sub_changes = case.get_new_updated_deleted_subresources(old_resource=saved_case)
+        for changes, sub_resources in zip(
+            (new_resources, updated_resources, deleted_resources), sub_changes
+        ):
+            for sub_resource in sub_resources:
+                changes.setdefault(type(sub_resource), {})[sub_resource.resource_id] = sub_resource
+
+        state_cases = state.setdefault(TestCase, {})
+        state_cases.pop(new_id, None)
+        state_cases[old_id] = case
+
+    for changes in (new_resources, updated_resources, deleted_resources):
+        for resource_type in (TestCase, *_TEST_CASE_SUBRESOURCE_TYPES):
+            if resource_type in changes and not changes[resource_type]:
+                changes.pop(resource_type)
+
+
+_TEST_CASE_SUBRESOURCE_TYPES = (
+    TestCaseAssertion,
+    TestCaseTags,
+    TestCaseSipHeaders,
+    TestCaseIntegrationAttributes,
+    TestCaseApiOperationMock,
+)
+
+
 def prune_cascade_deleted_flow_children(deleted_resources: ResourceMap) -> None:
     """Drop step/function deletes covered by their flow config's cascade delete."""
     # Deleting flow config deletes all its steps/functions, so we don't need to
@@ -327,17 +416,18 @@ def default_new_variant_attributes(
     current_resources: ResourceMap,
 ) -> None:
     """Give new variants all known (non-deleted) attributes as default values."""
-    # Add known attributes to any new variant to give it a default value
+    # Add known attributes to any new variant to give it a default value. A typed
+    # attribute cannot hold "", so its seed is a native null; the real value follows
+    # in the attribute update pushed straight after.
     deleted_attribute_ids = set(deleted_resources.get(VariantAttribute, {}).keys())
     for variant in new_resources.get(Variant, {}).values():
         if not isinstance(variant, Variant):
             raise TypeError(f"Variant is not a Variant: {variant}")
-        attribute_ids = [
-            aid
-            for aid in current_resources.get(VariantAttribute, {}).keys()
-            if aid not in deleted_attribute_ids
-        ]
-        variant.attribute_ids = attribute_ids
+        variant.attribute_values = {
+            attribute_id: "" if attribute.kind == AttributeKind.STRING else None
+            for attribute_id, attribute in current_resources.get(VariantAttribute, {}).items()
+            if attribute_id not in deleted_attribute_ids
+        }
 
 
 def fix_conditions_for_deleted_steps(

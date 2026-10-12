@@ -8,11 +8,10 @@ import logging
 import os
 import re
 import typing as ty
-import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property, lru_cache
-from typing import Literal, Optional, Union
+from typing import Literal, Optional
 
 from google.protobuf.message import Message
 
@@ -68,6 +67,15 @@ PY_TO_SCHEMA: dict[str, SchemaType] = {
 }
 
 SCHEMA_TO_PY = {v: k for k, v in PY_TO_SCHEMA.items()}
+
+
+@dataclass(frozen=True)
+class FunctionMetadata:
+    """The parts of a parsed function that rendering and decorator extraction read."""
+
+    lineno: int
+    args: tuple[ast.arg, ...]
+    decorator_list: tuple[ast.expr, ...]
 
 
 class FunctionType(str, Enum):
@@ -184,7 +192,7 @@ class LatencyControl(SubResource):
         delay_responses = DelayResponsesUpdate(
             delay_responses=[
                 DelayResponseUpdate(
-                    id=dr.id or f"DELAY-{uuid.uuid4().hex[:8]}",
+                    id=dr.id,
                     message=dr.message,
                     duration=dr.duration,
                     references=utils.get_references_from_prompt(
@@ -829,11 +837,9 @@ class Function(Resource):
 
     @staticmethod
     @lru_cache(maxsize=2048)
-    def _get_target_function(
-        code: str, function_name: str
-    ) -> Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]]:
+    def _get_target_function(code: str, function_name: str) -> Optional[FunctionMetadata]:
         module = ast.parse(code)
-        return next(
+        target = next(
             (
                 f
                 for f in ast.walk(module)
@@ -842,6 +848,13 @@ class Function(Resource):
             ),
             None,
         )
+        if target:
+            return FunctionMetadata(
+                lineno=target.lineno,
+                args=tuple(target.args.args),
+                decorator_list=tuple(target.decorator_list),
+            )
+        return None
 
     @staticmethod
     def _extract_decorators(
@@ -872,7 +885,7 @@ class Function(Resource):
 
                 if decorator_name == "func_parameter" and len(decorator.args) == 2:
                     name, desc = (arg.value for arg in decorator.args)
-                    matched_arg = next((arg for arg in target.args.args if arg.arg == name), None)
+                    matched_arg = next((arg for arg in target.args if arg.arg == name), None)
                     if matched_arg is None or matched_arg.annotation is None:
                         raise ValueError(
                             f"Parameter {name!r} has no type annotation. "
@@ -887,7 +900,7 @@ class Function(Resource):
 
                     _id = next(
                         (param.id for param in known_parameters if param.name == name),
-                        f"PARAMETER-{uuid.uuid4().hex[:8]}",
+                        utils.generate_subresource_id("PARAMETER", function_name, name),
                     )
 
                     if _type in PY_TO_SCHEMA:
@@ -936,7 +949,7 @@ class Function(Resource):
             elif kw.arg == "randomize" and isinstance(kw.value, ast.Constant):
                 randomize = bool(kw.value.value)
             elif kw.arg == "delay_responses" and isinstance(kw.value, ast.List):
-                for elt in kw.value.elts:
+                for i, elt in enumerate(kw.value.elts):
                     if isinstance(elt, ast.Tuple) and len(elt.elts) == 2:
                         msg = elt.elts[0].value if isinstance(elt.elts[0], ast.Constant) else ""
                         dur = elt.elts[1].value if isinstance(elt.elts[1], ast.Constant) else 0
@@ -955,7 +968,10 @@ class Function(Resource):
                             used_delay_response_ids.add(existing_id)
                         delay_responses.append(
                             FunctionDelayResponse(
-                                id=existing_id or f"DELAY-{uuid.uuid4().hex[:8]}",
+                                id=existing_id
+                                or utils.generate_subresource_id(
+                                    "DELAY", str(msg), str(dur), str(i)
+                                ),
                                 message=msg,
                                 duration=dur,
                             )
@@ -1108,7 +1124,7 @@ class Function(Resource):
     def _build_create_latency_control_proto(self) -> FunctionCreateLatencyControl:
         delay_responses = [
             FunctionDelayResponseProto(
-                id=dr.id or f"DELAY-{uuid.uuid4().hex[:8]}",
+                id=dr.id,
                 message=dr.message,
                 duration=dr.duration,
             )

@@ -21,6 +21,12 @@ The ADK gives you a local, Git-like workflow for Agent Studio projects: pull, ed
 uv tool install polyai-adk
 ```
 
+To place voice calls with [`poly call`](reference/cli/call.md), install the `call` extra, which adds the audio and WebRTC dependencies:
+
+```bash
+uv tool install "polyai-adk[call]"
+```
+
 ## Authentication
 
 You can login or sign up to a PolyAI Agent Studio account using the `login` command. Select your account's region if you are an enterprise user or "studio" if you have a self-serve account.
