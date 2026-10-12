@@ -8,7 +8,7 @@ from poly.resources.api_integration import (
     ApiIntegrationEnvironments,
     ApiIntegrationOperation,
 )
-from poly.resources.asr_settings import AsrSettings
+from poly.resources.asr_settings import AsrSettings, VoiceBargeInConfig
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,

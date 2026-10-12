@@ -1,6 +1,330 @@
 # CHANGELOG
 
 
+## v0.68.1 (2026-10-12)
+
+### Bug Fixes
+
+- Derive deployment mode from the parent template ref, not stored config
+  ([#356](https://github.com/polyai/adk/pull/356),
+  [`76e7ec6`](https://github.com/polyai/adk/commit/76e7ec600516b3171aa137f58e05c782c7ccbc18))
+
+## Summary
+
+The ADK now works out a project's deployment mode the way the platform does, from whether the
+  project has a parent template ref, instead of reading the stored `config.deployment_mode`. This
+  stops `poly branch create` refusing branches that Agent Studio and the server allow.
+
+## Motivation
+
+Agent Studio removed the deployment settings page, and the platform no longer reads or writes
+  `config.deployment_mode`. Every project now gets branches and sub-branches once simplified
+  deployments are on, except template-engine children, which are always simple.
+
+The ADK still read the stored value and checked branch creation locally before calling the server: -
+  Projects stored as `simple` (most projects created while simplified deployments were rolling out)
+  were refused a second branch. - Projects with no stored value (every project created since #10926,
+  which jupiter-api reports as `releases`) were refused sub-branches, and `branch list`, `switch`
+  and `delete` showed a flat list instead of the tree.
+
+## Changes
+
+- `AgentStudioProject.deployment_mode` now returns: - `simple` when the project has a
+  `parent_template_ref_id`, whether or not simplified deployments are on, since the server limits
+  template children to one branch in both states; - `releases_branches` when simplified deployments
+  are on; - `releases` otherwise. - The stored `config.deployment_mode` is no longer read. -
+  `DeploymentModePropertyTest` is rewritten around these rules, including a case showing every
+  stored value is ignored. - `CreateBranchDeploymentModeTest` now sets the mode directly, since it
+  tests the per-mode checks, not how the mode is resolved.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+`parent_template_ref_id` is already in the `/adk/v1/.../projects/{id}` response (the same
+  jupiter-api handler as Studio's v2 endpoint), so no server change is needed. **Not tried against a
+  live project.**
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (2,167 tests) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`: no change needed;
+  `reference/cli/branch.md` still holds
+
+## Follow-ups (not in this PR)
+
+- `poly project duplicate` still copies the stored `config.deployment_mode` to the new project
+  (`_copy_deployment_mode`, #330). Nothing reads it any more, so the copy does nothing, and its
+  failure message points to a setting that no longer exists in Agent Studio. -
+  `using_simplified_deployments` still guesses whether a project has converged locally instead of
+  asking the server, because the ADK API has no route for the server's answer.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
+## v0.68.0 (2026-10-12)
+
+### Features
+
+- Add poly deployments experiment ([#344](https://github.com/polyai/adk/pull/344),
+  [`d04a19f`](https://github.com/polyai/adk/commit/d04a19f26d8c64108bcb5a22b026a34bba628f69))
+
+## Summary
+
+Adds `poly deployments experiment` (start/list/active/update/end) for projects on the simplified
+  deployment model, backed by the new sourcerer experiment endpoints, and removes the deprecated
+  `poly deployments ab-test`.
+
+## Motivation
+
+Agent Studio is replacing A/B tests with a new "Experiment" feature for projects on the simplified
+  deployment model: instead of pinning control/variant to fixed deployment IDs, an experiment tests
+  a top-level branch against live, and the platform itself redeploys the winning branch when it
+  ends. ADK needs a CLI surface for this, and `ab-test` is fully deprecated, so it is removed rather
+  than maintained.
+
+## Changes
+
+- Add `poly deployments experiment {start,list,active,update,end}`, wired through all four layers
+  (`platform_api.py` → `interface.py` → `project.py` → `cli_commands/deployments.py`), with matching
+  rich/JSON output in `output/console.py`. - Add `AgentStudioProject.experiments_enabled` and a
+  `require_experiments_enabled` CLI guard: experiments require both the simplified deployment model
+  and a branch-capable `deployment_mode`. - Validate in `project.py` so programmatic callers get the
+  same checks as the CLI: `create_experiment` checks the name, the traffic range (1-99) and that the
+  variant is an eligible branch (not `main`, top-level, not diverged), and `update_experiment`
+  requires `branch_id` and `traffic_percentage` together. - Share branch name/ID helpers
+  (`resolve_branch_id`, `branch_id_map`, `fetch_branch_id_map`) in `cli_commands/shared.py`, now
+  also used by `branch.py`. - Remove `poly deployments ab-test` entirely (CLI, project/interface/API
+  methods, console output, docs, tests). - Normalize sourcerer's camelCase API responses to ADK's
+  snake_case convention at the API boundary (`handlers/utils.py::camel_to_snake_keys`), since the
+  experiment endpoints don't follow the existing snake_case convention. - `experiment update`'s
+  traffic change is nested under a branch's `versions` entry server-side, not a bare scalar - the
+  CLI derives the active experiment's variant branch automatically so callers only ever pass
+  `--traffic`/`--name`. - `experiment end` does not call `promote_deployment` afterward - the
+  platform redeploys the winner itself as part of ending the experiment. - `get_active_experiment`
+  is derived client-side (no server-side "active" endpoint exists) by paginating `list_experiments`
+  until the unended record is found or the list is exhausted.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Added `src/poly/tests/experiment_test.py` plus coverage in `cli_test.py`, `project_test.py`,
+  `console_test.py`, and both API test files; `ab_test_test.py` is deleted along with the command
+  (2234 tests passing total). Manually smoke-tested `--help` output, the full argparse dispatch
+  tree, the camelCase→snake_case conversion, the create→re-fetch flow, and branch_id derivation on
+  update, outside the mocked test suite.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] Breaking change to
+  the `poly` CLI interface with a migration path: `ab-test` is removed; use `poly deployments
+  experiment` instead - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+
+## v0.67.3 (2026-10-12)
+
+### Bug Fixes
+
+- Read and push barge-in through the voice channel's barge-in config
+  ([#355](https://github.com/polyai/adk/pull/355),
+  [`e6d94f1`](https://github.com/polyai/adk/commit/e6d94f18c60974f731ccedada87d11c7cd72265f))
+
+## Summary
+
+`barge_in` in `asr_settings.yaml` now controls the barge-in setting Agent Studio actually deploys.
+  Before this fix it could be set to `true`, pulled and pushed, and barge-in still stayed off.
+
+## Motivation
+
+Agent Studio stores voice barge-in in two fields: the older `asrSettings.bargeIn`, and the voice
+  channel's `bargeInConfig`, which the barge-in section of the Model Configuration page writes. When
+  an agent is deployed, `bargeInConfig.enabled` is used whenever `bargeInConfig` is set, and
+  `asrSettings.bargeIn` is ignored. New projects get a `bargeInConfig` by default.
+
+The ADK only read and wrote `asrSettings.bargeIn`. For a project whose `bargeInConfig.enabled` was
+  `false`:
+
+- `poly push` with `barge_in: true` changed only the ignored field. - `poly pull` reported
+  `barge_in: true`, so the YAML didn't match what runs and `poly diff` showed nothing to fix.
+
+Toggling barge-in in the Model Configuration page was the only way to turn it on.
+
+## Changes
+
+- **Pull** reads `barge_in` from `bargeInConfig.enabled`, falling back to `asrSettings.bargeIn` only
+  when the project has no `bargeInConfig`. This matches how Agent Studio picks the value at deploy
+  time. - **Push**: a change to `barge_in` also sends `voice_channel_update_barge_in_config` with
+  only `enabled` set, through a new `VoiceBargeInConfig` sub-resource. The other barge-in settings
+  (first-turn barge-in, maximum per call, minimum speech duration) stay as they are.
+  `asrSettings.bargeIn` is still written too, so the older Settings screen stays consistent. -
+  **Diff**: since pull now reads the deployed value, a project where `bargeInConfig.enabled` doesn't
+  match the YAML shows up in `poly diff` and `poly push`. - The YAML shape is unchanged.
+
+A project that never had a `bargeInConfig` gets one the first time `barge_in` changes, the same as
+  toggling barge-in in the UI.
+
+Deployed versions keep the setting they were built with: a fixed project takes effect after its next
+  deploy.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Unit tests cover: - reading `bargeInConfig.enabled` over `asrSettings.bargeIn` - a `bargeInConfig`
+  with no `enabled` key reading as off - falling back to `asrSettings.bargeIn` when there is no
+  `bargeInConfig` - enabling and disabling sending the barge-in config update with only `enabled`
+  set - an `interaction_style`-only change sending no barge-in update - a full push including the
+  update
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.67.2 (2026-10-07)
+
+### Bug Fixes
+
+- Use valid region in poly init help example ([#354](https://github.com/polyai/adk/pull/354),
+  [`25b6858`](https://github.com/polyai/adk/commit/25b6858ae3c3177237f7d4d5034031be0e1eda07))
+
+## Summary
+
+Fixes the example in `poly init --help`, which used the invalid region `eu-west-1`.
+
+## Motivation
+
+`--region` only accepts `us-1`, `euw-1`, `uk-1`, `studio`, `staging` or `dev`, so copying the help
+  example failed with an argument error.
+
+## Changes
+
+- Change the `poly init` help example from `--region eu-west-1` to `--region euw-1`.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Chores
+
+- Share contributor rules across coding agents with AGENTS.md and REVIEW.md
+  ([#352](https://github.com/polyai/adk/pull/352),
+  [`c61b79b`](https://github.com/polyai/adk/commit/c61b79b1e6beb26ea9d360204f5a4fbc49785a4f))
+
+## Summary
+
+Replaces the Claude- and Copilot-specific instruction files with tool-neutral ones that both tools
+  read: `AGENTS.md`, `REVIEW.md` and shared contributor skills. Drops guidance that had gone stale,
+  including the instruction to bump versions by hand.
+
+## Motivation
+
+Most PRs here are written with an AI coding agent, but the instructions those agents read were out
+  of date and split across tools:
+
+- `pr-reviewer` and `copilot-instructions.md` told contributors to bump the version in
+  `pyproject.toml`. semantic-release already does that, along with the skill versions and the
+  changelog. The PR title type is the only release input a contributor controls. - `CLAUDE.md`,
+  `pr-reviewer` and `copilot-instructions.md` described a resource-registration process that no
+  longer exists, named a nonexistent `PlatformAPIError`, and showed a stale project tree. - The
+  rules reviewers keep asking for weren't written down anywhere: the CLI → project → interface → API
+  layering, updating both doc trees and the skills, the test fixture, no internal references in
+  public PRs. - The same rules were copied per tool, so they drifted apart.
+
+Claude Code and GitHub Copilot both now read `AGENTS.md` and skills in `.claude/skills/`, so one set
+  of files covers both.
+
+## Changes
+
+- **`AGENTS.md`** (new): commands, the layering rule (anything that acts on a project is an
+  `AgentStudioProject` method holding its logic and validation, user interaction stays in the CLI,
+  and commands that run before a project exists may call the interface directly), what each
+  directory is for, the conventions reviewers enforce, test and docs expectations, and the PR title
+  → release table. Nested `AGENTS.md` files in `src/poly/resources/` (the current registration
+  steps) and `src/poly/cli_commands/` (command-layer rules). - **`REVIEW.md`** (new): a ranked
+  review checklist (blocking, worth raising, nits, ignore). It's self-contained because some review
+  tools read only this file; both files say to keep the two in sync. - **Contributor skills in
+  `.claude/skills/`**, replacing the four subagents in `.claude/agents/`: - `ci-check`: now mirrors
+  CI, adding the PR title, licence, `licenses.json` and skill-version checks. - `review-pr`: applies
+  `REVIEW.md`. - `write-tests`: measures coverage before and after. - `add-resource-type` -
+  `open-pr` (new)
+
+All are marked `metadata.internal: true`, so `poly setup` / `npx skills` don't install them into
+  users' projects. - **Removed** `.claude/CLAUDE.md`, `.claude/agents/` and
+  `.github/copilot-instructions.md`. - **Docs style guides:**
+  `docs/docs/reference/{cli,resources}/CLAUDE.md` renamed to `AGENTS.md` and excluded from the
+  mkdocs build. One was being published as a page on the docs site. - **Release notes:** the Slack
+  release notification and the GitHub release notes now say to upgrade with `poly update`. -
+  **CONTRIBUTING:** full title-type → release table, versions are never edited by hand, stacked-PR
+  merge order. Setup uses `uv run`, with venv activation optional for trying `poly` by hand. Notes
+  that Claude Code must be up to date to read `AGENTS.md` (there's deliberately no `CLAUDE.md`). The
+  skills README explains that skill versions are stamped automatically. - **PR template:** checklist
+  lines for the title type and for docs and skills updates. - **Housekeeping:** untracked `.idea/`;
+  `.gitignore` deduplicated, with cache, coverage and worktree entries added. Fixed the pre-commit
+  comment, which referenced a nonexistent `requirements-dev.txt` and a stale ruff version. Removed
+  43 blank lines that older release commits had left in `pyproject.toml`. -
+  **`.claude/settings.json`:** agents can now read the generated `protobuf/` and `types/` files;
+  editing them is still denied.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+- `npx -y skills@1.5.18 add . --list` lists only the five user skills. Without `metadata.internal:
+  true`, the contributor skills were listed too. - `mkdocs build` succeeds, with no `AGENTS` pages
+  in the output. - Claude Code picks up the five contributor skills from `.claude/skills/`.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+N/A
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.67.1 (2026-10-06)
 
 ### Bug Fixes

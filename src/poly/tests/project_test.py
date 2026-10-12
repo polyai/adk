@@ -52,6 +52,7 @@ from poly.resources import (
     Variable,
     Variant,
     VariantAttribute,
+    VoiceBargeInConfig,
     VoiceDisclaimerMessage,
     VoiceGreeting,
     VoiceStylePrompt,
@@ -2599,6 +2600,8 @@ class PushProjectTest(unittest.TestCase):
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(AsrSettings, updated_resources)
         self.assertIn("asr_settings", updated_resources[AsrSettings])
+        # The fixture file has barge_in: false, so barge-in is switched off
+        self.assertFalse(updated_resources[VoiceBargeInConfig]["asr_settings"].enabled)
 
     def test_push_project_validation_error(self):
         project_data = deepcopy(PROJECT_DATA)
@@ -4382,9 +4385,7 @@ class MultiResourcePullMergeTest(unittest.TestCase):
         patch("poly.utils.save_imports").start()
         patch("poly.utils.export_decorators").start()
         self.merge_spy = patch("poly.utils.merge_strings", wraps=merge_strings).start()
-        self.save_spy = patch.object(
-            Resource, "save_to_file", wraps=Resource.save_to_file
-        ).start()
+        self.save_spy = patch.object(Resource, "save_to_file", wraps=Resource.save_to_file).start()
         self.addCleanup(patch.stopall)
         MultiResourceYamlResource._file_cache.clear()
         self.addCleanup(MultiResourceYamlResource._file_cache.clear)
@@ -4658,7 +4659,9 @@ class TopicTagsSyncTest(unittest.TestCase):
         files_with_conflicts, _ = project.pull_project()
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertIn("enabled: true\ntags:\n- billing\n- refunds\nactions:", self._read_topic_file())
+        self.assertIn(
+            "enabled: true\ntags:\n- billing\n- refunds\nactions:", self._read_topic_file()
+        )
 
     def test_status_file_round_trips_tags(self):
         """Tags survive the status file, and a status file from before tags loads with none."""
@@ -5750,6 +5753,137 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
         )
 
 
+class ExperimentsTest(unittest.TestCase):
+    """Tests for the AgentStudioProject experiment methods."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.project._api_handler = self.mock_api
+
+    def _set_eligibility(self, simplified: bool, mode: DeploymentMode) -> None:
+        """Seed the cached simplified-deployments flag and the deployment mode."""
+        self.project.__dict__["using_simplified_deployments"] = simplified
+        self.project._deployment_mode = mode
+
+    def test_experiments_enabled_with_simplified_deployments_and_branches(self):
+        """Simplified deployments plus a branch-capable mode enables experiments."""
+        for mode in (DeploymentMode.RELEASES, DeploymentMode.RELEASES_BRANCHES):
+            with self.subTest(mode=mode):
+                self._set_eligibility(simplified=True, mode=mode)
+
+                self.assertTrue(self.project.experiments_enabled)
+
+    def test_experiments_disabled_in_simple_mode(self):
+        """A 'simple' mode project has no branch to test, so experiments are off."""
+        self._set_eligibility(simplified=True, mode=DeploymentMode.SIMPLE)
+
+        self.assertFalse(self.project.experiments_enabled)
+
+    def test_experiments_disabled_without_simplified_deployments(self):
+        """The classic deployment model does not support experiments."""
+        self._set_eligibility(simplified=False, mode=DeploymentMode.RELEASES)
+
+        self.assertFalse(self.project.experiments_enabled)
+
+    def test_list_experiments_unwraps_the_experiments_list(self):
+        """The API response's 'experiments' list is returned directly."""
+        self.mock_api.list_experiments.return_value = {"experiments": [{"id": "exp-1"}]}
+
+        result = self.project.list_experiments(limit=5, offset=10)
+
+        self.assertEqual(result, [{"id": "exp-1"}])
+        self.assertEqual(self.mock_api.list_experiments.call_args.kwargs["offset"], 10)
+
+    def test_list_experiments_missing_key_returns_empty_list(self):
+        """A response with no 'experiments' key is treated as no experiments."""
+        self.mock_api.list_experiments.return_value = {}
+
+        self.assertEqual(self.project.list_experiments(), [])
+
+    def test_get_active_experiment_returns_newest_when_not_ended(self):
+        """The active experiment, if any, is the newest (first) entry."""
+        self.mock_api.list_experiments.return_value = {
+            "experiments": [{"id": "exp-live", "ended_at": None}]
+        }
+
+        self.assertEqual(self.project.get_active_experiment()["id"], "exp-live")
+        self.assertEqual(self.mock_api.list_experiments.call_args.kwargs["limit"], 1)
+
+    def test_get_active_experiment_returns_empty_dict_when_newest_has_ended(self):
+        """If the newest experiment has ended, there is no active one."""
+        self.mock_api.list_experiments.return_value = {
+            "experiments": [{"id": "exp-old", "ended_at": "2026-01-01T00:00:00Z"}]
+        }
+
+        self.assertEqual(self.project.get_active_experiment(), {})
+
+    def test_get_active_experiment_returns_empty_dict_when_no_experiments(self):
+        """An empty project has no active experiment."""
+        self.mock_api.list_experiments.return_value = {"experiments": []}
+
+        self.assertEqual(self.project.get_active_experiment(), {})
+
+    def test_get_experiment_returns_api_response(self):
+        """get_experiment returns the platform response for the given ID directly."""
+        self.mock_api.get_experiment.return_value = {"id": "exp-1", "name": "v2 test"}
+
+        result = self.project.get_experiment("exp-1")
+
+        self.assertEqual(result, {"id": "exp-1", "name": "v2 test"})
+
+    def test_create_end_and_update_forward_project_scope(self):
+        """Mutating calls are scoped to this project's region, account and id."""
+        scope = {
+            "region": self.project.region,
+            "account_id": self.project.account_id,
+            "project_id": self.project.project_id,
+        }
+
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "v2": {"branchId": "br-v2", "parentBranchId": "main"},
+        }
+
+        self.project.create_experiment("v2", "br-v2", 30)
+        self.project.get_experiment("exp-1")
+        self.project.end_experiment("exp-1", "br-v2")
+        self.project.update_experiment("exp-1", name="renamed")
+
+        self.mock_api.create_experiment.assert_called_once_with(
+            **scope, name="v2", branch_id="br-v2", traffic_percentage=30
+        )
+        self.mock_api.get_experiment.assert_called_once_with(**scope, experiment_id="exp-1")
+        self.mock_api.end_experiment.assert_called_once_with(
+            **scope, experiment_id="exp-1", chosen_branch_id="br-v2"
+        )
+        self.mock_api.update_experiment.assert_called_once_with(
+            **scope, experiment_id="exp-1", name="renamed", branch_id=None, traffic_percentage=None
+        )
+
+    def test_create_experiment_rejects_invalid_input(self):
+        """Validation lives on the project so programmatic callers get it too."""
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "child": {"branchId": "br-child", "parentBranchId": "br-v2"},
+            "stale": {"branchId": "br-stale", "parentBranchId": "main", "isDiverged": True},
+        }
+        cases = {
+            "empty name": (" ", "br-stale", 50, "name is required"),
+            "traffic out of range": ("v2", "br-stale", 100, "between 1 and 99"),
+            "unknown branch": ("v2", "br-nope", 50, "No branch found"),
+            "main": ("v2", "main", 50, "Cannot test 'main'"),
+            "child branch": ("v2", "br-child", 50, "not a top-level branch"),
+            "diverged branch": ("v2", "br-stale", 50, "diverged"),
+        }
+        for label, (name, branch_id, traffic, message) in cases.items():
+            with self.subTest(label), self.assertRaisesRegex(ValueError, message):
+                self.project.create_experiment(name, branch_id, traffic)
+
+        self.mock_api.create_experiment.assert_not_called()
+
+
 class DeploymentModePropertyTest(unittest.TestCase):
     """Tests for the AgentStudioProject.deployment_mode property."""
 
@@ -5764,35 +5898,53 @@ class DeploymentModePropertyTest(unittest.TestCase):
     def tearDown(self):
         self.save_config_patcher.stop()
 
-    def test_reads_mode_from_remote_project_config(self):
-        """Each recognised config value maps to the matching enum member."""
-        for value, expected in (
-            ("simple", DeploymentMode.SIMPLE),
-            ("releases", DeploymentMode.RELEASES),
-            ("releases_branches", DeploymentMode.RELEASES_BRANCHES),
-        ):
-            with self.subTest(value=value):
-                self.project._deployment_mode = None
-                self.mock_api.get_project.return_value = {"config": {"deployment_mode": value}}
+    def _resolve(self, project_info: dict, simplified: bool) -> DeploymentMode:
+        """Resolve the mode for the given remote project and simplified state."""
+        self.project._deployment_mode = None
+        self.project.__dict__["using_simplified_deployments"] = simplified
+        self.mock_api.get_project.return_value = project_info
+        return self.project.deployment_mode
 
-                self.assertEqual(self.project.deployment_mode, expected)
+    def test_template_child_is_simple(self):
+        """A project with a parent template ref is simple, whether or not simplified is on."""
+        for simplified in (True, False):
+            with self.subTest(simplified=simplified):
+                mode = self._resolve({"parent_template_ref_id": "tmpl-1"}, simplified)
 
-    def test_defaults_to_releases_when_config_missing(self):
-        """A missing 'config', missing 'deployment_mode', or null config all default to releases."""
+                self.assertEqual(mode, DeploymentMode.SIMPLE)
+
+    def test_simplified_project_gets_sub_branches(self):
+        """A non-template project gets releases_branches once simplified is on."""
         for payload in (
             {"projectId": "test_project"},
-            {"config": {"other_setting": True}},
-            {"config": None},
+            {"parent_template_ref_id": None, "config": None},
         ):
             with self.subTest(payload=payload):
-                self.project._deployment_mode = None
-                self.mock_api.get_project.return_value = payload
+                mode = self._resolve(payload, simplified=True)
 
-                self.assertEqual(self.project.deployment_mode, DeploymentMode.RELEASES)
+                self.assertEqual(mode, DeploymentMode.RELEASES_BRANCHES)
+
+    def test_non_simplified_project_is_releases(self):
+        """A non-template project stays on releases while simplified is off."""
+        mode = self._resolve({"parent_template_ref_id": None}, simplified=False)
+
+        self.assertEqual(mode, DeploymentMode.RELEASES)
+
+    def test_stored_config_mode_is_ignored(self):
+        """The stored config.deployment_mode no longer affects the resolved mode."""
+        for stored in ("simple", "releases", "releases_branches"):
+            for simplified, expected in (
+                (True, DeploymentMode.RELEASES_BRANCHES),
+                (False, DeploymentMode.RELEASES),
+            ):
+                with self.subTest(stored=stored, simplified=simplified):
+                    mode = self._resolve({"config": {"deployment_mode": stored}}, simplified)
+
+                    self.assertEqual(mode, expected)
 
     def test_mode_is_fetched_once_and_cached(self):
         """Repeated reads reuse the cached mode instead of re-querying the API."""
-        self.mock_api.get_project.return_value = {"config": {"deployment_mode": "simple"}}
+        self.mock_api.get_project.return_value = {"parent_template_ref_id": "tmpl-1"}
 
         first = self.project.deployment_mode
         second = self.project.deployment_mode
@@ -5817,8 +5969,8 @@ class CreateBranchDeploymentModeTest(unittest.TestCase):
         self.save_config_patcher.stop()
 
     def _set_deployment_mode(self, mode: str) -> None:
-        """Make the remote project report the given deployment mode."""
-        self.mock_api.get_project.return_value = {"config": {"deployment_mode": mode}}
+        """Put the project in the given deployment mode."""
+        self.project._deployment_mode = DeploymentMode(mode)
 
     def _set_current_branch(self, branch_id: str) -> None:
         """Put the project and its API handler on the given branch."""
