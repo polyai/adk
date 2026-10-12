@@ -30,7 +30,7 @@ from poly.resources.api_integration import (
     ApiIntegrationEnvironments,
     ApiIntegrationOperation,
 )
-from poly.resources.asr_settings import AsrSettings
+from poly.resources.asr_settings import AsrSettings, VoiceBargeInConfig
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,
@@ -7319,6 +7319,50 @@ class AsrSettingsTests(unittest.TestCase):
         self.assertTrue(result.barge_in)
         self.assertEqual(result.interaction_style, "precise")
 
+    def _asr_settings(self, barge_in: bool, interaction_style: str = "balanced") -> AsrSettings:
+        return AsrSettings(
+            resource_id="asr_settings",
+            name="asr_settings",
+            barge_in=barge_in,
+            interaction_style=interaction_style,
+        )
+
+    def test_enabling_barge_in_updates_barge_in_config(self):
+        """Barge-in that changes is sent as a barge-in config update with only enabled set."""
+        new, updated, deleted = self._asr_settings(
+            barge_in=True
+        ).get_new_updated_deleted_subresources(old_resource=self._asr_settings(barge_in=False))
+
+        self.assertEqual(new, [])
+        self.assertEqual(deleted, [])
+        self.assertEqual(len(updated), 1)
+        barge_in_config = updated[0]
+        self.assertIsInstance(barge_in_config, VoiceBargeInConfig)
+        self.assertEqual(
+            barge_in_config.update_command_type, "voice_channel_update_barge_in_config"
+        )
+        proto = barge_in_config.build_update_proto()
+        self.assertEqual([field.name for field, _ in proto.ListFields()], ["enabled"])
+        self.assertTrue(proto.enabled)
+
+    def test_disabling_barge_in_sends_enabled_false(self):
+        """enabled=False must reach the wire, not be dropped as a proto default."""
+        _, updated, _ = self._asr_settings(barge_in=False).get_new_updated_deleted_subresources(
+            old_resource=self._asr_settings(barge_in=True)
+        )
+
+        proto = updated[0].build_update_proto()
+        self.assertTrue(proto.HasField("enabled"))
+        self.assertFalse(proto.enabled)
+
+    def test_unchanged_barge_in_sends_no_barge_in_config(self):
+        """Changing only interaction_style leaves the barge-in config alone."""
+        changes = self._asr_settings(
+            barge_in=True, interaction_style="swift"
+        ).get_new_updated_deleted_subresources(old_resource=self._asr_settings(barge_in=True))
+
+        self.assertEqual(changes, ([], [], []))
+
 
 class KeyphraseBoostingTests(unittest.TestCase):
     """Tests for KeyphraseBoosting resource."""
@@ -13157,6 +13201,38 @@ class AsrSettingsFromProjection(unittest.TestCase):
     def test_empty_projection_yields_no_asr_settings(self):
         """An empty projection should return an empty dict."""
         self.assertEqual(AsrSettings.from_projection({}), {})
+
+    def test_barge_in_config_overrides_legacy_barge_in(self):
+        """bargeInConfig.enabled is what runs, so it wins over asrSettings.bargeIn."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "asrSettings": {"bargeIn": True},
+                    "bargeInConfig": {"enabled": False, "allowedFirstTurn": True},
+                }
+            }
+        }
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertFalse(asr.barge_in)
+
+    def test_barge_in_config_without_enabled_is_disabled(self):
+        """The projection omits enabled when it is false, even if bargeIn is true."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "asrSettings": {"bargeIn": True},
+                    "bargeInConfig": {"allowedFirstTurn": True},
+                }
+            }
+        }
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertFalse(asr.barge_in)
+
+    def test_legacy_barge_in_used_without_barge_in_config(self):
+        """Without bargeInConfig, asrSettings.bargeIn is what runs."""
+        projection = {"channels": {"voice": {"asrSettings": {"bargeIn": True}}}}
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertTrue(asr.barge_in)
 
 
 class DeterministicConditionIdTests(unittest.TestCase):
