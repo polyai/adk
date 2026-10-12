@@ -4388,14 +4388,18 @@ class AgentStudioProject:
 
     @property
     def deployment_mode(self) -> DeploymentMode:
-        """Get the deployment mode for the project."""
+        """Get the deployment mode for the project.
+
+        Mirrors the platform: template-engine children are always simple, other
+        projects get sub-branches once simplified deployments are on. The stored
+        `config.deployment_mode` is no longer used.
+        """
         if self._deployment_mode is None:
-            cfg = self.get_project_info().get("config") or {}
-            deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
-            if (
-                deployment_mode == DeploymentMode.RELEASES_BRANCHES
-                and not self.using_simplified_deployments
-            ):
+            if self.get_project_info().get("parent_template_ref_id"):
+                deployment_mode = DeploymentMode.SIMPLE
+            elif self.using_simplified_deployments:
+                deployment_mode = DeploymentMode.RELEASES_BRANCHES
+            else:
                 deployment_mode = DeploymentMode.RELEASES
             self._deployment_mode = deployment_mode
         return self._deployment_mode
