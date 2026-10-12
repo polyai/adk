@@ -503,6 +503,34 @@ def _parse_multi_resource_path(file_path: str) -> tuple[str, list[str]]:
     return yaml_file_path, segments
 
 
+def _first_positions(keys: list[str]) -> dict[str, int]:
+    """Map each key to the index of its first occurrence."""
+    positions: dict[str, int] = {}
+    for i, key in enumerate(keys):
+        positions.setdefault(key, i)
+    return positions
+
+
+_MatchIndex: TypeAlias = dict[tuple[str, str], tuple[list, list[str], dict[str, int]]]
+
+
+class _ThreadMatchIndex(threading.local):
+    """Holds each thread's own multi-resource match index."""
+
+    def __init__(self) -> None:
+        self.entries: _MatchIndex = {}
+
+
+_thread_match_index = _ThreadMatchIndex()
+
+
+class _PerThreadMatchIndex:
+    """Descriptor that resolves to the calling thread's multi-resource match index."""
+
+    def __get__(self, obj: object, owner: type) -> _MatchIndex:
+        return _thread_match_index.entries
+
+
 class _ThreadFileCache(threading.local):
     """Holds each thread's own multi-resource file cache."""
 
@@ -528,6 +556,12 @@ class MultiResourceYamlResource(YamlResource, ABC):
     # One per thread: projects clear and flush the whole cache mid-operation, so threads sharing it
     # would drop each other's unflushed writes and flush each other's files.
     _file_cache: ClassVar[_PerThreadFileCache] = _PerThreadFileCache()
+
+    # (top_level_name, resource_key) -> (yaml_list, keys, positions): the clean name of each entry
+    # and the index of the first entry per clean name. Only valid for the exact list object it was
+    # built from, so a reload or cache clear (which yields new lists) drops it. One per thread,
+    # so threads indexing different lists don't evict or edit each other's entries.
+    _match_index: ClassVar[_PerThreadMatchIndex] = _PerThreadMatchIndex()
 
     # When True, the top-level key maps to a single dict (not a list). Used for singleton resources like VoiceGreeting.
     _singleton: ClassVar[bool] = False
@@ -611,16 +645,28 @@ class MultiResourceYamlResource(YamlResource, ABC):
         return cls._get_matching(file_path)
 
     @classmethod
-    def _find_matching(cls, yaml_list, resource_clean_name) -> Optional[dict]:
-        return next(
-            (
-                r
-                for r in yaml_list
-                if utils.clean_name(r.get(cls.resource_key) or "", lowercase=False)
-                == resource_clean_name
-            ),
-            None,
-        )
+    def _entry_key(cls, entry: dict) -> str:
+        """Return the clean name an entry of the top-level list is matched by."""
+        return utils.clean_name(entry.get(cls.resource_key) or "", lowercase=False)
+
+    @classmethod
+    def _index_for(cls, yaml_list: list) -> tuple[list[str], dict[str, int]]:
+        """Return the (keys, positions) index for yaml_list, building it if stale."""
+        slot = (cls.top_level_name, cls.resource_key)
+        cached = cls._match_index.get(slot)
+        if cached is not None and cached[0] is yaml_list and len(cached[1]) == len(yaml_list):
+            return cached[1], cached[2]
+        keys = [cls._entry_key(entry) for entry in yaml_list]
+        positions = _first_positions(keys)
+        cls._match_index[slot] = (yaml_list, keys, positions)
+        return keys, positions
+
+    @classmethod
+    def _find_matching(cls, yaml_list: list, resource_clean_name: str) -> Optional[dict]:
+        """Return the first entry whose clean name matches, or None."""
+        _, positions = cls._index_for(yaml_list)
+        index = positions.get(resource_clean_name)
+        return yaml_list[index] if index is not None else None
 
     def save(
         self, base_path: str, format: bool = False, save_to_cache: bool = False, **kwargs
@@ -657,13 +703,19 @@ class MultiResourceYamlResource(YamlResource, ABC):
             yaml_list = top_level_yaml_dict.get(self.top_level_name, [])
             if not isinstance(yaml_list, list):
                 raise ValueError(f"Top level YAML data is not a list: {top_level_yaml_dict}")
-            clean_name = utils.clean_name(self.name, lowercase=False)
-            matching = self._find_matching(yaml_list, clean_name)
-            matching_idx = yaml_list.index(matching) if matching is not None else None
+            keys, positions = self._index_for(yaml_list)
+            matching_idx = positions.get(utils.clean_name(self.name, lowercase=False))
+            new_key = self._entry_key(yaml_content)
             if matching_idx is not None:
                 yaml_list[matching_idx] = yaml_content
+                if keys[matching_idx] != new_key:
+                    keys[matching_idx] = new_key
+                    positions.clear()
+                    positions.update(_first_positions(keys))
             else:
                 yaml_list.append(yaml_content)
+                keys.append(new_key)
+                positions.setdefault(new_key, len(keys) - 1)
             top_level_yaml_dict[self.top_level_name] = yaml_list
 
         # If queue saves, write to cache instead of file
@@ -691,13 +743,14 @@ class MultiResourceYamlResource(YamlResource, ABC):
         else:
             resource_clean_name = segments[-1]
             yaml_list = top_level_yaml_dict.get(top_level_name, [])
-            matching_resource = cls._find_matching(
-                yaml_list,
-                resource_clean_name,
-            )
-            if not matching_resource:
+            keys, positions = cls._index_for(yaml_list)
+            matching_idx = positions.get(resource_clean_name)
+            if matching_idx is None or not yaml_list[matching_idx]:
                 return
-            yaml_list.remove(matching_resource)
+            del yaml_list[matching_idx]
+            keys.pop(matching_idx)
+            positions.clear()
+            positions.update(_first_positions(keys))
             top_level_yaml_dict[top_level_name] = yaml_list
 
         cls._update_cache_after_write(true_file_path, top_level_yaml_dict)

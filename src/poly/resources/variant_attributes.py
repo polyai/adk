@@ -196,6 +196,45 @@ def _read_attribute_type(type_data: dict | None) -> tuple[AttributeKind, dict]:
     return kind, utils.convert_keys_to_snake_case(config or {})
 
 
+def _variant_ids_by_name(resource_mappings: list[ResourceMapping]) -> dict[str, list[str]]:
+    """Map each variant name to the ids of every variant mapping with that name."""
+
+    def build() -> dict[str, list[str]]:
+        ids_by_name: dict[str, list[str]] = {}
+        for resource in resource_mappings:
+            if resource.resource_type == Variant:
+                ids_by_name.setdefault(resource.resource_name, []).append(resource.resource_id)
+        return ids_by_name
+
+    return utils.memo_for_mappings(resource_mappings, "variant_ids_by_name", build)
+
+
+def _variant_id_to_name(resource_mappings: list[ResourceMapping]) -> dict[str, str]:
+    """Map variant ids to names; the last mapping wins for a repeated id."""
+    return utils.memo_for_mappings(
+        resource_mappings,
+        "variant_id_to_name",
+        lambda: {
+            resource.resource_id: resource.resource_name
+            for resource in resource_mappings
+            if resource.resource_type == Variant
+        },
+    )
+
+
+def _variant_name_to_id(resource_mappings: list[ResourceMapping]) -> dict[str, str]:
+    """Map variant names to ids; the last mapping wins for a repeated name."""
+    return utils.memo_for_mappings(
+        resource_mappings,
+        "variant_name_to_id",
+        lambda: {
+            resource.resource_name: resource.resource_id
+            for resource in resource_mappings
+            if resource.resource_type == Variant
+        },
+    )
+
+
 @register_resource("variants")
 @dataclass
 class Variant(MultiResourceYamlResource):
@@ -320,13 +359,9 @@ class Variant(MultiResourceYamlResource):
         )
 
     def validate(self, resource_mappings: list[ResourceMapping], **kwargs):
-        for resource in resource_mappings:
-            if (
-                resource.resource_type == Variant
-                and resource.resource_id != self.resource_id
-                and resource.resource_name == self.name
-            ):
-                raise ValueError(f"Variant {self.name} already exists")
+        same_name_ids = _variant_ids_by_name(resource_mappings).get(self.name, ())
+        if any(variant_id != self.resource_id for variant_id in same_name_ids):
+            raise ValueError(f"Variant {self.name} already exists")
 
     @classmethod
     def validate_collection(cls, resources: dict[str, "Variant"]) -> None:
@@ -515,11 +550,7 @@ class VariantAttribute(MultiResourceYamlResource):
     ) -> dict:
         """Return dict with variant IDs replaced by names in values keys."""
         d = d.copy()
-        variant_ids_to_names = {
-            resource.resource_id: resource.resource_name
-            for resource in resource_mappings or []
-            if resource.resource_type == Variant
-        }
+        variant_ids_to_names = _variant_id_to_name(resource_mappings or [])
         # `values:` with nothing under it parses as None, not {}. Let it reach
         # validate() rather than raising AttributeError from the pretty path.
         new_mapping = {
@@ -537,11 +568,7 @@ class VariantAttribute(MultiResourceYamlResource):
         yaml_dict = super().from_pretty_dict(
             yaml_dict, resource_mappings=resource_mappings, **kwargs
         )
-        variant_names_to_ids = {
-            resource.resource_name: resource.resource_id
-            for resource in resource_mappings or []
-            if resource.resource_type == Variant
-        }
+        variant_names_to_ids = _variant_name_to_id(resource_mappings or [])
 
         new_mapping = {}
         for variant_name, variant_value in (yaml_dict.get("values") or {}).items():
@@ -617,11 +644,7 @@ class VariantAttribute(MultiResourceYamlResource):
         if not self.mappings:
             raise ValueError("Mappings are required")
 
-        known_variant_id_to_name = {
-            resource.resource_id: resource.resource_name
-            for resource in resource_mappings
-            if resource.resource_type == Variant
-        }
+        known_variant_id_to_name = _variant_id_to_name(resource_mappings)
         known_variants_ids = set(known_variant_id_to_name.keys())
         attribute_variants = set(self.mappings.keys())
 
