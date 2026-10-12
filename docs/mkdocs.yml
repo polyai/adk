@@ -4,6 +4,9 @@ site_url: https://polyai.github.io/adk/
 repo_name: polyai/adk
 repo_url: https://github.com/polyai/adk
 
+exclude_docs: |
+  AGENTS.md
+
 theme:
   name: material
   custom_dir: overrides

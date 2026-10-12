@@ -43,10 +43,8 @@
       "mcp__GitHub__list_branches"
     ],
     "deny": [
-      "Read(src/poly/handlers/protobuf/**)",
       "Edit(src/poly/handlers/protobuf/**)",
       "Write(src/poly/handlers/protobuf/**)",
-      "Read(src/poly/types/**)",
       "Edit(src/poly/types/**)",
       "Write(src/poly/types/**)"
     ]

@@ -20,6 +20,7 @@ import requests
 from rich.console import Console
 
 from poly.cli import AgentStudioCLI
+from poly.cli_commands import testing as testing_cli
 from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.base import (
     BUILDER_API_GROUP,
@@ -50,6 +51,7 @@ from poly.cli_commands.shared import (
     is_newer_version,
     parse_from_projection_json,
     require_deployment_simplification,
+    require_experiments_enabled,
     resolve_project_scope,
 )
 from poly.cli_commands.sync import FormatCommand, PushCommand, RevertCommand
@@ -1502,6 +1504,58 @@ class ChatLoopTest(unittest.TestCase):
         self.assertEqual(self.proj.send_message.call_count, 2)
         self.assertEqual(self.proj.send_message.call_args_list[0][0][1], "Hello")
         self.assertEqual(self.proj.send_message.call_args_list[1][0][1], "Goodbye")
+
+    def test_language_returned_by_a_turn_is_sent_on_the_next_turn(self):
+        """A mid-conversation language switch is echoed back so it persists."""
+        self.proj.send_message.side_effect = [
+            {
+                "response": "Por supuesto.",
+                "conversation_ended": False,
+                "metadata": {"asr_lang_code": "es-US", "tts_lang_code": "es-US"},
+            },
+            {"response": "Perfecto.", "conversation_ended": False},
+        ]
+
+        ChatCommand._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Sí, por favor", "Una reserva"],
+        )
+
+        first, second = self.proj.send_message.call_args_list
+        self.assertEqual(first[0][3:], (None, None))
+        self.assertEqual(second[0][3:], ("es-US", "es-US"))
+
+    def test_first_turn_uses_language_from_initial_response(self):
+        """The session's starting language is sent instead of the server-side default."""
+        ChatCommand._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Hello"],
+            initial_response={
+                "response": "Hi",
+                "conversation_ended": False,
+                "metadata": {"asr_lang_code": "en-US", "tts_lang_code": "en-US"},
+            },
+        )
+
+        self.assertEqual(self.proj.send_message.call_args[0][3:], ("en-US", "en-US"))
+
+    def test_cli_language_kept_when_reply_has_no_language(self):
+        """Explicit --input-lang/--output-lang are kept when replies don't carry codes."""
+        ChatCommand._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_lang="fr-FR",
+            output_lang="fr-FR",
+            input_messages=["Bonjour", "Merci"],
+        )
+
+        for call in self.proj.send_message.call_args_list:
+            self.assertEqual(call[0][3:], ("fr-FR", "fr-FR"))
 
     def test_scripted_messages_exits_cleanly_when_exhausted(self):
         """Loop returns restart=False once all scripted messages are consumed."""
@@ -4387,6 +4441,46 @@ class RequireDeploymentSimplificationTest(unittest.TestCase):
         self.assertNotIn("[bold]", mock_json_print.call_args[0][0]["error"])
 
 
+class RequireExperimentsEnabledTest(unittest.TestCase):
+    """Tests for the require_experiments_enabled CLI gate."""
+
+    def setUp(self):
+        self.proj = MagicMock()
+
+    @patch("poly.output.console.error")
+    def test_returns_silently_when_enabled(self, mock_error):
+        """An eligible project passes through without output or exit."""
+        self.proj.experiments_enabled = True
+
+        require_experiments_enabled(self.proj)
+
+        mock_error.assert_not_called()
+
+    @patch("poly.output.console.error")
+    def test_exits_with_error_when_disabled(self, mock_error):
+        """An ineligible project is refused on stderr with exit code 1."""
+        self.proj.experiments_enabled = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            require_experiments_enabled(self.proj)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("top-level branches", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_reports_failure_as_json(self, mock_json_print):
+        """In JSON mode the refusal is a machine-readable payload, not stderr text."""
+        self.proj.experiments_enabled = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            require_experiments_enabled(self.proj, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json_print.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("top-level branches", payload["error"])
+
+
 class BranchTagTest(unittest.TestCase):
     """Tests for BranchCommand.branch_tag and branch_untag."""
 
@@ -5859,6 +5953,42 @@ class UpdateSkillsStepTest(unittest.TestCase):
         self.mock_update.return_value = False
 
         self.assertFalse(UpdateCommand.update_skills_step(output_json=False, required=True))
+
+
+class TestRunNameTest(unittest.TestCase):
+    """Tests for ``poly test run --name``."""
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.testing.load_project").start()
+        self.proj = MagicMock()
+        self.proj.resolve_tests.return_value = [MagicMock(resource_id="tc-1")]
+        self.proj.trigger_tests.return_value = {"id": "run-1", "test_case_count": 1}
+        self.mock_load.return_value = self.proj
+        patch("poly.output.console.info").start()
+        patch("poly.output.console.success").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _run(self, *argv: str) -> None:
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(["test", "run", "--dont-poll", *argv])
+        testing_cli.TestingCommand.run(args)
+
+    def test_name_flag_is_forwarded_to_the_trigger(self):
+        """'test run --name <name>' reaches trigger_tests as the run name."""
+        self._run("--name", "Pre-release check · booking flow")
+
+        self.proj.trigger_tests.assert_called_once_with(
+            ["tc-1"], name="Pre-release check · booking flow"
+        )
+
+    def test_run_without_a_name_sends_none(self):
+        """Without --name the platform keeps naming the run itself."""
+        self._run()
+
+        self.proj.trigger_tests.assert_called_once_with(["tc-1"], name=None)
 
 
 class StartupUpdateMessageTest(unittest.TestCase):

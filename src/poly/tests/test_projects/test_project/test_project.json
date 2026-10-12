@@ -446,7 +446,11 @@
           "Check my email address",
           "Email validation request"
         ],
-        "enabled": true
+        "enabled": true,
+        "tags": [
+          "email",
+          "validation"
+        ]
       }
     },
     "child_topics": {

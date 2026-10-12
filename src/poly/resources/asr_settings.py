@@ -7,6 +7,7 @@ import logging
 import os
 from dataclasses import dataclass
 from functools import cached_property
+from typing import Optional
 
 from google.protobuf.message import Message
 
@@ -14,12 +15,43 @@ from poly.handlers.protobuf.asr_settings_pb2 import (
     ASRSettings_UpdateASRSettings,
     LatencyConfig,
 )
-from poly.handlers.protobuf.channels_pb2 import VoiceChannel_UpdateASRSettings
-from poly.resources.resource import ResourceMapping, YamlResource, register_resource
+from poly.handlers.protobuf.channels_pb2 import (
+    VoiceChannel_UpdateASRSettings,
+    VoiceChannel_UpdateBargeInConfig,
+)
+from poly.resources.resource import ResourceMapping, SubResource, YamlResource, register_resource
 
 logger = logging.getLogger(__name__)
 
 VALID_INTERACTION_STYLES = {"balanced", "precise", "swift", "sonic", "turbo"}
+
+
+@dataclass
+class VoiceBargeInConfig(SubResource):
+    """Barge-in on the voice channel.
+
+    Agent Studio runs bargeInConfig.enabled over asrSettings.bargeIn whenever it is set, so
+    barge_in is also sent as voice_channel_update_barge_in_config.
+    """
+
+    enabled: bool = False
+
+    @property
+    def command_type(self) -> str:
+        return "voice_barge_in_config"
+
+    @property
+    def update_command_type(self) -> str:
+        return "voice_channel_update_barge_in_config"
+
+    def build_update_proto(self) -> VoiceChannel_UpdateBargeInConfig:
+        return VoiceChannel_UpdateBargeInConfig(enabled=self.enabled)
+
+    def build_create_proto(self) -> None:
+        raise NotImplementedError("Barge-in config cannot be created")
+
+    def build_delete_proto(self) -> None:
+        raise NotImplementedError("Barge-in config cannot be deleted")
 
 
 @register_resource("asr_settings")
@@ -50,11 +82,18 @@ class AsrSettings(YamlResource):
             logger.debug("No read access to ASR settings - it will not be pulled.")
             return {}
 
-        asr_settings_data = projection.get("channels", {}).get("voice", {}).get("asrSettings", {})
+        voice_settings = projection.get("channels", {}).get("voice", {})
+        asr_settings_data = voice_settings.get("asrSettings", {})
         if not asr_settings_data:
             return {}
 
-        barge_in = asr_settings_data.get("bargeIn", False)
+        barge_in_config = voice_settings.get("bargeInConfig")
+        if barge_in_config is not None:
+            barge_in = barge_in_config.get("enabled", False)
+        else:
+            barge_in_legacy = asr_settings_data.get("bargeIn", False)
+            barge_in = barge_in_legacy
+
         interaction_style = asr_settings_data.get("latencyConfig", {}).get(
             "interactionStyle", "balanced"
         )
@@ -130,6 +169,21 @@ class AsrSettings(YamlResource):
 
     def build_delete_proto(self) -> Message:
         raise NotImplementedError("Delete operation not supported for ASR settings.")
+
+    def get_new_updated_deleted_subresources(
+        self, old_resource: Optional["AsrSettings"]
+    ) -> tuple[list[SubResource], list[SubResource], list[SubResource]]:
+        if old_resource is None or old_resource.barge_in == self.barge_in:
+            return [], [], []
+        return (
+            [],
+            [
+                VoiceBargeInConfig(
+                    resource_id=self.resource_id, name="barge_in", enabled=self.barge_in
+                )
+            ],
+            [],
+        )
 
     @staticmethod
     def discover_resources(base_path: str) -> list[str]:

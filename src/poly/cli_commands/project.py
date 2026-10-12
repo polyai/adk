@@ -888,7 +888,7 @@ class InitCommand(BaseCommand):
             "init",
             parents=[parents.verbose, parents.json, parents.debug],
             help="Initialize a new Agent Studio project.",
-            description="Initialize a new Agent Studio project.\n\nExamples:\n  poly init --region eu-west-1 --account_id 123 --project_id my_project\n  poly init  # (interactive selection)",
+            description="Initialize a new Agent Studio project.\n\nExamples:\n  poly init --region euw-1 --account_id 123 --project_id my_project\n  poly init  # (interactive selection)",
             formatter_class=RawTextHelpFormatter,
         )
         init_parser.add_argument(
