@@ -1,6 +1,73 @@
 # CHANGELOG
 
 
+## v0.68.1 (2026-10-12)
+
+### Bug Fixes
+
+- Derive deployment mode from the parent template ref, not stored config
+  ([#356](https://github.com/polyai/adk/pull/356),
+  [`76e7ec6`](https://github.com/polyai/adk/commit/76e7ec600516b3171aa137f58e05c782c7ccbc18))
+
+## Summary
+
+The ADK now works out a project's deployment mode the way the platform does, from whether the
+  project has a parent template ref, instead of reading the stored `config.deployment_mode`. This
+  stops `poly branch create` refusing branches that Agent Studio and the server allow.
+
+## Motivation
+
+Agent Studio removed the deployment settings page, and the platform no longer reads or writes
+  `config.deployment_mode`. Every project now gets branches and sub-branches once simplified
+  deployments are on, except template-engine children, which are always simple.
+
+The ADK still read the stored value and checked branch creation locally before calling the server: -
+  Projects stored as `simple` (most projects created while simplified deployments were rolling out)
+  were refused a second branch. - Projects with no stored value (every project created since #10926,
+  which jupiter-api reports as `releases`) were refused sub-branches, and `branch list`, `switch`
+  and `delete` showed a flat list instead of the tree.
+
+## Changes
+
+- `AgentStudioProject.deployment_mode` now returns: - `simple` when the project has a
+  `parent_template_ref_id`, whether or not simplified deployments are on, since the server limits
+  template children to one branch in both states; - `releases_branches` when simplified deployments
+  are on; - `releases` otherwise. - The stored `config.deployment_mode` is no longer read. -
+  `DeploymentModePropertyTest` is rewritten around these rules, including a case showing every
+  stored value is ignored. - `CreateBranchDeploymentModeTest` now sets the mode directly, since it
+  tests the per-mode checks, not how the mode is resolved.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+`parent_template_ref_id` is already in the `/adk/v1/.../projects/{id}` response (the same
+  jupiter-api handler as Studio's v2 endpoint), so no server change is needed. **Not tried against a
+  live project.**
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (2,167 tests) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`: no change needed;
+  `reference/cli/branch.md` still holds
+
+## Follow-ups (not in this PR)
+
+- `poly project duplicate` still copies the stored `config.deployment_mode` to the new project
+  (`_copy_deployment_mode`, #330). Nothing reads it any more, so the copy does nothing, and its
+  failure message points to a setting that no longer exists in Agent Studio. -
+  `using_simplified_deployments` still guesses whether a project has converged locally instead of
+  asking the server, because the ADK API has no route for the server's answer.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.68.0 (2026-10-12)
 
 ### Features
