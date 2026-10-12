@@ -4082,6 +4082,74 @@ class AgentStudioProject:
             self.region, self.account_id, self.project_id
         )
 
+    # ------------------------------------------------------------------
+    # Data API reads (metric values, conversation search, transcripts).
+    # Thin wrappers so commands never talk to the API handler directly.
+    # ------------------------------------------------------------------
+
+    def get_available_metrics(self) -> dict:
+        """List every metric the project can query, built-in metrics included.
+
+        Returns:
+            dict: ``{"metrics": [...], "total": n}`` from the Data API.
+        """
+        return AgentStudioInterface.get_available_metrics(self.region, project_id=self.project_id)
+
+    def query_metric(self, body: dict) -> dict:
+        """Aggregate one metric over a window for this project.
+
+        Args:
+            body: Aggregate request body. ``project_id`` is set to this project.
+
+        Returns:
+            dict: Columns, rows and paging from the Data API.
+        """
+        return AgentStudioInterface.query_metric(
+            self.region, body={**body, "project_id": self.project_id}
+        )
+
+    def search_conversations(self, body: dict) -> dict:
+        """Search this project's conversations by metric filters and window.
+
+        Args:
+            body: Search request body. ``project_id`` is set to this project.
+
+        Returns:
+            dict: Matching conversations and total from the Data API.
+        """
+        return AgentStudioInterface.search_conversations(
+            self.region, body={**body, "project_id": self.project_id}
+        )
+
+    def search_transcripts(self, params: dict) -> dict:
+        """Search this project's transcripts for a phrase.
+
+        The project id is always sent: Personal Access Tokens need it on this
+        route, and account keys accept it as a scope.
+
+        Args:
+            params: Query parameters. ``project_id`` is set to this project.
+
+        Returns:
+            dict: Matching turns with context from the Data API.
+        """
+        return AgentStudioInterface.search_transcripts(
+            self.region, params={**params, "project_id": self.project_id}
+        )
+
+    def get_transcript(self, conversation_id: str) -> dict:
+        """Fetch one conversation's transcript.
+
+        Args:
+            conversation_id: The conversation ID.
+
+        Returns:
+            dict: The transcript turns from the Data API.
+        """
+        return AgentStudioInterface.get_transcript(
+            self.region, conversation_id=conversation_id, project_id=self.project_id
+        )
+
     def create_custom_metric(self, data: dict) -> dict:
         """Validate and create a new custom metric.
 

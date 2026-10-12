@@ -1719,3 +1719,93 @@ def poll_test_run_live(
         success(f"Test run {result.get('status', 'unknown')}: {passed}/{total_count} passed")
 
     return result
+
+
+def print_available_metrics(metrics: list[dict[str, Any]]) -> None:
+    """Print the metrics a project can query, built-in metrics included.
+
+    Args:
+        metrics: Metric dicts from the Data Gateway catalog: name, type,
+            description, and ``values`` (expected values for string metrics).
+    """
+    if not metrics:
+        plain("No metrics available for this project.")
+        return
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Name", style="bold yellow", no_wrap=True)
+    table.add_column("Type", no_wrap=True)
+    table.add_column("Values", max_width=30)
+    table.add_column("Description", max_width=60)
+
+    for m in sorted(metrics, key=lambda m: str(m.get("name", "")).lower()):
+        values = m.get("values") or []
+        table.add_row(
+            str(m.get("name", "—")),
+            str(m.get("type", "—")),
+            ", ".join(str(v) for v in values) if values else "—",
+            m.get("description") or "",
+        )
+
+    console.print(table)
+    console.print(f"\n{len(metrics)} metrics. Query one with: poly metrics query <name>")
+
+
+def _format_aggregate_cell(column: str, value: Any) -> str:
+    """Format one cell of an aggregate result for the terminal."""
+    if value is None:
+        return "—"
+    if column in ("bucket", "bucket_start", "interval_start", "timestamp") and isinstance(
+        value, str
+    ):
+        return _format_iso_timestamp(value)
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return f"{value:,}"
+    return str(value)
+
+
+def print_aggregate(result: dict[str, Any], headline: str | None = None) -> None:
+    """Print a tabular aggregate result from the Data Gateway.
+
+    Args:
+        result: ``{"columns": [...], "rows": [[...]], "limit", "offset"}``.
+        headline: Optional one-line summary printed above the table.
+    """
+    columns = result.get("columns") or []
+    rows = result.get("rows") or []
+
+    if headline:
+        console.print(f"[bold]{headline}[/bold]")
+        console.print()
+
+    if not rows:
+        plain("No data in this window.")
+        return
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    for column in columns:
+        numeric = column in (
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "p50",
+            "p95",
+            "p99",
+            "conversation_count",
+            "distinct_count",
+        )
+        table.add_column(column, justify="right" if numeric else "left", no_wrap=True)
+
+    for row in rows:
+        table.add_row(*[_format_aggregate_cell(c, v) for c, v in zip(columns, row)])
+
+    console.print(table)
+    limit = result.get("limit")
+    if limit is not None and len(rows) >= limit:
+        console.print(
+            f"\nShowing {len(rows)} rows (limit {limit}). Use --offset {result.get('offset', 0) + limit}"
+            " for the next page."
+        )

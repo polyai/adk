@@ -71,6 +71,14 @@ FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+# Data Gateway routes (conversation data, metrics, transcripts). Served at
+# /public_api/api/v1 by the service; Kong exposes them as /api/v1 on the
+# regional api.<region>.poly.ai hosts.
+DATA_METRICS_URL = "/api/v1/metrics"
+DATA_METRICS_AGGREGATE_URL = "/api/v1/metrics/aggregate"
+DATA_TRANSCRIPTS_SEARCH_URL = "/api/v1/transcripts/search"
+DATA_TRANSCRIPT_URL = "/api/v1/transcripts/conversation/{conversation_id}"
+DATA_CONVERSATIONS_SEARCH_URL = "/api/v1/conversations/search"
 
 
 class PlatformAPIHandler:
@@ -1775,3 +1783,89 @@ class PlatformAPIHandler:
         """
         endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    # ------------------------------------------------------------------
+    # Data Gateway: metrics, conversation search, transcripts
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_available_metrics(region: str, project_id: ty.Optional[str] = None) -> dict:
+        """List the metrics that can be queried for an account or project.
+
+        Built-in metrics such as ``poly_score`` are included alongside custom
+        ones, so this is the set a ``query`` may name.
+
+        Args:
+            region: The region name.
+            project_id: Optional project ID to scope the catalog to.
+
+        Returns:
+            dict: ``{"metrics": [{name, description, type, values}], "total": int}``.
+        """
+        params = {"project_id": project_id} if project_id else None
+        return PlatformAPIHandler.make_request(region, DATA_METRICS_URL, "GET", params=params)
+
+    @staticmethod
+    def query_metric(region: str, body: dict) -> dict:
+        """Aggregate one metric over a window, optionally bucketed and grouped.
+
+        Args:
+            region: The region name.
+            body: The aggregate request body (metric, aggs, window, group_by,
+                filters, having, cohort restrictors, sort, pagination).
+
+        Returns:
+            dict: ``{"columns": [...], "rows": [[...]], "limit": int, "offset": int}``.
+        """
+        return PlatformAPIHandler.make_request(
+            region, DATA_METRICS_AGGREGATE_URL, "POST", data=body
+        )
+
+    @staticmethod
+    def search_conversations(region: str, body: dict) -> dict:
+        """Search conversations by metric filters, channel, environment and time.
+
+        Args:
+            region: The region name.
+            body: The search request body.
+
+        Returns:
+            dict: ``{"conversations": [...], "total": int, "limit": int, "offset": int}``.
+        """
+        return PlatformAPIHandler.make_request(
+            region, DATA_CONVERSATIONS_SEARCH_URL, "POST", data=body
+        )
+
+    @staticmethod
+    def search_transcripts(region: str, params: dict) -> dict:
+        """Full-text search over transcript turns with surrounding context.
+
+        Args:
+            region: The region name.
+            params: Query parameters: ``q`` (required), ``project_id``, ``from``,
+                ``to``, ``context_turns``, ``limit``, ``offset``.
+
+        Returns:
+            dict: ``{"results": [...], "total": int, "limit": int, "offset": int}``.
+        """
+        return PlatformAPIHandler.make_request(
+            region, DATA_TRANSCRIPTS_SEARCH_URL, "GET", params=params
+        )
+
+    @staticmethod
+    def get_transcript(
+        region: str, conversation_id: str, project_id: ty.Optional[str] = None
+    ) -> dict:
+        """Fetch every turn of one conversation, in order.
+
+        Args:
+            region: The region name.
+            conversation_id: The conversation ID.
+            project_id: Optional project ID; required for PAT and bearer callers.
+
+        Returns:
+            dict: ``{"conversation_id", "project_id", "turns": [...], "total_turns"}``.
+        """
+        endpoint = DATA_TRANSCRIPT_URL.format(conversation_id=conversation_id)
+        params = {"project_id": project_id} if project_id else None
+        return PlatformAPIHandler.make_request(region, endpoint, "GET", params=params)
