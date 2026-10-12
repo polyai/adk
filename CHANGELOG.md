@@ -1,6 +1,77 @@
 # CHANGELOG
 
 
+## v0.67.3 (2026-10-12)
+
+### Bug Fixes
+
+- Read and push barge-in through the voice channel's barge-in config
+  ([#355](https://github.com/polyai/adk/pull/355),
+  [`e6d94f1`](https://github.com/polyai/adk/commit/e6d94f18c60974f731ccedada87d11c7cd72265f))
+
+## Summary
+
+`barge_in` in `asr_settings.yaml` now controls the barge-in setting Agent Studio actually deploys.
+  Before this fix it could be set to `true`, pulled and pushed, and barge-in still stayed off.
+
+## Motivation
+
+Agent Studio stores voice barge-in in two fields: the older `asrSettings.bargeIn`, and the voice
+  channel's `bargeInConfig`, which the barge-in section of the Model Configuration page writes. When
+  an agent is deployed, `bargeInConfig.enabled` is used whenever `bargeInConfig` is set, and
+  `asrSettings.bargeIn` is ignored. New projects get a `bargeInConfig` by default.
+
+The ADK only read and wrote `asrSettings.bargeIn`. For a project whose `bargeInConfig.enabled` was
+  `false`:
+
+- `poly push` with `barge_in: true` changed only the ignored field. - `poly pull` reported
+  `barge_in: true`, so the YAML didn't match what runs and `poly diff` showed nothing to fix.
+
+Toggling barge-in in the Model Configuration page was the only way to turn it on.
+
+## Changes
+
+- **Pull** reads `barge_in` from `bargeInConfig.enabled`, falling back to `asrSettings.bargeIn` only
+  when the project has no `bargeInConfig`. This matches how Agent Studio picks the value at deploy
+  time. - **Push**: a change to `barge_in` also sends `voice_channel_update_barge_in_config` with
+  only `enabled` set, through a new `VoiceBargeInConfig` sub-resource. The other barge-in settings
+  (first-turn barge-in, maximum per call, minimum speech duration) stay as they are.
+  `asrSettings.bargeIn` is still written too, so the older Settings screen stays consistent. -
+  **Diff**: since pull now reads the deployed value, a project where `bargeInConfig.enabled` doesn't
+  match the YAML shows up in `poly diff` and `poly push`. - The YAML shape is unchanged.
+
+A project that never had a `bargeInConfig` gets one the first time `barge_in` changes, the same as
+  toggling barge-in in the UI.
+
+Deployed versions keep the setting they were built with: a fixed project takes effect after its next
+  deploy.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Unit tests cover: - reading `bargeInConfig.enabled` over `asrSettings.bargeIn` - a `bargeInConfig`
+  with no `enabled` key reading as off - falling back to `asrSettings.bargeIn` when there is no
+  `bargeInConfig` - enabling and disabling sending the barge-in config update with only `enabled`
+  set - an `interaction_style`-only change sending no barge-in update - a full push including the
+  update
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.67.2 (2026-10-07)
 
 ### Bug Fixes
