@@ -268,6 +268,15 @@ class GetPosthogClientTest(unittest.TestCase):
         timeout = mock_posthog_cls.call_args.kwargs["feature_flags_request_timeout_seconds"]
         self.assertEqual(timeout, posthog_module.FEATURE_FLAGS_REQUEST_TIMEOUT_SECONDS)
 
+    def test_client_sends_events_inline_with_a_bounded_timeout(self):
+        """Events are sent in the calling thread, so nothing is left to flush or hang at exit."""
+        with patch("posthog.Posthog") as mock_posthog_cls:
+            get_posthog_client("us-1")
+
+        kwargs = mock_posthog_cls.call_args.kwargs
+        self.assertTrue(kwargs["sync_mode"])
+        self.assertEqual(kwargs["timeout"], posthog_module.CAPTURE_REQUEST_TIMEOUT_SECONDS)
+
 
 class GetUserIdentityTest(unittest.TestCase):
     """Tests for get_user_identity, the PostHog distinct_id source."""
