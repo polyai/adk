@@ -1,6 +1,168 @@
 # CHANGELOG
 
 
+## v0.68.2 (2026-10-13)
+
+### Bug Fixes
+
+- Show only the differing fields when a whole resource conflicts in branch merge
+  ([#312](https://github.com/polyai/adk/pull/312),
+  [`2d4dd1e`](https://github.com/polyai/adk/commit/2d4dd1ea3f7bb161c243755e41c188ee8ca52f2b))
+
+## Summary
+
+When `poly branch merge` hits a conflict on a whole resource, the interactive prompt now lists only
+  the fields that differ between main and the branch, instead of printing both full resources or
+  hiding them behind a "choose a side" note.
+
+## Motivation
+
+A whole-resource conflict happens when both sides created the same resource, so there is no base to
+  diff against. Before this change, the prompt either printed both resources in full, which buried
+  the one field that actually differed, or, for large resources, took the "heavy content" path and
+  showed nothing at all. Independently created copies also always differ in their server-stamped
+  audit fields, which made identical resources look like real conflicts.
+
+## Changes
+
+- Whole-resource conflicts (both sides a dict) render one row per differing field, named by its
+  dotted path (e.g. `references.sms.enabled`), capped at 12 rows with an "and N more" line -
+  `createdAt`, `createdBy`, `updatedAt` and `updatedBy` are left out of the comparison; when nothing
+  else differs, the prompt says either side can be taken - Whole-resource conflicts no longer take
+  the "heavy content" path, since the field-level view stays readable at any size - A field present
+  on only one side shows as `(empty)` on the other - Conflict values are passed to the console as
+  their original types rather than stringified first, so the console can tell whole resources apart
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- Stop disabled settings residuals and prompt whitespace breaking flow step equality
+  ([#317](https://github.com/polyai/adk/pull/317),
+  [`f9d44c2`](https://github.com/polyai/adk/commit/f9d44c2ffe84e7736ebbf754eace1858013c340b))
+
+## Summary
+
+Flow step equality treated platform-stored residuals of *disabled* `asr_biasing`/`dtmf` sections —
+  values YAML cannot represent — as real differences, and the projection read kept prompt whitespace
+  that the YAML read strips. Both made identical content compare unequal forever;
+  `sync_ids_with_sandbox` compares whole resources, so a single duplicate-name merge fallback
+  rewrote **every step in the project** (86× `update_flow_step` + 86× `update_step_settings` on the
+  affected project).
+
+## Motivation
+
+Investigating the one remaining "Found duplicate name errors, attempting sync and merge" hit after
+  the 0.55 parent-id-adoption fix, the sync's 177-command batch turned out to be a mass no-op
+  rewrite. Reproduced against a second production project whose steps had never been through a sync:
+  **40/79 steps compared unequal — 38 of them purely on
+
+disabled-DTMF residuals** (`interDigitTimeout: 3` vs default `0`, `endKey: ''` vs `'#'`,
+  `collectWhileAgentSpeaking: true` vs `false`), the rest on prompt whitespace. This is the same
+  failure mode `variable_references` had for functions (see
+  `test_equality_ignores_variable_references`).
+
+## Changes
+
+- `FlowSettings.__init__` normalises a disabled `asr_biasing`/`dtmf` section to bare defaults,
+  extending the existing absent-means-disabled normalisation — `to_yaml_dict` drops disabled
+  sections, so their residuals can never round-trip through disk and must not affect equality. -
+  `FlowStep.__init__` strips surrounding prompt whitespace so every construction path agrees (the
+  YAML read already stripped; the projection read did not). The now-redundant strip in
+  `from_yaml_dict` is removed. - Tests: `FlowSettingsEqualityTest` (disabled residuals normalised;
+  enabled sections still compare by value; enable/disable still a change), prompt-strip coverage in
+  `FlowStepFromProjection`, and the two validation tests that relied on disabled-but-invalid
+  residuals now use enabled configs.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project
+
+Re-ran the sync-style whole-resource comparison against the live unmigrated project: **40/79 unequal
+  → 2/79**, and both survivors are genuine prompt content drift between the repo and Studio
+  (verified by character diff), not false positives.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1794 passed, 211
+  subtests) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) —
+  note: a push of a step whose disabled DTMF carried residuals now sends canonical disabled values,
+  which is what disk-read pushes already sent - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+- Stop PostHog background threads hanging CLI exit ([#318](https://github.com/polyai/adk/pull/318),
+  [`9753959`](https://github.com/polyai/adk/commit/975395918d99645c1259749b78e513b43170c144))
+
+## Summary
+
+Sends PostHog events in the calling thread (`sync_mode=True`) with a 3s timeout, so the CLI starts
+  no PostHog background threads and registers no exit-time flush, and bumps `posthog` 7.35.4 →
+  7.64.1.
+
+## Motivation
+
+By default the PostHog client starts a consumer thread to send events and registers an atexit hook
+  that flushes the queue when the process exits. The SDK's locking around that queue has caused
+  hangs (stuck threads, delayed exit) in other services, and a CLI must always exit promptly.
+
+With `sync_mode=True` there's no thread and no exit hook. `capture()` sends its event before
+  returning, which suits a CLI that exits straight after: the only event today, the sign-up event in
+  `poly apikey`, is sent or has failed before the command finishes, instead of depending on an
+  exit-time flush. Because the command now waits on that request, it gets a 3s timeout (the SDK
+  default is 15s). Flag evaluation is unchanged and keeps its 1s timeout.
+
+## Changes
+
+- Construct the PostHog client with `sync_mode=True` and `timeout=CAPTURE_REQUEST_TIMEOUT_SECONDS`
+  (3s) in `src/poly/handlers/posthog.py` - Bump `posthog` 7.35.4 → 7.64.1 in `pyproject.toml` and
+  `uv.lock` - Add a test that the client is built for inline sends with a bounded timeout
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+No background threads after client construction on 7.64.1:
+
+>>> get_posthog_client('dev') threads: ['MainThread'] sync_mode: True
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+
 ## v0.68.1 (2026-10-12)
 
 ### Bug Fixes
