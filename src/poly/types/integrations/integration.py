@@ -2,26 +2,25 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
-from typing import Any
-
-from ..log_utils import ConversationLogger
+from __future__ import annotations
 
 __all__ = ["Integration"]
 
+import requests
+from ..log_utils import ConversationLogger as ConversationLogger
+
 
 class Integration:
-    """Base class for all integrations"""
-
     integration_id: str
     integration_name: str
 
-    def __init__(self, log: ConversationLogger, proxy_request: Any): ...
+    def __init_subclass__(cls, **kwargs) -> None: ...
+    def __init__(self, log: ConversationLogger, proxy_request) -> None: ...
     def proxy_request(
         self,
         endpoint: str,
         http_method: str,
-        headers: dict[str, str] | None = ...,
-        params: dict[str, str] | None = ...,
-        body: dict[str, Any] | None = ...,
-    ) -> Any:
-        """Proxy a request to the integration's API using the integration's authentication."""
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        body: dict[str, any] | None = None,
+    ) -> requests.Response: ...
