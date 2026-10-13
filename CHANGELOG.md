@@ -1,6 +1,99 @@
 # CHANGELOG
 
 
+## v0.69.0 (2026-10-13)
+
+### Features
+
+- Sync _gen stubs with the latest runtime ([#189](https://github.com/polyai/adk/pull/189),
+  [`2dadb61`](https://github.com/polyai/adk/commit/2dadb61a6cad6dce33ec9a04d5572ce0f666caea))
+
+## Summary
+
+Brings the `_gen/` stubs that `poly pull` writes into a project up to date with the latest runtime.
+  Newer runtime types (`Clock`, `CxOne*`, `Outbound*`, `VerifiedContext`, the `connectors/` package)
+  are now available, and `from _gen import *` exposes exactly the names deployed functions can use,
+  so code that would raise `NameError` on the platform now fails locally too.
+
+To make that repeatable, the stub sync script is rewritten around mypy's `stubgen` plus a
+  post-processing pass that emits runtime-safe `.py` modules. The committed files are byte-identical
+  to what `poly pull` copies into `_gen/`, so review and CI validate exactly what ships, and the
+  script refuses to run unless the runtime checkout is a clean `origin/main`.
+
+## Motivation
+
+The custom script (~600 lines) reimplemented stub generation with edge cases around dataclass
+  `__init__` synthesis, import pruning, `TYPE_CHECKING` blocks, and depth-aware relative imports.
+  `stubgen` handles all of this correctly out of the box. Regenerating also picks up the runtime
+  modules added since the stubs were last synced.
+
+## Changes
+
+- Rewrite `scripts/sync_runtime_stubs.py` to shell out to `stubgen` (via `uv run --extra dev`) and
+  post-process into runtime-safe `.py` modules: relativize `runtime.`/`utils.` imports, inject
+  `__all__` from the runtime's `imports.json`, drop imports of internal-only modules and erase their
+  names to `Any`, bind annotation-only declarations (`X: T = ...`), add `from __future__ import
+  annotations` and the copyright + linter-suppression header - Add a typing-closure list
+  (`CLOSURE_SOURCES`): modules such as `utils/api_connector.py` are stubbed so that exported classes
+  keep their real base classes and annotation types, but get no `__all__` entry, so nothing
+  advertises them as importable (their back-edge imports are guarded under `TYPE_CHECKING` so the
+  package has no import cycles); re-exports of private names stubgen omits are dropped - `from _gen
+  import *` now exposes exactly the runtime's public surface from `imports.json`: helper classes
+  that were previously star-exported but aren't in `imports.json` (e.g. `Handoff`, `EntityConfig`,
+  the value-extraction `*Config` classes, `SMSClient`) are no longer top-level names (existing
+  projects reach these through attribute access such as `conv.utils.PhoneNumberConfig` rather than
+  the bare name, and `Utils` now declares those attributes, which the previous stubs did not), and
+  newer runtime types (`Clock`, `CxOne*`, `Outbound*`, `VerifiedContext`, …) are added - Validate at
+  sync time: the script refuses to run unless the runtime checkout is a clean `origin/main`
+  (`--skip-git-check` to override), imports every generated module in a subprocess and asserts every
+  `__all__` name binds, then runs `ruff check --ignore-noqa --select F821,F822` and `ruff format`
+  over the output; it warns when an `imports.json` name is missing from its stub, and replaces any
+  `__all__` the runtime module declares with the one from `imports.json` - Write
+  `src/poly/types/_manifest.json` (runtime commit, generation time, module count) and ship it as
+  package data so the stubs' origin is recorded - Simplify `save_imports()` to a verbatim copy of
+  the committed modules (including subpackages such as `connectors/` and `integrations/`) plus the
+  two genuinely per-project files (aggregated `__init__.py` with relative imports, `decorators.py`)
+  - Add `scripts/verify_wheel.py` + a `wheel-check` CI job: builds the wheel from a clean source
+  copy (a stale `build/` tree would otherwise mask packaging regressions), installs it into a fresh
+  venv, and generates a `_gen/` from it — the editable installs used everywhere else cannot catch
+  packaging mistakes - Regenerate all stubs from current runtime `main`, adding modules that were
+  missing (`clock`, `connectors/`, `cxone`, `janus_sms`, `outbound`) - Add `mypy` to the `dev` extra
+  - Add tests: generate a real `_gen/`, import it, and assert every `__all__` name is bound; check
+  subpackages are generated and every file carries the suppression header; check typing-closure
+  modules aren't advertised in `__init__`; import-walk the committed `poly.types` modules directly;
+  assert no stub carries absolute `runtime.`/`utils.` imports
+
+Usage: `python scripts/sync_runtime_stubs.py [--python-root /path/to/genai_lambda_runtime/python]`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+The sync script was run end-to-end against a fresh runtime `main` checkout, and `save_imports()` was
+  verified against a real Agent Studio project: the regenerated `_gen/` passes `ruff` and imports
+  cleanly with every exported name bound.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (2262 tests, 508
+  subtests) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` $ python scripts/sync_runtime_stubs.py ... validated 39 modules importable, all __all__ names
+  bound
+
+Synced 39 stub files to src/poly/types ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.68.2 (2026-10-13)
 
 ### Bug Fixes
