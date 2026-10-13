@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import contextlib
 import io
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -713,11 +714,14 @@ class TokenNeverInOutput(ApiKeyTestCase):
 class VersionAndNextStep(ApiKeyTestCase):
     """The running poly is named first, and the run ends with the next step."""
 
+    # Absolute on the host, so the expectation holds on Windows too.
+    CLI_PATH = os.path.abspath("/opt/tools/bin/poly")
+
     def setUp(self):
         super().setUp()
         for p in (
             patch("poly.cli_commands.apikey.get_package_version", return_value="9.9.9"),
-            patch.object(sys, "argv", ["/opt/tools/bin/poly", "apikey"]),
+            patch.object(sys, "argv", [self.CLI_PATH, "apikey"]),
         ):
             p.start()
             self.addCleanup(p.stop)
@@ -726,14 +730,14 @@ class VersionAndNextStep(ApiKeyTestCase):
         """The first line of plain output is `poly <version> (<path>)`."""
         stdout, _, _ = self.run_apikey(region="studio")
 
-        self.assertEqual(stdout.splitlines()[0], "poly 9.9.9 (/opt/tools/bin/poly)")
+        self.assertEqual(stdout.splitlines()[0], f"poly 9.9.9 ({self.CLI_PATH})")
 
     def test_json_has_cli_version_and_path(self):
         """--json carries cli_version and cli_path, on success and on failure."""
         stdout, _, _ = self.run_apikey(region="studio", output_json=True)
         payload = json.loads(stdout)
         self.assertEqual(payload["cli_version"], "9.9.9")
-        self.assertEqual(payload["cli_path"], "/opt/tools/bin/poly")
+        self.assertEqual(payload["cli_path"], self.CLI_PATH)
 
         self.mocks["get_accounts"].return_value = []
         stdout, _, _ = self.run_apikey(region="studio", output_json=True)
