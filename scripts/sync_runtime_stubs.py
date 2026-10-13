@@ -24,9 +24,9 @@ Two lists control what ships beyond ``imports.json``:
   entry, so nothing advertises them to users.
 
 Usage:
-    python scripts/sync_runtime_stubs.py [--runtime-path PATH]
+    python scripts/sync_runtime_stubs.py [--python-root PATH] [--skip-git-check]
 
-Default runtime path: ../genai_lambda_runtime/python/runtime
+Default python root: ../genai_lambda_runtime/python
 """
 
 from __future__ import annotations
@@ -215,6 +215,22 @@ def _guard_relative_imports(source: str) -> str:
     return "".join(kept)
 
 
+def _strip_module_all(source: str) -> str:
+    """Remove any module-level ``__all__`` assignment from *source*."""
+    tree = ast.parse(source)
+    lines = source.splitlines(keepends=True)
+    for node in reversed(tree.body):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets = [node.target]
+        else:
+            continue
+        if any(isinstance(t, ast.Name) and t.id == "__all__" for t in targets):
+            del lines[node.lineno - 1 : node.end_lineno]
+    return "".join(lines)
+
+
 def _postprocess(
     source: str, rel_path: str, all_names: list[str] | None = None, is_closure: bool = False
 ) -> str:
@@ -238,8 +254,10 @@ def _postprocess(
     # runtime (via _gen), where an unassigned annotation binds nothing and
     # breaks "from _gen.x import X" — give module-level declarations a value.
     source = _MODULE_ANNOTATION_RE.sub(r"\1 = ...", source)
-    # Inject __all__ from imports.json, filtered to names available in the stub
+    # Inject __all__ from imports.json, filtered to names available in the stub.
+    # imports.json is the only source of truth, so a runtime-declared __all__ is replaced.
     if all_names:
+        source = _strip_module_all(source)
         tree = ast.parse(source)
         available: set[str] = set()
         for node in ast.iter_child_nodes(tree):
@@ -255,6 +273,13 @@ def _postprocess(
                 for alias in node.names:
                     available.add(alias.asname or alias.name)
         filtered = [n for n in all_names if n in available]
+        missing = [n for n in all_names if n not in available]
+        if missing:
+            print(
+                f"  WARN {rel_path}: imports.json names not in the stub, left out of "
+                f"__all__: {', '.join(missing)}",
+                file=sys.stderr,
+            )
         if filtered:
             all_line = "__all__ = " + repr(filtered) + "\n\n"
             source = all_line + source
