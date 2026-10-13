@@ -256,6 +256,14 @@ If the merge has conflicts, the command prints a conflict table and exits non-ze
 
 If every conflict is auto-mergeable and you want to accept it, re-run with `--interactive` and accept the suggestions, or pre-populate `--resolutions` with the auto-merge values.
 
+#### Whole-resource conflicts
+
+A whole-resource conflict happens when both sides independently created the same resource, so there is no common base to diff against. Instead of printing both full resources, the interactive prompt shows only the fields that differ between main and the branch, named by their dotted path (for example `references.sms.enabled`).
+
+- Fields present on only one side show `(empty)` on the other.
+- Up to 12 differing fields are shown; if there are more, an "and N more differing fields" line appears at the end.
+- The audit fields `createdAt`, `createdBy`, `updatedAt`, and `updatedBy` are excluded from the comparison — when those are the only differences, the prompt notes that either side can be taken.
+
 #### `--interactive` / `-i`
 
 Interactive mode walks through each conflict and asks how to resolve it. For every conflict you can:
