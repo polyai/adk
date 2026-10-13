@@ -13,6 +13,7 @@ import copy
 from typing import Callable, TypeAlias
 
 from poly.resources import (
+    AsrSettings,
     AttributeKind,
     ChatGreeting,
     ChatSafetyFilters,
@@ -273,6 +274,18 @@ _TEST_CASE_SUBRESOURCE_TYPES = (
     TestCaseIntegrationAttributes,
     TestCaseApiOperationMock,
 )
+
+
+def push_asr_settings_by_section(
+    new_resources: ResourceMap, updated_resources: ResourceMap
+) -> None:
+    """Drop ASR settings themselves from the push.
+
+    Each section is pushed as its own voice channel sub-resource, so the file has no
+    command of its own.
+    """
+    new_resources.pop(AsrSettings, None)
+    updated_resources.pop(AsrSettings, None)
 
 
 def prune_cascade_deleted_flow_children(deleted_resources: ResourceMap) -> None:

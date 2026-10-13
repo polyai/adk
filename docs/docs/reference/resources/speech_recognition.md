@@ -12,10 +12,10 @@ Speech recognition resources control how the agent processes user speech input o
 These resources live under `voice/speech_recognition/` and are used to tune how the agent listens, recognizes, and post-processes spoken input.
 
 !!! note "ASR settings are platform-provisioned — update only"
-    ASR settings are created automatically when a project is created. They can be updated with `poly push` but not created from scratch. See the [equivalent note on agent settings](./agent_settings.md) for details.
+    `asr_settings.yaml` is pulled for every project with a voice channel. It can be updated with `poly push` but not created or deleted. See the [equivalent note on agent settings](./agent_settings.md) for details.
 
 !!! info "No effect on Raven Omni"
-    These settings only apply to the traditional Raven 3.5 ASR pipeline. Projects running Raven Omni bypass this pipeline entirely, so `asr_settings.yaml`, `keyphrase_boosting.yaml`, and `transcript_corrections.yaml` are silently ignored.
+    `asr_model`, keyphrase boosting and transcript corrections only apply to the traditional ASR pipeline. Projects running an end-to-end model such as Raven Omni bypass this pipeline, so they are silently ignored.
 
 ## Location
 
@@ -36,7 +36,7 @@ All three files are voice-specific. Only `asr_settings.yaml` is the core setting
 
     ---
 
-    Configure global speech-recognition behavior such as barge-in and latency/accuracy style.
+    Choose the ASR model and configure turn-taking, filler phrases and background ambience.
 
 -   **Keyphrase boosting**
 
@@ -60,30 +60,57 @@ ASR settings are defined in:
 voice/speech_recognition/asr_settings.yaml
 ~~~
 
-These settings control global speech-recognition behavior for the voice channel. Individual flow steps can override barge-in, ASR provider, VAD, and LLM settings for a single turn — see [ASR override](./flows.md#asr-override) and [barge-in](./flows.md#barge-in) in the flows reference.
+They match the Speech Recognition and Turn-taking tabs of the Model Configuration page in Agent Studio, and apply to the whole voice channel. Individual flow steps can override barge-in, ASR provider, VAD, and LLM settings for a single turn — see [ASR override](./flows.md#asr-override) and [barge-in](./flows.md#barge-in) in the flows reference.
+
+Every section is optional. A section that is left out uses the platform default, and removing a section resets it on the next push. The exception is `background_ambience`, which Agent Studio can't reset: removing it switches ambience off instead.
 
 ### Fields
 
-| Field | Type | Description |
-|---|---|---|
-| `barge_in` | `bool` | Whether the user can interrupt the agent while it is speaking. Default: `false`. |
-| `interaction_style` | `string` | Controls the latency/accuracy trade-off. Default: `balanced`. |
+| Field | Description |
+|---|---|
+| `asr_model` | The speech recognition model: `provider`, `model` and an optional `language`. Leave it out, or set it to `auto`, to let the platform pick. |
+| `speech_end_delay_ms` | How long the caller must be silent, in milliseconds, before the agent treats their turn as finished. |
+| `barge_in` | Whether the caller can interrupt the agent: `enabled`, `allow_on_first_turn` and `max_per_call`. |
+| `filler_phrases` | Phrases the agent says while the caller waits: `enabled`, `phrases`, `randomize`, `initial_interval_seconds` (before the first phrase) and `interval_seconds` (between phrases). |
+| `background_ambience` | Background sound played under the agent: `enabled`, `preset` and `loudness` in dB. |
+
+`background_ambience.preset` is one of `office-ambiance`, `restaurant-ambiance` or `whitenoise-subtle`. `loudness` is stored in dB: Agent Studio shows -70 dB as volume 0 and -20 dB as volume 100.
 
 ### Example
 
 ~~~yaml
-barge_in: false
-interaction_style: balanced
+asr_model:
+  provider: openai
+  model: gpt-4o-transcribe
+
+speech_end_delay_ms: 800
+
+barge_in:
+  enabled: true
+  allow_on_first_turn: false
+  max_per_call: 5
+
+filler_phrases:
+  enabled: false
+  phrases:
+    - One moment...
+    - Just a second...
+    - One second...
+  randomize: true
+  initial_interval_seconds: 2.5
+  interval_seconds: 5
+
+background_ambience:
+  enabled: false
+  preset: office-ambiance
+  loudness: -50
 ~~~
 
-### Interaction styles
+!!! note "Managed voice configuration"
+    When the Model Configuration page in Agent Studio is read-only because PolyAI manages the project's voice configuration, the platform chooses the ASR model and speech end delay. `asr_model` and `speech_end_delay_ms` are still pulled and pushed, but have no effect.
 
-| Style | Behavior |
-|---|---|
-| `precise` | Higher accuracy, higher latency |
-| `balanced` | Default balance of speed and accuracy |
-| `swift` | Faster responses, slightly lower accuracy |
-| `sonic` / `turbo` | Lowest latency |
+!!! warning "Older `asr_settings.yaml` files"
+    Earlier versions of the ADK wrote `barge_in: true` / `false` and `interaction_style`. `barge_in: true` is still read as `barge_in.enabled: true`, with a warning. `interaction_style` is ignored, because `speech_end_delay_ms` now sets end-of-speech timing. Run `poly pull` to rewrite the file in the current shape.
 
 ## Keyphrase boosting
 
@@ -180,7 +207,12 @@ corrections:
 
 ## Validation
 
-- `interaction_style` must be one of `precise`, `balanced`, `swift`, `sonic`, or `turbo`.
+- `asr_model` needs both `provider` and `model`.
+- `speech_end_delay_ms` must be a whole number between 200 and 1500.
+- `barge_in.max_per_call` can't be negative.
+- `filler_phrases.initial_interval_seconds` must be at least 0.5, and `interval_seconds` at least 1. An enabled `filler_phrases` needs at least one phrase.
+- `background_ambience` needs a `preset`, and `loudness` must be between -70 and -20. A preset Agent Studio doesn't know is a warning, not an error.
+- Keys inside a section must be ones listed above, so a misspelt key is an error rather than being ignored.
 - Each keyphrase must be non-empty, with a `level` of `default`, `boosted`, or `maximum`.
 - Keyphrases must be unique once trimmed and lowercased — Agent Studio treats `Infusion Sets` and `infusion sets` as the same phrase, and rejects a project that keeps both.
 - Each transcript correction needs a unique `name` and at least one regex rule, and every rule needs a `regular_expression`.
@@ -193,7 +225,8 @@ corrections:
 - keep each keyphrase unique after trimming and lowercasing
 - use transcript corrections for common, repeated recognition errors
 - avoid overly broad regex rules that may alter normal input unexpectedly
-- choose the ASR interaction style deliberately based on latency and accuracy needs
+- change `speech_end_delay_ms` in small steps: lower values respond faster but cut off callers who pause mid-sentence
+- leave a section out unless you need a value other than the platform default
 
 !!! tip "Use the lightest possible intervention"
 

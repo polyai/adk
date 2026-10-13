@@ -1,2 +1,21 @@
-barge_in: false
-interaction_style: balanced
+asr_model:
+  provider: openai
+  model: gpt-4o-transcribe
+  language: en-GB
+speech_end_delay_ms: 800
+barge_in:
+  enabled: false
+  allow_on_first_turn: false
+  max_per_call: 5
+filler_phrases:
+  enabled: true
+  phrases:
+  - One moment...
+  - Just a second...
+  randomize: true
+  initial_interval_seconds: 2.5
+  interval_seconds: 5
+background_ambience:
+  enabled: false
+  preset: office-ambiance
+  loudness: -50
