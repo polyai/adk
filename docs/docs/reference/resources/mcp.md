@@ -9,9 +9,6 @@ description: Connect the agent to MCP (Model Context Protocol) servers and choos
 MCP servers give the agent tools hosted outside the project. Declare each server in YAML, choose which of its tools the agent may call, and keep the connection settings under version control like any other resource.
 </p>
 
-!!! note "Integrations must be enabled to take effect"
-    MCP servers only reach a deployed agent when integrations are enabled for the account. If a pushed server has no effect on calls, check that with PolyAI before debugging the YAML.
-
 ## Location
 
 ~~~text

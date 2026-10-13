@@ -67,5 +67,4 @@ mcp_profiles:
 
 ## Notes
 
-- The platform's tool discovery state (when tools were last listed and how many were found) is not stored in the YAML. Pushing a change keeps it as it is.
-- MCP servers only reach a deployed agent when integrations are enabled for the account. If a pushed server has no effect on calls, check that with PolyAI before debugging the YAML.
+The platform's tool discovery state (when tools were last listed and how many were found) is not stored in the YAML. Pushing a change keeps it as it is.
