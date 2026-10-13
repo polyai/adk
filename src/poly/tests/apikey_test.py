@@ -6,20 +6,41 @@ Copyright PolyAI Limited
 import contextlib
 import io
 import json
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
 
-from poly.cli_commands.apikey import ApiKeyCommand
+from poly.auth.device_flow import DeviceFlowError
+from poly.cli_commands.apikey import NEXT_STEP_URL, ApiKeyCommand
 from poly.cli_commands.base import GETTING_STARTED_GROUP
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
+from poly.utils.apikey_session import CachedSession
 from poly.utils.env_profile import EnvVarConflict, ProfileTarget
 
-FAKE_JWT = "jwt-1"
+# Distinctive, so a test can assert it never reaches any output.
+FAKE_JWT = "jwt-fresh-5e1f0c7a"
+CACHED_JWT = "jwt-cached-9b2d4e61"
 FAKE_KEY = "sk-newkey1234567890"
 FAKE_ACCOUNT = "acc-1"
+ME = "me@x.com"
+
+
+def _http_error(status: int) -> requests.HTTPError:
+    """Build the HTTPError the platform handler raises for `status`."""
+    response = MagicMock()
+    response.status_code = status
+    return requests.HTTPError(f"{status} Client Error", response=response)
+
+
+def _cached(token: str = CACHED_JWT) -> CachedSession:
+    """A cached sign-in saved 5 minutes ago that is good for another 55."""
+    import time
+
+    now = int(time.time())
+    return CachedSession(token, now + 55 * 60, now - 5 * 60)
 
 
 class ApiKeyTestCase(unittest.TestCase):
@@ -33,7 +54,7 @@ class ApiKeyTestCase(unittest.TestCase):
             ),
             "authorise": patch(
                 "poly.cli_commands.apikey.AgentStudioInterface.authorise",
-                return_value={"user": {"is_first_login": False}},
+                return_value={"user": {"is_first_login": False, "email": ME}},
             ),
             "capture_event": patch("poly.handlers.posthog.capture_event"),
             "get_accounts": patch(
@@ -65,10 +86,34 @@ class ApiKeyTestCase(unittest.TestCase):
                 ),
             ),
             "sleep": patch("poly.cli_commands.apikey.time.sleep"),
+            # Non-interactive by default: no test may block on a real prompt.
+            "stdin": patch("poly.cli_commands.apikey.sys.stdin"),
+            "select": patch("questionary.select"),
+            # Nothing cached, and never touch the real ~/.poly/apikey_session.json.
+            "session_load": patch(
+                "poly.cli_commands.apikey.apikey_session.load", return_value=None
+            ),
+            "session_save": patch(
+                "poly.cli_commands.apikey.apikey_session.save",
+                side_effect=lambda region, token: _cached(token),
+            ),
+            "session_clear": patch("poly.cli_commands.apikey.apikey_session.clear"),
         }
         self.mocks = {name: p.start() for name, p in patchers.items()}
         for p in patchers.values():
             self.addCleanup(p.stop)
+        self.mocks["stdin"].isatty.return_value = False
+
+    def run_apikey(self, **kwargs) -> tuple[str, str, int | None]:
+        """Run apikey and return (stdout, stderr, exit code or None)."""
+        stdout, stderr = io.StringIO(), io.StringIO()
+        code = None
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                ApiKeyCommand.apikey(**kwargs)
+            except SystemExit as e:
+                code = e.code
+        return stdout.getvalue(), stderr.getvalue(), code
 
 
 class HappyPath(ApiKeyTestCase):
@@ -134,6 +179,9 @@ class HappyPath(ApiKeyTestCase):
             "profile_path",
             "profile_shell",
             "key_active",
+            "cli_version",
+            "cli_path",
+            "next_step_url",
         ):
             self.assertIn(key, payload)
         self.assertIs(payload["key_active"], True)
@@ -333,30 +381,167 @@ class AccountPollFailure(ApiKeyTestCase):
 
 
 class MultipleAccounts(ApiKeyTestCase):
-    """Tests for refusing to guess an account among several, on any region."""
+    """Choosing among several accounts: picker at a terminal, own workspace or a listed error otherwise."""
 
     TWO_ACCOUNTS = [
-        {"id": "acc-1", "name": "Account One"},
-        {"id": "acc-2", "name": "Account Two"},
+        {"id": "acc-1", "name": "Account One", "role": "Member", "created_by": "boss@x.com"},
+        {"id": "acc-2", "name": "Account Two", "role": "Member", "created_by": None},
+    ]
+    ONE_OWN = [
+        {"id": "acc-team", "name": "Team", "role": "Member", "created_by": "boss@x.com"},
+        {"id": "acc-mine", "name": "Mine", "role": "Admin", "created_by": "Me@X.com"},
     ]
 
-    def test_non_studio_with_two_accounts_and_no_account_id_fails_with_list(self):
-        """Two accounts without --account-id is a clean, listed error."""
+    def _tty(self) -> None:
+        self.mocks["stdin"].isatty.return_value = True
+
+    def test_tty_two_accounts_shows_picker_and_uses_choice(self):
+        """At a terminal, the picker lists every account, defaults to your own, and its choice is used."""
+        self._tty()
+        self.mocks["get_accounts"].return_value = self.ONE_OWN
+        self.mocks["select"].return_value.ask.return_value = "acc-team"
+
+        self.run_apikey(region="studio")
+
+        self.mocks["signin"].assert_called_once()
+        kwargs = self.mocks["select"].call_args.kwargs
+        titles = [c.title for c in kwargs["choices"]]
+        self.assertEqual(titles, ["Team (acc-team)", "Mine (acc-mine)"])
+        self.assertEqual(kwargs["default"], "acc-mine")
+        self.assertEqual(self.mocks["create_key"].call_args.kwargs["account_id"], "acc-team")
+        self.assertEqual(self.mocks["create_key"].call_args.kwargs["jwt_token"], FAKE_JWT)
+
+    def test_tty_picker_defaults_to_first_without_own_account(self):
+        """With no account of your own, the picker defaults to the first one."""
+        self._tty()
+        self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
+        self.mocks["select"].return_value.ask.return_value = "acc-2"
+
+        self.run_apikey(region="studio")
+
+        self.assertEqual(self.mocks["select"].call_args.kwargs["default"], "acc-1")
+
+    def test_tty_picker_cancel_exits_1_account_step(self):
+        """Cancelling the picker exits 1 at the account step without creating a key."""
+        self._tty()
+        self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
+        self.mocks["select"].return_value.ask.return_value = None
+
+        _, stderr, code = self.run_apikey(region="studio")
+
+        self.assertEqual(code, 1)
+        self.assertIn("No account selected", stderr)
+        self.mocks["create_key"].assert_not_called()
+
+    def test_non_tty_two_accounts_one_own_auto_selects(self):
+        """Without a terminal, the one account you created is used, and the output says so."""
+        self.mocks["get_accounts"].return_value = self.ONE_OWN
+
+        stdout, _, code = self.run_apikey(region="studio")
+
+        self.assertIsNone(code)
+        self.mocks["select"].assert_not_called()
+        self.assertEqual(self.mocks["create_key"].call_args.kwargs["account_id"], "acc-mine")
+        self.assertIn("Auto-selected your workspace Mine (acc-mine)", stdout)
+
+    def test_non_tty_two_accounts_none_own_errors_with_accounts_json(self):
+        """None of them yours: exit 1 at the account step, listing them in text and in `accounts`."""
         self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
 
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            with self.assertRaises(SystemExit) as ctx:
-                ApiKeyCommand.apikey(region="us-1", output_json=True)
+        stdout, _, code = self.run_apikey(region="us-1", output_json=True)
 
-        self.assertEqual(ctx.exception.code, 1)
-        payload = json.loads(buffer.getvalue())
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout)
         self.assertEqual(payload["step"], "account")
-        self.assertIn("acc-1", payload["error"])
-        self.assertIn("Account One", payload["error"])
-        self.assertIn("acc-2", payload["error"])
-        self.assertIn("Account Two", payload["error"])
-        self.assertIn("--account-id", payload["error"])
+        for text in ("acc-1", "Account One", "acc-2", "Account Two", "--account-id"):
+            self.assertIn(text, payload["error"])
+        self.assertEqual(
+            payload["accounts"],
+            [
+                {
+                    "id": "acc-1",
+                    "name": "Account One",
+                    "role": "Member",
+                    "created_by": "boss@x.com",
+                },
+                {"id": "acc-2", "name": "Account Two", "role": "Member", "created_by": None},
+            ],
+        )
+        self.mocks["create_key"].assert_not_called()
+
+    def test_error_says_the_sign_in_is_kept(self):
+        """When the sign-in was cached, the error says the re-run won't sign in again."""
+        self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
+
+        stdout, _, _ = self.run_apikey(region="studio", output_json=True)
+
+        self.assertIn("will not ask you to sign in again", json.loads(stdout)["error"])
+
+    def test_error_does_not_promise_reuse_with_no_session_cache(self):
+        """With --no-session-cache nothing is kept, so the error doesn't claim it is."""
+        self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
+
+        stdout, _, _ = self.run_apikey(region="studio", output_json=True, no_session_cache=True)
+
+        self.assertNotIn("sign in again", json.loads(stdout)["error"])
+
+    def test_non_tty_two_accounts_two_own_errors(self):
+        """Two accounts you created is still a guess, so it is an error."""
+        self.mocks["get_accounts"].return_value = [
+            {"id": "acc-a", "name": "A", "role": "Admin", "created_by": ME},
+            {"id": "acc-b", "name": "B", "role": "Admin", "created_by": ME},
+        ]
+
+        stdout, _, code = self.run_apikey(region="studio", output_json=True)
+
+        self.assertEqual(code, 1)
+        self.assertEqual([a["id"] for a in json.loads(stdout)["accounts"]], ["acc-a", "acc-b"])
+
+    def test_empty_created_by_never_matches(self):
+        """An account with an empty creator is never treated as yours, even with no email known."""
+        self.mocks["authorise"].return_value = {"user": {"is_first_login": False}}
+        self.mocks["get_accounts"].return_value = [
+            {"id": "acc-a", "name": "A", "created_by": ""},
+            {"id": "acc-b", "name": "B", "created_by": ""},
+        ]
+
+        _, _, code = self.run_apikey(region="studio", output_json=True)
+
+        self.assertEqual(code, 1)
+
+    def test_email_falls_back_to_the_token_claim(self):
+        """With no email in authorise's user record, the token's email claim is used."""
+        self.mocks["authorise"].return_value = {"user": {"is_first_login": False}}
+        self.mocks["get_accounts"].return_value = self.ONE_OWN
+
+        with patch(
+            "poly.cli_commands.apikey.apikey_session.token_claims",
+            return_value={"email": "me@x.com"},
+        ):
+            _, _, code = self.run_apikey(region="studio")
+
+        self.assertIsNone(code)
+        self.assertEqual(self.mocks["create_key"].call_args.kwargs["account_id"], "acc-mine")
+
+    def test_json_two_accounts_never_prompts_even_at_tty(self):
+        """--json never shows the picker, even with a terminal attached."""
+        self._tty()
+        self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
+
+        _, _, code = self.run_apikey(region="studio", output_json=True)
+
+        self.assertEqual(code, 1)
+        self.mocks["select"].assert_not_called()
+
+    def test_account_id_flag_wins_over_several_accounts(self):
+        """--account-id skips the list, the picker and the auto-select."""
+        self._tty()
+        self.mocks["get_accounts"].return_value = self.ONE_OWN
+
+        self.run_apikey(region="studio", account_id="acc-team")
+
+        self.mocks["get_accounts"].assert_not_called()
+        self.mocks["select"].assert_not_called()
 
     def test_non_studio_with_one_account_proceeds(self):
         """A single account on an enterprise region resolves without --account-id."""
@@ -372,21 +557,198 @@ class MultipleAccounts(ApiKeyTestCase):
             source="apikey",
         )
 
-    def test_studio_with_two_accounts_errors_like_any_region(self):
-        """Studio has no special case - more than one account is an error there too."""
-        self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
 
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            with self.assertRaises(SystemExit) as ctx:
-                ApiKeyCommand.apikey(region="studio", output_json=True)
+class SessionCache(ApiKeyTestCase):
+    """Reusing the sign-in across runs."""
 
-        self.assertEqual(ctx.exception.code, 1)
-        payload = json.loads(buffer.getvalue())
-        self.assertEqual(payload["step"], "account")
-        self.assertIn("acc-1", payload["error"])
-        self.assertIn("acc-2", payload["error"])
-        self.assertIn("--account-id", payload["error"])
+    def test_cached_token_skips_signin(self):
+        """A cached sign-in is used for authorise, and no new sign-in happens."""
+        self.mocks["session_load"].return_value = _cached()
+
+        stdout, _, code = self.run_apikey(region="studio")
+
+        self.assertIsNone(code)
+        self.mocks["signin"].assert_not_called()
+        self.mocks["session_save"].assert_not_called()
+        self.mocks["authorise"].assert_called_once_with(region="studio", jwt_token=CACHED_JWT)
+        self.assertIn("Reusing your sign-in from 5 minutes ago", stdout)
+
+    def test_expired_cache_signs_in_and_saves(self):
+        """Nothing usable cached (load returns None for expired): sign in and save the token."""
+        self.mocks["session_load"].return_value = None
+
+        self.run_apikey(region="studio")
+
+        self.mocks["signin"].assert_called_once()
+        self.mocks["session_save"].assert_called_once_with("studio", FAKE_JWT)
+
+    def test_cached_token_401_clears_and_signs_in_once(self):
+        """A refused cached sign-in is dropped, and one fresh sign-in completes the run."""
+        self.mocks["session_load"].return_value = _cached()
+        self.mocks["authorise"].side_effect = [
+            _http_error(401),
+            {"user": {"is_first_login": False, "email": ME}},
+        ]
+
+        _, _, code = self.run_apikey(region="studio")
+
+        self.assertIsNone(code)
+        self.mocks["session_clear"].assert_called_once_with("studio")
+        self.mocks["signin"].assert_called_once()
+        self.assertEqual(self.mocks["authorise"].call_args.kwargs["jwt_token"], FAKE_JWT)
+        self.assertEqual(self.mocks["create_key"].call_args.kwargs["jwt_token"], FAKE_JWT)
+
+    def test_cached_token_401_on_accounts_also_retries(self):
+        """A 401 listing accounts with a cached sign-in is retried the same way."""
+        self.mocks["session_load"].return_value = _cached()
+        self.mocks["get_accounts"].side_effect = [_http_error(401), [{"id": FAKE_ACCOUNT}]]
+
+        _, _, code = self.run_apikey(region="studio")
+
+        self.assertIsNone(code)
+        self.mocks["session_clear"].assert_called_once_with("studio")
+        self.mocks["signin"].assert_called_once()
+
+    def test_401_after_fresh_sign_in_is_not_retried(self):
+        """A fresh sign-in that is refused is a real error: no loop, exit 1 at authorise."""
+        self.mocks["session_load"].return_value = _cached()
+        self.mocks["authorise"].side_effect = _http_error(401)
+
+        stdout, _, code = self.run_apikey(region="studio", output_json=True)
+
+        self.assertEqual(code, 1)
+        self.assertEqual(self.mocks["signin"].call_count, 1)
+        self.assertEqual(self.mocks["authorise"].call_count, 2)
+        self.assertEqual(json.loads(stdout)["step"], "authorise")
+
+    def test_401_without_cache_is_not_retried(self):
+        """With a fresh token from the start, a 401 surfaces as before."""
+        self.mocks["authorise"].side_effect = _http_error(401)
+
+        _, _, code = self.run_apikey(region="studio")
+
+        self.assertEqual(code, 1)
+        self.mocks["session_clear"].assert_not_called()
+        self.assertEqual(self.mocks["signin"].call_count, 1)
+
+    def test_no_session_cache_flag_skips_load_and_save(self):
+        """--no-session-cache neither reads nor writes the cache."""
+        self.run_apikey(region="studio", no_session_cache=True)
+
+        self.mocks["session_load"].assert_not_called()
+        self.mocks["session_save"].assert_not_called()
+        self.mocks["signin"].assert_called_once()
+
+    def test_no_session_cache_flag_is_parsed(self):
+        """The flag reaches the handler from the command line."""
+        from poly.cli import AgentStudioCLI
+
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(
+            ["apikey", "--region", "studio", "--no-session-cache"]
+        )
+
+        self.assertTrue(args.no_session_cache)
+
+
+class TokenNeverInOutput(ApiKeyTestCase):
+    """The sign-in token never reaches stdout or stderr, on any path."""
+
+    def _failure_setups(self):
+        """Each failure path, as (name, mutation of self.mocks, run kwargs)."""
+
+        def set_(name, attr, value):
+            return lambda: setattr(self.mocks[name], attr, value)
+
+        two = [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}]
+        return [
+            ("device flow", set_("signin", "side_effect", DeviceFlowError("expired")), {}),
+            ("authorise 500", set_("authorise", "side_effect", _http_error(500)), {}),
+            (
+                "authorise 403",
+                set_("authorise", "side_effect", _http_error(403)),
+                {"region": "us-1"},
+            ),
+            ("authorise 401", set_("authorise", "side_effect", _http_error(401)), {}),
+            ("no account", set_("get_accounts", "return_value", []), {}),
+            ("several accounts", set_("get_accounts", "return_value", two), {}),
+            ("accounts 500", set_("get_accounts", "side_effect", _http_error(500)), {}),
+            ("no key", set_("create_key", "return_value", {}), {}),
+            ("list keys 500", set_("list_keys", "side_effect", _http_error(500)), {}),
+            (
+                "env conflict",
+                set_("write_env", "side_effect", EnvVarConflict("o", "n", Path("/p"))),
+                {},
+            ),
+        ]
+
+    def test_token_never_in_output_on_any_failure(self):
+        """Every failure path, plain and --json, fresh and cached sign-in, prints no token."""
+        for cached in (False, True):
+            for output_json in (False, True):
+                for name, mutate, kwargs in self._failure_setups():
+                    if cached and name == "device flow":
+                        continue  # a cached sign-in never reaches the device flow
+                    with self.subTest(path=name, json=output_json, cached=cached):
+                        self.setUp()
+                        if cached:
+                            self.mocks["session_load"].return_value = _cached()
+                        mutate()
+                        stdout, stderr, code = self.run_apikey(
+                            **{"region": "studio", "output_json": output_json, **kwargs}
+                        )
+                        self.assertIsNotNone(code)
+                        for token in (FAKE_JWT, CACHED_JWT):
+                            self.assertNotIn(token, stdout)
+                            self.assertNotIn(token, stderr)
+
+    def test_token_never_in_output_on_success(self):
+        """Success, plain and --json, prints no token."""
+        for output_json in (False, True):
+            stdout, stderr, _ = self.run_apikey(region="studio", output_json=output_json)
+            self.assertNotIn(FAKE_JWT, stdout + stderr)
+
+
+class VersionAndNextStep(ApiKeyTestCase):
+    """The running poly is named first, and the run ends with the next step."""
+
+    def setUp(self):
+        super().setUp()
+        for p in (
+            patch("poly.cli_commands.apikey.get_package_version", return_value="9.9.9"),
+            patch.object(sys, "argv", ["/opt/tools/bin/poly", "apikey"]),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_first_line_names_version_and_path(self):
+        """The first line of plain output is `poly <version> (<path>)`."""
+        stdout, _, _ = self.run_apikey(region="studio")
+
+        self.assertEqual(stdout.splitlines()[0], "poly 9.9.9 (/opt/tools/bin/poly)")
+
+    def test_json_has_cli_version_and_path(self):
+        """--json carries cli_version and cli_path, on success and on failure."""
+        stdout, _, _ = self.run_apikey(region="studio", output_json=True)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["cli_version"], "9.9.9")
+        self.assertEqual(payload["cli_path"], "/opt/tools/bin/poly")
+
+        self.mocks["get_accounts"].return_value = []
+        stdout, _, _ = self.run_apikey(region="studio", output_json=True)
+        payload = json.loads(stdout)
+        self.assertFalse(payload["success"])
+        self.assertEqual(payload["cli_version"], "9.9.9")
+
+    def test_summary_and_json_carry_next_step_url(self):
+        """The plain summary ends with the next step; --json has next_step_url."""
+        stdout, _, _ = self.run_apikey(region="studio")
+        self.assertIn(f"Next: make your first Dialog RSN 1 call -- {NEXT_STEP_URL}", stdout)
+        self.assertEqual(NEXT_STEP_URL, "https://docs.poly.ai/dialog-rsn-1")
+
+        stdout, _, _ = self.run_apikey(region="studio", output_json=True)
+        self.assertEqual(json.loads(stdout)["next_step_url"], NEXT_STEP_URL)
 
 
 class UnprovisionedEnterpriseUser(ApiKeyTestCase):
@@ -473,9 +835,7 @@ class KeyActivationWait(ApiKeyTestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             ApiKeyCommand.apikey(region="studio")
 
-        self.mocks["get_accounts_with_key"].assert_called_with(
-            region="studio", api_key=FAKE_KEY
-        )
+        self.mocks["get_accounts_with_key"].assert_called_with(region="studio", api_key=FAKE_KEY)
 
 
 class EnvConflict(ApiKeyTestCase):

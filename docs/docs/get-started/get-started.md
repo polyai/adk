@@ -89,7 +89,7 @@ To sign in to more than one region from the same machine, re-run `poly login` fo
 
 ### Need an API key for the PolyAI APIs or Dialog RSN? — `poly apikey`
 
-`poly apikey --region studio` signs you in, creates an account-scoped API key, and exports `POLY_API_KEY` into your shell profile for use in your own code. It's non-interactive, so an AI coding assistant can run it for you. For setting up the ADK itself, `poly setup`/`poly login` above is the path — the ADK doesn't need `POLY_API_KEY`.
+`poly apikey --region studio` signs you in, creates an account-scoped API key, and exports `POLY_API_KEY` into your shell profile for use in your own code. It never prompts when run by an AI coding assistant, so an agent can run it for you; at a terminal, if you belong to more than one workspace, it asks which one to use. For setting up the ADK itself, `poly setup`/`poly login` above is the path — the ADK doesn't need `POLY_API_KEY`.
 
 ```bash
 poly apikey --region studio
