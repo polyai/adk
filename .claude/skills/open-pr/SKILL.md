@@ -26,6 +26,7 @@ notice:
 | Anything a user can see: new command or flag, changed output, new on-disk shape | `feat:` |
 | A bug fix with no new surface | `fix:` |
 | Faster, same behaviour | `perf:` |
+| Only brings the bundled experimental config schema or runtime stubs up to date with production | `sync:` |
 | Breaks existing usage | add `!`, e.g. `feat!:` |
 | Docs only | `docs:` |
 | CI, tooling, refactors, tests, internal-only changes | `ci:`, `chore:`, `refactor:`, `test:` |

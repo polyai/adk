@@ -53,6 +53,7 @@ PRs are squash-merged, so the PR title becomes the commit on `main`. It must fol
 | Title prefix | Release | Example |
 |---|---|---|
 | `fix:`, `perf:` | Patch (2.0.4 → 2.0.5) | `fix: handle missing config file` |
+| `sync:` | Patch (2.0.4 → 2.0.5) | `sync: experimental config schema with production` |
 | `feat:` | Minor (2.0.4 → 2.1.0) | `feat: add poly export command` |
 | `feat!:` / `BREAKING CHANGE:` | Major (2.0.4 → 3.0.0) | `feat!: redesign resource schema` |
 | `chore:`, `docs:`, `ci:`, `build:`, `refactor:`, `style:`, `test:` | No release | `docs: update README` |
