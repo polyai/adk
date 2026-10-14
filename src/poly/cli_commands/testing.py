@@ -3,12 +3,24 @@
 Copyright PolyAI Limited
 """
 
+import os
+import shlex
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 
 from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.output.json_output import json_print
+
+
+def show_run_command(base_path: str, run_id: str, output_json: bool = False) -> str:
+    """Return the `poly test show` command for a run, runnable from the current directory."""
+    command = ["poly", "test", "show", run_id]
+    if os.path.abspath(base_path) != os.getcwd():
+        command += ["--path", base_path]
+    if output_json:
+        command.append("--json")
+    return shlex.join(command)
 
 
 class TestingCommand(BaseCommand):
@@ -66,7 +78,7 @@ class TestingCommand(BaseCommand):
         test_run_parser.add_argument(
             "--dont-poll",
             action="store_true",
-            help="Do not poll for test results.",
+            help="Do not poll for test results. --json never polls.",
         )
         test_run_parser.add_argument(
             "--push",
@@ -237,6 +249,8 @@ class TestingCommand(BaseCommand):
         if output_json:
             json_output["test_run"] = test_info
             json_output["success"] = True
+            # --json never polls, so tell the caller how to check on the run.
+            json_output["next_command"] = show_run_command(base_path, test_run_id, True)
             json_print(json_output)
             return
 
@@ -248,7 +262,8 @@ class TestingCommand(BaseCommand):
 
         if dont_poll:
             info(
-                f"Use [bold]poly test show {test_run_id}[/bold] to check the status of the test run."
+                f"Use [bold]{show_run_command(base_path, test_run_id)}[/bold] "
+                "to check the status of the test run."
             )
             return
 
