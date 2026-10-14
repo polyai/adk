@@ -10,7 +10,7 @@ description: >
 metadata:
   author: PolyAI
   license: Apache-2.0
-  version: 0.69.0
+  version: 0.70.0
   requires:
     bins:
       - poly

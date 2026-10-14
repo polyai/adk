@@ -1,6 +1,111 @@
 # CHANGELOG
 
 
+## v0.70.0 (2026-10-14)
+
+### Bug Fixes
+
+- Match bare file names and globs in poly test run --files
+  ([#361](https://github.com/polyai/adk/pull/361),
+  [`0d1dfe8`](https://github.com/polyai/adk/commit/0d1dfe82975813d395a252c5bced376aac834643))
+
+## Summary
+
+`poly test run --files` now accepts bare file names, paths with or without the `test_suite/` prefix,
+  and globs. `--files` and `--tag` now fail with a clear error when any entry matches no test,
+  instead of silently skipping it.
+
+## Motivation
+
+`--files` only matched the exact path relative to the project root
+  (`test_suite/greeting_flow_test.yaml`). Passing just the file name, which is what most people
+  type, found nothing and reported "No tests found". Separately, if one of several `--files` or
+  `--tag` entries matched nothing, it was dropped without a word, so a typo could quietly shrink a
+  run.
+
+## Changes
+
+- Each `--files` entry is matched against the end of a test's path, so `greeting_flow_test.yaml`,
+  `greeting_flow_test`, `./test_suite/greeting_flow_test.yaml` and an absolute path inside the
+  project all select the same test. Globs such as `"booking_*"` also work. A file name under the
+  wrong directory still doesn't match. - If any `--files` or `--tag` entry matches no test,
+  `resolve_tests` raises a `ValueError` naming the entries that didn't match. - Updated the `poly
+  test run` help text, `docs/docs/reference/cli/test.md` and the `poly-adk-testing` skill.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New cases in `ResolveTestsTest` cover bare names with and without `.yaml`, `./`-prefixed and
+  absolute paths, globs, the wrong directory, and partly unmatched files and tags.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+<img width="605" height="296" alt="Screenshot 2026-10-14 at 11 34 30"
+  src="https://github.com/user-attachments/assets/e823eaa1-e7a7-486e-b1c7-ab060cfa7ba3" />
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+### Features
+
+- Include the follow-up command in poly test run --json output
+  ([#362](https://github.com/polyai/adk/pull/362),
+  [`92039d1`](https://github.com/polyai/adk/commit/92039d1d8636f00429b6ef00ca9e10feefd42bc0))
+
+## Summary
+
+`poly test run --json` now includes a `next_command` field with the `poly test show` command to
+  check on the run it just triggered. The docs and the testing skill now say that `--json` returns
+  immediately and never polls.
+
+## Motivation
+
+`poly test run --json` returns as soon as the run is triggered, with status `pending`. The docs said
+  the CLI polls after triggering and made no exception for `--json`, so callers expected to get
+  final results.
+
+Returning straight away is the right behaviour for `--json`. Its callers are mostly agents and
+  scripts, and a run can take several minutes, longer than a typical agent's shell timeout. What was
+  missing was saying so, and telling the caller how to follow up.
+
+## Changes
+
+- `poly test run --json` output gains `next_command`, e.g. `poly test show <run_id> --json`. It
+  includes `--path` when the project isn't in the current directory, and quotes paths that contain
+  spaces. - The plain-text `--dont-poll` hint uses the same command, so it also includes `--path`
+  when it's needed. - The `--dont-poll` help text notes that `--json` never polls. -
+  `docs/docs/reference/cli/test.md` explains that `--json` doesn't poll and how to poll with
+  `next_command`, and the JSON example includes `status` and `next_command`. The `poly-adk-testing`
+  skill has the same note.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New `TestRunJsonTest` cases check that `--json` doesn't poll, that `next_command` is correct, and
+  that `--path` is kept and quoted.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.69.0 (2026-10-13)
 
 ### Features
