@@ -21,6 +21,7 @@ from poly.handlers.protobuf.api_integrations_pb2 import (
     ApiIntegrationOperation_Delete,
     ApiIntegrationOperation_Update,
     Environments,
+    OperationHeaders,
 )
 from poly.resources.resource import (
     MultiResourceYamlResource,
@@ -46,6 +47,15 @@ AVAILABLE_AUTH_TYPES = {
     "oauth2_client_credentials",
     "jwt_client_assertion",
 }
+
+OPERATION_DESCRIPTION_MAX = 1000
+
+# An RFC 7230 token without `.`, which Agent Studio refuses in header names
+HEADER_NAME_PATTERN = re.compile(r"^[!#$%&'*+^_`|~0-9A-Za-z-]+$")
+# Set from the environment config (auth type and base URL), so refused on operations
+RESERVED_HEADER_NAMES = {"authorization", "host"}
+MAX_OPERATION_HEADERS = 50
+HEADER_VALUE_MAX = 4096
 
 # Matches an empty string (no URL configured) or a valid http(s) base URL
 URL_PATTERN = re.compile(r"^(https?://[^\s]+)?$")
@@ -206,6 +216,8 @@ class ApiIntegrationOperation(SubResource):
     name: str = ""
     method: str = ""
     resource: str = ""
+    description: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
     integration_id: str = (
         ""  # Set by parent when yielding from get_new_updated_deleted_subresources
     )
@@ -227,17 +239,67 @@ class ApiIntegrationOperation(SubResource):
             raise ValueError(
                 f"Operation '{self.name}': resource '{self.resource}' is not a valid URL path."
             )
+        if not isinstance(self.description, str):
+            raise ValueError(f"Operation '{self.name}': description must be a string.")
+        if len(self.description) > OPERATION_DESCRIPTION_MAX:
+            raise ValueError(
+                f"Operation '{self.name}': description can't be longer than "
+                f"{OPERATION_DESCRIPTION_MAX} characters."
+            )
+        self._validate_headers()
+
+    def _validate_headers(self) -> None:
+        """Apply the header rules Agent Studio enforces when the operation is saved."""
+        label = f"Operation '{self.name}'"
+        if not isinstance(self.headers, dict):
+            raise ValueError(f"{label}: headers must be a mapping of header name to value.")
+        if len(self.headers) > MAX_OPERATION_HEADERS:
+            raise ValueError(f"{label}: can have at most {MAX_OPERATION_HEADERS} headers.")
+        seen: set[str] = set()
+        for header_name, value in self.headers.items():
+            if not isinstance(header_name, str) or not HEADER_NAME_PATTERN.fullmatch(header_name):
+                raise ValueError(
+                    f"{label}: header name '{header_name}' can't contain spaces, dots, colons, "
+                    "slashes or other separators."
+                )
+            if header_name.lower() in RESERVED_HEADER_NAMES:
+                raise ValueError(
+                    f"{label}: header '{header_name}' is set from the environment config, "
+                    "not on an operation."
+                )
+            if header_name.lower() in seen:
+                raise ValueError(f"{label}: duplicate header '{header_name}'.")
+            seen.add(header_name.lower())
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"{label}: header '{header_name}' value must be a string; quote it in YAML."
+                )
+            if len(value) > HEADER_VALUE_MAX:
+                raise ValueError(
+                    f"{label}: header '{header_name}' value can't be longer than "
+                    f"{HEADER_VALUE_MAX} characters."
+                )
+            if value != value.strip() or any(
+                (ord(char) < 0x20 and char != "\t") or ord(char) >= 0x7F for char in value
+            ):
+                raise ValueError(
+                    f"{label}: header '{header_name}' value can't contain line breaks, control "
+                    "or non-ASCII characters, or start or end with a space."
+                )
 
     @property
     def command_type(self) -> str:
         return "api_integration_operation"
 
     def to_yaml_dict(self) -> dict:
-        return {
-            "name": self.name,
-            "method": self.method,
-            "resource": self.resource,
-        }
+        yaml_dict = {"name": self.name}
+        if self.description:
+            yaml_dict["description"] = self.description
+        yaml_dict["method"] = self.method
+        yaml_dict["resource"] = self.resource
+        if self.headers:
+            yaml_dict["headers"] = dict(sorted(self.headers.items()))
+        return yaml_dict
 
     def build_create_proto(self) -> ApiIntegrationOperation_Create:
         return ApiIntegrationOperation_Create(
@@ -246,15 +308,20 @@ class ApiIntegrationOperation(SubResource):
             method=self.method,
             resource=self.resource,
             integration_id=self.integration_id,
+            headers=self.headers,
+            description=self.description,
         )
 
     def build_update_proto(self) -> ApiIntegrationOperation_Update:
+        # Headers are always sent so that removing them all in YAML clears them remotely
         return ApiIntegrationOperation_Update(
             id=self.resource_id,
             name=self.name,
             method=self.method,
             resource=self.resource,
             integration_id=self.integration_id,
+            headers=OperationHeaders(entries=self.headers),
+            description=self.description,
         )
 
     def build_delete_proto(self) -> ApiIntegrationOperation_Delete:
@@ -273,6 +340,8 @@ class ApiIntegrationOperation(SubResource):
             name=data.get("name", ""),
             method=data.get("method", "").upper(),
             resource=data.get("resource", ""),
+            description=data.get("description") or "",
+            headers=data.get("headers") or {},
         )
 
 
@@ -467,6 +536,8 @@ class ApiIntegration(MultiResourceYamlResource):
                 name=op_obj.name,
                 method=op_obj.method,
                 resource=op_obj.resource,
+                description=op_obj.description,
+                headers=op_obj.headers,
                 integration_id=self.resource_id,
             )
             if old is None:
@@ -477,6 +548,8 @@ class ApiIntegration(MultiResourceYamlResource):
                     old.name != op_obj.name
                     or old.method != op_obj.method
                     or old.resource != op_obj.resource
+                    or old.description != op_obj.description
+                    or old.headers != op_obj.headers
                 ):
                     updated_ops.append(op_with_parent)
 

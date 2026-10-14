@@ -19,7 +19,7 @@ Each API integration has:
 - **name**: Identifier for the API. Becomes the namespace at runtime: `conv.api.<name>`.
 - **description**: Optional description of what the API is used for.
 - **environments**: Per-environment config (see below).
-- **operations**: List of HTTP operations (method, name, resource path).
+- **operations**: List of HTTP operations (name, method, resource path, and optionally a description and default headers).
 
 ## Environments
 
@@ -43,12 +43,14 @@ Each operation is one HTTP endpoint. You define:
 - **name**: Operation name; used at runtime as `conv.api.<api_name>.<operation_name>(...)`.
 - **method**: HTTP method (e.g. `GET`, `POST`, `PUT`, `DELETE`).
 - **resource**: Path template (e.g. `/tickets/{id}`). Path variables are exposed as arguments when calling the operation.
+- **description** (optional): What the operation does, up to 1000 characters.
+- **headers** (optional): Default request headers sent on every call, as a map of header name to value. Headers passed at the call site override them. At most 50; `Authorization` and `Host` aren't allowed because they come from the environment config. Names can't contain separators such as spaces, dots or colons. Values must be strings (quote numbers, e.g. `'2'`) of at most 4096 characters, with no line breaks, control or non-ASCII characters, and no leading or trailing spaces.
 
 ## Usage
 
 - **In functions and flows**: Call an operation with `conv.api.<api_name>.<operation_name>(...)`. Path variables can be positional or keyword arguments.
 - **Return value**: Calls return a `requests.Response`-like object — use `response.status_code`, `response.text`, `response.json()` as usual.
-- **Query, body, headers**: Operations accept keyword arguments for `params`, `json`, `headers`, etc., similar to a standard HTTP client.
+- **Query, body, headers**: Operations accept keyword arguments for `params`, `json`, `headers`, etc., similar to a standard HTTP client. Headers passed here override the operation's default `headers`.
 - **Authentication**: Configured at the API level per environment; credentials are managed by Agent Studio and are not stored in the YAML or embedded in flows and functions.
 
 ## Example
@@ -69,8 +71,11 @@ api_integrations:
         auth_type: oauth2
     operations:
       - name: get_contact
+        description: Get a contact by its ID
         method: GET
         resource: /contacts/{contact_id}
+        headers:
+          Accept: application/json
       - name: update_contact
         method: PATCH
         resource: /contacts/{contact_id}
