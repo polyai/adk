@@ -1485,6 +1485,21 @@
         "enabled_functions": null,
         "last_discovered_at": null,
         "last_discovered_tool_count": null
+      },
+      "mcp-1791899588123": {
+        "resource_id": "mcp-1791899588123",
+        "name": "custom:1791899588123",
+        "url": "https://tools.example.com/mcp",
+        "auth": {
+          "header": "",
+          "query_param": "api_key",
+          "secret_name": "tools_api_key",
+          "oauth": null
+        },
+        "timeout": null,
+        "enabled_functions": null,
+        "last_discovered_at": "2026-10-01T09:30:00Z",
+        "last_discovered_tool_count": 4
       }
     }
   },

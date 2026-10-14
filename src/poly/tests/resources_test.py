@@ -13634,6 +13634,7 @@ class MCPServerTests(unittest.TestCase):
             [
                 os.path.join("config", "mcp.yaml", "mcp_servers", "ticketing"),
                 os.path.join("config", "mcp.yaml", "mcp_servers", "internal_tools"),
+                os.path.join("config", "mcp.yaml", "mcp_servers", "custom_1791899588123"),
             ],
         )
         server = MCPServer.read_local_resource(

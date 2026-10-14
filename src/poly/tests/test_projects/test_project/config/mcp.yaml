@@ -17,3 +17,8 @@ mcp_servers:
       token_url: https://internal.example.com/oauth/token
       audience: mcp-api
       scope: tools:read tools:write
+- provider_id: custom:1791899588123
+  url: https://tools.example.com/mcp
+  auth:
+    query_param: api_key
+    secret_name: tools_api_key
