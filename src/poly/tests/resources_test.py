@@ -7764,6 +7764,17 @@ class TestApiIntegrationValidate(unittest.TestCase):
         for auth_type in AVAILABLE_AUTH_TYPES:
             self.assertIn(auth_type, str(ctx.exception))
 
+    def test_environment_with_each_available_auth_type_is_valid(self):
+        """Every auth type Agent Studio can configure passes validation."""
+        for auth_type in AVAILABLE_AUTH_TYPES:
+            with self.subTest(auth_type=auth_type):
+                integration = self._make_integration(
+                    environments=ApiIntegrationEnvironments.from_dict(
+                        {"sandbox": {"base_url": "https://sb.example.com", "auth_type": auth_type}}
+                    )
+                )
+                integration.validate()
+
     def test_environment_with_invalid_base_url_raises_value_error(self):
         """Validation rejects an environment whose base_url is not a valid URL."""
         integration = self._make_integration(
