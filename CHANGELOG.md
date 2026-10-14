@@ -1,6 +1,75 @@
 # CHANGELOG
 
 
+## v0.71.0 (2026-10-14)
+
+### Features
+
+- Sync MCP servers ([#358](https://github.com/polyai/adk/pull/358),
+  [`f53713b`](https://github.com/polyai/adk/commit/f53713bd04dc300d668bc2a7f559e44f07e07480))
+
+## Summary
+
+MCP servers can now be pulled, diffed and pushed like any other resource. They live in
+  `config/mcp.yaml`, under `mcp_servers`.
+
+## Motivation
+
+MCP configuration could only be managed in the Agent Studio UI, so it had no version control, no
+  diffs and no way to review or promote changes alongside the rest of an agent.
+
+## Changes
+
+- New `MCPServer` resource, keyed by `provider_id` in the YAML: the catalogue id for catalogue
+  providers, or any short key for a custom server. Server ids never appear on disk. A server with no
+  `provider_id` is keyed as `custom:<id>`, matching how Agent Studio shows it. - `auth` supports a
+  secret in a header or query parameter, or OAuth client credentials. Secrets are referenced by name
+  only; their values are never pulled or pushed. - `enabled_functions` keeps the platform's meaning:
+  leaving the key out enables every tool on the server, and `[]` enables none. - Create and update
+  send `upsert_mcp_server`; delete sends `delete_mcp_server`. - An upsert replaces the whole server,
+  so the platform's tool discovery state (`last_discovered_at`, `last_discovered_tool_count`) is
+  kept off disk and carried from the last pull into each upsert, rather than being cleared by a
+  push. - Saved MCP profiles aren't synced. Agent Studio keeps them so a disconnected provider can
+  be reconnected, and they hold the same settings as a server. - Local validation matches the
+  platform: required `provider_id` and `url`, `http(s)` URLs, exactly one auth method with its
+  required fields (OAuth needs `client_id`, `client_secret_name` and `token_url`), `timeout` from 1
+  to 30 seconds, unique non-empty `enabled_functions`. - A user without read access to MCP config
+  gets nothing for it locally, same as API integrations. - Docs: a new resource page, `poly docs
+  mcp`, and entries in the resource and `poly docs` indexes and the workflow skill's project tree.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Against a test project on us-1: - A custom server added in Agent Studio (header auth, two enabled
+  tools) pulled into `config/mcp.yaml` with its `custom:<number>` provider_id. - Pushed three more
+  servers from the ADK, one per remaining auth shape: the Tavily catalogue provider with
+  query-parameter auth, a custom server with OAuth client credentials, and a server with no auth and
+  `enabled_functions: []`. All four appeared in Agent Studio as expected. - After the push, `poly
+  status` reported no changes, so the pull that follows a push round-trips cleanly.
+
+New `MCPServerTests` in `resources_test.py` cover projection parsing, YAML round-trips, protos,
+  validation, discovery, the `custom:<id>` fallback, and profiles being ignored on pull.
+  `PushProjectTest` checks that an edited server is upserted with its discovery state. The
+  `test_project` fixture gains `config/mcp.yaml`, and the existing fixture-integrity, no-change push
+  and slim-projection tests now cover MCP too.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.70.1 (2026-10-14)
 
 ### Bug Fixes
