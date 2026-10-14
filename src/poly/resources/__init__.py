@@ -11,6 +11,7 @@ from poly.resources.api_integration import (
 from poly.resources.asr_settings import (
     AsrSettings,
     VoiceAmbience,
+    VoiceAsrConfig,
     VoiceBargeInConfig,
     VoiceFillerPhrases,
     VoiceVadConfig,

@@ -1195,6 +1195,11 @@
       "asr_settings": {
         "resource_id": "asr_settings",
         "name": "asr_settings",
+        "asr_model": {
+          "provider": "openai",
+          "model": "gpt-4o-transcribe",
+          "language": "en-GB"
+        },
         "speech_end_delay_ms": 800,
         "barge_in": {
           "enabled": false,

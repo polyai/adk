@@ -1,5 +1,5 @@
-"""Handling and managing the voice channel's turn-taking, filler phrases and background
-ambience
+"""Handling and managing the voice channel's model configuration (ASR model, turn-taking,
+filler phrases and background ambience)
 
 Copyright PolyAI Limited
 """
@@ -12,14 +12,17 @@ from typing import Any, Optional, Union
 
 from google.protobuf.message import Message
 
+from poly.handlers.protobuf.asr_pb2 import Asr
 from poly.handlers.protobuf.channels_pb2 import (
     AmbienceSettings,
     FillerUtterances,
     VADConfig,
+    VoiceChannel_ResetAsrConfig,
     VoiceChannel_ResetBargeInConfig,
     VoiceChannel_ResetSilenceFillerUtterances,
     VoiceChannel_ResetVadConfig,
     VoiceChannel_UpdateAmbience,
+    VoiceChannel_UpdateAsrConfig,
     VoiceChannel_UpdateBargeInConfig,
     VoiceChannel_UpdateSilenceFillerUtterances,
     VoiceChannel_UpdateVadConfig,
@@ -43,6 +46,31 @@ DEFAULT_FILLER_PHRASES = ("One moment...", "Just a second...", "One second...")
 
 # Written by older ADK versions; read for one release so existing projects migrate on push.
 LEGACY_FIELDS = ("interaction_style",)
+
+
+@dataclass
+class AsrModel:
+    """Speech recognition model for the voice channel. Absent means Auto."""
+
+    provider: str
+    model: str
+    language: Optional[str] = None
+
+    def validate(self) -> None:
+        """Validate the ASR model."""
+        if not self.provider or not self.model:
+            raise ValueError("asr_model needs both a provider and a model.")
+
+    def to_yaml_dict(self) -> dict:
+        """Return a dictionary suitable for YAML serialization."""
+        output = {"provider": self.provider, "model": self.model}
+        if self.language:
+            output["language"] = self.language
+        return output
+
+    def to_proto(self) -> Asr:
+        """Convert to proto representation."""
+        return Asr(provider_id=self.provider, model_id=self.model, language=self.language or "")
 
 
 @dataclass
@@ -147,6 +175,34 @@ class BackgroundAmbience:
     def to_proto(self) -> AmbienceSettings:
         """Convert to proto representation."""
         return AmbienceSettings(enabled=self.enabled, preset=self.preset, loudness=self.loudness)
+
+
+@dataclass
+class VoiceAsrConfig(SubResource):
+    """The asr_model section, pushed as the voice channel's ASR config."""
+
+    asr_model: Optional[AsrModel] = None
+
+    @property
+    def command_type(self) -> str:
+        return "voice_asr_config"
+
+    @property
+    def update_command_type(self) -> str:
+        return "voice_channel_update_asr_config"
+
+    @property
+    def delete_command_type(self) -> str:
+        return "voice_channel_reset_asr_config"
+
+    def build_update_proto(self) -> VoiceChannel_UpdateAsrConfig:
+        return VoiceChannel_UpdateAsrConfig(asr_config=self.asr_model.to_proto())
+
+    def build_delete_proto(self) -> VoiceChannel_ResetAsrConfig:
+        return VoiceChannel_ResetAsrConfig()
+
+    def build_create_proto(self) -> None:
+        raise NotImplementedError("ASR config cannot be created")
 
 
 @dataclass
@@ -297,13 +353,14 @@ def _as_section(value: Any, section_type: type, section_name: str) -> Any:
 @register_resource("asr_settings")
 @dataclass
 class AsrSettings(YamlResource):
-    """The voice channel's model configuration: turn-taking, filler phrases and background
-    ambience.
+    """The voice channel's model configuration: ASR model, turn-taking, filler phrases and
+    background ambience.
 
     Each section is pushed with its own voice channel command. A section that is left out
     uses the platform default, and removing one resets it.
     """
 
+    asr_model: Optional[AsrModel]
     speech_end_delay_ms: Optional[int]
     barge_in: Optional[BargeIn]
     filler_phrases: Optional[FillerPhrases]
@@ -314,6 +371,7 @@ class AsrSettings(YamlResource):
         *,
         resource_id: str,
         name: str,
+        asr_model: Union[AsrModel, dict, None] = None,
         speech_end_delay_ms: Optional[int] = None,
         barge_in: Union[BargeIn, dict, bool, None] = None,
         filler_phrases: Union[FillerPhrases, dict, None] = None,
@@ -321,6 +379,7 @@ class AsrSettings(YamlResource):
     ):
         self.resource_id = resource_id
         self.name = name
+        self.asr_model = _as_section(asr_model, AsrModel, "asr_model")
         self.speech_end_delay_ms = speech_end_delay_ms
         if isinstance(barge_in, bool):
             # Status files written by older ADK versions store barge-in as a bool.
@@ -341,6 +400,14 @@ class AsrSettings(YamlResource):
         voice = projection.get("channels", {}).get("voice")
         if voice is None:
             return {}
+
+        asr_model = None
+        if asr_config := voice.get("asrConfig"):
+            asr_model = AsrModel(
+                provider=asr_config.get("providerId", ""),
+                model=asr_config.get("modelId", ""),
+                language=asr_config.get("language") or None,
+            )
 
         speech_end_delay_ms = None
         vad_config = voice.get("vadConfig")
@@ -384,6 +451,7 @@ class AsrSettings(YamlResource):
             "asr_settings": cls(
                 resource_id="asr_settings",
                 name="asr_settings",
+                asr_model=asr_model,
                 speech_end_delay_ms=speech_end_delay_ms,
                 barge_in=barge_in,
                 filler_phrases=filler_phrases,
@@ -397,6 +465,8 @@ class AsrSettings(YamlResource):
 
     def to_yaml_dict(self) -> dict:
         output: dict[str, Any] = {}
+        if self.asr_model:
+            output["asr_model"] = self.asr_model.to_yaml_dict()
         if self.speech_end_delay_ms is not None:
             output["speech_end_delay_ms"] = self.speech_end_delay_ms
         if self.barge_in:
@@ -425,9 +495,14 @@ class AsrSettings(YamlResource):
                 f"Use 'barge_in:' with 'enabled: {str(barge_in).lower()}' under it instead."
             )
 
+        asr_model = yaml_dict.get("asr_model")
+        if asr_model == "auto":
+            asr_model = None
+
         return cls(
             resource_id=resource_id,
             name=name,
+            asr_model=asr_model,
             speech_end_delay_ms=yaml_dict.get("speech_end_delay_ms"),
             barge_in=barge_in,
             filler_phrases=yaml_dict.get("filler_phrases"),
@@ -435,6 +510,8 @@ class AsrSettings(YamlResource):
         )
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        if self.asr_model:
+            self.asr_model.validate()
         if self.speech_end_delay_ms is not None and not (
             SPEECH_END_DELAY_MS_MIN <= self.speech_end_delay_ms <= SPEECH_END_DELAY_MS_MAX
         ):
@@ -486,6 +563,7 @@ class AsrSettings(YamlResource):
             elif old_value is not None:
                 deleted.append(sub_resource)
 
+        _diff("asr_model", VoiceAsrConfig)
         _diff("speech_end_delay_ms", VoiceVadConfig)
         _diff("barge_in", VoiceBargeInConfig)
         _diff("filler_phrases", VoiceFillerPhrases)

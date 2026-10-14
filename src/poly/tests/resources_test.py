@@ -7247,6 +7247,7 @@ class AsrSettingsTests(unittest.TestCase):
     """Tests for AsrSettings resource."""
 
     FULL_YAML = {
+        "asr_model": {"provider": "openai", "model": "gpt-4o-transcribe", "language": "en-GB"},
         "speech_end_delay_ms": 800,
         "barge_in": {"enabled": True, "allow_on_first_turn": False, "max_per_call": 5},
         "filler_phrases": {
@@ -7273,6 +7274,12 @@ class AsrSettingsTests(unittest.TestCase):
     def test_omitted_sections_stay_omitted(self):
         """A file with no sections writes back with no sections."""
         self.assertEqual(self._from_yaml({}).to_yaml_dict(), {})
+
+    def test_asr_model_auto_is_omitted(self):
+        """asr_model: auto means the platform picks, the same as leaving it out."""
+        asr = self._from_yaml({"asr_model": "auto"})
+        self.assertIsNone(asr.asr_model)
+        self.assertEqual(asr.to_yaml_dict(), {})
 
     def test_status_dict_roundtrip(self):
         """The status file form rebuilds an equal resource."""
@@ -7302,8 +7309,8 @@ class AsrSettingsTests(unittest.TestCase):
     def test_section_that_is_not_a_mapping_raises(self):
         """A section given as a scalar is an error."""
         with self.assertRaises(ValueError) as cm:
-            self._from_yaml({"filler_phrases": "on"})
-        self.assertIn("filler_phrases", str(cm.exception))
+            self._from_yaml({"asr_model": "openai/gpt-4o-transcribe"})
+        self.assertIn("asr_model", str(cm.exception))
 
     def test_validate_passes_with_full_settings(self):
         """The full example validates."""
@@ -7313,6 +7320,7 @@ class AsrSettingsTests(unittest.TestCase):
         """Values outside the Model Configuration page's limits are rejected."""
         cases = {
             "speech_end_delay_ms": {"speech_end_delay_ms": 150},
+            "asr_model": {"asr_model": {"provider": "openai", "model": ""}},
             "max_per_call": {"barge_in": {"enabled": True, "max_per_call": -1}},
             "initial_interval_seconds": {"filler_phrases": {"initial_interval_seconds": 0.2}},
             "interval_seconds": {"filler_phrases": {"interval_seconds": 0.5}},
@@ -7361,6 +7369,7 @@ class AsrSettingsTests(unittest.TestCase):
             sorted(sub_resource.update_command_type for sub_resource in updated),
             [
                 "voice_channel_update_ambience",
+                "voice_channel_update_asr_config",
                 "voice_channel_update_barge_in_config",
                 "voice_channel_update_silence_filler_utterances",
                 "voice_channel_update_vad_config",
@@ -7376,6 +7385,7 @@ class AsrSettingsTests(unittest.TestCase):
         self.assertEqual(
             sorted(sub_resource.delete_command_type for sub_resource in deleted),
             [
+                "voice_channel_reset_asr_config",
                 "voice_channel_reset_barge_in_config",
                 "voice_channel_reset_silence_filler_utterances",
                 "voice_channel_reset_vad_config",
@@ -7407,6 +7417,14 @@ class AsrSettingsTests(unittest.TestCase):
         _, updated, _ = self._changes({"speech_end_delay_ms": 640}, {})
         proto = updated[0].build_update_proto()
         self.assertAlmostEqual(proto.vad_config.speech_end_window_seconds, 0.64)
+
+    def test_asr_model_proto(self):
+        """asr_model is sent as provider_id/model_id, with an empty language when unset."""
+        _, updated, _ = self._changes({"asr_model": {"provider": "polyai", "model": "owl"}}, {})
+        proto = updated[0].build_update_proto()
+        self.assertEqual(proto.asr_config.provider_id, "polyai")
+        self.assertEqual(proto.asr_config.model_id, "owl")
+        self.assertEqual(proto.asr_config.language, "")
 
     def test_filler_phrases_proto(self):
         """Filler phrases are sent as utterance messages."""
@@ -13264,6 +13282,7 @@ class AsrSettingsFromProjection(unittest.TestCase):
         projection = {
             "channels": {
                 "voice": {
+                    "asrConfig": {"providerId": "openai", "modelId": "gpt-4o-transcribe", "language": ""},
                     "vadConfig": {"speechEndWindowSeconds": 0.8},
                     "bargeInConfig": {"enabled": True, "maxPerCall": 5},
                     "silenceFillerUtterances": {
@@ -13281,6 +13300,7 @@ class AsrSettingsFromProjection(unittest.TestCase):
         self.assertEqual(
             asr.to_yaml_dict(),
             {
+                "asr_model": {"provider": "openai", "model": "gpt-4o-transcribe"},
                 "speech_end_delay_ms": 800,
                 "barge_in": {"enabled": True, "allow_on_first_turn": False, "max_per_call": 5},
                 "filler_phrases": {

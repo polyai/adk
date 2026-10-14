@@ -15,7 +15,7 @@ These resources live under `voice/speech_recognition/` and are used to tune how 
     `asr_settings.yaml` is pulled for every project with a voice channel. It can be updated with `poly push` but not created or deleted. See the [equivalent note on agent settings](./agent_settings.md) for details.
 
 !!! info "No effect on Raven Omni"
-    Keyphrase boosting and transcript corrections only apply to the traditional ASR pipeline. Projects running an end-to-end model such as Raven Omni bypass this pipeline, so they are silently ignored.
+    `asr_model`, keyphrase boosting and transcript corrections only apply to the traditional ASR pipeline. Projects running an end-to-end model such as Raven Omni bypass this pipeline, so they are silently ignored.
 
 ## Location
 
@@ -36,7 +36,7 @@ All three files are voice-specific. Only `asr_settings.yaml` is the core setting
 
     ---
 
-    Configure turn-taking, filler phrases and background ambience.
+    Choose the ASR model and configure turn-taking, filler phrases and background ambience.
 
 -   **Keyphrase boosting**
 
@@ -60,7 +60,7 @@ ASR settings are defined in:
 voice/speech_recognition/asr_settings.yaml
 ~~~
 
-They match the Turn-taking tab of the Model Configuration page in Agent Studio, and apply to the whole voice channel. Individual flow steps can override barge-in, ASR provider, VAD, and LLM settings for a single turn — see [ASR override](./flows.md#asr-override) and [barge-in](./flows.md#barge-in) in the flows reference.
+They match the Speech Recognition and Turn-taking tabs of the Model Configuration page in Agent Studio, and apply to the whole voice channel. Individual flow steps can override barge-in, ASR provider, VAD, and LLM settings for a single turn — see [ASR override](./flows.md#asr-override) and [barge-in](./flows.md#barge-in) in the flows reference.
 
 Every section is optional. A section that is left out uses the platform default, and removing a section resets it on the next push. The exception is `background_ambience`, which Agent Studio can't reset: removing it switches ambience off instead.
 
@@ -68,6 +68,7 @@ Every section is optional. A section that is left out uses the platform default,
 
 | Field | Description |
 |---|---|
+| `asr_model` | The speech recognition model: `provider`, `model` and an optional `language`. Leave it out, or set it to `auto`, to let the platform pick. |
 | `speech_end_delay_ms` | How long the caller must be silent, in milliseconds, before the agent treats their turn as finished. |
 | `barge_in` | Whether the caller can interrupt the agent: `enabled`, `allow_on_first_turn` and `max_per_call`. |
 | `filler_phrases` | Phrases the agent says while the caller waits: `enabled`, `phrases`, `randomize`, `initial_interval_seconds` (before the first phrase) and `interval_seconds` (between phrases). |
@@ -78,6 +79,10 @@ Every section is optional. A section that is left out uses the platform default,
 ### Example
 
 ~~~yaml
+asr_model:
+  provider: openai
+  model: gpt-4o-transcribe
+
 speech_end_delay_ms: 800
 
 barge_in:
@@ -102,7 +107,7 @@ background_ambience:
 ~~~
 
 !!! note "Managed voice configuration"
-    When the Model Configuration page in Agent Studio is read-only because PolyAI manages the project's voice configuration, the platform chooses the speech end delay. `speech_end_delay_ms` is still pulled and pushed, but has no effect.
+    When the Model Configuration page in Agent Studio is read-only because PolyAI manages the project's voice configuration, the platform chooses the ASR model and speech end delay. `asr_model` and `speech_end_delay_ms` are still pulled and pushed, but have no effect.
 
 !!! warning "Older `asr_settings.yaml` files"
     Earlier versions of the ADK wrote `barge_in: true` / `false` and `interaction_style`. `barge_in: true` is still read as `barge_in.enabled: true`, with a warning. `interaction_style` is ignored, because `speech_end_delay_ms` now sets end-of-speech timing. Run `poly pull` to rewrite the file in the current shape.
@@ -202,6 +207,7 @@ corrections:
 
 ## Validation
 
+- `asr_model` needs both `provider` and `model`.
 - `speech_end_delay_ms` must be a whole number between 200 and 1500.
 - `barge_in.max_per_call` can't be negative.
 - `filler_phrases.initial_interval_seconds` must be at least 0.5, and `interval_seconds` at least 1. An enabled `filler_phrases` needs at least one phrase.
