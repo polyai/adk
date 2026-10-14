@@ -1,6 +1,51 @@
 # CHANGELOG
 
 
+## v0.70.1 (2026-10-14)
+
+### Bug Fixes
+
+- Accept oauth2_client_credentials and jwt_client_assertion api integration auth types
+  ([#366](https://github.com/polyai/adk/pull/366),
+  [`4bf66fd`](https://github.com/polyai/adk/commit/4bf66fd822dfcf6b16ebd55e4c827d147969d05d))
+
+## Summary
+
+Accept the `oauth2_client_credentials` and `jwt_client_assertion` auth types on API integrations, so
+  projects that use them pass `poly validate` and push.
+
+## Motivation
+
+Agent Studio now configures API integrations with two more auth types: `oauth2_client_credentials`,
+  which the Salesforce connector sets up, and `jwt_client_assertion`. The ADK only allowed `none`,
+  `basic`, `apiKey` and `oauth2`. After pulling a project with one of the newer types, validation
+  failed with `auth_type '…' invalid`, and the project couldn't be pushed.
+
+## Changes
+
+- Add `oauth2_client_credentials` and `jwt_client_assertion` to the auth types the ADK accepts. Push
+  already sends `auth_type` to Agent Studio as-is, so nothing else changes. - List both types in the
+  API integrations resource docs (`docs/docs/`) and in `src/poly/docs/`. - Add a test that every
+  accepted auth type passes validation.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.70.0 (2026-10-14)
 
 ### Bug Fixes
