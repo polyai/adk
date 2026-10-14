@@ -16,7 +16,8 @@ Examples:
 ~~~bash
 poly test run
 poly test run --tag smoke
-poly test run --files test_suite/greeting_flow_test.yaml
+poly test run --files greeting_flow_test.yaml
+poly test run --files "booking_*"
 poly test run --dry-run
 poly test run --dont-poll
 poly test run --push
@@ -27,8 +28,8 @@ After triggering, the CLI polls for results every 5 seconds and displays a live-
 
 | Flag | Description |
 |---|---|
-| `--files` | One or more specific test YAML files to run. |
-| `--tag` | Run only tests that carry the specified tag(s). Multiple tags are OR-matched. |
+| `--files` | One or more test files to run. Each matches the end of a test's path, so `greeting_flow_test.yaml`, `greeting_flow_test` and `test_suite/greeting_flow_test.yaml` all select the same test. Globs such as `"booking_*"` work; quote them so the shell doesn't expand them. The run fails if any entry matches no test. |
+| `--tag` | Run only tests that carry the specified tag(s). Multiple tags are OR-matched. The run fails if any tag matches no test. |
 | `--dry-run` | Preview which tests would run without triggering them. |
 | `--name` | Name for the run in Agent Studio. Defaults to the test name or count. |
 | `--dont-poll` | Trigger the run and exit immediately. Use `poly test show <run_id>` to check results later. |
