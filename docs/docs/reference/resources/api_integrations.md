@@ -65,11 +65,13 @@ Credentials themselves are managed by Agent Studio, not stored in the YAML — s
 
 Each entry is one HTTP endpoint:
 
-| Field | Description |
-|---|---|
-| `name` | Operation name. Called at runtime as `conv.api.<api_name>.<name>(...)`. |
-| `method` | One of `GET`, `POST`, `PATCH`, `PUT`, `DELETE`. |
-| `resource` | Path template, e.g. `/tickets/{id}`. Path variables become call arguments. |
+| Field | Required | Description |
+|---|---|---|
+| `name` | Yes | Operation name. Called at runtime as `conv.api.<api_name>.<name>(...)`. |
+| `description` | No | What the operation does, up to 1000 characters. |
+| `method` | Yes | One of `GET`, `POST`, `PATCH`, `PUT`, `DELETE`. |
+| `resource` | Yes | Path template, e.g. `/tickets/{id}`. Path variables become call arguments. |
+| `headers` | No | Default request headers sent on every call, as a map of header name to value. Headers passed at the call site override them. |
 
 ### Example
 
@@ -89,8 +91,11 @@ api_integrations:
         auth_type: oauth2
     operations:
       - name: get_contact
+        description: Get a contact by its ID
         method: GET
         resource: /contacts/{contact_id}
+        headers:
+          Accept: application/json
       - name: update_contact
         method: PATCH
         resource: /contacts/{contact_id}
@@ -100,7 +105,7 @@ api_integrations:
 
 - **Calling an operation** — `conv.api.<api_name>.<operation_name>(...)` from a function or flow. Path variables can be passed positionally or as keyword arguments.
 - **Return value** — a `requests.Response`-like object; use `.status_code`, `.text`, and `.json()` as normal.
-- **Extra request data** — pass `params`, `json`, `headers`, etc. as keyword arguments, same as a standard HTTP client.
+- **Extra request data** — pass `params`, `json`, `headers`, etc. as keyword arguments, same as a standard HTTP client. Headers passed here override the operation's default `headers`.
 - **Authentication** — configured per environment at the API level; credentials are managed by Agent Studio and never appear in the YAML or in function/flow code.
 
 ~~~python
@@ -125,6 +130,14 @@ response = conv.api.salesforce.update_contact(
   `jwt_client_assertion`.
 - Every operation needs a non-empty `name`, a `method` from the supported set, and a `resource` path matching a valid URL-path pattern (optionally with `{param}` placeholders).
 - No two operations in the same integration may share both `name` and `method`.
+- An operation's `description` can be at most 1000 characters.
+- An operation can have at most 50 `headers`. Header names are case-insensitive and must be
+  unique, and can't contain spaces, dots, colons, slashes or other separators.
+- `Authorization` and `Host` can't be set as operation headers: they come from the environment's
+  `auth_type` and `base_url`.
+- Header values must be strings of at most 4096 characters, with no line breaks, control or
+  non-ASCII characters, and no leading or trailing spaces. Quote values YAML would read as a
+  number or boolean, e.g. `'2'`.
 
 ## Best practices
 
