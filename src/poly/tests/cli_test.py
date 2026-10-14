@@ -5991,6 +5991,45 @@ class TestRunNameTest(unittest.TestCase):
         self.proj.trigger_tests.assert_called_once_with(["tc-1"], name=None)
 
 
+class TestRunJsonTest(unittest.TestCase):
+    """Tests for ``poly test run --json``, which returns without polling."""
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.testing.load_project").start()
+        self.proj = MagicMock()
+        self.proj.resolve_tests.return_value = [MagicMock(resource_id="tc-1")]
+        self.proj.trigger_tests.return_value = {"id": "run-1", "status": "pending"}
+        self.mock_load.return_value = self.proj
+        self.json_print = patch("poly.cli_commands.testing.json_print").start()
+        self.poll = patch("poly.output.console.poll_test_run_live").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _run(self, *argv: str) -> dict:
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(["test", "run", "--json", *argv])
+        testing_cli.TestingCommand.run(args)
+        return self.json_print.call_args.args[0]
+
+    def test_returns_the_run_and_the_command_to_check_on_it(self):
+        """--json prints the pending run with a follow-up show command, and never polls."""
+        output = self._run()
+
+        self.assertEqual(output["test_run"]["id"], "run-1")
+        self.assertEqual(output["next_command"], "poly test show run-1 --json")
+        self.poll.assert_not_called()
+
+    def test_next_command_keeps_a_path_outside_the_current_directory(self):
+        """With --path, the follow-up command points at the same project."""
+        output = self._run("--path", "/projects/my agent")
+
+        self.assertEqual(
+            output["next_command"], "poly test show run-1 --path '/projects/my agent' --json"
+        )
+
+
 class StartupUpdateMessageTest(unittest.TestCase):
     """Tests for display_update_message, the passive check run at the start of every command."""
 

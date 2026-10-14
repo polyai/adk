@@ -74,6 +74,7 @@ poly test run --tag smoke        # only tagged tests (multiple tags OR-match)
 poly test run --files test_suite/greeting_flow_test.yaml
 poly test run --dry-run          # preview which tests would run
 poly test run --dont-poll        # trigger and exit; check later with poly test show
+poly test run --json             # never polls: returns the pending run and next_command to check on it
 poly test run --tag smoke --name "Pre-release check · booking flow"   # name the run
 poly test list                   # past runs
 poly test show <run_id>                    # run summary + per-test table
