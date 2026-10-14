@@ -1,4 +1,4 @@
-"""Handling and managing Agent Studio MCP servers and saved MCP profiles
+"""Handling and managing Agent Studio MCP servers
 
 Copyright PolyAI Limited
 """
@@ -13,8 +13,6 @@ import poly.resources.resource_utils as utils
 from poly.handlers.protobuf import integrations_pb2
 from poly.handlers.protobuf.integrations_pb2 import (
     MCPEnabledFunctions,
-    MCPProfile_Delete,
-    MCPProfile_Upsert,
     MCPServer_Delete,
     MCPServer_Upsert,
 )
@@ -33,7 +31,7 @@ MAX_TIMEOUT_SECONDS = 30
 
 @dataclass
 class MCPOAuth:
-    """OAuth client-credentials settings for an MCP connection.
+    """OAuth client-credentials settings for an MCP server.
 
     client_secret_name names a secret stored in Agent Studio; the secret value
     never passes through the ADK.
@@ -84,7 +82,7 @@ class MCPOAuth:
 
 @dataclass
 class MCPAuth:
-    """How an MCP connection authenticates: a secret sent in a header or query
+    """How an MCP server authenticates: a secret sent in a header or query
     parameter, or OAuth.
 
     secret_name names a secret stored in Agent Studio; the secret value never
@@ -151,10 +149,9 @@ class MCPAuth:
         if self.secret_name and not (self.header or self.query_param):
             raise ValueError("auth.secret_name needs auth.header or auth.query_param to be set.")
         if methods == ["oauth"]:
-            if not self.oauth.client_id:
-                raise ValueError("auth.oauth.client_id is required.")
-            if not self.oauth.token_url:
-                raise ValueError("auth.oauth.token_url is required.")
+            for field in ("client_id", "client_secret_name", "token_url"):
+                if not getattr(self.oauth, field):
+                    raise ValueError(f"auth.oauth.{field} is required.")
             if not URL_PATTERN.fullmatch(self.oauth.token_url):
                 raise ValueError(
                     f"auth.oauth.token_url '{self.oauth.token_url}' must be an http(s) URL."
@@ -177,78 +174,6 @@ class MCPAuth:
         )
 
 
-def _build_auth(auth: MCPAuth | dict | None) -> Optional[MCPAuth]:
-    if auth is not None and not isinstance(auth, (MCPAuth, dict)):
-        raise ValueError("auth must be a mapping.")
-    return MCPAuth.from_dict(auth) if isinstance(auth, dict) else auth
-
-
-def _validate_connection(resource: "MCPServer | MCPSavedProfile") -> None:
-    """Validate the fields MCP servers and saved profiles share."""
-    if not resource.name:
-        raise ValueError("provider_id is required.")
-    if not resource.url:
-        raise ValueError("url is required.")
-    if not URL_PATTERN.fullmatch(resource.url):
-        raise ValueError(f"url '{resource.url}' must be an http(s) URL.")
-    if resource.auth:
-        resource.auth.validate()
-    if resource.timeout is not None and not (
-        MIN_TIMEOUT_SECONDS <= resource.timeout <= MAX_TIMEOUT_SECONDS
-    ):
-        raise ValueError(
-            f"timeout must be between {MIN_TIMEOUT_SECONDS} and {MAX_TIMEOUT_SECONDS} "
-            f"seconds, got {resource.timeout}."
-        )
-
-
-def _connection_to_yaml_dict(resource: "MCPServer | MCPSavedProfile") -> dict:
-    result = {"provider_id": resource.name, "url": resource.url}
-    auth = resource.auth.to_yaml_dict() if resource.auth else {}
-    if auth:
-        result["auth"] = auth
-    if resource.timeout is not None:
-        result["timeout"] = resource.timeout
-    return result
-
-
-def _validate_unique_provider_ids(
-    resources: dict[str, "MCPServer | MCPSavedProfile"], top_level_name: str
-) -> None:
-    provider_ids = [resource.name for resource in resources.values()]
-    duplicates = sorted({p for p in provider_ids if provider_ids.count(p) > 1})
-    if duplicates:
-        raise ValueError(f"Duplicate provider_id in {top_level_name}: {duplicates}")
-
-
-def _discover(base_path: str, resource_cls: type[MultiResourceYamlResource]) -> list[str]:
-    file_path = os.path.join(base_path, MCP_FILE)
-    if not os.path.exists(file_path):
-        return []
-    yaml_dict = resource_cls._get_top_level_data(file_path)
-    top_level_name = resource_cls.top_level_name
-    entries: list[dict] = (yaml_dict.get(top_level_name) if yaml_dict else None) or []
-    return [
-        os.path.join(
-            file_path, top_level_name, utils.clean_name(entry["provider_id"], lowercase=False)
-        )
-        for entry in entries
-        if isinstance(entry, dict) and entry.get("provider_id")
-    ]
-
-
-def _mcp_projection(projection: dict) -> Optional[dict]:
-    """Return the mcpConfig slice, or None when the user cannot read it.
-
-    The slice has no always-present fields, so the API leaves it out entirely
-    for a user without read access.
-    """
-    mcp_projection = projection.get("mcpConfig")
-    if mcp_projection is None:
-        logger.debug("No read access to MCP config - it will not be pulled.")
-    return mcp_projection
-
-
 @register_resource("mcp_servers")
 @dataclass
 class MCPServer(MultiResourceYamlResource):
@@ -259,6 +184,9 @@ class MCPServer(MultiResourceYamlResource):
     last_discovered_tool_count are set by the platform when it lists the
     server's tools, so they are kept off the YAML and sent back unchanged on
     upsert, which would otherwise clear them.
+
+    Saved MCP profiles are not synced: they hold the same settings as a server,
+    kept by Agent Studio so a disconnected provider can be reconnected.
     """
 
     url: str
@@ -284,10 +212,12 @@ class MCPServer(MultiResourceYamlResource):
         last_discovered_at: Optional[str] = None,
         last_discovered_tool_count: Optional[int] = None,
     ):
+        if auth is not None and not isinstance(auth, (MCPAuth, dict)):
+            raise ValueError("auth must be a mapping.")
         self.resource_id = resource_id
         self.name = name
         self.url = url
-        self.auth = _build_auth(auth)
+        self.auth = MCPAuth.from_dict(auth) if isinstance(auth, dict) else auth
         self.timeout = timeout
         self.enabled_functions = enabled_functions
         self.last_discovered_at = last_discovered_at
@@ -301,15 +231,21 @@ class MCPServer(MultiResourceYamlResource):
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "MCPServer"]:
-        """Parse MCP servers from a projection dict."""
-        mcp_projection = _mcp_projection(projection)
+        """Parse MCP servers from a projection dict.
+
+        The mcpConfig slice has no always-present fields, so the API leaves it
+        out entirely for a user without read access.
+        """
+        mcp_projection = projection.get("mcpConfig")
         if mcp_projection is None:
+            logger.debug("No read access to MCP config - it will not be pulled.")
             return {}
         servers = mcp_projection.get("servers", {}).get("entities", {})
         return {
             server_id: cls(
                 resource_id=server_id,
-                name=server.get("providerId", ""),
+                # Agent Studio shows a server without a provider under this key too.
+                name=server.get("providerId") or f"custom:{server_id}",
                 url=server.get("url", ""),
                 auth=server.get("auth"),
                 timeout=server.get("timeout"),
@@ -321,7 +257,12 @@ class MCPServer(MultiResourceYamlResource):
         }
 
     def to_yaml_dict(self) -> dict:
-        result = _connection_to_yaml_dict(self)
+        result = {"provider_id": self.name, "url": self.url}
+        auth = self.auth.to_yaml_dict() if self.auth else {}
+        if auth:
+            result["auth"] = auth
+        if self.timeout is not None:
+            result["timeout"] = self.timeout
         if self.enabled_functions is not None:
             result["enabled_functions"] = list(self.enabled_functions)
         return result
@@ -348,7 +289,21 @@ class MCPServer(MultiResourceYamlResource):
         )
 
     def validate(self, **kwargs) -> None:
-        _validate_connection(self)
+        if not self.name:
+            raise ValueError("provider_id is required.")
+        if not self.url:
+            raise ValueError("url is required.")
+        if not URL_PATTERN.fullmatch(self.url):
+            raise ValueError(f"url '{self.url}' must be an http(s) URL.")
+        if self.auth:
+            self.auth.validate()
+        if self.timeout is not None and not (
+            MIN_TIMEOUT_SECONDS <= self.timeout <= MAX_TIMEOUT_SECONDS
+        ):
+            raise ValueError(
+                f"timeout must be between {MIN_TIMEOUT_SECONDS} and {MAX_TIMEOUT_SECONDS} "
+                f"seconds, got {self.timeout}."
+            )
         if self.enabled_functions is not None:
             duplicates = sorted(
                 {f for f in self.enabled_functions if self.enabled_functions.count(f) > 1}
@@ -360,11 +315,27 @@ class MCPServer(MultiResourceYamlResource):
 
     @classmethod
     def validate_collection(cls, resources: dict[str, "MCPServer"]) -> None:
-        _validate_unique_provider_ids(resources, cls.top_level_name)
+        provider_ids = [server.name for server in resources.values()]
+        duplicates = sorted({p for p in provider_ids if provider_ids.count(p) > 1})
+        if duplicates:
+            raise ValueError(f"Duplicate provider_id in mcp_servers: {duplicates}")
 
     @staticmethod
     def discover_resources(base_path: str) -> list[str]:
-        return _discover(base_path, MCPServer)
+        file_path = os.path.join(base_path, MCP_FILE)
+        if not os.path.exists(file_path):
+            return []
+        yaml_dict = MCPServer._get_top_level_data(file_path)
+        entries: list[dict] = (yaml_dict.get(MCPServer.top_level_name) if yaml_dict else None) or []
+        return [
+            os.path.join(
+                file_path,
+                MCPServer.top_level_name,
+                utils.clean_name(entry["provider_id"], lowercase=False),
+            )
+            for entry in entries
+            if isinstance(entry, dict) and entry.get("provider_id")
+        ]
 
     @property
     def command_type(self) -> str:
@@ -407,120 +378,3 @@ class MCPServer(MultiResourceYamlResource):
 
     def build_delete_proto(self) -> MCPServer_Delete:
         return MCPServer_Delete(id=self.resource_id)
-
-
-@register_resource("mcp_profiles")
-@dataclass
-class MCPSavedProfile(MultiResourceYamlResource):
-    """Saved connection settings for an MCP provider, offered as the defaults
-    when a server for that provider is connected.
-
-    The platform keys profiles by provider_id, so the ADK resource id is never
-    sent.
-    """
-
-    url: str
-    auth: Optional[MCPAuth]
-    timeout: Optional[int]
-
-    top_level_name: ClassVar[str] = "mcp_profiles"
-    resource_key: ClassVar[str] = "provider_id"
-
-    def __init__(
-        self,
-        *,
-        resource_id: str,
-        name: str,
-        url: str = "",
-        auth: MCPAuth | dict | None = None,
-        timeout: Optional[int] = None,
-    ):
-        self.resource_id = resource_id
-        self.name = name
-        self.url = url
-        self.auth = _build_auth(auth)
-        self.timeout = timeout
-
-    @property
-    def file_path(self) -> str:
-        return os.path.join(
-            MCP_FILE, self.top_level_name, utils.clean_name(self.name, lowercase=False)
-        )
-
-    @classmethod
-    def from_projection(cls, projection: dict) -> dict[str, "MCPSavedProfile"]:
-        """Parse saved MCP profiles from a projection dict."""
-        mcp_projection = _mcp_projection(projection)
-        if mcp_projection is None:
-            return {}
-        profiles = mcp_projection.get("savedProfiles", {}).get("entities", {})
-        return {
-            provider_id: cls(
-                resource_id=provider_id,
-                name=profile.get("providerId") or provider_id,
-                url=profile.get("url", ""),
-                auth=profile.get("auth"),
-                timeout=profile.get("timeout"),
-            )
-            for provider_id, profile in profiles.items()
-        }
-
-    def to_yaml_dict(self) -> dict:
-        return _connection_to_yaml_dict(self)
-
-    @classmethod
-    def from_yaml_dict(
-        cls, yaml_dict: dict, resource_id: str, name: str = "", **kwargs
-    ) -> "MCPSavedProfile":
-        return cls(
-            resource_id=resource_id,
-            name=yaml_dict.get("provider_id") or name,
-            url=yaml_dict.get("url") or "",
-            auth=yaml_dict.get("auth"),
-            timeout=yaml_dict.get("timeout"),
-        )
-
-    def validate(self, **kwargs) -> None:
-        _validate_connection(self)
-
-    @classmethod
-    def validate_collection(cls, resources: dict[str, "MCPSavedProfile"]) -> None:
-        _validate_unique_provider_ids(resources, cls.top_level_name)
-
-    @staticmethod
-    def discover_resources(base_path: str) -> list[str]:
-        return _discover(base_path, MCPSavedProfile)
-
-    @property
-    def command_type(self) -> str:
-        return "mcp_profile"
-
-    @property
-    def create_command_type(self) -> str:
-        return "upsert_mcp_profile"
-
-    @property
-    def update_command_type(self) -> str:
-        return "upsert_mcp_profile"
-
-    def _build_upsert_proto(self) -> MCPProfile_Upsert:
-        optional_fields = {
-            "auth": self.auth.to_proto() if self.auth else None,
-            "timeout": self.timeout,
-        }
-        return MCPProfile_Upsert(
-            profile=integrations_pb2.MCPProfile(
-                provider_id=self.name,
-                url=self.url,
-                **{key: value for key, value in optional_fields.items() if value is not None},
-            )
-        )
-
-    def build_create_proto(self) -> MCPProfile_Upsert:
-        return self._build_upsert_proto()
-
-    def build_update_proto(self) -> MCPProfile_Upsert:
-        return self._build_upsert_proto()
-
-    def build_delete_proto(self) -> MCPProfile_Delete:
-        return MCPProfile_Delete(provider_id=self.name)

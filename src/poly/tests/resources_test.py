@@ -74,13 +74,14 @@ from poly.resources.languages import (
     AdditionalLanguage,
     DefaultLanguage,
 )
-from poly.resources.mcp import MCPAuth, MCPOAuth, MCPSavedProfile, MCPServer
+from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     _parse_multi_resource_path,
+    load_resources_from_projection,
 )
 from poly.resources.safety_filters import (
     ChatSafetyFilters,
@@ -13451,16 +13452,6 @@ def _mcp_server(**overrides) -> MCPServer:
     return MCPServer(**fields)
 
 
-def _mcp_profile(**overrides) -> MCPSavedProfile:
-    fields = {
-        "resource_id": "ticketing",
-        "name": "ticketing",
-        "url": "https://mcp.ticketing.example.com/v1",
-    }
-    fields.update(overrides)
-    return MCPSavedProfile(**fields)
-
-
 class MCPServerTests(unittest.TestCase):
     """Tests for MCPServer."""
 
@@ -13572,7 +13563,7 @@ class MCPServerTests(unittest.TestCase):
             None,
             MCPAuth(header="Authorization", secret_name="token"),
             MCPAuth(query_param="api_key", secret_name="token"),
-            MCPAuth(oauth=MCPOAuth(client_id="c", token_url="https://example.com/token")),
+            MCPAuth(oauth=MCPOAuth(client_id="c", client_secret_name="s", token_url="https://example.com/token")),
         ):
             with self.subTest(auth=auth):
                 _mcp_server(auth=auth).validate()
@@ -13589,17 +13580,26 @@ class MCPServerTests(unittest.TestCase):
                 "auth": MCPAuth(
                     header="Authorization",
                     secret_name="token",
-                    oauth=MCPOAuth(client_id="c", token_url="https://example.com/token"),
+                    oauth=MCPOAuth(client_id="c", client_secret_name="s", token_url="https://example.com/token"),
                 )
             },
             "secret_name is required when auth.header": {"auth": MCPAuth(header="Authorization")},
             "needs auth.header or auth.query_param": {"auth": MCPAuth(secret_name="token")},
             "client_id is required": {
-                "auth": MCPAuth(oauth=MCPOAuth(token_url="https://example.com/token"))
+                "auth": MCPAuth(
+                    oauth=MCPOAuth(client_secret_name="s", token_url="https://example.com/token")
+                )
             },
-            "token_url is required": {"auth": MCPAuth(oauth=MCPOAuth(client_id="c"))},
+            "client_secret_name is required": {
+                "auth": MCPAuth(oauth=MCPOAuth(client_id="c", token_url="https://example.com/token"))
+            },
+            "token_url is required": {
+                "auth": MCPAuth(oauth=MCPOAuth(client_id="c", client_secret_name="s"))
+            },
             "token_url 'not-a-url' must be": {
-                "auth": MCPAuth(oauth=MCPOAuth(client_id="c", token_url="not-a-url"))
+                "auth": MCPAuth(
+                    oauth=MCPOAuth(client_id="c", client_secret_name="s", token_url="not-a-url")
+                )
             },
         }
         for message, overrides in cases.items():
@@ -13647,101 +13647,38 @@ class MCPServerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             self.assertEqual(MCPServer.discover_resources(tmpdir), [])
 
-    def test_save_shares_one_file_with_profiles(self):
-        """Servers and profiles each keep their own top-level key in config/mcp.yaml."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            _mcp_server().save(tmpdir)
-            _mcp_profile().save(tmpdir)
+    def test_server_without_provider_id_is_keyed_like_agent_studio(self):
+        """A server with no providerId gets custom:<id>, the key Agent Studio shows.
 
-            with open(os.path.join(tmpdir, "config", "mcp.yaml"), encoding="utf-8") as f:
-                saved = yaml.safe_load(f)
-
-        self.assertEqual([s["provider_id"] for s in saved["mcp_servers"]], ["ticketing"])
-        self.assertEqual([p["provider_id"] for p in saved["mcp_profiles"]], ["ticketing"])
-
-
-class MCPSavedProfileTests(unittest.TestCase):
-    """Tests for MCPSavedProfile."""
-
-    def setUp(self):
-        MultiResourceYamlResource._file_cache.clear()
-
-    def test_from_projection_keys_profiles_by_provider_id(self):
-        profiles = MCPSavedProfile.from_projection(MCP_PROJECTION)
-
-        self.assertEqual(list(profiles), ["ticketing"])
-        profile = profiles["ticketing"]
-        self.assertEqual(
-            profile.auth, MCPAuth(query_param="api_key", secret_name="ticketing_mcp_token")
-        )
-        self.assertEqual(profile.timeout, 15)
-
-    def test_from_projection_without_mcp_config_returns_nothing(self):
-        with self.assertLogs("poly.resources.mcp", level="DEBUG"):
-            self.assertEqual(MCPSavedProfile.from_projection({}), {})
-
-    def test_yaml_round_trip_preserves_config(self):
-        profile = MCPSavedProfile.from_projection(MCP_PROJECTION)["ticketing"]
-
-        reread = MCPSavedProfile.from_yaml_dict(profile.to_yaml_dict(), resource_id="local-id")
-
-        self.assertEqual(
-            reread.to_yaml_dict(),
-            {
-                "provider_id": "ticketing",
-                "url": "https://mcp.ticketing.example.com/v1",
-                "auth": {"query_param": "api_key", "secret_name": "ticketing_mcp_token"},
-                "timeout": 15,
-            },
-        )
-        self.assertEqual(reread.compute_hash(), profile.compute_hash())
-
-    def test_protos_use_provider_id_not_resource_id(self):
-        """The platform keys profiles by provider_id, so the ADK id is never sent."""
-        profile = _mcp_profile(resource_id="MCP_PROFILES-1234", timeout=15)
-
-        upsert = profile.build_update_proto().profile
-        self.assertEqual(profile.update_command_type, "upsert_mcp_profile")
-        self.assertEqual(profile.delete_command_type, "delete_mcp_profile")
-        self.assertEqual(upsert.provider_id, "ticketing")
-        self.assertEqual(upsert.timeout, 15)
-        self.assertFalse(upsert.HasField("auth"))
-        self.assertEqual(profile.build_delete_proto().provider_id, "ticketing")
-
-    def test_file_path(self):
-        self.assertEqual(
-            _mcp_profile().file_path,
-            os.path.join("config", "mcp.yaml", "mcp_profiles", "ticketing"),
-        )
-
-    def test_validate_rejects_invalid_config(self):
-        cases = {
-            "provider_id is required": {"name": ""},
-            "must be an http(s) URL": {"url": "mcp.example.com"},
-            "timeout must be between 1 and 30": {"timeout": 0},
-            "secret_name is required when auth.query_param": {
-                "auth": MCPAuth(query_param="api_key")
-            },
+        Without it the server would have no name, discovery would skip it, and
+        the next push would delete it.
+        """
+        projection = {
+            "mcpConfig": {
+                "servers": {
+                    "entities": {
+                        "mcp-123": {"id": "mcp-123", "providerId": "", "url": "https://a.example.com"}
+                    }
+                }
+            }
         }
-        for message, overrides in cases.items():
-            with self.subTest(message=message):
-                with self.assertRaises(ValueError) as cm:
-                    _mcp_profile(**overrides).validate()
-                self.assertIn(message, str(cm.exception))
 
-    def test_validate_collection_rejects_duplicate_provider_ids(self):
-        profiles = {"a": _mcp_profile(resource_id="a"), "b": _mcp_profile(resource_id="b")}
+        server = MCPServer.from_projection(projection)["mcp-123"]
 
-        with self.assertRaises(ValueError):
-            MCPSavedProfile.validate_collection(profiles)
+        self.assertEqual(server.name, "custom:mcp-123")
+        self.assertEqual(server.to_yaml_dict()["provider_id"], "custom:mcp-123")
+        self.assertEqual(
+            server.file_path, os.path.join("config", "mcp.yaml", "mcp_servers", "custom_mcp_123")
+        )
 
-    def test_discover_from_fixture(self):
-        paths = MCPSavedProfile.discover_resources(MCP_TEST_PROJECT_DIR)
+    def test_saved_profiles_are_not_pulled(self):
+        """Profiles duplicate server settings, so only servers come out of a projection."""
+        resources, slim = load_resources_from_projection(MCP_PROJECTION)
 
         self.assertEqual(
-            [os.path.relpath(p, MCP_TEST_PROJECT_DIR) for p in paths],
-            [os.path.join("config", "mcp.yaml", "mcp_profiles", "ticketing")],
+            {type(r) for by_id in resources.values() for r in by_id.values()}, {MCPServer}
         )
+        self.assertEqual(slim, [])
 
 
 def _run_in_thread(func):

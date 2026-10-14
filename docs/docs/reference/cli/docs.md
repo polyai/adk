@@ -41,7 +41,7 @@ Available resource names:
 | `handoffs` | SIP call transfers |
 | `functions` | Global and flow functions, decorators, state, metrics |
 | `languages` | Default and additional language configuration |
-| `mcp` | MCP servers and saved provider profiles |
+| `mcp` | MCP servers the agent connects to |
 | `tests` | Simulated conversation test cases |
 | `safety_filters` | Content moderation settings |
 | `sms` | Text message templates |

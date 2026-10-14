@@ -17,10 +17,3 @@ mcp_servers:
       token_url: https://internal.example.com/oauth/token
       audience: mcp-api
       scope: tools:read tools:write
-mcp_profiles:
-- provider_id: ticketing
-  url: https://mcp.ticketing.example.com/v1
-  auth:
-    header: Authorization
-    secret_name: ticketing_mcp_token
-  timeout: 15

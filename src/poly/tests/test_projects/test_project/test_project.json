@@ -1486,20 +1486,6 @@
         "last_discovered_at": null,
         "last_discovered_tool_count": null
       }
-    },
-    "mcp_profiles": {
-      "ticketing": {
-        "resource_id": "ticketing",
-        "name": "ticketing",
-        "url": "https://mcp.ticketing.example.com/v1",
-        "auth": {
-          "header": "Authorization",
-          "query_param": "",
-          "secret_name": "ticketing_mcp_token",
-          "oauth": null
-        },
-        "timeout": 15
-      }
     }
   },
   "file_structure_info": {},

@@ -6,23 +6,17 @@ MCP (Model Context Protocol) servers give the agent tools hosted outside the pro
 
 ## Location
 
-`config/mcp.yaml`. Connected servers are listed under `mcp_servers` and saved provider profiles under `mcp_profiles`. The file is optional.
+`config/mcp.yaml`. Servers are listed under the `mcp_servers` key. The file is optional.
 
 ## Structure
 
-### mcp_servers
-
 Each server the agent connects to:
 
-- **provider_id**: Which MCP provider this server is for. Unique within `mcp_servers`.
+- **provider_id**: Identifies the server, and is unique within the file. For a provider from the Agent Studio catalogue, use its id (e.g. `tavily`). For any other server, use any short key (e.g. `deepwiki`). Servers added in Agent Studio as custom servers show up as `custom:<number>`; keep that value, as changing it replaces the server with a new one.
 - **url**: The server's `http(s)://` URL.
 - **auth**: Optional. How to authenticate (see below).
 - **timeout**: Optional. Request timeout in seconds, from 1 to 30.
 - **enabled_functions**: Optional. The tool names the agent may call. Leave the key out to enable every tool the server offers; `[]` enables none.
-
-### mcp_profiles
-
-Saved connection settings per provider, used as the defaults when a server for that provider is connected in Agent Studio. Same fields as a server except `enabled_functions`. `provider_id` is unique within `mcp_profiles`.
 
 ### auth
 
@@ -30,9 +24,9 @@ Set one of these:
 
 - **header** and **secret_name**: send the secret in this request header.
 - **query_param** and **secret_name**: send the secret as this query parameter.
-- **oauth**: OAuth client credentials, with **client_id** and **token_url** required and **client_secret_name**, **audience** and **scope** optional.
+- **oauth**: OAuth client credentials, with **client_id**, **client_secret_name** and **token_url** required and **audience** and **scope** optional.
 
-`secret_name` and `client_secret_name` name secrets stored in Agent Studio. The secret values are never pulled or pushed.
+`secret_name` and `client_secret_name` are the names of secrets stored in Agent Studio. The secret values are never pulled or pushed. A secret is sent as the whole header or parameter value, so for a bearer token store `Bearer <token>`.
 
 ## Example
 
@@ -55,16 +49,9 @@ mcp_servers:
         client_secret_name: internal_mcp_oauth_secret
         token_url: https://internal.example.com/oauth/token
         scope: tools:read
-
-mcp_profiles:
-  - provider_id: ticketing
-    url: https://mcp.ticketing.example.com/v1
-    auth:
-      header: Authorization
-      secret_name: ticketing_mcp_token
-    timeout: 15
 ```
 
 ## Notes
 
-The platform's tool discovery state (when tools were last listed and how many were found) is not stored in the YAML. Pushing a change keeps it as it is.
+- The platform's tool discovery state (when tools were last listed and how many were found) is not stored in the YAML. Pushing a change keeps it as it is.
+- Saved MCP profiles, which Agent Studio keeps so a disconnected provider can be reconnected, are not synced. Disconnecting a server in Agent Studio removes it from `mcp_servers` on the next pull.

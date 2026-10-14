@@ -15,44 +15,24 @@ MCP servers give the agent tools hosted outside the project. Declare each server
 config/mcp.yaml
 ~~~
 
-Connected servers are listed under the `mcp_servers` key and saved provider profiles under `mcp_profiles`. The file is optional; omit it if the agent uses no MCP servers.
+Servers are listed under the `mcp_servers` key. The file is optional; omit it if the agent uses no MCP servers.
 
-## What MCP config contains
+## What an MCP server contains
 
-<div class="grid cards" markdown>
+Each entry is one server the agent connects to: where it is, how to authenticate, and which of its tools the agent may call.
 
--   **Servers**
-
-    ---
-
-    The MCP servers the agent connects to, with the tools it may call on each.
-
--   **Profiles**
-
-    ---
-
-    Saved connection settings per provider, offered as the defaults when a server for that provider is connected in Agent Studio.
-
-</div>
-
-### Server fields
+### Fields
 
 | Field | Required | Description |
 |---|---|---|
-| `provider_id` | Yes | Which MCP provider this server is for. Identifies the server in the file. |
+| `provider_id` | Yes | Identifies the server. For a provider from the Agent Studio catalogue, use its id (e.g. `tavily`); for any other server, use any short key (e.g. `deepwiki`). |
 | `url` | Yes | The server's `http(s)://` URL. |
 | `auth` | No | How to authenticate. See [Authentication](#authentication). |
 | `timeout` | No | Request timeout in seconds, from 1 to 30. |
 | `enabled_functions` | No | Tool names the agent may call. Leave the key out to enable every tool the server offers; `[]` enables none. |
 
-### Profile fields
-
-| Field | Required | Description |
-|---|---|---|
-| `provider_id` | Yes | The provider these settings are for. Identifies the profile in the file. |
-| `url` | Yes | The server's `http(s)://` URL. |
-| `auth` | No | How to authenticate. See [Authentication](#authentication). |
-| `timeout` | No | Request timeout in seconds, from 1 to 30. |
+!!! warning "Changing `provider_id` replaces the server"
+    Servers added in Agent Studio as custom servers show up with a `provider_id` like `custom:1791899588123`. Keep that value: a different `provider_id` is pushed as a new server, and the old one is deleted.
 
 ### Authentication
 
@@ -62,9 +42,9 @@ Connected servers are listed under the `mcp_servers` key and saved provider prof
 |---|---|
 | Header | `header` (the header name) and `secret_name` |
 | Query parameter | `query_param` (the parameter name) and `secret_name` |
-| OAuth client credentials | `oauth`, with `client_id` and `token_url`, and optionally `client_secret_name`, `audience` and `scope` |
+| OAuth client credentials | `oauth`, with `client_id`, `client_secret_name` and `token_url`, and optionally `audience` and `scope` |
 
-`secret_name` and `client_secret_name` name secrets stored in Agent Studio. The secret values are never pulled to or pushed from your machine.
+`secret_name` and `client_secret_name` are the names of secrets stored in Agent Studio. The secret values are never pulled to or pushed from your machine. A secret is sent as the whole header or parameter value, so for a bearer token store `Bearer <token>` as the secret.
 
 ### Example
 
@@ -87,26 +67,21 @@ mcp_servers:
         client_secret_name: internal_mcp_oauth_secret
         token_url: https://internal.example.com/oauth/token
         scope: tools:read
-
-mcp_profiles:
-  - provider_id: ticketing
-    url: https://mcp.ticketing.example.com/v1
-    auth:
-      header: Authorization
-      secret_name: ticketing_mcp_token
-    timeout: 15
 ~~~
 
 !!! info "Tool discovery state stays on the platform"
     Agent Studio records when it last listed a server's tools and how many it found. That state isn't written to `mcp.yaml`, and pushing a change to a server keeps it as it is.
 
+!!! note "Saved profiles aren't synced"
+    Agent Studio keeps a saved profile for a disconnected provider so it can be reconnected. Profiles hold the same settings as a server, so the ADK doesn't sync them. Disconnecting a server in Agent Studio removes it from `mcp_servers` on the next pull.
+
 ## Validation
 
 - `provider_id` and `url` are required, and `url` must be an `http(s)://` URL.
-- `provider_id` must be unique within `mcp_servers`, and within `mcp_profiles`.
+- `provider_id` must be unique within `mcp_servers`.
 - `auth` sets only one of `header`, `query_param` and `oauth`.
 - `header` and `query_param` need `secret_name`, and `secret_name` needs one of them.
-- `oauth` needs `client_id` and `token_url`, and `token_url` must be an `http(s)://` URL.
+- `oauth` needs `client_id`, `client_secret_name` and `token_url`, and `token_url` must be an `http(s)://` URL.
 - `timeout`, if set, is between 1 and 30.
 - `enabled_functions` entries must be non-empty and unique.
 
