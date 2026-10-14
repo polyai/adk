@@ -36,6 +36,7 @@ from poly.resources import (
     FunctionStep,
     Handoff,
     KeyphraseBoosting,
+    MCPServer,
     Pronunciation,
     Resource,
     ResourceMapping,
@@ -2256,6 +2257,26 @@ class PushProjectTest(unittest.TestCase):
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(Function, deleted_resources)
         self.assertIn("FUNCTION-extra_function", deleted_resources[Function])
+
+    def test_push_project_updated_mcp_server_keeps_discovery_fields(self):
+        """An edited MCP server is upserted with the platform's discovery state.
+
+        The upsert replaces the whole server, so sending it without the discovery
+        fields would clear them.
+        """
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["mcp_servers"]["MCP-SERVER-ticketing"]["timeout"] = 5
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, message, commands = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        updated = self.mock_api_handler.queue_resources.call_args.kwargs["updated_resources"]
+        server = updated[MCPServer]["MCP-SERVER-ticketing"]
+        self.assertEqual(server.timeout, 15)
+        upsert = server.build_update_proto().server
+        self.assertEqual(upsert.last_discovered_at, "2026-08-01T12:00:00Z")
+        self.assertEqual(upsert.last_discovered_tool_count, 12)
 
     def test_push_project_renamed_test_case_is_an_update(self):
         """A test case renamed locally keeps its id: one update, no delete and create."""

@@ -1,0 +1,24 @@
+mcp_servers:
+- provider_id: ticketing
+  url: https://mcp.ticketing.example.com/v1
+  auth:
+    header: Authorization
+    secret_name: ticketing_mcp_token
+  timeout: 15
+  enabled_functions:
+  - search_tickets
+  - create_ticket
+- provider_id: internal-tools
+  url: https://internal.example.com/mcp
+  auth:
+    oauth:
+      client_id: adk-test-client
+      client_secret_name: internal_mcp_oauth_secret
+      token_url: https://internal.example.com/oauth/token
+      audience: mcp-api
+      scope: tools:read tools:write
+- provider_id: custom:1791899588123
+  url: https://tools.example.com/mcp
+  auth:
+    query_param: api_key
+    secret_name: tools_api_key

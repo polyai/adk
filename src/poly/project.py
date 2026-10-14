@@ -41,6 +41,7 @@ from poly.resources import (
     FlowStep,
     Function,
     FunctionStep,
+    MCPServer,
     MultiResourceYamlResource,
     Pronunciation,
     Resource,
@@ -2276,6 +2277,14 @@ class AgentStudioProject:
                 additional_kwargs["known_function_id"] = original_resource.function_id
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
+
+        if resource_class == MCPServer and original_resource:
+            if not isinstance(original_resource, MCPServer):
+                raise TypeError(f"Original resource is not an MCPServer: {original_resource}")
+            additional_kwargs["known_last_discovered_at"] = original_resource.last_discovered_at
+            additional_kwargs["known_last_discovered_tool_count"] = (
+                original_resource.last_discovered_tool_count
+            )
 
         try:
             resource = resource_class.read_local_resource(

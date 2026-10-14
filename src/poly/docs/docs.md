@@ -21,6 +21,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   ├── api_integrations.yaml           # Optional
 │   ├── entities.yaml                   # Optional
 │   ├── handoffs.yaml                   # Optional
+│   ├── mcp.yaml                        # Optional
 │   ├── sms_templates.yaml              # Optional
 │   ├── translations.yaml               # Optional
 │   └── variant_attributes.yaml         # Optional
@@ -126,6 +127,7 @@ Resource-specific documentation is available via `poly docs {resource} [resource
 | `handoffs` | SIP call transfers |
 | `functions` | Global and flow functions, decorators, state, metrics |
 | `languages` | Default and additional language configuration |
+| `mcp` | MCP servers the agent connects to |
 | `tests` | Simulated conversation test cases |
 | `safety_filters` | Content moderation settings |
 | `sms` | Text message templates |

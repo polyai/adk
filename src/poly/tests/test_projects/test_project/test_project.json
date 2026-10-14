@@ -1445,6 +1445,62 @@
         "action": "warn",
         "enabled": true
       }
+    },
+    "mcp_servers": {
+      "MCP-SERVER-ticketing": {
+        "resource_id": "MCP-SERVER-ticketing",
+        "name": "ticketing",
+        "url": "https://mcp.ticketing.example.com/v1",
+        "auth": {
+          "header": "Authorization",
+          "query_param": "",
+          "secret_name": "ticketing_mcp_token",
+          "oauth": null
+        },
+        "timeout": 15,
+        "enabled_functions": [
+          "search_tickets",
+          "create_ticket"
+        ],
+        "last_discovered_at": "2026-08-01T12:00:00Z",
+        "last_discovered_tool_count": 12
+      },
+      "MCP-SERVER-internal": {
+        "resource_id": "MCP-SERVER-internal",
+        "name": "internal-tools",
+        "url": "https://internal.example.com/mcp",
+        "auth": {
+          "header": "",
+          "query_param": "",
+          "secret_name": "",
+          "oauth": {
+            "client_id": "adk-test-client",
+            "client_secret_name": "internal_mcp_oauth_secret",
+            "token_url": "https://internal.example.com/oauth/token",
+            "audience": "mcp-api",
+            "scope": "tools:read tools:write"
+          }
+        },
+        "timeout": null,
+        "enabled_functions": null,
+        "last_discovered_at": null,
+        "last_discovered_tool_count": null
+      },
+      "mcp-1791899588123": {
+        "resource_id": "mcp-1791899588123",
+        "name": "custom:1791899588123",
+        "url": "https://tools.example.com/mcp",
+        "auth": {
+          "header": "",
+          "query_param": "api_key",
+          "secret_name": "tools_api_key",
+          "oauth": null
+        },
+        "timeout": null,
+        "enabled_functions": null,
+        "last_discovered_at": "2026-10-01T09:30:00Z",
+        "last_discovered_tool_count": 4
+      }
     }
   },
   "file_structure_info": {},
