@@ -53,7 +53,14 @@ class ApiIntegrationConfig(_message.Message):
     def __init__(self, base_url: _Optional[str] = ..., auth_type: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationOperation(_message.Message):
-    __slots__ = ("id", "name", "method", "resource", "created_at", "created_by", "updated_at", "updated_by")
+    __slots__ = ("id", "name", "method", "resource", "created_at", "created_by", "updated_at", "updated_by", "headers", "description")
+    class HeadersEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     METHOD_FIELD_NUMBER: _ClassVar[int]
@@ -62,6 +69,8 @@ class ApiIntegrationOperation(_message.Message):
     CREATED_BY_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
+    HEADERS_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     method: str
@@ -70,7 +79,22 @@ class ApiIntegrationOperation(_message.Message):
     created_by: str
     updated_at: _timestamp_pb2.Timestamp
     updated_by: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ...) -> None: ...
+    headers: _containers.ScalarMap[str, str]
+    description: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., headers: _Optional[_Mapping[str, str]] = ..., description: _Optional[str] = ...) -> None: ...
+
+class OperationHeaders(_message.Message):
+    __slots__ = ("entries",)
+    class EntriesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    ENTRIES_FIELD_NUMBER: _ClassVar[int]
+    entries: _containers.ScalarMap[str, str]
+    def __init__(self, entries: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class ApiIntegration_Create(_message.Message):
     __slots__ = ("id", "name", "description", "environments")
@@ -117,21 +141,32 @@ class ApiIntegrationConfig_Update(_message.Message):
     def __init__(self, id: _Optional[str] = ..., environment: _Optional[str] = ..., base_url: _Optional[str] = ..., auth_type: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationOperation_Create(_message.Message):
-    __slots__ = ("name", "method", "resource", "integration_id", "id")
+    __slots__ = ("name", "method", "resource", "integration_id", "id", "headers", "description")
+    class HeadersEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     NAME_FIELD_NUMBER: _ClassVar[int]
     METHOD_FIELD_NUMBER: _ClassVar[int]
     RESOURCE_FIELD_NUMBER: _ClassVar[int]
     INTEGRATION_ID_FIELD_NUMBER: _ClassVar[int]
     ID_FIELD_NUMBER: _ClassVar[int]
+    HEADERS_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     name: str
     method: str
     resource: str
     integration_id: str
     id: str
-    def __init__(self, name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., integration_id: _Optional[str] = ..., id: _Optional[str] = ...) -> None: ...
+    headers: _containers.ScalarMap[str, str]
+    description: str
+    def __init__(self, name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., integration_id: _Optional[str] = ..., id: _Optional[str] = ..., headers: _Optional[_Mapping[str, str]] = ..., description: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationOperation_Update(_message.Message):
-    __slots__ = ("id", "name", "method", "resource", "integration_id", "integration_name", "old_name")
+    __slots__ = ("id", "name", "method", "resource", "integration_id", "integration_name", "old_name", "headers", "description")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     METHOD_FIELD_NUMBER: _ClassVar[int]
@@ -139,6 +174,8 @@ class ApiIntegrationOperation_Update(_message.Message):
     INTEGRATION_ID_FIELD_NUMBER: _ClassVar[int]
     INTEGRATION_NAME_FIELD_NUMBER: _ClassVar[int]
     OLD_NAME_FIELD_NUMBER: _ClassVar[int]
+    HEADERS_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     method: str
@@ -146,7 +183,9 @@ class ApiIntegrationOperation_Update(_message.Message):
     integration_id: str
     integration_name: str
     old_name: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., integration_id: _Optional[str] = ..., integration_name: _Optional[str] = ..., old_name: _Optional[str] = ...) -> None: ...
+    headers: OperationHeaders
+    description: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., integration_id: _Optional[str] = ..., integration_name: _Optional[str] = ..., old_name: _Optional[str] = ..., headers: _Optional[_Union[OperationHeaders, _Mapping]] = ..., description: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationOperation_Delete(_message.Message):
     __slots__ = ("id", "integration_id", "integration_name", "operation_name")

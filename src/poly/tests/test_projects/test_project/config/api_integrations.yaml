@@ -13,5 +13,9 @@ api_integrations:
       auth_type: apiKey
   operations:
   - name: get_confirmation_status
+    description: Check whether a booking is confirmed
     method: GET
     resource: /bookings/{booking_id}/confirmation-status
+    headers:
+      Accept: application/json
+      X-Api-Version: '2'
