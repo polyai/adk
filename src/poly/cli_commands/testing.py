@@ -41,6 +41,7 @@ class TestingCommand(BaseCommand):
                 "  poly test run\n"
                 "  poly test run --path /path/to/project\n"
                 "  poly test run --files test1.yaml test2.yaml\n"
+                '  poly test run --files "booking_*"\n'
                 "  poly test run --tag smoke\n"
                 '  poly test run --tag smoke --name "Pre-release check · booking flow"\n'
             ),
@@ -49,7 +50,7 @@ class TestingCommand(BaseCommand):
         test_run_parser.add_argument(
             "--files",
             nargs="*",
-            help="List of test files to run.",
+            help="Test files to run: bare names, paths under test_suite/, or quoted globs.",
         )
         test_run_parser.add_argument(
             "--tag",
