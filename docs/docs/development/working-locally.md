@@ -33,8 +33,10 @@ A typical project structure looks like this:
 │   ├── safety_filters.yaml             # Optional
 │   └── experimental_config.json        # Optional
 ├── config/                             # Configuration
+│   ├── api_integrations.yaml           # Optional
 │   ├── entities.yaml                   # Optional
 │   ├── handoffs.yaml                   # Optional
+│   ├── mcp.yaml                        # Optional
 │   ├── sms_templates.yaml              # Optional
 │   ├── translations.yaml               # Optional
 │   └── variant_attributes.yaml         # Optional

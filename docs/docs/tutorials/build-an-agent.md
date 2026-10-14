@@ -108,6 +108,7 @@ Resource-specific documentation is available in the reference section:
 [topics](../reference/resources/topics.md),
 [entities](../reference/resources/entities.md),
 [handoffs](../reference/resources/handoffs.md),
+[MCP servers](../reference/resources/mcp.md),
 [variants](../reference/resources/variants.md),
 [SMS templates](../reference/resources/sms.md),
 [variables](../reference/resources/variables.md),
@@ -169,6 +170,10 @@ Configure [content safety filtering](../reference/resources/safety_filters.md) a
 #### Handoffs, SMS, and variants
 
 Define [escalation paths](../reference/resources/handoffs.md), [SMS templates](../reference/resources/sms.md), and [per-variant configuration](../reference/resources/variants.md).
+
+#### MCP servers
+
+Connect the agent to [external tool servers over MCP](../reference/resources/mcp.md) when a service already exposes its operations over MCP.
 
 #### Languages and translations
 
