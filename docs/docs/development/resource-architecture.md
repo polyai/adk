@@ -219,7 +219,7 @@ voice/
 
 **Speech recognition** shapes the transcript before the agent ever sees it:
 
-- `asr_settings.yaml` — the ASR model and turn-taking behavior, including how long to wait for the caller to finish (`speech_end_delay_ms`) and whether they can interrupt (`barge_in`), plus filler phrases and background ambience
+- `asr_settings.yaml` — turn-taking behavior, including how long to wait for the caller to finish (`speech_end_delay_ms`) and whether they can interrupt (`barge_in`), plus filler phrases and background ambience
 - `keyphrase_boosting.yaml` — bias recognition toward terms it would otherwise mishear, each set to `default`, `boosted`, or `maximum`
 - `transcript_corrections.yaml` — regular expressions that rewrite systematic misrecognitions, such as "at gmail dot com" becoming `@gmail.com`
 

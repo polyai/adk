@@ -6,25 +6,21 @@ Speech recognition resources control how the agent processes user speech input o
 
 ```
 voice/speech_recognition/
-├── asr_settings.yaml               # ASR model, turn-taking, filler phrases, ambience
+├── asr_settings.yaml               # Turn-taking, filler phrases, ambience
 ├── keyphrase_boosting.yaml         # Optional - bias ASR toward specific words
 └── transcript_corrections.yaml     # Optional - regex corrections on ASR output
 ```
 
 ## ASR Settings (`asr_settings.yaml`)
 
-The voice channel's model configuration: the Speech Recognition and Turn-taking tabs of the
-Model Configuration page in Agent Studio. Update only: the file can't be created or deleted.
+The voice channel's model configuration: the Turn-taking tab of the Model Configuration page
+in Agent Studio. Update only: the file can't be created or deleted.
 
 Every section is optional. A section that is left out uses the platform default, and removing
 a section resets it on the next push. `background_ambience` can't be reset, so removing it
 switches ambience off instead.
 
 ### Fields
-- **asr_model**: Speech recognition model.
-  - **provider** (string, required), **model** (string, required), **language** (string, optional).
-  - Leave it out, or set `asr_model: auto`, to let the platform pick.
-  - Has no effect on end-to-end models such as Raven Omni.
 - **speech_end_delay_ms** (int): Silence, in milliseconds, before the caller's turn is treated as finished. 200–1500.
 - **barge_in**: Whether the caller can interrupt the agent.
   - **enabled** (bool), **allow_on_first_turn** (bool), **max_per_call** (int, 0 or more).
@@ -38,13 +34,10 @@ switches ambience off instead.
 Keys inside a section are checked, so a misspelt key is an error.
 
 If the Model Configuration page is read-only because PolyAI manages the project's voice
-configuration, `asr_model` and `speech_end_delay_ms` have no effect.
+configuration, `speech_end_delay_ms` has no effect.
 
 ### Example
 ```yaml
-asr_model:
-  provider: openai
-  model: gpt-4o-transcribe
 speech_end_delay_ms: 800
 barge_in:
   enabled: true
