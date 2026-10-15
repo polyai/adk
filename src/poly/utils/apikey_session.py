@@ -21,7 +21,7 @@ from poly.constants import POLY_HOME_DIR
 
 logger = logging.getLogger(__name__)
 
-SESSION_FILE_PATH = os.path.join(POLY_HOME_DIR, "apikey_session.json")
+SESSION_FILE_PATH = os.path.join(POLY_HOME_DIR, "apikey_session")
 
 # Treat a token as expired this many seconds early, so it doesn't lapse mid-run.
 EXPIRY_MARGIN_SECONDS = 60

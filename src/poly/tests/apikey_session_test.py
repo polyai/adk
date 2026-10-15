@@ -31,7 +31,7 @@ class SessionFileTestCase(unittest.TestCase):
     def setUp(self):
         tmp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(tmp_dir.cleanup)
-        self.path = os.path.join(tmp_dir.name, "poly", "apikey_session.json")
+        self.path = os.path.join(tmp_dir.name, "poly", "apikey_session")
         patcher = patch.object(apikey_session, "SESSION_FILE_PATH", self.path)
         patcher.start()
         self.addCleanup(patcher.stop)

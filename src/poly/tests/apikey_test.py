@@ -90,7 +90,7 @@ class ApiKeyTestCase(unittest.TestCase):
             # Non-interactive by default: no test may block on a real prompt.
             "stdin": patch("poly.cli_commands.apikey.sys.stdin"),
             "select": patch("questionary.select"),
-            # Nothing cached, and never touch the real ~/.poly/apikey_session.json.
+            # Nothing cached, and never touch the real ~/.poly/apikey_session.
             "session_load": patch(
                 "poly.cli_commands.apikey.apikey_session.load", return_value=None
             ),
@@ -382,45 +382,30 @@ class AccountPollFailure(ApiKeyTestCase):
 
 
 class MultipleAccounts(ApiKeyTestCase):
-    """Choosing among several accounts: picker at a terminal, own workspace or a listed error otherwise."""
+    """Choosing among several accounts: a picker at a terminal, a listed error otherwise."""
 
     TWO_ACCOUNTS = [
         {"id": "acc-1", "name": "Account One", "role": "Member", "created_by": "boss@x.com"},
         {"id": "acc-2", "name": "Account Two", "role": "Member", "created_by": None},
-    ]
-    ONE_OWN = [
-        {"id": "acc-team", "name": "Team", "role": "Member", "created_by": "boss@x.com"},
-        {"id": "acc-mine", "name": "Mine", "role": "Admin", "created_by": "Me@X.com"},
     ]
 
     def _tty(self) -> None:
         self.mocks["stdin"].isatty.return_value = True
 
     def test_tty_two_accounts_shows_picker_and_uses_choice(self):
-        """At a terminal, the picker lists every account, defaults to your own, and its choice is used."""
-        self._tty()
-        self.mocks["get_accounts"].return_value = self.ONE_OWN
-        self.mocks["select"].return_value.ask.return_value = "acc-team"
-
-        self.run_apikey(region="studio")
-
-        self.mocks["signin"].assert_called_once()
-        kwargs = self.mocks["select"].call_args.kwargs
-        titles = [c.title for c in kwargs["choices"]]
-        self.assertEqual(titles, ["Team (acc-team)", "Mine (acc-mine)"])
-        self.assertEqual(kwargs["default"], "acc-mine")
-        self.assertEqual(self.mocks["create_key"].call_args.kwargs["account_id"], "acc-team")
-        self.assertEqual(self.mocks["create_key"].call_args.kwargs["jwt_token"], FAKE_JWT)
-
-    def test_tty_picker_defaults_to_first_without_own_account(self):
-        """With no account of your own, the picker defaults to the first one."""
+        """At a terminal, the picker lists every account and its choice is used with the same sign-in."""
         self._tty()
         self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
         self.mocks["select"].return_value.ask.return_value = "acc-2"
 
         self.run_apikey(region="studio")
 
-        self.assertEqual(self.mocks["select"].call_args.kwargs["default"], "acc-1")
+        self.mocks["signin"].assert_called_once()
+        kwargs = self.mocks["select"].call_args.kwargs
+        titles = [c.title for c in kwargs["choices"]]
+        self.assertEqual(titles, ["Account One (acc-1)", "Account Two (acc-2)"])
+        self.assertEqual(self.mocks["create_key"].call_args.kwargs["account_id"], "acc-2")
+        self.assertEqual(self.mocks["create_key"].call_args.kwargs["jwt_token"], FAKE_JWT)
 
     def test_tty_picker_cancel_exits_1_account_step(self):
         """Cancelling the picker exits 1 at the account step without creating a key."""
@@ -434,24 +419,14 @@ class MultipleAccounts(ApiKeyTestCase):
         self.assertIn("No account selected", stderr)
         self.mocks["create_key"].assert_not_called()
 
-    def test_non_tty_two_accounts_one_own_auto_selects(self):
-        """Without a terminal, the one account you created is used, and the output says so."""
-        self.mocks["get_accounts"].return_value = self.ONE_OWN
-
-        stdout, _, code = self.run_apikey(region="studio")
-
-        self.assertIsNone(code)
-        self.mocks["select"].assert_not_called()
-        self.assertEqual(self.mocks["create_key"].call_args.kwargs["account_id"], "acc-mine")
-        self.assertIn("Auto-selected your workspace Mine (acc-mine)", stdout)
-
-    def test_non_tty_two_accounts_none_own_errors_with_accounts_json(self):
-        """None of them yours: exit 1 at the account step, listing them in text and in `accounts`."""
+    def test_non_tty_two_accounts_errors_with_accounts_json(self):
+        """Without a terminal: exit 1 at the account step, listing them in text and in `accounts`."""
         self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
 
         stdout, _, code = self.run_apikey(region="us-1", output_json=True)
 
         self.assertEqual(code, 1)
+        self.mocks["select"].assert_not_called()
         payload = json.loads(stdout)
         self.assertEqual(payload["step"], "account")
         for text in ("acc-1", "Account One", "acc-2", "Account Two", "--account-id"):
@@ -470,6 +445,16 @@ class MultipleAccounts(ApiKeyTestCase):
         )
         self.mocks["create_key"].assert_not_called()
 
+    def test_non_tty_plain_output_lists_the_accounts(self):
+        """Without --json the error on stderr still names every account."""
+        self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
+
+        _, stderr, code = self.run_apikey(region="studio")
+
+        self.assertEqual(code, 1)
+        for text in ("acc-1", "Account One", "acc-2", "Account Two", "--account-id"):
+            self.assertIn(text, " ".join(stderr.split()))  # the console wraps long lines
+
     def test_error_says_the_sign_in_is_kept(self):
         """When the sign-in was cached, the error says the re-run won't sign in again."""
         self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
@@ -486,44 +471,6 @@ class MultipleAccounts(ApiKeyTestCase):
 
         self.assertNotIn("sign in again", json.loads(stdout)["error"])
 
-    def test_non_tty_two_accounts_two_own_errors(self):
-        """Two accounts you created is still a guess, so it is an error."""
-        self.mocks["get_accounts"].return_value = [
-            {"id": "acc-a", "name": "A", "role": "Admin", "created_by": ME},
-            {"id": "acc-b", "name": "B", "role": "Admin", "created_by": ME},
-        ]
-
-        stdout, _, code = self.run_apikey(region="studio", output_json=True)
-
-        self.assertEqual(code, 1)
-        self.assertEqual([a["id"] for a in json.loads(stdout)["accounts"]], ["acc-a", "acc-b"])
-
-    def test_empty_created_by_never_matches(self):
-        """An account with an empty creator is never treated as yours, even with no email known."""
-        self.mocks["authorise"].return_value = {"user": {"is_first_login": False}}
-        self.mocks["get_accounts"].return_value = [
-            {"id": "acc-a", "name": "A", "created_by": ""},
-            {"id": "acc-b", "name": "B", "created_by": ""},
-        ]
-
-        _, _, code = self.run_apikey(region="studio", output_json=True)
-
-        self.assertEqual(code, 1)
-
-    def test_email_falls_back_to_the_token_claim(self):
-        """With no email in authorise's user record, the token's email claim is used."""
-        self.mocks["authorise"].return_value = {"user": {"is_first_login": False}}
-        self.mocks["get_accounts"].return_value = self.ONE_OWN
-
-        with patch(
-            "poly.cli_commands.apikey.apikey_session.token_claims",
-            return_value={"email": "me@x.com"},
-        ):
-            _, _, code = self.run_apikey(region="studio")
-
-        self.assertIsNone(code)
-        self.assertEqual(self.mocks["create_key"].call_args.kwargs["account_id"], "acc-mine")
-
     def test_json_two_accounts_never_prompts_even_at_tty(self):
         """--json never shows the picker, even with a terminal attached."""
         self._tty()
@@ -535,11 +482,11 @@ class MultipleAccounts(ApiKeyTestCase):
         self.mocks["select"].assert_not_called()
 
     def test_account_id_flag_wins_over_several_accounts(self):
-        """--account-id skips the list, the picker and the auto-select."""
+        """--account-id skips the list and the picker."""
         self._tty()
-        self.mocks["get_accounts"].return_value = self.ONE_OWN
+        self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
 
-        self.run_apikey(region="studio", account_id="acc-team")
+        self.run_apikey(region="studio", account_id="acc-1")
 
         self.mocks["get_accounts"].assert_not_called()
         self.mocks["select"].assert_not_called()
@@ -712,7 +659,7 @@ class TokenNeverInOutput(ApiKeyTestCase):
 
 
 class VersionAndNextStep(ApiKeyTestCase):
-    """The running poly is named first, and the run ends with the next step."""
+    """--json names the running poly, and the run ends with the next step."""
 
     # Absolute on the host, so the expectation holds on Windows too.
     CLI_PATH = os.path.abspath("/opt/tools/bin/poly")
@@ -726,11 +673,12 @@ class VersionAndNextStep(ApiKeyTestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def test_first_line_names_version_and_path(self):
-        """The first line of plain output is `poly <version> (<path>)`."""
+    def test_plain_output_does_not_print_version_and_path(self):
+        """The version and path are for --json only; the plain output stays as it was."""
         stdout, _, _ = self.run_apikey(region="studio")
 
-        self.assertEqual(stdout.splitlines()[0], f"poly 9.9.9 ({self.CLI_PATH})")
+        self.assertNotIn("9.9.9", stdout)
+        self.assertNotIn(self.CLI_PATH, stdout)
 
     def test_json_has_cli_version_and_path(self):
         """--json carries cli_version and cli_path, on success and on failure."""
@@ -748,7 +696,8 @@ class VersionAndNextStep(ApiKeyTestCase):
     def test_summary_and_json_carry_next_step_url(self):
         """The plain summary ends with the next step; --json has next_step_url."""
         stdout, _, _ = self.run_apikey(region="studio")
-        self.assertIn(f"Next: make your first Dialog RSN 1 call -- {NEXT_STEP_URL}", stdout)
+        self.assertIn("Next: make your first API call (POLY_API_KEY is already set).", stdout)
+        self.assertIn(f"Dialog RSN 1: {NEXT_STEP_URL}", stdout)
         self.assertEqual(NEXT_STEP_URL, "https://docs.poly.ai/dialog-rsn-1")
 
         stdout, _, _ = self.run_apikey(region="studio", output_json=True)
