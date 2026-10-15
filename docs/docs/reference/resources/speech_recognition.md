@@ -14,8 +14,8 @@ These resources live under `voice/speech_recognition/` and are used to tune how 
 !!! note "ASR settings are platform-provisioned — update only"
     `asr_settings.yaml` is pulled for every project with a voice channel. It can be updated with `poly push` but not created or deleted. See the [equivalent note on agent settings](./agent_settings.md) for details.
 
-!!! info "No effect on Dialog-RSN-1"
-    Keyphrase boosting and transcript corrections only apply to the traditional ASR pipeline. Projects running an end-to-end model such as Dialog-RSN-1 bypass this pipeline, so they are silently ignored.
+!!! info "Modular mode only"
+    Keyphrase boosting and transcript corrections only apply in modular mode, where separate components handle speech recognition and language processing. Projects in speech-native mode, such as Dialog-RSN-1, don't use them.
 
 ## Location
 
@@ -63,8 +63,6 @@ voice/speech_recognition/asr_settings.yaml
 They hold the voice channel's turn-taking settings, and apply to the whole voice channel. Individual flow steps can override barge-in, ASR provider, VAD, and LLM settings for a single turn — see [ASR override](./flows.md#asr-override) and [barge-in](./flows.md#barge-in) in the flows reference.
 
 Every section is optional. A section that is left out uses the platform default, and removing a section resets it on the next push.
-
-Filler phrases and background ambience are voice settings, in [`voice/configuration.yaml`](./voice_settings.md#filler-phrases).
 
 ### Fields
 

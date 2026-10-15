@@ -18,9 +18,6 @@ The voice channel's turn-taking. Update only: the file can't be created or delet
 Every section is optional. A section that is left out uses the platform default, and removing
 a section resets it on the next push.
 
-Filler phrases and background ambience are in `voice/configuration.yaml` (see
-[Voice Settings](voice_settings.md)).
-
 ### Fields
 - **speech_end_delay_ms** (int): Silence, in milliseconds, before the caller's turn is treated as finished. 200–1500.
 - **barge_in**: Whether the caller can interrupt the agent.
