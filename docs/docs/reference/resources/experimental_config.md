@@ -188,8 +188,8 @@ Example:
 
 The `background_track` object (`name`, `loudness`) plays a looped recording behind the agent's voice for the duration of the call. See `background_track` in the schema for exact fields and ranges.
 
-!!! info "No effect on Raven Omni, and telephony only"
-    `background_track` only applies to the Raven 3.5 voice stack — it has no effect under Raven Omni. It also only plays on real telephony calls, not in the Agent Studio web call testing UI, so it won't be audible when testing there.
+!!! info "No effect on Dialog-RSN-1, and telephony only"
+    `background_track` only applies to the Raven 3.5 voice stack — it has no effect under Dialog-RSN-1. It also only plays on real telephony calls, not in the Agent Studio web call testing UI, so it won't be audible when testing there.
 
 ### Barge-in
 

@@ -14,8 +14,8 @@ These resources live under `voice/speech_recognition/` and are used to tune how 
 !!! note "ASR settings are platform-provisioned — update only"
     `asr_settings.yaml` is pulled for every project with a voice channel. It can be updated with `poly push` but not created or deleted. See the [equivalent note on agent settings](./agent_settings.md) for details.
 
-!!! info "No effect on Raven Omni"
-    Keyphrase boosting and transcript corrections only apply to the traditional ASR pipeline. Projects running an end-to-end model such as Raven Omni bypass this pipeline, so they are silently ignored.
+!!! info "No effect on Dialog-RSN-1"
+    Keyphrase boosting and transcript corrections only apply to the traditional ASR pipeline. Projects running an end-to-end model such as Dialog-RSN-1 bypass this pipeline, so they are silently ignored.
 
 ## Location
 
