@@ -271,7 +271,6 @@ def _print_summary(
         plain(f"Open a new terminal, or run `source {target.path}`, to pick up POLY_API_KEY.")
     plain("")
     plain("Next: make your first API call (POLY_API_KEY is already set).")
-    plain(f"      Dialog RSN 1: {NEXT_STEP_URL}")
 
 
 def _print_json(

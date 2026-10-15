@@ -694,10 +694,10 @@ class VersionAndNextStep(ApiKeyTestCase):
         self.assertEqual(payload["cli_version"], "9.9.9")
 
     def test_summary_and_json_carry_next_step_url(self):
-        """The plain summary ends with the next step; --json has next_step_url."""
+        """The plain summary ends with the next step; only --json carries next_step_url."""
         stdout, _, _ = self.run_apikey(region="studio")
         self.assertIn("Next: make your first API call (POLY_API_KEY is already set).", stdout)
-        self.assertIn(f"Dialog RSN 1: {NEXT_STEP_URL}", stdout)
+        self.assertNotIn(NEXT_STEP_URL, stdout)
         self.assertEqual(NEXT_STEP_URL, "https://docs.poly.ai/dialog-rsn-1")
 
         stdout, _, _ = self.run_apikey(region="studio", output_json=True)

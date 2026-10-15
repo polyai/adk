@@ -27,7 +27,7 @@ poly apikey --region studio --no-session-cache
 4. Reuses an active, unexpired API key with the default name if one already exists for the account, otherwise creates one. Unlike [`poly login`](./login.md)'s Personal Access Token, this key is **account-scoped**.
 5. Saves the key to `~/.poly/credentials.json` under `--region` — but only if no entry for that region already exists there. An existing ADK credential is never overwritten, and credentials for different regions coexist independently.
 6. Writes `export POLY_API_KEY="..."` (or, on Windows, sets the variable in your user environment) into your detected shell profile, so new shells and processes pick it up automatically. The ADK itself reads `~/.poly/credentials.json` and doesn't need this variable; it's exported for the PolyAI SDKs and other tools that read `POLY_API_KEY` directly.
-7. Prints a summary with the key masked, ending with the next step: your first API call, with <https://docs.poly.ai/dialog-rsn-1> as the Dialog RSN 1 starting point. The key and your sign-in token are never printed or logged.
+7. Prints a summary with the key masked, ending with the next step: your first API call. `--json` carries a `next_step_url` for the Dialog RSN 1 reference. The key and your sign-in token are never printed or logged.
 
 Exit codes: `0` on success, `1` on a sign-in, account, or API failure, `2` when `POLY_API_KEY` is already set in your profile to a different value and `--force` was not passed.
 
