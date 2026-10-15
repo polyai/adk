@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -387,27 +388,65 @@ class TestCaseIntegrationAttributes(SubResource):
         raise NotImplementedError("Test Case Integration Attributes cannot be deleted")
 
 
-def _python_to_value(data: Any) -> Value:
-    """Convert an arbitrary JSON-compatible python value into a google.protobuf.Value.
+def _body_text(body: Any) -> str:
+    """The response text a mock body is sent as.
 
-    `Struct.__setitem__` already knows how to encode any JSON-compatible python
-    value (including nested dicts/lists) into a Value — wrapping it in a
-    throwaway Struct reuses that instead of hand-rolling the encoding.
+    Sent as text, not as a google.protobuf.Value: a Value holds every number as a
+    double, so `2` and `2.0` would arrive identical. Text bodies pass through to
+    the function untouched, so its `r.json()` sees exactly what was written.
     """
-    wrapper = Struct()
-    wrapper["value"] = data
-    value = Value()
-    value.CopyFrom(wrapper.fields["value"])
-    return value
+    return body if isinstance(body, str) else json.dumps(body)
 
 
-@dataclass
+def _parse_body(body: Any) -> Any:
+    """Read a body stored as text back into the structure it was written as.
+
+    Text that isn't JSON, or is a JSON string or null, stays as written.
+    """
+    if not isinstance(body, str):
+        return body
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return body
+    return body if parsed is None or isinstance(parsed, str) else parsed
+
+
+def _same_json(left: Any, right: Any) -> bool:
+    """Equality that tells `2` from `2.0`, and `1` from `true`, unlike `==`."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _same_json(value, right[key]) for key, value in left.items()
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(map(_same_json, left, right))
+    return left == right
+
+
+@dataclass(eq=False)
 class ApiResponse:
-    """A single mocked API response: status, body, and headers."""
+    """A single mocked API response: status, body, and headers.
+
+    `legacy_body` marks a body the platform holds in its old non-text form, which
+    lost int vs float, so the next push rewrites it as text.
+    """
 
     status: int = 200
     body: Any = None
     headers: dict[str, str] = field(default_factory=dict)
+    legacy_body: bool = False
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ApiResponse):
+            return NotImplemented
+        return (
+            self.status == other.status
+            and self.headers == other.headers
+            and self.legacy_body == other.legacy_body
+            and _same_json(self.body, other.body)
+        )
 
     def to_yaml_dict(self) -> dict:
         response: dict[str, Any] = {"status": self.status}
@@ -423,11 +462,11 @@ class ApiResponse:
             "headers": {str(key): _header_value(value) for key, value in self.headers.items()},
         }
         if self.body is not None:
-            kwargs["body"] = _python_to_value(self.body)
+            kwargs["body"] = Value(string_value=_body_text(self.body))
         return ApiResponseProto(**kwargs)
 
     @classmethod
-    def from_dict(cls, data: dict | None) -> "ApiResponse":
+    def from_dict(cls, data: dict | None, from_projection: bool = False) -> "ApiResponse":
         data = data or {}
         if not isinstance(data, dict):
             raise ValueError(
@@ -440,14 +479,15 @@ class ApiResponse:
                 f"'respond.headers' must be a mapping of header name to value, "
                 f"got {type(headers).__name__}: {headers!r}"
             )
-        # Mirrors _normalise_attribute: a body pushed through google.protobuf.Value
-        # (a double) reads a pushed int back as a float, producing a spurious
-        # diff on the next pull. Folding integral floats back to int here
-        # keeps a pull-after-push round trip stable.
+        body = data.get("body")
+        legacy_body = bool(data.get("legacy_body")) or (
+            from_projection and not isinstance(body, (str, type(None)))
+        )
         return cls(
             status=data.get("status", 200),
-            body=_normalise_attribute(data.get("body")),
+            body=_parse_body(body),
             headers=dict(headers),
+            legacy_body=legacy_body,
         )
 
 
@@ -477,14 +517,17 @@ class ApiResponseRule:
         return ApiResponseRuleProto(**kwargs)
 
     @classmethod
-    def from_dict(cls, data: dict | None) -> "ApiResponseRule":
+    def from_dict(cls, data: dict | None, from_projection: bool = False) -> "ApiResponseRule":
         data = data or {}
         if not isinstance(data, dict):
             raise ValueError(
                 f"Response rule must be a mapping with 'respond' (and optional 'repeat'), "
                 f"got {type(data).__name__}: {data!r}"
             )
-        return cls(respond=ApiResponse.from_dict(data.get("respond")), repeat=data.get("repeat"))
+        return cls(
+            respond=ApiResponse.from_dict(data.get("respond"), from_projection),
+            repeat=data.get("repeat"),
+        )
 
 
 @dataclass
@@ -516,7 +559,9 @@ class TestCaseApiMocks:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, dict[str, list[dict]]] | None) -> "TestCaseApiMocks":
+    def from_dict(
+        cls, data: dict[str, dict[str, list[dict]]] | None, from_projection: bool = False
+    ) -> "TestCaseApiMocks":
         data = data or {}
         if not isinstance(data, dict):
             raise ValueError(
@@ -542,7 +587,7 @@ class TestCaseApiMocks:
                 parsed_rules = []
                 for index, rule in enumerate(rules):
                     try:
-                        parsed_rules.append(ApiResponseRule.from_dict(rule))
+                        parsed_rules.append(ApiResponseRule.from_dict(rule, from_projection))
                     except ValueError as exc:
                         raise ValueError(
                             f"api_mocks.{integration_name}.{operation_name}[{index}]: {exc}"
@@ -733,7 +778,9 @@ class TestCase(YamlResource):
             # integrations/operations/responses wrapper is only the protobuf wire
             # shape used internally between agent-stream's backend and its own
             # store; it never reaches the projection.
-            api_mocks = TestCaseApiMocks.from_dict(test_case_data.get("apiMocks"))
+            api_mocks = TestCaseApiMocks.from_dict(
+                test_case_data.get("apiMocks"), from_projection=True
+            )
             test_cases[test_case_id] = cls(
                 resource_id=test_case_id,
                 name=test_case_data.get("name", ""),
