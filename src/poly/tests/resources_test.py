@@ -9,6 +9,7 @@ import shutil
 import tempfile
 import threading
 import unittest
+from typing import Optional
 
 import yaml
 from google.protobuf.json_format import MessageToDict
@@ -30,7 +31,7 @@ from poly.resources.api_integration import (
     ApiIntegrationEnvironments,
     ApiIntegrationOperation,
 )
-from poly.resources.asr_settings import AsrSettings, VoiceBargeInConfig
+from poly.resources.asr_settings import AsrSettings, BargeIn, VoiceBargeInConfig
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,
@@ -7245,123 +7246,222 @@ class PronunciationTests(unittest.TestCase):
 class AsrSettingsTests(unittest.TestCase):
     """Tests for AsrSettings resource."""
 
-    def test_init_to_yaml_dict_from_yaml_dict_roundtrip(self):
-        """Init from kwargs, to_yaml_dict, from_yaml_dict roundtrip preserves fields."""
-        a = AsrSettings(
-            resource_id="asr-1",
-            name="asr_settings",
-            barge_in=True,
-            interaction_style="swift",
-        )
-        d = a.to_yaml_dict()
-        self.assertTrue(d["barge_in"])
-        self.assertEqual(d["interaction_style"], "swift")
-        a2 = AsrSettings.from_yaml_dict(d, resource_id="asr-1", name="asr_settings")
-        self.assertEqual(a2.barge_in, a.barge_in)
-        self.assertEqual(a2.interaction_style, a.interaction_style)
+    FULL_YAML = {
+        "asr_model": {"provider": "openai", "model": "gpt-4o-transcribe", "language": "en-GB"},
+        "speech_end_delay_ms": 800,
+        "barge_in": {"enabled": True, "allow_on_first_turn": False, "max_per_call": 5},
+        "filler_phrases": {
+            "enabled": True,
+            "phrases": ["One moment..."],
+            "randomize": True,
+            "initial_interval_seconds": 2.5,
+            "interval_seconds": 5,
+        },
+        "background_ambience": {"enabled": True, "preset": "office-ambiance", "loudness": -50},
+    }
 
-    def test_from_yaml_dict_turbo_maps_to_sonic(self):
-        """turbo interaction_style in YAML is mapped to sonic."""
-        a = AsrSettings.from_yaml_dict(
-            {"barge_in": False, "interaction_style": "turbo"},
-            resource_id="asr-1",
-            name="asr_settings",
-        )
-        self.assertEqual(a.interaction_style, "sonic")
+    def _from_yaml(self, yaml_dict: dict) -> AsrSettings:
+        return AsrSettings.from_yaml_dict(yaml_dict, resource_id="asr_settings", name="asr_settings")
 
-    def test_validate_invalid_interaction_style_raises(self):
-        """validate raises ValueError for invalid interaction_style."""
-        a = AsrSettings(
-            resource_id="asr-1",
-            name="asr_settings",
-            barge_in=False,
-            interaction_style="invalid",
-        )
+    def _changes(self, new: dict, old: Optional[dict]):
+        old_resource = self._from_yaml(old) if old is not None else None
+        return self._from_yaml(new).get_new_updated_deleted_subresources(old_resource=old_resource)
+
+    def test_yaml_roundtrip(self):
+        """Every section survives from_yaml_dict -> to_yaml_dict unchanged."""
+        self.assertEqual(self._from_yaml(self.FULL_YAML).to_yaml_dict(), self.FULL_YAML)
+
+    def test_omitted_sections_stay_omitted(self):
+        """A file with no sections writes back with no sections."""
+        self.assertEqual(self._from_yaml({}).to_yaml_dict(), {})
+
+    def test_asr_model_auto_is_omitted(self):
+        """asr_model: auto means the platform picks, the same as leaving it out."""
+        asr = self._from_yaml({"asr_model": "auto"})
+        self.assertIsNone(asr.asr_model)
+        self.assertEqual(asr.to_yaml_dict(), {})
+
+    def test_status_dict_roundtrip(self):
+        """The status file form rebuilds an equal resource."""
+        asr = self._from_yaml(self.FULL_YAML)
+        self.assertEqual(AsrSettings(**resource_utils.resource_to_dict(asr)), asr)
+
+    def test_legacy_status_dict_is_read(self):
+        """A status file from an older ADK, with a bool barge_in, still loads."""
+        asr = AsrSettings(resource_id="asr_settings", name="asr_settings", barge_in=True)
+        self.assertEqual(asr.barge_in, BargeIn(enabled=True))
+
+    def test_legacy_barge_in_bool_maps_to_enabled(self):
+        """barge_in: true from an older file becomes barge_in.enabled, with a warning."""
+        with self.assertLogs("poly.resources.asr_settings", level="WARNING") as logs:
+            asr = self._from_yaml({"barge_in": True, "interaction_style": "balanced"})
+        self.assertEqual(asr.barge_in, BargeIn(enabled=True))
+        self.assertEqual(asr.to_yaml_dict(), {"barge_in": {"enabled": True, "allow_on_first_turn": False}})
+        self.assertTrue(any("deprecated" in line for line in logs.output))
+        self.assertTrue(any("interaction_style" in line for line in logs.output))
+
+    def test_unknown_section_key_raises(self):
+        """A misspelt key inside a section is an error, not silently dropped."""
         with self.assertRaises(ValueError) as cm:
-            a.validate()
-        self.assertIn("Invalid interaction_style", str(cm.exception))
+            self._from_yaml({"barge_in": {"enabled": True, "max_barge_ins": 3}})
+        self.assertIn("max_barge_ins", str(cm.exception))
 
-    def test_validate_passes_with_valid_style(self):
-        """validate succeeds with valid interaction_style."""
-        a = AsrSettings(
-            resource_id="asr-1",
-            name="asr_settings",
-            barge_in=True,
-            interaction_style="balanced",
-        )
-        a.validate()
+    def test_section_that_is_not_a_mapping_raises(self):
+        """A section given as a scalar is an error."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"asr_model": "openai/gpt-4o-transcribe"})
+        self.assertIn("asr_model", str(cm.exception))
 
-    def test_read_local_resource(self):
-        """read_local_resource correctly parses asr_settings from YAML file."""
-        yaml_content = "barge_in: true\ninteraction_style: precise\n"
+    def test_validate_passes_with_full_settings(self):
+        """The full example validates."""
+        self._from_yaml(self.FULL_YAML).validate()
 
-        def exists_asr(path):
-            return "asr_settings.yaml" in str(path) or os.path.exists(path)
+    def test_validate_rejects_out_of_range_values(self):
+        """Values outside the Model Configuration page's limits are rejected."""
+        cases = {
+            "speech_end_delay_ms": {"speech_end_delay_ms": 150},
+            "asr_model": {"asr_model": {"provider": "openai", "model": ""}},
+            "max_per_call": {"barge_in": {"enabled": True, "max_per_call": -1}},
+            "initial_interval_seconds": {"filler_phrases": {"initial_interval_seconds": 0.2}},
+            "interval_seconds": {"filler_phrases": {"interval_seconds": 0.5}},
+            "at least one phrase": {"filler_phrases": {"enabled": True, "phrases": [" "]}},
+            "loudness": {"background_ambience": {"preset": "office-ambiance", "loudness": -10}},
+        }
+        for expected, yaml_dict in cases.items():
+            with self.subTest(expected):
+                with self.assertRaises(ValueError) as cm:
+                    self._from_yaml(yaml_dict).validate()
+                self.assertIn(expected, str(cm.exception))
 
-        def isfile_asr(path):
-            return "asr_settings.yaml" in str(path) or os.path.isfile(path)
+    def test_validate_warns_on_unknown_ambience_preset(self):
+        """An unknown preset warns rather than fails, so newer platform presets still push."""
+        asr = self._from_yaml({"background_ambience": {"preset": "rainforest"}})
+        with self.assertLogs("poly.resources.asr_settings", level="WARNING"):
+            asr.validate()
 
+    def test_wrong_field_type_raises_on_read(self):
+        """Field types inside sections are checked when the file is read."""
+        yaml_content = "speech_end_delay_ms: 800\nbarge_in:\n  max_per_call: lots\n"
         with mock_read_from_file(yaml_content):
             with (
-                unittest.mock.patch(
-                    "poly.resources.resource.os.path.exists", side_effect=exists_asr
-                ),
-                unittest.mock.patch(
-                    "poly.resources.resource.os.path.isfile", side_effect=isfile_asr
-                ),
+                unittest.mock.patch("poly.resources.resource.os.path.exists", return_value=True),
+                unittest.mock.patch("poly.resources.resource.os.path.isfile", return_value=True),
             ):
-                result = AsrSettings.read_local_resource(
-                    file_path="voice/speech_recognition/asr_settings.yaml",
-                    resource_id="asr-123",
-                    resource_name="asr_settings",
-                )
-        self.assertEqual(result.resource_id, "asr-123")
-        self.assertTrue(result.barge_in)
-        self.assertEqual(result.interaction_style, "precise")
+                with self.assertRaises(ValueError) as cm:
+                    AsrSettings.read_local_resource(
+                        file_path="voice/speech_recognition/asr_settings.yaml",
+                        resource_id="asr_settings",
+                        resource_name="asr_settings",
+                    )
+        self.assertIn("barge_in.max_per_call", str(cm.exception))
 
-    def _asr_settings(self, barge_in: bool, interaction_style: str = "balanced") -> AsrSettings:
-        return AsrSettings(
-            resource_id="asr_settings",
-            name="asr_settings",
-            barge_in=barge_in,
-            interaction_style=interaction_style,
-        )
+    def test_unchanged_settings_send_nothing(self):
+        """No commands when nothing changed."""
+        self.assertEqual(self._changes(self.FULL_YAML, self.FULL_YAML), ([], [], []))
 
-    def test_enabling_barge_in_updates_barge_in_config(self):
-        """Barge-in that changes is sent as a barge-in config update with only enabled set."""
-        new, updated, deleted = self._asr_settings(
-            barge_in=True
-        ).get_new_updated_deleted_subresources(old_resource=self._asr_settings(barge_in=False))
+    def test_each_changed_section_is_updated(self):
+        """A new resource sends one update per section, each through its own command."""
+        new, updated, deleted = self._changes(self.FULL_YAML, None)
 
         self.assertEqual(new, [])
         self.assertEqual(deleted, [])
-        self.assertEqual(len(updated), 1)
-        barge_in_config = updated[0]
-        self.assertIsInstance(barge_in_config, VoiceBargeInConfig)
         self.assertEqual(
-            barge_in_config.update_command_type, "voice_channel_update_barge_in_config"
+            sorted(sub_resource.update_command_type for sub_resource in updated),
+            [
+                "voice_channel_update_ambience",
+                "voice_channel_update_asr_config",
+                "voice_channel_update_barge_in_config",
+                "voice_channel_update_silence_filler_utterances",
+                "voice_channel_update_vad_config",
+            ],
         )
-        proto = barge_in_config.build_update_proto()
-        self.assertEqual([field.name for field, _ in proto.ListFields()], ["enabled"])
+
+    def test_removed_sections_are_reset(self):
+        """Removing a section resets it on the platform."""
+        old = {key: value for key, value in self.FULL_YAML.items() if key != "background_ambience"}
+        _, updated, deleted = self._changes({}, old)
+
+        self.assertEqual(updated, [])
+        self.assertEqual(
+            sorted(sub_resource.delete_command_type for sub_resource in deleted),
+            [
+                "voice_channel_reset_asr_config",
+                "voice_channel_reset_barge_in_config",
+                "voice_channel_reset_silence_filler_utterances",
+                "voice_channel_reset_vad_config",
+            ],
+        )
+        for sub_resource in deleted:
+            self.assertEqual(sub_resource.build_delete_proto().ListFields(), [])
+
+    def test_removed_ambience_is_switched_off(self):
+        """Ambience can't be reset, so removing it sends enabled: false with the old preset."""
+        old = {"background_ambience": {"enabled": True, "preset": "office-ambiance", "loudness": -40}}
+        with self.assertLogs("poly.resources.asr_settings", level="WARNING"):
+            _, updated, deleted = self._changes({}, old)
+
+        self.assertEqual(deleted, [])
+        self.assertEqual(len(updated), 1)
+        proto = updated[0].build_update_proto()
+        self.assertFalse(proto.ambience.enabled)
+        self.assertEqual(proto.ambience.preset, "office-ambiance")
+        self.assertEqual(proto.ambience.loudness, -40)
+
+    def test_removed_disabled_ambience_sends_nothing(self):
+        """Removing ambience that is already off has nothing to send."""
+        old = {"background_ambience": {"enabled": False, "preset": "office-ambiance"}}
+        self.assertEqual(self._changes({}, old), ([], [], []))
+
+    def test_speech_end_delay_is_sent_in_seconds(self):
+        """speech_end_delay_ms is stored as speechEndWindowSeconds."""
+        _, updated, _ = self._changes({"speech_end_delay_ms": 640}, {})
+        proto = updated[0].build_update_proto()
+        self.assertAlmostEqual(proto.vad_config.speech_end_window_seconds, 0.64)
+
+    def test_asr_model_proto(self):
+        """asr_model is sent as provider_id/model_id, with an empty language when unset."""
+        _, updated, _ = self._changes({"asr_model": {"provider": "polyai", "model": "owl"}}, {})
+        proto = updated[0].build_update_proto()
+        self.assertEqual(proto.asr_config.provider_id, "polyai")
+        self.assertEqual(proto.asr_config.model_id, "owl")
+        self.assertEqual(proto.asr_config.language, "")
+
+    def test_filler_phrases_proto(self):
+        """Filler phrases are sent as utterance messages."""
+        _, updated, _ = self._changes({"filler_phrases": self.FULL_YAML["filler_phrases"]}, {})
+        proto = updated[0].build_update_proto().silence_filler_utterances
         self.assertTrue(proto.enabled)
+        self.assertEqual([utterance.message for utterance in proto.utterances], ["One moment..."])
+        self.assertEqual(proto.initial_interval_seconds, 2.5)
+        self.assertEqual(proto.interval_seconds, 5)
 
     def test_disabling_barge_in_sends_enabled_false(self):
         """enabled=False must reach the wire, not be dropped as a proto default."""
-        _, updated, _ = self._asr_settings(barge_in=False).get_new_updated_deleted_subresources(
-            old_resource=self._asr_settings(barge_in=True)
+        _, updated, _ = self._changes(
+            {"barge_in": {"enabled": False}}, {"barge_in": {"enabled": True}}
         )
 
+        self.assertEqual(len(updated), 1)
+        self.assertIsInstance(updated[0], VoiceBargeInConfig)
         proto = updated[0].build_update_proto()
         self.assertTrue(proto.HasField("enabled"))
         self.assertFalse(proto.enabled)
+        self.assertFalse(proto.HasField("max_per_call"))
 
-    def test_unchanged_barge_in_sends_no_barge_in_config(self):
-        """Changing only interaction_style leaves the barge-in config alone."""
-        changes = self._asr_settings(
-            barge_in=True, interaction_style="swift"
-        ).get_new_updated_deleted_subresources(old_resource=self._asr_settings(barge_in=True))
+    def test_removing_max_per_call_resets_before_updating(self):
+        """Barge-in updates merge, so clearing max_per_call takes a reset and an update."""
+        _, updated, deleted = self._changes(
+            {"barge_in": {"enabled": True}}, {"barge_in": {"enabled": True, "max_per_call": 3}}
+        )
 
-        self.assertEqual(changes, ([], [], []))
+        self.assertEqual(
+            [sub_resource.delete_command_type for sub_resource in deleted],
+            ["voice_channel_reset_barge_in_config"],
+        )
+        self.assertEqual(
+            [sub_resource.update_command_type for sub_resource in updated],
+            ["voice_channel_update_barge_in_config"],
+        )
 
 
 class KeyphraseBoostingTests(unittest.TestCase):
@@ -13275,33 +13375,68 @@ class ChannelSettingsFromProjection(unittest.TestCase):
 class AsrSettingsFromProjection(unittest.TestCase):
     """Tests for AsrSettings.from_projection."""
 
-    def test_parses_asr_settings(self):
-        """Verify barge_in and interaction_style are parsed."""
+    def test_parses_every_section(self):
+        """Each Model Configuration field maps to its YAML section."""
         projection = {
             "channels": {
                 "voice": {
-                    "asrSettings": {
-                        "bargeIn": True,
-                        "latencyConfig": {
-                            "interactionStyle": "fast",
-                        },
-                    }
+                    "asrConfig": {"providerId": "openai", "modelId": "gpt-4o-transcribe", "language": ""},
+                    "vadConfig": {"speechEndWindowSeconds": 0.8},
+                    "bargeInConfig": {"enabled": True, "maxPerCall": 5},
+                    "silenceFillerUtterances": {
+                        "enabled": False,
+                        "utterances": [{"message": "One moment..."}],
+                        "randomize": True,
+                        "initialIntervalSeconds": 2.5,
+                        "intervalSeconds": 5,
+                    },
+                    "ambience": {"enabled": True, "preset": "office-ambiance", "loudness": -50},
                 }
             }
         }
-        result = AsrSettings.from_projection(projection)
-        self.assertEqual(list(result), ["asr_settings"])
-        asr = result["asr_settings"]
-        self.assertIsInstance(asr, AsrSettings)
-        self.assertTrue(asr.barge_in)
-        self.assertEqual(asr.interaction_style, "fast")
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertEqual(
+            asr.to_yaml_dict(),
+            {
+                "asr_model": {"provider": "openai", "model": "gpt-4o-transcribe"},
+                "speech_end_delay_ms": 800,
+                "barge_in": {"enabled": True, "allow_on_first_turn": False, "max_per_call": 5},
+                "filler_phrases": {
+                    "enabled": False,
+                    "phrases": ["One moment..."],
+                    "randomize": True,
+                    "initial_interval_seconds": 2.5,
+                    "interval_seconds": 5,
+                },
+                "background_ambience": {
+                    "enabled": True,
+                    "preset": "office-ambiance",
+                    "loudness": -50,
+                },
+            },
+        )
 
-    def test_empty_projection_yields_no_asr_settings(self):
+    def test_unset_fields_are_omitted(self):
+        """A voice channel with nothing set pulls as an empty file, which pushes nothing."""
+        asr = AsrSettings.from_projection({"channels": {"voice": {}}})["asr_settings"]
+        self.assertEqual(asr.to_yaml_dict(), {})
+
+    def test_speech_end_delay_rounds_to_whole_milliseconds(self):
+        """Float seconds don't leak into speech_end_delay_ms."""
+        projection = {"channels": {"voice": {"vadConfig": {"speechEndWindowSeconds": 0.58}}}}
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertEqual(asr.speech_end_delay_ms, 580)
+
+    def test_no_channel_access_yields_no_asr_settings(self):
         """An empty projection should return an empty dict."""
         self.assertEqual(AsrSettings.from_projection({}), {})
 
+    def test_no_voice_channel_yields_no_asr_settings(self):
+        """Without a voice channel there is nothing to pull."""
+        self.assertEqual(AsrSettings.from_projection({"channels": {}}), {})
+
     def test_barge_in_config_overrides_legacy_barge_in(self):
-        """bargeInConfig.enabled is what runs, so it wins over asrSettings.bargeIn."""
+        """bargeInConfig is what runs, so it wins over asrSettings.bargeIn."""
         projection = {
             "channels": {
                 "voice": {
@@ -13311,7 +13446,7 @@ class AsrSettingsFromProjection(unittest.TestCase):
             }
         }
         asr = AsrSettings.from_projection(projection)["asr_settings"]
-        self.assertFalse(asr.barge_in)
+        self.assertEqual(asr.barge_in, BargeIn(enabled=False, allow_on_first_turn=True))
 
     def test_barge_in_config_without_enabled_is_disabled(self):
         """The projection omits enabled when it is false, even if bargeIn is true."""
@@ -13324,13 +13459,31 @@ class AsrSettingsFromProjection(unittest.TestCase):
             }
         }
         asr = AsrSettings.from_projection(projection)["asr_settings"]
-        self.assertFalse(asr.barge_in)
+        self.assertFalse(asr.barge_in.enabled)
 
     def test_legacy_barge_in_used_without_barge_in_config(self):
         """Without bargeInConfig, asrSettings.bargeIn is what runs."""
         projection = {"channels": {"voice": {"asrSettings": {"bargeIn": True}}}}
         asr = AsrSettings.from_projection(projection)["asr_settings"]
-        self.assertTrue(asr.barge_in)
+        self.assertEqual(asr.barge_in, BargeIn(enabled=True))
+
+    def test_pull_then_push_round_trips(self):
+        """A pulled file, read back unchanged, sends no commands."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "vadConfig": {"speechEndWindowSeconds": 0.8},
+                    "bargeInConfig": {"enabled": True},
+                    "ambience": {"enabled": False, "preset": "office-ambiance", "loudness": -50},
+                }
+            }
+        }
+        pulled = AsrSettings.from_projection(projection)["asr_settings"]
+        read_back = AsrSettings.from_yaml_dict(
+            resource_utils.load_yaml(pulled.raw), resource_id="asr_settings", name="asr_settings"
+        )
+        self.assertEqual(read_back.compute_hash(), pulled.compute_hash())
+        self.assertEqual(read_back.get_new_updated_deleted_subresources(pulled), ([], [], []))
 
 
 class DeterministicConditionIdTests(unittest.TestCase):

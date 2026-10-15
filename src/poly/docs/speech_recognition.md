@@ -6,34 +6,70 @@ Speech recognition resources control how the agent processes user speech input o
 
 ```
 voice/speech_recognition/
-├── asr_settings.yaml               # Barge-in, interaction style
+├── asr_settings.yaml               # ASR model, turn-taking, filler phrases, ambience
 ├── keyphrase_boosting.yaml         # Optional - bias ASR toward specific words
 └── transcript_corrections.yaml     # Optional - regex corrections on ASR output
 ```
 
 ## ASR Settings (`asr_settings.yaml`)
 
-Global speech recognition settings for the voice channel.
+The voice channel's model configuration: the Speech Recognition and Turn-taking tabs of the
+Model Configuration page in Agent Studio. Update only: the file can't be created or deleted.
+
+Every section is optional. A section that is left out uses the platform default, and removing
+a section resets it on the next push. `background_ambience` can't be reset, so removing it
+switches ambience off instead.
 
 ### Fields
-- **barge_in** (bool): Allow the user to interrupt the agent while it's speaking. Default: `false`.
-- **interaction_style** (string): Controls ASR latency/accuracy trade-off. One of: `balanced`, `precise`, `swift`, `sonic`, `turbo`. Default: `balanced`.
+- **asr_model**: Speech recognition model.
+  - **provider** (string, required), **model** (string, required), **language** (string, optional).
+  - Leave it out, or set `asr_model: auto`, to let the platform pick.
+  - Has no effect on end-to-end models such as Raven Omni.
+- **speech_end_delay_ms** (int): Silence, in milliseconds, before the caller's turn is treated as finished. 200–1500.
+- **barge_in**: Whether the caller can interrupt the agent.
+  - **enabled** (bool), **allow_on_first_turn** (bool), **max_per_call** (int, 0 or more).
+- **filler_phrases**: Phrases the agent says while the caller waits.
+  - **enabled** (bool), **phrases** (list of strings, at least one when enabled), **randomize** (bool).
+  - **initial_interval_seconds** (float, at least 0.5): wait before the first phrase.
+  - **interval_seconds** (float, at least 1): wait between phrases.
+- **background_ambience**: Background sound under the agent's speech.
+  - **enabled** (bool), **preset** (`office-ambiance`, `restaurant-ambiance` or `whitenoise-subtle`), **loudness** (dB, -70 to -20; Agent Studio shows -70 as volume 0 and -20 as volume 100).
+
+Keys inside a section are checked, so a misspelt key is an error.
+
+If the Model Configuration page is read-only because PolyAI manages the project's voice
+configuration, `asr_model` and `speech_end_delay_ms` have no effect.
 
 ### Example
 ```yaml
-barge_in: false
-interaction_style: balanced
+asr_model:
+  provider: openai
+  model: gpt-4o-transcribe
+speech_end_delay_ms: 800
+barge_in:
+  enabled: true
+  allow_on_first_turn: false
+  max_per_call: 5
+filler_phrases:
+  enabled: false
+  phrases:
+    - One moment...
+    - Just a second...
+  randomize: true
+  initial_interval_seconds: 2.5
+  interval_seconds: 5
+background_ambience:
+  enabled: false
+  preset: office-ambiance
+  loudness: -50
 ```
 
 These apply to the whole voice channel. Individual flow steps can override barge-in, ASR
 provider, VAD and LLM settings for a single turn — see [step settings](flows.md#step-settings).
 
-| Style | Behavior |
-|-------|----------|
-| `precise` | Higher accuracy, higher latency |
-| `balanced` | Default balance of speed and accuracy |
-| `swift` | Faster responses, slightly less accurate |
-| `sonic` / `turbo` | Lowest latency |
+Older files with `barge_in: true` / `false` or `interaction_style` still load, with a warning:
+`barge_in: true` is read as `barge_in.enabled: true`, and `interaction_style` is ignored. Run
+`poly pull` to rewrite the file.
 
 ## Keyphrase Boosting (`keyphrase_boosting.yaml`)
 

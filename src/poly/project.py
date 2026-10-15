@@ -1583,7 +1583,8 @@ class AgentStudioProject:
         When deleting a flow, only send a command to delete the flow config,
         not the steps/functions.
 
-        Remove subresource containers from updated resources.
+        Remove subresource containers from updated resources. ASR settings are pushed
+        only as their per-section voice channel commands.
 
         If a flow step has changed type, delete the old step and create a new one.
         For the start step, use a dummy workaround as we can't delete a start step
@@ -1631,6 +1632,7 @@ class AgentStudioProject:
             new_resources, updated_resources, post_push_deleted_resources
         )
         prepush.prune_cascade_deleted_flow_children(deleted_resources)
+        prepush.push_asr_settings_by_section(new_resources, updated_resources)
         prepush.replace_flow_steps_with_dummy_workaround(
             state,
             new_resources,
