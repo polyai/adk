@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import datetime
+import json
 import os
 import shutil
 import tempfile
@@ -9810,7 +9811,7 @@ class TestCaseApiMocksTests(unittest.TestCase):
         self.assertEqual(first.respond.status, 200)
         self.assertEqual(dict(first.respond.headers), {"x-trace": "abc"})
         self.assertEqual(
-            MessageToDict(first.respond.body), {"id": 1, "flag": True, "meta": {"a": 1}}
+            first.respond.body.string_value, '{"id": 1, "flag": true, "meta": {"a": 1}}'
         )
         self.assertFalse(first.HasField("repeat"))
 
@@ -10185,13 +10186,79 @@ class TestCaseApiMocksTests(unittest.TestCase):
         self.assertIsNone(response.body)
         self.assertEqual(response.headers, {})
 
-    def test_api_response_from_dict_keeps_ints_as_ints(self):
-        """Mirrors _normalise_attribute: a body pushed through google.protobuf.Value
-        (a double) must not read a pushed int back as a float."""
-        response = ApiResponse.from_dict({"status": 200, "body": {"count": 2}})
+    def test_api_response_body_is_sent_as_text_keeping_int_and_float(self):
+        response = ApiResponse(status=200, body={"party_size": 2, "price": 2.0})
 
-        self.assertEqual(response.body, {"count": 2})
-        self.assertIsInstance(response.body["count"], int)
+        self.assertEqual(response.to_proto().body.string_value, '{"party_size": 2, "price": 2.0}')
+
+    def test_api_response_text_body_from_projection_keeps_int_and_float(self):
+        response = ApiResponse.from_dict(
+            {"status": 200, "body": '{"party_size": 2, "price": 2.0}'}, from_projection=True
+        )
+
+        self.assertEqual(response.body, {"party_size": 2, "price": 2.0})
+        self.assertIs(type(response.body["party_size"]), int)
+        self.assertIs(type(response.body["price"]), float)
+        self.assertFalse(response.legacy_body)
+
+    def test_api_response_from_dict_keeps_a_float_body_value_a_float(self):
+        response = ApiResponse.from_dict({"status": 200, "body": {"price": 2.0}})
+
+        self.assertIs(type(response.body["price"]), float)
+
+    def test_api_response_plain_text_body_stays_text(self):
+        for text in ("OK", '"OK"', "null"):
+            with self.subTest(text=text):
+                response = ApiResponse.from_dict({"body": text}, from_projection=True)
+
+                self.assertEqual(response.body, text)
+                self.assertEqual(response.to_proto().body.string_value, text)
+
+    def test_api_response_equality_tells_int_from_float(self):
+        self.assertNotEqual(ApiResponse(body={"n": 2}), ApiResponse(body={"n": 2.0}))
+        self.assertNotEqual(ApiResponse(body={"n": 1}), ApiResponse(body={"n": True}))
+        self.assertEqual(ApiResponse(body={"a": 1, "b": 2}), ApiResponse(body={"b": 2, "a": 1}))
+
+    def test_subresource_pushed_when_body_changes_from_int_to_float(self):
+        def mocks(body):
+            return self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(body=body))]}}
+            )
+
+        old = self._test_case(api_mocks=mocks({"n": 2}))
+        new = self._test_case(api_mocks=mocks({"n": 2.0}))
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertEqual(len([u for u in updated if isinstance(u, TestCaseApiOperationMock)]), 1)
+
+    def test_legacy_object_body_is_pushed_again_as_text(self):
+        """A body the platform holds as an object lost int vs float; push it again as text."""
+        projection_rule = {"respond": {"status": 200, "body": {"n": 2}}}
+        old_mocks = TestCaseApiMocks.from_dict(
+            {"crm": {"get_customer": [projection_rule]}}, from_projection=True
+        )
+        old = self._test_case(api_mocks=old_mocks)
+        new = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(body={"n": 2}))]}}
+            )
+        )
+
+        self.assertTrue(old_mocks.mocks["crm"]["get_customer"][0].respond.legacy_body)
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertEqual(len([u for u in updated if isinstance(u, TestCaseApiOperationMock)]), 1)
+
+    def test_legacy_body_marker_survives_the_status_file(self):
+        old_mocks = TestCaseApiMocks.from_dict(
+            {"crm": {"get_customer": [{"respond": {"body": {"n": 2}}}]}}, from_projection=True
+        )
+        test_case = self._test_case(api_mocks=old_mocks)
+
+        reloaded = TestCase(**json.loads(json.dumps(resource_utils.resource_to_dict(test_case))))
+
+        self.assertTrue(reloaded.api_mocks.mocks["crm"]["get_customer"][0].respond.legacy_body)
 
     def test_api_mocks_round_trips_through_resource_to_dict(self):
         """TestCaseApiMocks isn't a SubResource, so resource_to_dict wraps its
@@ -12769,9 +12836,7 @@ class FlowSettingsEqualityTest(unittest.TestCase):
 
     def test_disabled_asr_biasing_residuals_are_normalised(self):
         with_residuals = self._settings(
-            asr_biasing=ASRBiasing(
-                is_enabled=False, precise_date=True, custom_keywords=["acme"]
-            )
+            asr_biasing=ASRBiasing(is_enabled=False, precise_date=True, custom_keywords=["acme"])
         )
         self.assertEqual(with_residuals, self._settings())
         self.assertEqual(with_residuals.asr_biasing, ASRBiasing())
@@ -13661,7 +13726,11 @@ class MCPServerTests(unittest.TestCase):
             None,
             MCPAuth(header="Authorization", secret_name="token"),
             MCPAuth(query_param="api_key", secret_name="token"),
-            MCPAuth(oauth=MCPOAuth(client_id="c", client_secret_name="s", token_url="https://example.com/token")),
+            MCPAuth(
+                oauth=MCPOAuth(
+                    client_id="c", client_secret_name="s", token_url="https://example.com/token"
+                )
+            ),
         ):
             with self.subTest(auth=auth):
                 _mcp_server(auth=auth).validate()
@@ -13678,7 +13747,9 @@ class MCPServerTests(unittest.TestCase):
                 "auth": MCPAuth(
                     header="Authorization",
                     secret_name="token",
-                    oauth=MCPOAuth(client_id="c", client_secret_name="s", token_url="https://example.com/token"),
+                    oauth=MCPOAuth(
+                        client_id="c", client_secret_name="s", token_url="https://example.com/token"
+                    ),
                 )
             },
             "secret_name is required when auth.header": {"auth": MCPAuth(header="Authorization")},
@@ -13689,7 +13760,9 @@ class MCPServerTests(unittest.TestCase):
                 )
             },
             "client_secret_name is required": {
-                "auth": MCPAuth(oauth=MCPOAuth(client_id="c", token_url="https://example.com/token"))
+                "auth": MCPAuth(
+                    oauth=MCPOAuth(client_id="c", token_url="https://example.com/token")
+                )
             },
             "token_url is required": {
                 "auth": MCPAuth(oauth=MCPOAuth(client_id="c", client_secret_name="s"))
@@ -13756,7 +13829,11 @@ class MCPServerTests(unittest.TestCase):
             "mcpConfig": {
                 "servers": {
                     "entities": {
-                        "mcp-123": {"id": "mcp-123", "providerId": "", "url": "https://a.example.com"}
+                        "mcp-123": {
+                            "id": "mcp-123",
+                            "providerId": "",
+                            "url": "https://a.example.com",
+                        }
                     }
                 }
             }
