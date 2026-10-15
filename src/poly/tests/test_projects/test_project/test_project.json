@@ -1200,22 +1200,30 @@
           "enabled": false,
           "allow_on_first_turn": false,
           "max_per_call": 5
-        },
-        "filler_phrases": {
-          "enabled": true,
-          "phrases": [
-            "One moment...",
-            "Just a second..."
-          ],
-          "randomize": true,
-          "initial_interval_seconds": 2.5,
-          "interval_seconds": 5
-        },
-        "background_ambience": {
-          "enabled": false,
-          "preset": "office-ambiance",
-          "loudness": -50
         }
+      }
+    },
+    "voice_filler_phrases": {
+      "voice_filler_phrases": {
+        "resource_id": "voice_filler_phrases",
+        "name": "voice_filler_phrases",
+        "enabled": true,
+        "phrases": [
+          "One moment...",
+          "Just a second..."
+        ],
+        "randomize": true,
+        "initial_interval_seconds": 2.5,
+        "interval_seconds": 5
+      }
+    },
+    "voice_background_ambience": {
+      "voice_background_ambience": {
+        "resource_id": "voice_background_ambience",
+        "name": "voice_background_ambience",
+        "preset": "office-ambiance",
+        "enabled": false,
+        "loudness": -50
       }
     },
     "safety_filters": {

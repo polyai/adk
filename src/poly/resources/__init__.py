@@ -10,15 +10,15 @@ from poly.resources.api_integration import (
 )
 from poly.resources.asr_settings import (
     AsrSettings,
-    VoiceAmbience,
     VoiceBargeInConfig,
-    VoiceFillerPhrases,
     VoiceVadConfig,
 )
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,
+    VoiceBackgroundAmbience,
     VoiceDisclaimerMessage,
+    VoiceFillerPhrases,
     VoiceGreeting,
     VoiceStylePrompt,
 )

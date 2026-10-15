@@ -1,45 +1,30 @@
-"""Handling and managing the voice channel's turn-taking, filler phrases and background
-ambience
+"""Handling and managing the voice channel's turn-taking
 
 Copyright PolyAI Limited
 """
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, Optional, Union
 
 from google.protobuf.message import Message
 
 from poly.handlers.protobuf.channels_pb2 import (
-    AmbienceSettings,
-    FillerUtterances,
     VADConfig,
     VoiceChannel_ResetBargeInConfig,
-    VoiceChannel_ResetSilenceFillerUtterances,
     VoiceChannel_ResetVadConfig,
-    VoiceChannel_UpdateAmbience,
     VoiceChannel_UpdateBargeInConfig,
-    VoiceChannel_UpdateSilenceFillerUtterances,
     VoiceChannel_UpdateVadConfig,
 )
 from poly.resources.resource import ResourceMapping, SubResource, YamlResource, register_resource
 
 logger = logging.getLogger(__name__)
 
-# Limits of the Model Configuration page. The backend only checks for non-negative values.
+# Limits of Agent Studio's voice settings. The backend only checks for non-negative values.
 SPEECH_END_DELAY_MS_MIN = 200
 SPEECH_END_DELAY_MS_MAX = 1500
-FILLER_INITIAL_INTERVAL_MIN_SECONDS = 0.5
-FILLER_INTERVAL_MIN_SECONDS = 1.0
-AMBIENCE_LOUDNESS_MIN_DB = -70
-AMBIENCE_LOUDNESS_MAX_DB = -20
-
-# Agent Studio rejects any other preset; new ones need a platform release first.
-AMBIENCE_PRESETS = ("office-ambiance", "restaurant-ambiance", "whitenoise-subtle")
-
-DEFAULT_FILLER_PHRASES = ("One moment...", "Just a second...", "One second...")
 
 # Written by older ADK versions; read for one release so existing projects migrate on push.
 LEGACY_FIELDS = ("interaction_style",)
@@ -68,85 +53,6 @@ class BargeIn:
         if self.max_per_call is not None:
             output["max_per_call"] = self.max_per_call
         return output
-
-
-@dataclass
-class FillerPhrases:
-    """Phrases the agent says while the caller waits on a slow turn."""
-
-    enabled: bool = False
-    phrases: list[str] = field(default_factory=lambda: list(DEFAULT_FILLER_PHRASES))
-    randomize: bool = True
-    initial_interval_seconds: float = 2.5
-    interval_seconds: float = 5
-
-    def validate(self) -> None:
-        """Validate the filler phrases."""
-        if self.enabled and not any(phrase.strip() for phrase in self.phrases):
-            raise ValueError("filler_phrases needs at least one phrase when enabled.")
-        if self.initial_interval_seconds < FILLER_INITIAL_INTERVAL_MIN_SECONDS:
-            raise ValueError(
-                "filler_phrases.initial_interval_seconds must be at least "
-                f"{FILLER_INITIAL_INTERVAL_MIN_SECONDS:g}."
-            )
-        if self.interval_seconds < FILLER_INTERVAL_MIN_SECONDS:
-            raise ValueError(
-                f"filler_phrases.interval_seconds must be at least {FILLER_INTERVAL_MIN_SECONDS:g}."
-            )
-
-    def to_yaml_dict(self) -> dict:
-        """Return a dictionary suitable for YAML serialization."""
-        return {
-            "enabled": self.enabled,
-            "phrases": list(self.phrases),
-            "randomize": self.randomize,
-            "initial_interval_seconds": self.initial_interval_seconds,
-            "interval_seconds": self.interval_seconds,
-        }
-
-    def to_proto(self) -> FillerUtterances:
-        """Convert to proto representation."""
-        return FillerUtterances(
-            enabled=self.enabled,
-            utterances=[FillerUtterances.Utterance(message=phrase) for phrase in self.phrases],
-            randomize=self.randomize,
-            initial_interval_seconds=self.initial_interval_seconds,
-            interval_seconds=self.interval_seconds,
-        )
-
-
-@dataclass
-class BackgroundAmbience:
-    """Background sound played under the agent's speech."""
-
-    preset: str
-    enabled: bool = False
-    loudness: float = -50
-
-    def validate(self) -> None:
-        """Validate the background ambience."""
-        if not self.preset:
-            raise ValueError("background_ambience needs a preset.")
-        if not AMBIENCE_LOUDNESS_MIN_DB <= self.loudness <= AMBIENCE_LOUDNESS_MAX_DB:
-            raise ValueError(
-                f"background_ambience.loudness must be between {AMBIENCE_LOUDNESS_MIN_DB} "
-                f"and {AMBIENCE_LOUDNESS_MAX_DB} dB."
-            )
-        if self.preset not in AMBIENCE_PRESETS:
-            # Warn rather than fail, so a preset added to the platform after this ADK
-            # release can still be pushed.
-            logger.warning(
-                f"background_ambience.preset '{self.preset}' is not a known preset "
-                f"({', '.join(AMBIENCE_PRESETS)}). Agent Studio may reject it."
-            )
-
-    def to_yaml_dict(self) -> dict:
-        """Return a dictionary suitable for YAML serialization."""
-        return {"enabled": self.enabled, "preset": self.preset, "loudness": self.loudness}
-
-    def to_proto(self) -> AmbienceSettings:
-        """Convert to proto representation."""
-        return AmbienceSettings(enabled=self.enabled, preset=self.preset, loudness=self.loudness)
 
 
 @dataclass
@@ -215,63 +121,6 @@ class VoiceBargeInConfig(SubResource):
         raise NotImplementedError("Barge-in config cannot be created")
 
 
-@dataclass
-class VoiceFillerPhrases(SubResource):
-    """The filler_phrases section, pushed as the voice channel's silence filler utterances."""
-
-    filler_phrases: Optional[FillerPhrases] = None
-
-    @property
-    def command_type(self) -> str:
-        return "voice_silence_filler_utterances"
-
-    @property
-    def update_command_type(self) -> str:
-        return "voice_channel_update_silence_filler_utterances"
-
-    @property
-    def delete_command_type(self) -> str:
-        return "voice_channel_reset_silence_filler_utterances"
-
-    def build_update_proto(self) -> VoiceChannel_UpdateSilenceFillerUtterances:
-        return VoiceChannel_UpdateSilenceFillerUtterances(
-            silence_filler_utterances=self.filler_phrases.to_proto()
-        )
-
-    def build_delete_proto(self) -> VoiceChannel_ResetSilenceFillerUtterances:
-        return VoiceChannel_ResetSilenceFillerUtterances()
-
-    def build_create_proto(self) -> None:
-        raise NotImplementedError("Silence filler utterances cannot be created")
-
-
-@dataclass
-class VoiceAmbience(SubResource):
-    """The background_ambience section, pushed as the voice channel's ambience.
-
-    The platform has no command to clear ambience, so it can only be updated.
-    """
-
-    background_ambience: Optional[BackgroundAmbience] = None
-
-    @property
-    def command_type(self) -> str:
-        return "voice_ambience"
-
-    @property
-    def update_command_type(self) -> str:
-        return "voice_channel_update_ambience"
-
-    def build_update_proto(self) -> VoiceChannel_UpdateAmbience:
-        return VoiceChannel_UpdateAmbience(ambience=self.background_ambience.to_proto())
-
-    def build_delete_proto(self) -> None:
-        raise NotImplementedError("Ambience cannot be reset")
-
-    def build_create_proto(self) -> None:
-        raise NotImplementedError("Ambience cannot be created")
-
-
 def _as_section(value: Any, section_type: type, section_name: str) -> Any:
     """Build a section from a dict (YAML or status file), passing instances and None through.
 
@@ -297,8 +146,7 @@ def _as_section(value: Any, section_type: type, section_name: str) -> Any:
 @register_resource("asr_settings")
 @dataclass
 class AsrSettings(YamlResource):
-    """The voice channel's model configuration: turn-taking, filler phrases and background
-    ambience.
+    """The voice channel's turn-taking: speech end delay and barge-in.
 
     Each section is pushed with its own voice channel command. A section that is left out
     uses the platform default, and removing one resets it.
@@ -306,8 +154,6 @@ class AsrSettings(YamlResource):
 
     speech_end_delay_ms: Optional[int]
     barge_in: Optional[BargeIn]
-    filler_phrases: Optional[FillerPhrases]
-    background_ambience: Optional[BackgroundAmbience]
 
     def __init__(
         self,
@@ -316,8 +162,6 @@ class AsrSettings(YamlResource):
         name: str,
         speech_end_delay_ms: Optional[int] = None,
         barge_in: Union[BargeIn, dict, bool, None] = None,
-        filler_phrases: Union[FillerPhrases, dict, None] = None,
-        background_ambience: Union[BackgroundAmbience, dict, None] = None,
     ):
         self.resource_id = resource_id
         self.name = name
@@ -326,14 +170,10 @@ class AsrSettings(YamlResource):
             # Status files written by older ADK versions store barge-in as a bool.
             barge_in = BargeIn(enabled=barge_in)
         self.barge_in = _as_section(barge_in, BargeIn, "barge_in")
-        self.filler_phrases = _as_section(filler_phrases, FillerPhrases, "filler_phrases")
-        self.background_ambience = _as_section(
-            background_ambience, BackgroundAmbience, "background_ambience"
-        )
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "AsrSettings"]:
-        """Parse the voice channel's model configuration from a projection dict."""
+        """Parse the voice channel's turn-taking from a projection dict."""
         if "channels" not in projection:
             logger.debug("No read access to ASR settings - it will not be pulled.")
             return {}
@@ -360,34 +200,12 @@ class AsrSettings(YamlResource):
             # Without a barge-in config the runtime still follows the legacy flag.
             barge_in = BargeIn(enabled=voice["asrSettings"]["bargeIn"])
 
-        filler_phrases = None
-        if filler := voice.get("silenceFillerUtterances"):
-            filler_phrases = FillerPhrases(
-                enabled=filler.get("enabled", False),
-                phrases=[
-                    utterance.get("message", "") for utterance in filler.get("utterances", [])
-                ],
-                randomize=filler.get("randomize", False),
-                initial_interval_seconds=filler.get("initialIntervalSeconds", 2.5),
-                interval_seconds=filler.get("intervalSeconds", 5),
-            )
-
-        background_ambience = None
-        if ambience := voice.get("ambience"):
-            background_ambience = BackgroundAmbience(
-                enabled=ambience.get("enabled", False),
-                preset=ambience.get("preset", ""),
-                loudness=ambience.get("loudness", -50),
-            )
-
         return {
             "asr_settings": cls(
                 resource_id="asr_settings",
                 name="asr_settings",
                 speech_end_delay_ms=speech_end_delay_ms,
                 barge_in=barge_in,
-                filler_phrases=filler_phrases,
-                background_ambience=background_ambience,
             )
         }
 
@@ -401,10 +219,6 @@ class AsrSettings(YamlResource):
             output["speech_end_delay_ms"] = self.speech_end_delay_ms
         if self.barge_in:
             output["barge_in"] = self.barge_in.to_yaml_dict()
-        if self.filler_phrases:
-            output["filler_phrases"] = self.filler_phrases.to_yaml_dict()
-        if self.background_ambience:
-            output["background_ambience"] = self.background_ambience.to_yaml_dict()
         return output
 
     @classmethod
@@ -430,8 +244,6 @@ class AsrSettings(YamlResource):
             name=name,
             speech_end_delay_ms=yaml_dict.get("speech_end_delay_ms"),
             barge_in=barge_in,
-            filler_phrases=yaml_dict.get("filler_phrases"),
-            background_ambience=yaml_dict.get("background_ambience"),
         )
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
@@ -444,10 +256,6 @@ class AsrSettings(YamlResource):
             )
         if self.barge_in:
             self.barge_in.validate()
-        if self.filler_phrases:
-            self.filler_phrases.validate()
-        if self.background_ambience:
-            self.background_ambience.validate()
 
     @property
     def command_type(self) -> str:
@@ -467,8 +275,7 @@ class AsrSettings(YamlResource):
     ) -> tuple[list[SubResource], list[SubResource], list[SubResource]]:
         """Get the voice channel commands for the sections that changed.
 
-        A changed section is updated and a removed one is reset. Ambience can't be reset,
-        so removing it switches it off instead.
+        A changed section is updated and a removed one is reset.
         """
         updated: list[SubResource] = []
         deleted: list[SubResource] = []
@@ -488,7 +295,6 @@ class AsrSettings(YamlResource):
 
         _diff("speech_end_delay_ms", VoiceVadConfig)
         _diff("barge_in", VoiceBargeInConfig)
-        _diff("filler_phrases", VoiceFillerPhrases)
 
         old_barge_in = old_resource.barge_in if old_resource else None
         if (
@@ -501,33 +307,6 @@ class AsrSettings(YamlResource):
             deleted.append(
                 VoiceBargeInConfig(resource_id=self.resource_id, name="barge_in", barge_in=None)
             )
-
-        old_ambience = old_resource.background_ambience if old_resource else None
-        if self.background_ambience != old_ambience:
-            if self.background_ambience is not None:
-                updated.append(
-                    VoiceAmbience(
-                        resource_id=self.resource_id,
-                        name="background_ambience",
-                        background_ambience=self.background_ambience,
-                    )
-                )
-            elif old_ambience.enabled:
-                logger.warning(
-                    "background_ambience was removed, but Agent Studio can't clear it. "
-                    "It will be switched off instead."
-                )
-                updated.append(
-                    VoiceAmbience(
-                        resource_id=self.resource_id,
-                        name="background_ambience",
-                        background_ambience=BackgroundAmbience(
-                            enabled=False,
-                            preset=old_ambience.preset,
-                            loudness=old_ambience.loudness,
-                        ),
-                    )
-                )
 
         return [], updated, deleted
 

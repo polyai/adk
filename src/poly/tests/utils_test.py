@@ -33,6 +33,7 @@ from poly.resources import (
     SMSTemplate,
     Variable,
     VariantAttribute,
+    VoiceBackgroundAmbience,
 )
 from poly.resources.flows import (
     ASRBiasing,
@@ -1513,6 +1514,44 @@ class ClearUnusedSettingsFromFlowStepTest(unittest.TestCase):
         self.assertEqual(queued[0].type, "clear_step_settings")
         self.assertEqual(queued[0].clear_step_settings.flow_id, self.FLOW_ID)
         self.assertEqual(queued[0].clear_step_settings.step_id, self.STEP_ID)
+
+
+class SwitchOffRemovedAmbienceTest(unittest.TestCase):
+    """Tests for prepush.switch_off_removed_ambience.
+
+    Agent Studio has no command to clear ambience, so a removed background_ambience
+    section is sent as an update that switches it off.
+    """
+
+    RESOURCE_ID = "voice_background_ambience"
+
+    def _ambience(self, enabled: bool) -> VoiceBackgroundAmbience:
+        return VoiceBackgroundAmbience(
+            resource_id=self.RESOURCE_ID,
+            name=self.RESOURCE_ID,
+            preset="office-ambiance",
+            enabled=enabled,
+            loudness=-40,
+        )
+
+    def test_removed_enabled_ambience_is_switched_off(self):
+        updated = {}
+        deleted = {VoiceBackgroundAmbience: {self.RESOURCE_ID: self._ambience(enabled=True)}}
+
+        with self.assertLogs("poly.utils.prepush", level="WARNING"):
+            prepush.switch_off_removed_ambience(updated, deleted)
+
+        self.assertEqual(deleted, {})
+        switched_off = updated[VoiceBackgroundAmbience][self.RESOURCE_ID]
+        self.assertEqual(switched_off, self._ambience(enabled=False))
+
+    def test_removed_disabled_ambience_sends_nothing(self):
+        updated = {}
+        deleted = {VoiceBackgroundAmbience: {self.RESOURCE_ID: self._ambience(enabled=False)}}
+
+        prepush.switch_off_removed_ambience(updated, deleted)
+
+        self.assertEqual((updated, deleted), ({}, {}))
 
 
 class JsonIoTests(unittest.TestCase):

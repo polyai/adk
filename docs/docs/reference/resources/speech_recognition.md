@@ -36,7 +36,7 @@ All three files are voice-specific. Only `asr_settings.yaml` is the core setting
 
     ---
 
-    Configure turn-taking, filler phrases and background ambience.
+    Configure turn-taking: speech end delay and barge-in.
 
 -   **Keyphrase boosting**
 
@@ -60,9 +60,11 @@ ASR settings are defined in:
 voice/speech_recognition/asr_settings.yaml
 ~~~
 
-They match the Turn-taking tab of the Model Configuration page in Agent Studio, and apply to the whole voice channel. Individual flow steps can override barge-in, ASR provider, VAD, and LLM settings for a single turn — see [ASR override](./flows.md#asr-override) and [barge-in](./flows.md#barge-in) in the flows reference.
+They hold the voice channel's turn-taking settings, and apply to the whole voice channel. Individual flow steps can override barge-in, ASR provider, VAD, and LLM settings for a single turn — see [ASR override](./flows.md#asr-override) and [barge-in](./flows.md#barge-in) in the flows reference.
 
-Every section is optional. A section that is left out uses the platform default, and removing a section resets it on the next push. The exception is `background_ambience`, which Agent Studio can't reset: removing it switches ambience off instead.
+Every section is optional. A section that is left out uses the platform default, and removing a section resets it on the next push.
+
+Filler phrases and background ambience are voice settings, in [`voice/configuration.yaml`](./voice_settings.md#filler-phrases).
 
 ### Fields
 
@@ -70,10 +72,6 @@ Every section is optional. A section that is left out uses the platform default,
 |---|---|
 | `speech_end_delay_ms` | How long the caller must be silent, in milliseconds, before the agent treats their turn as finished. |
 | `barge_in` | Whether the caller can interrupt the agent: `enabled`, `allow_on_first_turn` and `max_per_call`. |
-| `filler_phrases` | Phrases the agent says while the caller waits: `enabled`, `phrases`, `randomize`, `initial_interval_seconds` (before the first phrase) and `interval_seconds` (between phrases). |
-| `background_ambience` | Background sound played under the agent: `enabled`, `preset` and `loudness` in dB. |
-
-`background_ambience.preset` is one of `office-ambiance`, `restaurant-ambiance` or `whitenoise-subtle`. `loudness` is stored in dB: Agent Studio shows -70 dB as volume 0 and -20 dB as volume 100.
 
 ### Example
 
@@ -84,25 +82,10 @@ barge_in:
   enabled: true
   allow_on_first_turn: false
   max_per_call: 5
-
-filler_phrases:
-  enabled: false
-  phrases:
-    - One moment...
-    - Just a second...
-    - One second...
-  randomize: true
-  initial_interval_seconds: 2.5
-  interval_seconds: 5
-
-background_ambience:
-  enabled: false
-  preset: office-ambiance
-  loudness: -50
 ~~~
 
 !!! note "Managed voice configuration"
-    When the Model Configuration page in Agent Studio is read-only because PolyAI manages the project's voice configuration, the platform chooses the speech end delay. `speech_end_delay_ms` is still pulled and pushed, but has no effect.
+    When the voice model settings in Agent Studio are read-only because PolyAI manages the project's voice configuration, the platform chooses the speech end delay. `speech_end_delay_ms` is still pulled and pushed, but has no effect.
 
 !!! warning "Older `asr_settings.yaml` files"
     Earlier versions of the ADK wrote `barge_in: true` / `false` and `interaction_style`. `barge_in: true` is still read as `barge_in.enabled: true`, with a warning. `interaction_style` is ignored, because `speech_end_delay_ms` now sets end-of-speech timing. Run `poly pull` to rewrite the file in the current shape.
@@ -204,8 +187,6 @@ corrections:
 
 - `speech_end_delay_ms` must be a whole number between 200 and 1500.
 - `barge_in.max_per_call` can't be negative.
-- `filler_phrases.initial_interval_seconds` must be at least 0.5, and `interval_seconds` at least 1. An enabled `filler_phrases` needs at least one phrase.
-- `background_ambience` needs a `preset`, and `loudness` must be between -70 and -20. A preset Agent Studio doesn't know is a warning, not an error.
 - Keys inside a section must be ones listed above, so a misspelt key is an error rather than being ignored.
 - Each keyphrase must be non-empty, with a `level` of `default`, `boosted`, or `maximum`.
 - Keyphrases must be unique once trimmed and lowercased — Agent Studio treats `Infusion Sets` and `infusion sets` as the same phrase, and rejects a project that keeps both.

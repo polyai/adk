@@ -1584,7 +1584,8 @@ class AgentStudioProject:
         not the steps/functions.
 
         Remove subresource containers from updated resources. ASR settings are pushed
-        only as their per-section voice channel commands.
+        only as their per-section voice channel commands, and removed background ambience
+        is switched off since it can't be cleared.
 
         If a flow step has changed type, delete the old step and create a new one.
         For the start step, use a dummy workaround as we can't delete a start step
@@ -1633,6 +1634,7 @@ class AgentStudioProject:
         )
         prepush.prune_cascade_deleted_flow_children(deleted_resources)
         prepush.push_asr_settings_by_section(new_resources, updated_resources)
+        prepush.switch_off_removed_ambience(updated_resources, deleted_resources)
         prepush.replace_flow_steps_with_dummy_workaround(
             state,
             new_resources,

@@ -7,7 +7,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import ClassVar
+from typing import ClassVar, Optional
 
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.agent_settings_pb2 import (
@@ -15,11 +15,16 @@ from poly.handlers.protobuf.agent_settings_pb2 import (
     Greeting_UpdateGreeting,
 )
 from poly.handlers.protobuf.channels_pb2 import (
+    AmbienceSettings,
     Channel_UpdateGreeting,
     Channel_UpdateStylePrompt,
     ChannelType,
+    FillerUtterances,
     StylePrompt_UpdateStylePrompt,
+    VoiceChannel_ResetSilenceFillerUtterances,
+    VoiceChannel_UpdateAmbience,
     VoiceChannel_UpdateDisclaimer,
+    VoiceChannel_UpdateSilenceFillerUtterances,
 )
 from poly.resources.resource import (
     MultiResourceYamlResource,
@@ -29,10 +34,45 @@ from poly.resources.resource import (
 
 logger = logging.getLogger(__name__)
 
+# Limits of Agent Studio's voice settings.
+FILLER_INITIAL_INTERVAL_MIN_SECONDS = 0.5
+FILLER_INTERVAL_MIN_SECONDS = 1.0
+AMBIENCE_LOUDNESS_MIN_DB = -70
+AMBIENCE_LOUDNESS_MAX_DB = -20
+
+# Agent Studio rejects any other preset; new ones need a platform release first.
+AMBIENCE_PRESETS = ("office-ambiance", "restaurant-ambiance", "whitenoise-subtle")
+
+DEFAULT_FILLER_PHRASES = ("One moment...", "Just a second...", "One second...")
+
 
 def _config_path(channel: str) -> str:
     """Return config path for a channel (e.g. voice/configuration.yaml)."""
     return os.path.join(channel, "configuration.yaml")
+
+
+def _reject_unknown_keys(yaml_dict: dict, known_keys: tuple[str, ...], section: str) -> None:
+    """Raise if a section has keys it doesn't define, so a misspelt key isn't dropped.
+
+    Raises:
+        ValueError: If the section has unknown keys.
+    """
+    if unknown_keys := sorted(set(yaml_dict) - set(known_keys)):
+        raise ValueError(
+            f"Unknown key(s) in '{section}': {', '.join(unknown_keys)}. "
+            f"Expected: {', '.join(known_keys)}."
+        )
+
+
+def _discover_voice_section(base_path: str, top_level_name: str) -> list[str]:
+    """Return the section's resource path when voice/configuration.yaml has it set."""
+    file_path = os.path.join(base_path, _config_path("voice"))
+    if not os.path.exists(file_path):
+        return []
+    yaml_dict = MultiResourceYamlResource._get_top_level_data(file_path)
+    if not (yaml_dict or {}).get(top_level_name):
+        return []
+    return [os.path.join(file_path, top_level_name)]
 
 
 @register_resource("voice_disclaimer")
@@ -467,3 +507,239 @@ class ChatStylePrompt(ChannelStylePrompt):
         """Validate the chat style prompt resource."""
         super().validate(resource_mappings=resource_mappings, **kwargs)
         utils.validate_webchat_siblings(type(self), resource_mappings)
+
+
+@register_resource("voice_filler_phrases")
+@dataclass
+class VoiceFillerPhrases(MultiResourceYamlResource):
+    """Phrases the agent says while the caller waits on a slow turn.
+
+    Pushed as the voice channel's silence filler utterances. Removing the section resets them.
+    """
+
+    enabled: bool = False
+    phrases: list[str] = field(default_factory=lambda: list(DEFAULT_FILLER_PHRASES))
+    randomize: bool = True
+    initial_interval_seconds: float = 2.5
+    interval_seconds: float = 5
+
+    top_level_name: ClassVar[str] = "filler_phrases"
+    _singleton: ClassVar[bool] = True
+    yaml_keys: ClassVar[tuple[str, ...]] = (
+        "enabled",
+        "phrases",
+        "randomize",
+        "initial_interval_seconds",
+        "interval_seconds",
+    )
+
+    @cached_property
+    def file_path(self) -> str:
+        return os.path.join(_config_path("voice"), self.top_level_name)
+
+    def to_yaml_dict(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "phrases": list(self.phrases),
+            "randomize": self.randomize,
+            "initial_interval_seconds": self.initial_interval_seconds,
+            "interval_seconds": self.interval_seconds,
+        }
+
+    @classmethod
+    def from_yaml_dict(
+        cls, yaml_dict: dict, resource_id: str, name: str, **kwargs
+    ) -> "VoiceFillerPhrases":
+        _reject_unknown_keys(yaml_dict, cls.yaml_keys, cls.top_level_name)
+        return cls(
+            resource_id=resource_id,
+            name=name,
+            **{key: yaml_dict[key] for key in cls.yaml_keys if key in yaml_dict},
+        )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "VoiceFillerPhrases"]:
+        """Parse the voice channel's silence filler utterances from a projection dict."""
+        if "channels" not in projection:
+            logger.debug("No read access to voice filler phrases - they will not be pulled.")
+            return {}
+
+        filler = projection.get("channels", {}).get("voice", {}).get("silenceFillerUtterances")
+        if not filler:
+            return {}
+        return {
+            "voice_filler_phrases": cls(
+                resource_id="voice_filler_phrases",
+                name="voice_filler_phrases",
+                enabled=filler.get("enabled", False),
+                phrases=[
+                    utterance.get("message", "") for utterance in filler.get("utterances", [])
+                ],
+                randomize=filler.get("randomize", False),
+                initial_interval_seconds=filler.get("initialIntervalSeconds", 2.5),
+                interval_seconds=filler.get("intervalSeconds", 5),
+            )
+        }
+
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        if self.enabled and not any(phrase.strip() for phrase in self.phrases):
+            raise ValueError("filler_phrases needs at least one phrase when enabled.")
+        if self.initial_interval_seconds < FILLER_INITIAL_INTERVAL_MIN_SECONDS:
+            raise ValueError(
+                "filler_phrases.initial_interval_seconds must be at least "
+                f"{FILLER_INITIAL_INTERVAL_MIN_SECONDS:g}."
+            )
+        if self.interval_seconds < FILLER_INTERVAL_MIN_SECONDS:
+            raise ValueError(
+                f"filler_phrases.interval_seconds must be at least {FILLER_INTERVAL_MIN_SECONDS:g}."
+            )
+
+    @property
+    def command_type(self) -> str:
+        return "voice_silence_filler_utterances"
+
+    @property
+    def update_command_type(self) -> str:
+        return "voice_channel_update_silence_filler_utterances"
+
+    @property
+    def create_command_type(self) -> str:
+        return self.update_command_type
+
+    @property
+    def delete_command_type(self) -> str:
+        return "voice_channel_reset_silence_filler_utterances"
+
+    def build_update_proto(self) -> VoiceChannel_UpdateSilenceFillerUtterances:
+        return VoiceChannel_UpdateSilenceFillerUtterances(
+            silence_filler_utterances=FillerUtterances(
+                enabled=self.enabled,
+                utterances=[FillerUtterances.Utterance(message=phrase) for phrase in self.phrases],
+                randomize=self.randomize,
+                initial_interval_seconds=self.initial_interval_seconds,
+                interval_seconds=self.interval_seconds,
+            )
+        )
+
+    def build_create_proto(self) -> VoiceChannel_UpdateSilenceFillerUtterances:
+        return self.build_update_proto()
+
+    def build_delete_proto(self) -> VoiceChannel_ResetSilenceFillerUtterances:
+        return VoiceChannel_ResetSilenceFillerUtterances()
+
+    @classmethod
+    def discover_resources(cls, base_path: str) -> list[str]:
+        return _discover_voice_section(base_path, cls.top_level_name)
+
+
+@register_resource("voice_background_ambience")
+@dataclass
+class VoiceBackgroundAmbience(MultiResourceYamlResource):
+    """Background sound played under the agent's speech.
+
+    The platform has no command to clear ambience, so a removed section is switched off at
+    push time instead (see prepush.switch_off_removed_ambience).
+    """
+
+    preset: str = ""
+    enabled: bool = False
+    loudness: float = -50
+
+    top_level_name: ClassVar[str] = "background_ambience"
+    _singleton: ClassVar[bool] = True
+    yaml_keys: ClassVar[tuple[str, ...]] = ("enabled", "preset", "loudness")
+
+    @cached_property
+    def file_path(self) -> str:
+        return os.path.join(_config_path("voice"), self.top_level_name)
+
+    def to_yaml_dict(self) -> dict:
+        return {"enabled": self.enabled, "preset": self.preset, "loudness": self.loudness}
+
+    @classmethod
+    def from_yaml_dict(
+        cls, yaml_dict: dict, resource_id: str, name: str, **kwargs
+    ) -> "VoiceBackgroundAmbience":
+        _reject_unknown_keys(yaml_dict, cls.yaml_keys, cls.top_level_name)
+        return cls(
+            resource_id=resource_id,
+            name=name,
+            **{key: yaml_dict[key] for key in cls.yaml_keys if key in yaml_dict},
+        )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "VoiceBackgroundAmbience"]:
+        """Parse the voice channel's ambience from a projection dict."""
+        if "channels" not in projection:
+            logger.debug("No read access to voice background ambience - it will not be pulled.")
+            return {}
+
+        ambience = projection.get("channels", {}).get("voice", {}).get("ambience")
+        if not ambience:
+            return {}
+        return {
+            "voice_background_ambience": cls(
+                resource_id="voice_background_ambience",
+                name="voice_background_ambience",
+                enabled=ambience.get("enabled", False),
+                preset=ambience.get("preset", ""),
+                loudness=ambience.get("loudness", -50),
+            )
+        }
+
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        if not self.preset:
+            raise ValueError("background_ambience needs a preset.")
+        if not AMBIENCE_LOUDNESS_MIN_DB <= self.loudness <= AMBIENCE_LOUDNESS_MAX_DB:
+            raise ValueError(
+                f"background_ambience.loudness must be between {AMBIENCE_LOUDNESS_MIN_DB} "
+                f"and {AMBIENCE_LOUDNESS_MAX_DB} dB."
+            )
+        if self.preset not in AMBIENCE_PRESETS:
+            # Warn rather than fail, so a preset added to the platform after this ADK
+            # release can still be pushed.
+            logger.warning(
+                f"background_ambience.preset '{self.preset}' is not a known preset "
+                f"({', '.join(AMBIENCE_PRESETS)}). Agent Studio may reject it."
+            )
+
+    def switched_off(self) -> Optional["VoiceBackgroundAmbience"]:
+        """Return this ambience disabled, or None when it is already off."""
+        if not self.enabled:
+            return None
+        return VoiceBackgroundAmbience(
+            resource_id=self.resource_id,
+            name=self.name,
+            preset=self.preset,
+            enabled=False,
+            loudness=self.loudness,
+        )
+
+    @property
+    def command_type(self) -> str:
+        return "voice_ambience"
+
+    @property
+    def update_command_type(self) -> str:
+        return "voice_channel_update_ambience"
+
+    @property
+    def create_command_type(self) -> str:
+        return self.update_command_type
+
+    def build_update_proto(self) -> VoiceChannel_UpdateAmbience:
+        return VoiceChannel_UpdateAmbience(
+            ambience=AmbienceSettings(
+                enabled=self.enabled, preset=self.preset, loudness=self.loudness
+            )
+        )
+
+    def build_create_proto(self) -> VoiceChannel_UpdateAmbience:
+        return self.build_update_proto()
+
+    def build_delete_proto(self) -> None:
+        raise NotImplementedError("Ambience cannot be reset")
+
+    @classmethod
+    def discover_resources(cls, base_path: str) -> list[str]:
+        return _discover_voice_section(base_path, cls.top_level_name)

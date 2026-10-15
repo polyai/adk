@@ -35,7 +35,9 @@ from poly.resources.asr_settings import AsrSettings, BargeIn, VoiceBargeInConfig
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,
+    VoiceBackgroundAmbience,
     VoiceDisclaimerMessage,
+    VoiceFillerPhrases,
     VoiceGreeting,
     VoiceStylePrompt,
 )
@@ -7249,14 +7251,6 @@ class AsrSettingsTests(unittest.TestCase):
     FULL_YAML = {
         "speech_end_delay_ms": 800,
         "barge_in": {"enabled": True, "allow_on_first_turn": False, "max_per_call": 5},
-        "filler_phrases": {
-            "enabled": True,
-            "phrases": ["One moment..."],
-            "randomize": True,
-            "initial_interval_seconds": 2.5,
-            "interval_seconds": 5,
-        },
-        "background_ambience": {"enabled": True, "preset": "office-ambiance", "loudness": -50},
     }
 
     def _from_yaml(self, yaml_dict: dict) -> AsrSettings:
@@ -7302,34 +7296,24 @@ class AsrSettingsTests(unittest.TestCase):
     def test_section_that_is_not_a_mapping_raises(self):
         """A section given as a scalar is an error."""
         with self.assertRaises(ValueError) as cm:
-            self._from_yaml({"filler_phrases": "on"})
-        self.assertIn("filler_phrases", str(cm.exception))
+            self._from_yaml({"barge_in": "on"})
+        self.assertIn("barge_in", str(cm.exception))
 
     def test_validate_passes_with_full_settings(self):
         """The full example validates."""
         self._from_yaml(self.FULL_YAML).validate()
 
     def test_validate_rejects_out_of_range_values(self):
-        """Values outside the Model Configuration page's limits are rejected."""
+        """Values outside Agent Studio's limits are rejected."""
         cases = {
             "speech_end_delay_ms": {"speech_end_delay_ms": 150},
             "max_per_call": {"barge_in": {"enabled": True, "max_per_call": -1}},
-            "initial_interval_seconds": {"filler_phrases": {"initial_interval_seconds": 0.2}},
-            "interval_seconds": {"filler_phrases": {"interval_seconds": 0.5}},
-            "at least one phrase": {"filler_phrases": {"enabled": True, "phrases": [" "]}},
-            "loudness": {"background_ambience": {"preset": "office-ambiance", "loudness": -10}},
         }
         for expected, yaml_dict in cases.items():
             with self.subTest(expected):
                 with self.assertRaises(ValueError) as cm:
                     self._from_yaml(yaml_dict).validate()
                 self.assertIn(expected, str(cm.exception))
-
-    def test_validate_warns_on_unknown_ambience_preset(self):
-        """An unknown preset warns rather than fails, so newer platform presets still push."""
-        asr = self._from_yaml({"background_ambience": {"preset": "rainforest"}})
-        with self.assertLogs("poly.resources.asr_settings", level="WARNING"):
-            asr.validate()
 
     def test_wrong_field_type_raises_on_read(self):
         """Field types inside sections are checked when the file is read."""
@@ -7359,63 +7343,26 @@ class AsrSettingsTests(unittest.TestCase):
         self.assertEqual(deleted, [])
         self.assertEqual(
             sorted(sub_resource.update_command_type for sub_resource in updated),
-            [
-                "voice_channel_update_ambience",
-                "voice_channel_update_barge_in_config",
-                "voice_channel_update_silence_filler_utterances",
-                "voice_channel_update_vad_config",
-            ],
+            ["voice_channel_update_barge_in_config", "voice_channel_update_vad_config"],
         )
 
     def test_removed_sections_are_reset(self):
         """Removing a section resets it on the platform."""
-        old = {key: value for key, value in self.FULL_YAML.items() if key != "background_ambience"}
-        _, updated, deleted = self._changes({}, old)
+        _, updated, deleted = self._changes({}, self.FULL_YAML)
 
         self.assertEqual(updated, [])
         self.assertEqual(
             sorted(sub_resource.delete_command_type for sub_resource in deleted),
-            [
-                "voice_channel_reset_barge_in_config",
-                "voice_channel_reset_silence_filler_utterances",
-                "voice_channel_reset_vad_config",
-            ],
+            ["voice_channel_reset_barge_in_config", "voice_channel_reset_vad_config"],
         )
         for sub_resource in deleted:
             self.assertEqual(sub_resource.build_delete_proto().ListFields(), [])
-
-    def test_removed_ambience_is_switched_off(self):
-        """Ambience can't be reset, so removing it sends enabled: false with the old preset."""
-        old = {"background_ambience": {"enabled": True, "preset": "office-ambiance", "loudness": -40}}
-        with self.assertLogs("poly.resources.asr_settings", level="WARNING"):
-            _, updated, deleted = self._changes({}, old)
-
-        self.assertEqual(deleted, [])
-        self.assertEqual(len(updated), 1)
-        proto = updated[0].build_update_proto()
-        self.assertFalse(proto.ambience.enabled)
-        self.assertEqual(proto.ambience.preset, "office-ambiance")
-        self.assertEqual(proto.ambience.loudness, -40)
-
-    def test_removed_disabled_ambience_sends_nothing(self):
-        """Removing ambience that is already off has nothing to send."""
-        old = {"background_ambience": {"enabled": False, "preset": "office-ambiance"}}
-        self.assertEqual(self._changes({}, old), ([], [], []))
 
     def test_speech_end_delay_is_sent_in_seconds(self):
         """speech_end_delay_ms is stored as speechEndWindowSeconds."""
         _, updated, _ = self._changes({"speech_end_delay_ms": 640}, {})
         proto = updated[0].build_update_proto()
         self.assertAlmostEqual(proto.vad_config.speech_end_window_seconds, 0.64)
-
-    def test_filler_phrases_proto(self):
-        """Filler phrases are sent as utterance messages."""
-        _, updated, _ = self._changes({"filler_phrases": self.FULL_YAML["filler_phrases"]}, {})
-        proto = updated[0].build_update_proto().silence_filler_utterances
-        self.assertTrue(proto.enabled)
-        self.assertEqual([utterance.message for utterance in proto.utterances], ["One moment..."])
-        self.assertEqual(proto.initial_interval_seconds, 2.5)
-        self.assertEqual(proto.interval_seconds, 5)
 
     def test_disabling_barge_in_sends_enabled_false(self):
         """enabled=False must reach the wire, not be dropped as a proto default."""
@@ -7444,6 +7391,174 @@ class AsrSettingsTests(unittest.TestCase):
             [sub_resource.update_command_type for sub_resource in updated],
             ["voice_channel_update_barge_in_config"],
         )
+
+
+class VoiceFillerPhrasesTests(unittest.TestCase):
+    """Tests for the filler_phrases section of voice/configuration.yaml."""
+
+    YAML = {
+        "enabled": True,
+        "phrases": ["One moment..."],
+        "randomize": True,
+        "initial_interval_seconds": 2.5,
+        "interval_seconds": 5,
+    }
+
+    def _from_yaml(self, yaml_dict: dict) -> VoiceFillerPhrases:
+        return VoiceFillerPhrases.from_yaml_dict(
+            yaml_dict, resource_id="voice_filler_phrases", name="voice_filler_phrases"
+        )
+
+    def test_yaml_roundtrip(self):
+        """Every field survives from_yaml_dict -> to_yaml_dict unchanged."""
+        self.assertEqual(self._from_yaml(self.YAML).to_yaml_dict(), self.YAML)
+
+    def test_file_path(self):
+        """The section lives in the voice channel's configuration file."""
+        self.assertEqual(
+            self._from_yaml(self.YAML).file_path,
+            os.path.join("voice", "configuration.yaml", "filler_phrases"),
+        )
+
+    def test_unknown_key_raises(self):
+        """A misspelt key is an error, not silently dropped."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"enabled": True, "phrase": ["Hi"]})
+        self.assertIn("phrase", str(cm.exception))
+
+    def test_validate_rejects_out_of_range_values(self):
+        """Values outside Agent Studio's limits are rejected."""
+        cases = {
+            "initial_interval_seconds": {"initial_interval_seconds": 0.2},
+            "interval_seconds": {"interval_seconds": 0.5},
+            "at least one phrase": {"enabled": True, "phrases": [" "]},
+        }
+        for expected, yaml_dict in cases.items():
+            with self.subTest(expected):
+                with self.assertRaises(ValueError) as cm:
+                    self._from_yaml(yaml_dict).validate()
+                self.assertIn(expected, str(cm.exception))
+
+    def test_new_section_is_pushed_as_an_update(self):
+        """The platform has no create command, so a new section is sent as an update."""
+        filler = self._from_yaml(self.YAML)
+        self.assertEqual(
+            filler.create_command_type, "voice_channel_update_silence_filler_utterances"
+        )
+        proto = filler.build_create_proto().silence_filler_utterances
+        self.assertTrue(proto.enabled)
+        self.assertEqual([utterance.message for utterance in proto.utterances], ["One moment..."])
+        self.assertEqual(proto.initial_interval_seconds, 2.5)
+        self.assertEqual(proto.interval_seconds, 5)
+
+    def test_removed_section_is_reset(self):
+        """Removing the section resets the platform's filler phrases."""
+        filler = self._from_yaml(self.YAML)
+        self.assertEqual(
+            filler.delete_command_type, "voice_channel_reset_silence_filler_utterances"
+        )
+        self.assertEqual(filler.build_delete_proto().ListFields(), [])
+
+    def test_from_projection(self):
+        """silenceFillerUtterances maps to the filler_phrases section."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "silenceFillerUtterances": {
+                        "enabled": True,
+                        "utterances": [{"message": "One moment..."}],
+                        "randomize": True,
+                        "initialIntervalSeconds": 2.5,
+                        "intervalSeconds": 5,
+                    }
+                }
+            }
+        }
+        result = VoiceFillerPhrases.from_projection(projection)
+        self.assertEqual(result["voice_filler_phrases"].to_yaml_dict(), self.YAML)
+
+    def test_unset_in_projection_yields_nothing(self):
+        """No silenceFillerUtterances, or no channel access, pulls no section."""
+        self.assertEqual(VoiceFillerPhrases.from_projection({"channels": {"voice": {}}}), {})
+        self.assertEqual(VoiceFillerPhrases.from_projection({}), {})
+
+
+class VoiceBackgroundAmbienceTests(unittest.TestCase):
+    """Tests for the background_ambience section of voice/configuration.yaml."""
+
+    YAML = {"enabled": True, "preset": "office-ambiance", "loudness": -40}
+
+    def _from_yaml(self, yaml_dict: dict) -> VoiceBackgroundAmbience:
+        return VoiceBackgroundAmbience.from_yaml_dict(
+            yaml_dict, resource_id="voice_background_ambience", name="voice_background_ambience"
+        )
+
+    def test_yaml_roundtrip(self):
+        """Every field survives from_yaml_dict -> to_yaml_dict unchanged."""
+        self.assertEqual(self._from_yaml(self.YAML).to_yaml_dict(), self.YAML)
+
+    def test_file_path(self):
+        """The section lives in the voice channel's configuration file."""
+        self.assertEqual(
+            self._from_yaml(self.YAML).file_path,
+            os.path.join("voice", "configuration.yaml", "background_ambience"),
+        )
+
+    def test_unknown_key_raises(self):
+        """A misspelt key is an error, not silently dropped."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"preset": "office-ambiance", "volume": -40})
+        self.assertIn("volume", str(cm.exception))
+
+    def test_validate_rejects_loudness_out_of_range(self):
+        """Loudness outside Agent Studio's limits is rejected."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"preset": "office-ambiance", "loudness": -10}).validate()
+        self.assertIn("loudness", str(cm.exception))
+
+    def test_validate_requires_preset(self):
+        """A section without a preset is rejected."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"enabled": True}).validate()
+        self.assertIn("preset", str(cm.exception))
+
+    def test_validate_warns_on_unknown_preset(self):
+        """An unknown preset warns rather than fails, so newer platform presets still push."""
+        ambience = self._from_yaml({"preset": "rainforest"})
+        with self.assertLogs("poly.resources.channel_settings", level="WARNING"):
+            ambience.validate()
+
+    def test_new_section_is_pushed_as_an_update(self):
+        """The platform has no create command, so a new section is sent as an update."""
+        ambience = self._from_yaml(self.YAML)
+        self.assertEqual(ambience.create_command_type, "voice_channel_update_ambience")
+        proto = ambience.build_create_proto().ambience
+        self.assertTrue(proto.enabled)
+        self.assertEqual(proto.preset, "office-ambiance")
+        self.assertEqual(proto.loudness, -40)
+
+    def test_switched_off_keeps_preset_and_loudness(self):
+        """Switching off sends enabled: false with the old preset and loudness."""
+        switched_off = self._from_yaml(self.YAML).switched_off()
+        self.assertEqual(
+            switched_off.to_yaml_dict(),
+            {"enabled": False, "preset": "office-ambiance", "loudness": -40},
+        )
+
+    def test_switched_off_is_none_when_already_off(self):
+        """Ambience that is already off has nothing to switch off."""
+        self.assertIsNone(self._from_yaml({**self.YAML, "enabled": False}).switched_off())
+
+    def test_from_projection(self):
+        """ambience maps to the background_ambience section."""
+        projection = {"channels": {"voice": {"ambience": dict(self.YAML)}}}
+        result = VoiceBackgroundAmbience.from_projection(projection)
+        self.assertEqual(result["voice_background_ambience"].to_yaml_dict(), self.YAML)
+
+    def test_unset_in_projection_yields_nothing(self):
+        """No ambience, or no channel access, pulls no section."""
+        self.assertEqual(VoiceBackgroundAmbience.from_projection({"channels": {"voice": {}}}), {})
+        self.assertEqual(VoiceBackgroundAmbience.from_projection({}), {})
 
 
 class KeyphraseBoostingTests(unittest.TestCase):
@@ -13358,7 +13473,7 @@ class AsrSettingsFromProjection(unittest.TestCase):
     """Tests for AsrSettings.from_projection."""
 
     def test_parses_every_section(self):
-        """Each Model Configuration field maps to its YAML section."""
+        """Each turn-taking field maps to its YAML section; filler and ambience are left out."""
         projection = {
             "channels": {
                 "voice": {
@@ -13381,18 +13496,6 @@ class AsrSettingsFromProjection(unittest.TestCase):
             {
                 "speech_end_delay_ms": 800,
                 "barge_in": {"enabled": True, "allow_on_first_turn": False, "max_per_call": 5},
-                "filler_phrases": {
-                    "enabled": False,
-                    "phrases": ["One moment..."],
-                    "randomize": True,
-                    "initial_interval_seconds": 2.5,
-                    "interval_seconds": 5,
-                },
-                "background_ambience": {
-                    "enabled": True,
-                    "preset": "office-ambiance",
-                    "loudness": -50,
-                },
             },
         )
 

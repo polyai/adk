@@ -8,3 +8,15 @@ disclaimer_messages:
   message: This conversation may be recorded for quality assurance.
   enabled: true
   language_code: en-GB
+filler_phrases:
+  enabled: true
+  phrases:
+  - One moment...
+  - Just a second...
+  randomize: true
+  initial_interval_seconds: 2.5
+  interval_seconds: 5
+background_ambience:
+  enabled: false
+  preset: office-ambiance
+  loudness: -50
