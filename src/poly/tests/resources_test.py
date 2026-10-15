@@ -7273,19 +7273,11 @@ class AsrSettingsTests(unittest.TestCase):
         asr = self._from_yaml(self.FULL_YAML)
         self.assertEqual(AsrSettings(**resource_utils.resource_to_dict(asr)), asr)
 
-    def test_legacy_status_dict_is_read(self):
-        """A status file from an older ADK, with a bool barge_in, still loads."""
-        asr = AsrSettings(resource_id="asr_settings", name="asr_settings", barge_in=True)
-        self.assertEqual(asr.barge_in, BargeIn(enabled=True))
-
-    def test_legacy_barge_in_bool_maps_to_enabled(self):
-        """barge_in: true from an older file becomes barge_in.enabled, with a warning."""
-        with self.assertLogs("poly.resources.asr_settings", level="WARNING") as logs:
-            asr = self._from_yaml({"barge_in": True, "interaction_style": "balanced"})
-        self.assertEqual(asr.barge_in, BargeIn(enabled=True))
-        self.assertEqual(asr.to_yaml_dict(), {"barge_in": {"enabled": True, "allow_on_first_turn": False}})
-        self.assertTrue(any("deprecated" in line for line in logs.output))
-        self.assertTrue(any("interaction_style" in line for line in logs.output))
+    def test_bool_barge_in_is_an_error(self):
+        """The old bool shape is rewritten by a migration, so reading one is an error."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"barge_in": True})
+        self.assertIn("barge_in", str(cm.exception))
 
     def test_unknown_section_key_raises(self):
         """A misspelt key inside a section is an error, not silently dropped."""

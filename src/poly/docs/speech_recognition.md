@@ -28,8 +28,9 @@ Filler phrases and background ambience are in `voice/configuration.yaml` (see
 
 Keys inside a section are checked, so a misspelt key is an error.
 
-If the voice model settings in Agent Studio are read-only because PolyAI manages the project's
-voice configuration, `speech_end_delay_ms` has no effect.
+If PolyAI manages the project's voice configuration, `speech_end_delay_ms` is overwritten at
+runtime. You can check on the project's **Voice › Model** page in Agent Studio, which shows a
+**Best defaults** tag when it's managed.
 
 ### Example
 ```yaml
@@ -42,10 +43,6 @@ barge_in:
 
 These apply to the whole voice channel. Individual flow steps can override barge-in, ASR
 provider, VAD and LLM settings for a single turn — see [step settings](flows.md#step-settings).
-
-Older files with `barge_in: true` / `false` or `interaction_style` still load, with a warning:
-`barge_in: true` is read as `barge_in.enabled: true`, and `interaction_style` is ignored. Run
-`poly pull` to rewrite the file.
 
 ## Keyphrase Boosting (`keyphrase_boosting.yaml`)
 

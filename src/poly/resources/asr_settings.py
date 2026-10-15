@@ -26,9 +26,6 @@ logger = logging.getLogger(__name__)
 SPEECH_END_DELAY_MS_MIN = 200
 SPEECH_END_DELAY_MS_MAX = 1500
 
-# Written by older ADK versions; read for one release so existing projects migrate on push.
-LEGACY_FIELDS = ("interaction_style",)
-
 
 @dataclass
 class BargeIn:
@@ -161,14 +158,11 @@ class AsrSettings(YamlResource):
         resource_id: str,
         name: str,
         speech_end_delay_ms: Optional[int] = None,
-        barge_in: Union[BargeIn, dict, bool, None] = None,
+        barge_in: Union[BargeIn, dict, None] = None,
     ):
         self.resource_id = resource_id
         self.name = name
         self.speech_end_delay_ms = speech_end_delay_ms
-        if isinstance(barge_in, bool):
-            # Status files written by older ADK versions store barge-in as a bool.
-            barge_in = BargeIn(enabled=barge_in)
         self.barge_in = _as_section(barge_in, BargeIn, "barge_in")
 
     @classmethod
@@ -225,25 +219,11 @@ class AsrSettings(YamlResource):
     def from_yaml_dict(
         cls, yaml_dict: dict, resource_id: str, name: str, **kwargs
     ) -> "AsrSettings":
-        for legacy_field in LEGACY_FIELDS:
-            if legacy_field in yaml_dict:
-                logger.warning(
-                    f"'{legacy_field}' in asr_settings.yaml is no longer used and is ignored. "
-                    "Remove it, or run 'poly pull' to rewrite the file."
-                )
-
-        barge_in = yaml_dict.get("barge_in")
-        if isinstance(barge_in, bool):
-            logger.warning(
-                f"'barge_in: {str(barge_in).lower()}' in asr_settings.yaml is deprecated. "
-                f"Use 'barge_in:' with 'enabled: {str(barge_in).lower()}' under it instead."
-            )
-
         return cls(
             resource_id=resource_id,
             name=name,
             speech_end_delay_ms=yaml_dict.get("speech_end_delay_ms"),
-            barge_in=barge_in,
+            barge_in=yaml_dict.get("barge_in"),
         )
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:

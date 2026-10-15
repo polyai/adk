@@ -84,11 +84,8 @@ barge_in:
   max_per_call: 5
 ~~~
 
-!!! note "Managed voice configuration"
-    When the voice model settings in Agent Studio are read-only because PolyAI manages the project's voice configuration, the platform chooses the speech end delay. `speech_end_delay_ms` is still pulled and pushed, but has no effect.
-
-!!! warning "Older `asr_settings.yaml` files"
-    Earlier versions of the ADK wrote `barge_in: true` / `false` and `interaction_style`. `barge_in: true` is still read as `barge_in.enabled: true`, with a warning. `interaction_style` is ignored, because `speech_end_delay_ms` now sets end-of-speech timing. Run `poly pull` to rewrite the file in the current shape.
+!!! note "Projects with a managed voice configuration"
+    If PolyAI manages your project's voice configuration, `speech_end_delay_ms` is overwritten at runtime. It's still pulled and pushed, but has no effect. You can check on your project's **Voice › Model** page in Agent Studio, which shows a **Best defaults** tag when the configuration is managed.
 
 ## Keyphrase boosting
 

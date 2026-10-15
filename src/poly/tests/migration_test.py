@@ -7,7 +7,13 @@ import os
 import tempfile
 import unittest
 
-from poly.migration_utils import migrate_legacy_topic_files, remove_personality_and_role_files
+from poly.migration_utils import (
+    MigrationFlag,
+    migrate_asr_settings_barge_in,
+    migrate_legacy_topic_files,
+    remove_personality_and_role_files,
+    run_migrations,
+)
 from poly.resources import resource_utils
 
 
@@ -171,3 +177,82 @@ class TestRemovePersonalityAndRoleFiles(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(tmp, "agent_settings", "role.yaml")))
             self.assertTrue(os.path.exists(os.path.join(tmp, "agent_settings", "rules.txt")))
             self.assertTrue(os.path.exists(os.path.join(tmp, "agent_settings", "persona.txt")))
+
+
+class TestMigrateAsrSettingsBargeIn(unittest.TestCase):
+    """Tests for migrate_asr_settings_barge_in."""
+
+    def _write(self, root: str, content: str) -> str:
+        path = os.path.join(root, "voice", "speech_recognition", "asr_settings.yaml")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return path
+
+    def _read(self, path: str) -> dict:
+        with open(path, encoding="utf-8") as f:
+            return resource_utils.load_yaml(f.read())
+
+    def test_moves_bool_under_enabled_and_drops_interaction_style(self):
+        """barge_in keeps its value, now under enabled."""
+        for value in (True, False):
+            with self.subTest(value), tempfile.TemporaryDirectory() as tmp:
+                path = self._write(
+                    tmp, f"barge_in: {str(value).lower()}\ninteraction_style: balanced\n"
+                )
+
+                migrate_asr_settings_barge_in(tmp, None)
+
+                self.assertEqual(self._read(path), {"barge_in": {"enabled": value}})
+
+    def test_leaves_current_files_untouched(self):
+        """A file already in the current shape isn't rewritten."""
+        with tempfile.TemporaryDirectory() as tmp:
+            content = "# kept\nspeech_end_delay_ms: 640\nbarge_in:\n  enabled: true\n"
+            path = self._write(tmp, content)
+
+            migrate_asr_settings_barge_in(tmp, None)
+
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(f.read(), content)
+
+    def test_no_asr_settings_file(self):
+        """A project without the file is a no-op."""
+        with tempfile.TemporaryDirectory() as tmp:
+            migrate_asr_settings_barge_in(tmp, None)
+            self.assertFalse(os.path.isdir(os.path.join(tmp, "voice")))
+
+    def test_migrates_the_status_dict_to_match(self):
+        """The last pulled state is rewritten the same way, so the file isn't shown as modified."""
+        status_dict = {
+            "resources": {
+                "asr_settings": {
+                    "asr_settings": {
+                        "resource_id": "asr_settings",
+                        "name": "asr_settings",
+                        "barge_in": False,
+                        "interaction_style": "balanced",
+                    }
+                }
+            }
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            migrate_asr_settings_barge_in(tmp, status_dict)
+
+        self.assertEqual(
+            status_dict["resources"]["asr_settings"]["asr_settings"],
+            {"resource_id": "asr_settings", "name": "asr_settings", "barge_in": {"enabled": False}},
+        )
+
+    def test_runs_once(self):
+        """run_migrations applies it and records the flag, so it doesn't run again."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, "barge_in: true\n")
+
+            flags = run_migrations(tmp, set(), status_dict={})
+            self.assertIn(MigrationFlag.MIGRATED_ASR_SETTINGS_BARGE_IN, flags)
+            self.assertEqual(self._read(path), {"barge_in": {"enabled": True}})
+
+            self._write(tmp, "barge_in: true\n")
+            run_migrations(tmp, flags, status_dict={})
+            self.assertEqual(self._read(path), {"barge_in": True})
