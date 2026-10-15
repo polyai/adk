@@ -7478,7 +7478,7 @@ class VoiceFillerPhrasesTests(unittest.TestCase):
 class VoiceBackgroundAmbienceTests(unittest.TestCase):
     """Tests for the background_ambience section of voice/configuration.yaml."""
 
-    YAML = {"enabled": True, "preset": "office-ambiance", "loudness": -40}
+    YAML = {"preset": "office-ambiance", "loudness": -40}
 
     def _from_yaml(self, yaml_dict: dict) -> VoiceBackgroundAmbience:
         return VoiceBackgroundAmbience.from_yaml_dict(
@@ -7511,7 +7511,7 @@ class VoiceBackgroundAmbienceTests(unittest.TestCase):
     def test_validate_requires_preset(self):
         """A section without a preset is rejected."""
         with self.assertRaises(ValueError) as cm:
-            self._from_yaml({"enabled": True}).validate()
+            self._from_yaml({"loudness": -40}).validate()
         self.assertIn("preset", str(cm.exception))
 
     def test_validate_warns_on_unknown_preset(self):
@@ -7529,23 +7529,29 @@ class VoiceBackgroundAmbienceTests(unittest.TestCase):
         self.assertEqual(proto.preset, "office-ambiance")
         self.assertEqual(proto.loudness, -40)
 
-    def test_switched_off_keeps_preset_and_loudness(self):
-        """Switching off sends enabled: false with the old preset and loudness."""
-        switched_off = self._from_yaml(self.YAML).switched_off()
-        self.assertEqual(
-            switched_off.to_yaml_dict(),
-            {"enabled": False, "preset": "office-ambiance", "loudness": -40},
-        )
+    def test_enabled_is_not_written(self):
+        """The section only exists while ambience is on, so it has no enabled key."""
+        self.assertNotIn("enabled", self._from_yaml(self.YAML).to_yaml_dict())
+        with self.assertRaises(ValueError):
+            self._from_yaml({**self.YAML, "enabled": True})
 
-    def test_switched_off_is_none_when_already_off(self):
-        """Ambience that is already off has nothing to switch off."""
-        self.assertIsNone(self._from_yaml({**self.YAML, "enabled": False}).switched_off())
+    def test_switched_off_turns_ambience_off_with_the_same_preset(self):
+        """Removing the section sends enabled: false with the old preset and loudness."""
+        proto = self._from_yaml(self.YAML).switched_off().build_update_proto().ambience
+        self.assertFalse(proto.enabled)
+        self.assertEqual(proto.preset, "office-ambiance")
+        self.assertEqual(proto.loudness, -40)
 
     def test_from_projection(self):
-        """ambience maps to the background_ambience section."""
-        projection = {"channels": {"voice": {"ambience": dict(self.YAML)}}}
+        """Ambience that is on maps to the background_ambience section."""
+        projection = {"channels": {"voice": {"ambience": {"enabled": True, **self.YAML}}}}
         result = VoiceBackgroundAmbience.from_projection(projection)
         self.assertEqual(result["voice_background_ambience"].to_yaml_dict(), self.YAML)
+
+    def test_ambience_that_is_off_pulls_no_section(self):
+        """Ambience that is off is written by leaving the section out."""
+        projection = {"channels": {"voice": {"ambience": {"enabled": False, **self.YAML}}}}
+        self.assertEqual(VoiceBackgroundAmbience.from_projection(projection), {})
 
     def test_unset_in_projection_yields_nothing(self):
         """No ambience, or no channel access, pulls no section."""

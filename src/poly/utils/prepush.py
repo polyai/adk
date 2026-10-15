@@ -10,7 +10,6 @@ Copyright PolyAI Limited
 """
 
 import copy
-import logging
 from typing import Callable, TypeAlias
 
 from poly.resources import (
@@ -45,8 +44,6 @@ from poly.utils.commands import (
     create_command_webchat_channel_update_status,
 )
 from poly.utils.variable_references import compute_variable_references
-
-logger = logging.getLogger(__name__)
 
 ResourceMap: TypeAlias = dict[type[Resource], dict[str, Resource]]
 
@@ -295,20 +292,15 @@ def push_asr_settings_by_section(
 def switch_off_removed_ambience(
     updated_resources: ResourceMap, deleted_resources: ResourceMap
 ) -> None:
-    """Turn a removed background_ambience section into an update that switches it off.
+    """Turn a removed background_ambience section into an update that turns ambience off.
 
     Agent Studio has no command to clear ambience.
     """
     removed = deleted_resources.pop(VoiceBackgroundAmbience, {})
     for resource_id, ambience in removed.items():
-        switched_off = ambience.switched_off()
-        if switched_off is None:
-            continue
-        logger.warning(
-            "background_ambience was removed, but Agent Studio can't clear it. "
-            "It will be switched off instead."
+        updated_resources.setdefault(VoiceBackgroundAmbience, {})[resource_id] = (
+            ambience.switched_off()
         )
-        updated_resources.setdefault(VoiceBackgroundAmbience, {})[resource_id] = switched_off
 
 
 def prune_cascade_deleted_flow_children(deleted_resources: ResourceMap) -> None:

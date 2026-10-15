@@ -78,11 +78,10 @@ filler_phrases:
 
 ## Background Ambience
 
-Background sound played under the agent's speech. Optional. Agent Studio can't clear ambience,
-so removing the section switches it off on the next push.
+Background sound played under the agent's speech. Plays while the section is in the file;
+removing it turns ambience off.
 
 ### Fields
-- **enabled** (bool)
 - **preset**: `office-ambiance`, `restaurant-ambiance` or `whitenoise-subtle`. An unknown preset
   is a warning, not an error.
 - **loudness** (dB, -70 to -20): Agent Studio shows -70 as volume 0 and -20 as volume 100.
@@ -90,7 +89,6 @@ so removing the section switches it off on the next push.
 ### Example
 ```yaml
 background_ambience:
-  enabled: false
   preset: office-ambiance
   loudness: -50
 ```
@@ -118,7 +116,6 @@ filler_phrases:
   initial_interval_seconds: 2.5
   interval_seconds: 5
 background_ambience:
-  enabled: false
   preset: office-ambiance
   loudness: -50
 ```

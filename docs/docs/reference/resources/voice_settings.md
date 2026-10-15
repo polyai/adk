@@ -174,13 +174,12 @@ filler_phrases:
 
 ## Background ambience
 
-Background ambience is a sound played under the agent's speech, such as office noise. The section is optional. Agent Studio can't clear ambience, so removing the section switches it off on the next push.
+Background ambience is a sound played under the agent's speech, such as office noise. Ambience plays while the section is in the file; removing it turns ambience off.
 
 ### Fields
 
 | Field | Description |
 |---|---|
-| `enabled` | Whether ambience is played. |
 | `preset` | One of `office-ambiance`, `restaurant-ambiance` or `whitenoise-subtle`. |
 | `loudness` | Volume in dB. Agent Studio shows -70 dB as volume 0 and -20 dB as volume 100. |
 
@@ -188,7 +187,6 @@ Background ambience is a sound played under the agent's speech, such as office n
 
 ~~~yaml
 background_ambience:
-  enabled: false
   preset: office-ambiance
   loudness: -50
 ~~~
@@ -224,7 +222,6 @@ filler_phrases:
   interval_seconds: 5
 
 background_ambience:
-  enabled: false
   preset: office-ambiance
   loudness: -50
 ~~~

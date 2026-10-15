@@ -7,7 +7,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import ClassVar, Optional
+from typing import ClassVar
 
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.agent_settings_pb2 import (
@@ -637,24 +637,26 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
 class VoiceBackgroundAmbience(MultiResourceYamlResource):
     """Background sound played under the agent's speech.
 
-    The platform has no command to clear ambience, so a removed section is switched off at
-    push time instead (see prepush.switch_off_removed_ambience).
+    The section exists only while ambience is on. The platform has no command to clear
+    ambience, so a removed section is pushed as an update that turns it off (see
+    prepush.switch_off_removed_ambience).
     """
 
     preset: str = ""
-    enabled: bool = False
     loudness: float = -50
+    # Only False on the update built to turn ambience off; never read from or written to YAML.
+    enabled: bool = field(default=True, init=False, repr=False)
 
     top_level_name: ClassVar[str] = "background_ambience"
     _singleton: ClassVar[bool] = True
-    yaml_keys: ClassVar[tuple[str, ...]] = ("enabled", "preset", "loudness")
+    yaml_keys: ClassVar[tuple[str, ...]] = ("preset", "loudness")
 
     @cached_property
     def file_path(self) -> str:
         return os.path.join(_config_path("voice"), self.top_level_name)
 
     def to_yaml_dict(self) -> dict:
-        return {"enabled": self.enabled, "preset": self.preset, "loudness": self.loudness}
+        return {"preset": self.preset, "loudness": self.loudness}
 
     @classmethod
     def from_yaml_dict(
@@ -675,13 +677,12 @@ class VoiceBackgroundAmbience(MultiResourceYamlResource):
             return {}
 
         ambience = projection.get("channels", {}).get("voice", {}).get("ambience")
-        if not ambience:
+        if not ambience or not ambience.get("enabled"):
             return {}
         return {
             "voice_background_ambience": cls(
                 resource_id="voice_background_ambience",
                 name="voice_background_ambience",
-                enabled=ambience.get("enabled", False),
                 preset=ambience.get("preset", ""),
                 loudness=ambience.get("loudness", -50),
             )
@@ -703,17 +704,16 @@ class VoiceBackgroundAmbience(MultiResourceYamlResource):
                 f"({', '.join(AMBIENCE_PRESETS)}). Agent Studio may reject it."
             )
 
-    def switched_off(self) -> Optional["VoiceBackgroundAmbience"]:
-        """Return this ambience disabled, or None when it is already off."""
-        if not self.enabled:
-            return None
-        return VoiceBackgroundAmbience(
+    def switched_off(self) -> "VoiceBackgroundAmbience":
+        """Return a copy that turns ambience off, keeping its preset and loudness."""
+        off = VoiceBackgroundAmbience(
             resource_id=self.resource_id,
             name=self.name,
             preset=self.preset,
-            enabled=False,
             loudness=self.loudness,
         )
+        off.enabled = False
+        return off
 
     @property
     def command_type(self) -> str:

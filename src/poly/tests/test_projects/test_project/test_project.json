@@ -1222,7 +1222,6 @@
         "resource_id": "voice_background_ambience",
         "name": "voice_background_ambience",
         "preset": "office-ambiance",
-        "enabled": false,
         "loudness": -50
       }
     },

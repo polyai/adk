@@ -1525,33 +1525,22 @@ class SwitchOffRemovedAmbienceTest(unittest.TestCase):
 
     RESOURCE_ID = "voice_background_ambience"
 
-    def _ambience(self, enabled: bool) -> VoiceBackgroundAmbience:
-        return VoiceBackgroundAmbience(
+    def test_removed_ambience_is_turned_off(self):
+        ambience = VoiceBackgroundAmbience(
             resource_id=self.RESOURCE_ID,
             name=self.RESOURCE_ID,
             preset="office-ambiance",
-            enabled=enabled,
             loudness=-40,
         )
-
-    def test_removed_enabled_ambience_is_switched_off(self):
         updated = {}
-        deleted = {VoiceBackgroundAmbience: {self.RESOURCE_ID: self._ambience(enabled=True)}}
-
-        with self.assertLogs("poly.utils.prepush", level="WARNING"):
-            prepush.switch_off_removed_ambience(updated, deleted)
-
-        self.assertEqual(deleted, {})
-        switched_off = updated[VoiceBackgroundAmbience][self.RESOURCE_ID]
-        self.assertEqual(switched_off, self._ambience(enabled=False))
-
-    def test_removed_disabled_ambience_sends_nothing(self):
-        updated = {}
-        deleted = {VoiceBackgroundAmbience: {self.RESOURCE_ID: self._ambience(enabled=False)}}
+        deleted = {VoiceBackgroundAmbience: {self.RESOURCE_ID: ambience}}
 
         prepush.switch_off_removed_ambience(updated, deleted)
 
-        self.assertEqual((updated, deleted), ({}, {}))
+        self.assertEqual(deleted, {})
+        turned_off = updated[VoiceBackgroundAmbience][self.RESOURCE_ID]
+        self.assertFalse(turned_off.enabled)
+        self.assertEqual((turned_off.preset, turned_off.loudness), ("office-ambiance", -40))
 
 
 class JsonIoTests(unittest.TestCase):
