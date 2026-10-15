@@ -154,6 +154,7 @@ nav:
           - Functions: reference/resources/functions.md
           - Flows: reference/resources/flows.md
           - API integrations: reference/resources/api_integrations.md
+          - MCP servers: reference/resources/mcp.md
           - Entities: reference/resources/entities.md
           - Handoffs: reference/resources/handoffs.md
           - SMS templates: reference/resources/sms.md

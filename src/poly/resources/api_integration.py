@@ -38,7 +38,14 @@ OPERATION_RESOURCE_PATTERN = re.compile(
 )
 
 AVAILABLE_OPERATIONS = {"GET", "POST", "PATCH", "PUT", "DELETE"}
-AVAILABLE_AUTH_TYPES = {"none", "basic", "apiKey", "oauth2"}
+AVAILABLE_AUTH_TYPES = {
+    "none",
+    "basic",
+    "apiKey",
+    "oauth2",
+    "oauth2_client_credentials",
+    "jwt_client_assertion",
+}
 
 # Matches an empty string (no URL configured) or a valid http(s) base URL
 URL_PATTERN = re.compile(r"^(https?://[^\s]+)?$")

@@ -57,7 +57,7 @@ Each integration configures `sandbox`, `pre-release`, and `live` separately, so 
 | Field | Description |
 |---|---|
 | `base_url` | Base URL for that environment, e.g. `https://api.example.com`. May be left empty if the environment isn't wired up yet. |
-| `auth_type` | One of `none`, `basic`, `apiKey`, `oauth2`. |
+| `auth_type` | One of `none`, `basic`, `apiKey`, `oauth2`, `oauth2_client_credentials`, `jwt_client_assertion`. |
 
 Credentials themselves are managed by Agent Studio, not stored in the YAML — see [Usage](#usage) below.
 
@@ -121,7 +121,8 @@ response = conv.api.salesforce.update_contact(
 - `name` is required and must match `^[a-z_][a-z0-9_]*$`.
 - Each environment's `base_url` must be a valid `http(s)://` URL, or empty.
 - `base_url` cannot be empty when `auth_type` is not `none`.
-- `auth_type` must be one of `none`, `basic`, `apiKey`, `oauth2`.
+- `auth_type` must be one of `none`, `basic`, `apiKey`, `oauth2`, `oauth2_client_credentials`,
+  `jwt_client_assertion`.
 - Every operation needs a non-empty `name`, a `method` from the supported set, and a `resource` path matching a valid URL-path pattern (optionally with `{param}` placeholders).
 - No two operations in the same integration may share both `name` and `method`.
 

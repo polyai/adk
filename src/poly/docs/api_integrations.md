@@ -32,7 +32,7 @@ Each integration supports separate configuration for:
 Per environment you set:
 
 - **base_url**: Base URL for that environment (e.g. `https://website.com`).
-- **auth_type**: Authentication type (e.g. `none`, `basic`, `apiKey`, `oauth2`).
+- **auth_type**: Authentication type (`none`, `basic`, `apiKey`, `oauth2`, `oauth2_client_credentials` or `jwt_client_assertion`).
 
 This lets you test against staging in sandbox and promote without changing code.
 

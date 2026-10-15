@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
+from pathlib import PurePath
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -40,6 +41,7 @@ from poly.resources import (
     FlowStep,
     Function,
     FunctionStep,
+    MCPServer,
     MultiResourceYamlResource,
     Pronunciation,
     Resource,
@@ -2278,6 +2280,14 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == MCPServer and original_resource:
+            if not isinstance(original_resource, MCPServer):
+                raise TypeError(f"Original resource is not an MCPServer: {original_resource}")
+            additional_kwargs["known_last_discovered_at"] = original_resource.last_discovered_at
+            additional_kwargs["known_last_discovered_tool_count"] = (
+                original_resource.last_discovered_tool_count
+            )
+
         try:
             resource = resource_class.read_local_resource(
                 file_path=resource.file_path,
@@ -3522,22 +3532,40 @@ class AgentStudioProject:
         Runs all tests by default. Use files or tags to filter.
 
         Args:
-            files: List of specific test file paths to select.
+            files: Test files to select. Each matches the end of a test's path, so a
+                bare file name (with or without .yaml) or a glob such as "smoke_*" works.
             tags: List of tags to filter by.
 
         Returns:
             list[TestCase]: The matched test cases.
+
+        Raises:
+            ValueError: If any entry in files or tags matches no test.
         """
         tests: dict[str, TestCase] = self.resources.get(TestCase, {})
         matched: list[TestCase] = []
         if tags:
+            unmatched = set(tags)
             for test in tests.values():
                 if any(tag in test.tags.tags for tag in tags):
                     matched.append(test)
+                    unmatched -= set(test.tags.tags)
+            if unmatched:
+                raise ValueError(f"No tests match these tags: {', '.join(sorted(unmatched))}")
         elif files:
+            patterns = {
+                f: os.path.relpath(f, self.root_path) if os.path.isabs(f) else f for f in files
+            }
+            unmatched = set(files)
             for test in tests.values():
-                if test.file_path in files:
+                path = PurePath(test.file_path)
+                hits = {f for f, p in patterns.items() if path.match(p) or path.match(f"{p}.yaml")}
+                if hits:
                     matched.append(test)
+                    unmatched -= hits
+
+            if unmatched:
+                raise ValueError(f"No tests match these files: {', '.join(sorted(unmatched))}")
         else:
             matched = list(tests.values())
 

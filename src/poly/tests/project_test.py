@@ -36,6 +36,7 @@ from poly.resources import (
     FunctionStep,
     Handoff,
     KeyphraseBoosting,
+    MCPServer,
     Pronunciation,
     Resource,
     ResourceMapping,
@@ -2258,6 +2259,26 @@ class PushProjectTest(unittest.TestCase):
         self.assertIn(Function, deleted_resources)
         self.assertIn("FUNCTION-extra_function", deleted_resources[Function])
 
+    def test_push_project_updated_mcp_server_keeps_discovery_fields(self):
+        """An edited MCP server is upserted with the platform's discovery state.
+
+        The upsert replaces the whole server, so sending it without the discovery
+        fields would clear them.
+        """
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["mcp_servers"]["MCP-SERVER-ticketing"]["timeout"] = 5
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, message, commands = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        updated = self.mock_api_handler.queue_resources.call_args.kwargs["updated_resources"]
+        server = updated[MCPServer]["MCP-SERVER-ticketing"]
+        self.assertEqual(server.timeout, 15)
+        upsert = server.build_update_proto().server
+        self.assertEqual(upsert.last_discovered_at, "2026-08-01T12:00:00Z")
+        self.assertEqual(upsert.last_discovered_tool_count, 12)
+
     def test_push_project_renamed_test_case_is_an_update(self):
         """A test case renamed locally keeps its id: one update, no delete and create."""
         project_data = deepcopy(PROJECT_DATA)
@@ -4080,6 +4101,41 @@ class ResolveTestsTest(unittest.TestCase):
         result = self.project.resolve_tests(files=[target.file_path])
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].resource_id, target.resource_id)
+
+    def test_filter_by_bare_file_name(self):
+        """A file name without the test_suite/ prefix, with or without .yaml, matches."""
+        for name in ["greeting_flow_test.yaml", "greeting_flow_test"]:
+            with self.subTest(name=name):
+                result = self.project.resolve_tests(files=[name])
+                self.assertEqual([t.name for t in result], ["Greeting flow test"])
+
+    def test_filter_by_relative_and_absolute_path(self):
+        """A ./-prefixed path and an absolute path inside the project both match."""
+        absolute = os.path.join(TEST_DIR, "test_suite", "greeting_flow_test.yaml")
+        for path in ["./test_suite/greeting_flow_test.yaml", absolute]:
+            with self.subTest(path=path):
+                result = self.project.resolve_tests(files=[path])
+                self.assertEqual([t.name for t in result], ["Greeting flow test"])
+
+    def test_filter_by_glob(self):
+        """A glob matches every test whose file name fits it."""
+        result = self.project.resolve_tests(files=["*_test.yaml"])
+        self.assertEqual(len(result), 2)
+
+    def test_file_in_another_directory_does_not_match(self):
+        """A path with the right file name under the wrong directory matches nothing."""
+        with self.assertRaises(ValueError):
+            self.project.resolve_tests(files=["other/greeting_flow_test.yaml"])
+
+    def test_partly_unmatched_files_raise(self):
+        """If any requested file matches no test, the error names it."""
+        with self.assertRaisesRegex(ValueError, "no_such_test.yaml"):
+            self.project.resolve_tests(files=["greeting_flow_test.yaml", "no_such_test.yaml"])
+
+    def test_partly_unmatched_tags_raise(self):
+        """If any requested tag matches no test, the error names it."""
+        with self.assertRaisesRegex(ValueError, "nonexistent"):
+            self.project.resolve_tests(tags=["booking", "nonexistent"])
 
     def test_unmatched_tag_raises(self):
         """A tag that matches nothing raises ValueError."""

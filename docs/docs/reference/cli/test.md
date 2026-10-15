@@ -16,7 +16,8 @@ Examples:
 ~~~bash
 poly test run
 poly test run --tag smoke
-poly test run --files test_suite/greeting_flow_test.yaml
+poly test run --files greeting_flow_test.yaml
+poly test run --files "booking_*"
 poly test run --dry-run
 poly test run --dont-poll
 poly test run --push
@@ -25,13 +26,15 @@ poly test run --tag smoke --name "Pre-release check · booking flow"
 
 After triggering, the CLI polls for results every 5 seconds and displays a live-updating table. For projects with 20 or fewer tests the full table is shown; for larger suites a compact rolling view is used instead. Both views update in place until the run completes.
 
+With `--json`, the CLI never polls: it prints the triggered run and exits, and `next_command` gives the `poly test show` command to check on it. Run that command until `test_run.status` is no longer `pending` or `in_progress`.
+
 | Flag | Description |
 |---|---|
-| `--files` | One or more specific test YAML files to run. |
-| `--tag` | Run only tests that carry the specified tag(s). Multiple tags are OR-matched. |
+| `--files` | One or more test files to run. Each matches the end of a test's path, so `greeting_flow_test.yaml`, `greeting_flow_test` and `test_suite/greeting_flow_test.yaml` all select the same test. Globs such as `"booking_*"` work; quote them so the shell doesn't expand them. The run fails if any entry matches no test. |
+| `--tag` | Run only tests that carry the specified tag(s). Multiple tags are OR-matched. The run fails if any tag matches no test. |
 | `--dry-run` | Preview which tests would run without triggering them. |
 | `--name` | Name for the run in Agent Studio. Defaults to the test name or count. |
-| `--dont-poll` | Trigger the run and exit immediately. Use `poly test show <run_id>` to check results later. |
+| `--dont-poll` | Trigger the run and exit immediately. Use `poly test show <run_id>` to check results later. `--json` always behaves this way. |
 | `--push` | Push the project before running tests. Equivalent to running `poly push` then `poly test run`. |
 
 When `--dont-poll` is used, the CLI prints the run ID and a `poly test show` command to retrieve results:
@@ -45,7 +48,8 @@ Use poly test show <run_id> to check the status of the test run.
 ~~~json
 {
   "success": true,
-  "test_run": { "id": "...", "test_case_count": 12, "...": "..." }
+  "test_run": { "id": "...", "status": "pending", "test_case_count": 12, "...": "..." },
+  "next_command": "poly test show <run_id> --json"
 }
 ~~~
 
