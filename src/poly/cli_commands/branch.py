@@ -20,7 +20,12 @@ from poly.cli_commands.base import (
     add_grouped_subparsers,
     group_subcommands,
 )
-from poly.cli_commands.shared import load_project, parse_from_projection_json, read_project_config
+from poly.cli_commands.shared import (
+    load_project,
+    parse_from_projection_json,
+    read_project_config,
+    resolve_branch_id,
+)
 from poly.output.json_output import json_print
 from poly.project import DeploymentMode
 from poly.resources.resource_utils import contains_merge_conflict
@@ -646,7 +651,7 @@ class BranchCommand(BaseCommand):
         if source_branch:
             base_branch_name = source_branch
             _, branches = project.get_branches()
-            base_branch_id = branches.get(source_branch, {}).get("branchId")
+            base_branch_id = resolve_branch_id(branches, source_branch)
         else:
             base_branch_id = project.branch_id
             base_branch_name = project.get_current_branch()
@@ -972,6 +977,11 @@ class BranchCommand(BaseCommand):
         branch_label = branch_display_name or "current branch"
 
         def _is_heavy_content(c: dict[str, Any]) -> bool:
+            # Whole-resource conflicts are rendered as a field-level diff, which
+            # stays readable however large the resource is — the heavy path would
+            # replace that with a "choose a side" note and show nothing at all.
+            if isinstance(c.get("oursValue"), dict) and isinstance(c.get("theirsValue"), dict):
+                return False
             for key in ("baseValue", "theirsValue", "oursValue"):
                 v = c.get(key, "")
                 s = v if isinstance(v, str) else str(v)
@@ -1003,10 +1013,10 @@ class BranchCommand(BaseCommand):
                 conflict_total=total,
                 auto_mergeable=auto_merged,
                 heavy=heavy,
-                base_value=str(conflict.get("baseValue", "")),
+                base_value=conflict.get("baseValue", ""),
                 branch_label=branch_label,
-                branch_value=str(conflict.get("theirsValue", "")),
-                main_value=str(conflict.get("oursValue", "")),
+                branch_value=conflict.get("theirsValue", ""),
+                main_value=conflict.get("oursValue", ""),
                 existing_resolution=existing_resolution,
             )
 
@@ -1653,7 +1663,7 @@ class BranchCommand(BaseCommand):
                 warning("No current branch found. Please specify a branch name.")
             return
 
-        branch_id = branches.get(branch_name, {}).get("branchId")
+        branch_id = resolve_branch_id(branches, branch_name)
         if not branch_id:
             if output_json:
                 json_print({"success": False, "error": f"Branch '{branch_name}' does not exist."})

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 from rich.console import Console, ConsoleDimensions
 
 from poly.output.console import (
+    _merge_leaf_diffs,
     _OverflowPager,
     console,
     flatten_branch_tree,
@@ -17,6 +18,8 @@ from poly.output.console import (
     paged_output,
     print_archived_branches,
     print_branch_history,
+    print_experiment_detail,
+    print_experiments,
     print_releases_branches,
     resolve_parent_branch_label,
 )
@@ -499,3 +502,151 @@ class PagedOutputTest(unittest.TestCase):
         mock_pager.assert_called_once()
         self.assertIsInstance(mock_pager.call_args.kwargs["pager"], _OverflowPager)
         self.assertTrue(mock_pager.call_args.kwargs["styles"])
+
+
+def _topic(content: str, timestamp: str) -> dict:
+    """A knowledge base topic as the platform returns it in a merge conflict."""
+    return {
+        "id": "TOPICS-396d40fd",
+        "name": "Topic 3",
+        "content": content,
+        "actions": "",
+        "exampleQueries": [{"query": "Topic 3"}],
+        "references": {"sms": {}, "handoff": {}, "variables": {}},
+        "isActive": True,
+        "tags": [],
+        "createdAt": timestamp,
+        "createdBy": "user@example.com",
+        "updatedAt": timestamp,
+        "updatedBy": "user@example.com",
+    }
+
+
+class MergeLeafDiffsTest(unittest.TestCase):
+    """Tests for _merge_leaf_diffs, which reduces a whole-resource conflict to its fields."""
+
+    def test_reports_only_the_field_that_differs(self):
+        """A resource copied then edited on one side reports that field alone."""
+        diffs = _merge_leaf_diffs(
+            _topic("A second topic", "2026-09-09T09:29:23.574Z"),
+            _topic("A third topic", "2026-09-09T09:30:02.188Z"),
+        )
+
+        self.assertEqual(diffs, [("content", "A second topic", "A third topic")])
+
+    def test_audit_fields_alone_report_nothing(self):
+        """Two independently created copies differ only in audit fields, which are excluded."""
+        diffs = _merge_leaf_diffs(
+            _topic("New content", "2026-09-07T13:37:30.232Z"),
+            _topic("New content", "2026-09-07T13:55:55.175Z"),
+        )
+
+        self.assertEqual(diffs, [])
+
+    def test_nested_fields_are_reported_by_dotted_path(self):
+        """A difference inside a nested object names the full path to the leaf."""
+        main = {"references": {"sms": {"enabled": False}}}
+        branch = {"references": {"sms": {"enabled": True}}}
+
+        self.assertEqual(_merge_leaf_diffs(main, branch), [("references.sms.enabled", False, True)])
+
+    def test_key_present_on_one_side_only(self):
+        """A field only one side carries is reported against a missing counterpart."""
+        self.assertEqual(
+            _merge_leaf_diffs({"content": "a"}, {"content": "a", "actions": "run"}),
+            [("actions", None, "run")],
+        )
+
+    def test_list_values_are_compared_whole(self):
+        """Lists are not walked element by element; the differing list is reported as one leaf."""
+        diffs = _merge_leaf_diffs(
+            {"exampleQueries": [{"query": "one"}]},
+            {"exampleQueries": [{"query": "two"}]},
+        )
+
+        self.assertEqual(diffs, [("exampleQueries", [{"query": "one"}], [{"query": "two"}])])
+
+
+_EXPERIMENT = {
+    "id": "exp-001",
+    "name": "v2 test",
+    "traffic_percentage": 30,
+    "versions": [
+        {"branch_id": "br-main", "kind": "control", "traffic_percentage": 70},
+        {"branch_id": "br-v2", "kind": "release", "traffic_percentage": 30},
+    ],
+    "created_by": "miles",
+}
+_EXPERIMENT_BRANCHES = {"br-main": {"name": "main"}, "br-v2": {"name": "v2-branch"}}
+
+
+class PrintExperimentsTest(unittest.TestCase):
+    """Tests for print_experiments, the table used by `deployments experiment list`."""
+
+    def _render(self, experiments: list, branches: dict | None = None) -> str:
+        with console.capture() as capture:
+            print_experiments(experiments, branches=branches)
+        return capture.get()
+
+    def test_empty_list_prints_no_experiments_message(self):
+        """No experiments renders an informational message instead of a table."""
+        self.assertIn("No experiments found", self._render([]))
+
+    def test_row_shows_variant_branch_name_and_active_status(self):
+        """Each row names the variant branch and marks an unended experiment active."""
+        output = self._render([_EXPERIMENT], branches=_EXPERIMENT_BRANCHES)
+
+        self.assertIn("exp-001", output)
+        self.assertIn("v2-branch", output)
+        self.assertIn("active", output)
+
+    def test_ended_experiment_without_branch_map_shows_raw_id(self):
+        """Without a branch map the variant branch ID is shown, and status is ended."""
+        output = self._render([dict(_EXPERIMENT, ended_at="2026-01-01T00:00:00Z")])
+
+        self.assertIn("br-v2", output)
+        self.assertIn("ended", output)
+
+
+class PrintExperimentDetailTest(unittest.TestCase):
+    """Tests for print_experiment_detail, the panel used by `deployments experiment active`."""
+
+    def _render(self, experiment: dict | None, branches: dict | None = None) -> str:
+        with console.capture() as capture:
+            print_experiment_detail(experiment, branches=branches)
+        return capture.get()
+
+    def test_none_prints_no_active_experiment_message(self):
+        """A missing experiment renders an informational message instead of a panel."""
+        self.assertIn("No active experiment", self._render(None))
+
+    def test_traffic_split_is_shown_for_control_and_variant(self):
+        """The control gets the remainder of the variant's traffic percentage."""
+        output = self._render(_EXPERIMENT, branches=_EXPERIMENT_BRANCHES)
+
+        self.assertIn("(70% traffic)  main", output)
+        self.assertIn("(30% traffic)  v2-branch", output)
+
+    def test_ended_experiment_shows_winner(self):
+        """An ended experiment with a chosen version shows the winning branch."""
+        ended = dict(
+            _EXPERIMENT,
+            ended_at="2026-01-01T00:00:00Z",
+            chosen_version={"branch_id": "br-v2"},
+        )
+
+        output = self._render(ended, branches=_EXPERIMENT_BRANCHES)
+
+        self.assertIn("Ended", output)
+        self.assertIn("Winner", output)
+
+    def test_missing_version_traffic_shows_placeholder(self):
+        """A version missing its own traffic_percentage falls back to a dash."""
+        experiment = dict(_EXPERIMENT)
+        experiment["versions"] = [
+            {"branch_id": "br-main", "kind": "control"},
+            {"branch_id": "br-v2", "kind": "release"},
+        ]
+        output = self._render(experiment)
+
+        self.assertIn("(— traffic)", output)

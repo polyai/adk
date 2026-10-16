@@ -30,7 +30,7 @@ from poly.resources.api_integration import (
     ApiIntegrationEnvironments,
     ApiIntegrationOperation,
 )
-from poly.resources.asr_settings import AsrSettings
+from poly.resources.asr_settings import AsrSettings, VoiceBargeInConfig
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,
@@ -74,12 +74,14 @@ from poly.resources.languages import (
     AdditionalLanguage,
     DefaultLanguage,
 )
+from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     _parse_multi_resource_path,
+    load_resources_from_projection,
 )
 from poly.resources.safety_filters import (
     ChatSafetyFilters,
@@ -7231,9 +7233,7 @@ class PronunciationTests(unittest.TestCase):
 
     def test_save_keeps_cr_in_single_line_field(self):
         """A CR in a single-line field is quoted, not treated as a line break."""
-        pronunciation = Pronunciation(
-            resource_id="pr-0", regex="x", replacement="a\rb", position=0
-        )
+        pronunciation = Pronunciation(resource_id="pr-0", regex="x", replacement="a\rb", position=0)
 
         contents = self._save_to_temp_project([pronunciation], batched=False)
 
@@ -7318,6 +7318,50 @@ class AsrSettingsTests(unittest.TestCase):
         self.assertEqual(result.resource_id, "asr-123")
         self.assertTrue(result.barge_in)
         self.assertEqual(result.interaction_style, "precise")
+
+    def _asr_settings(self, barge_in: bool, interaction_style: str = "balanced") -> AsrSettings:
+        return AsrSettings(
+            resource_id="asr_settings",
+            name="asr_settings",
+            barge_in=barge_in,
+            interaction_style=interaction_style,
+        )
+
+    def test_enabling_barge_in_updates_barge_in_config(self):
+        """Barge-in that changes is sent as a barge-in config update with only enabled set."""
+        new, updated, deleted = self._asr_settings(
+            barge_in=True
+        ).get_new_updated_deleted_subresources(old_resource=self._asr_settings(barge_in=False))
+
+        self.assertEqual(new, [])
+        self.assertEqual(deleted, [])
+        self.assertEqual(len(updated), 1)
+        barge_in_config = updated[0]
+        self.assertIsInstance(barge_in_config, VoiceBargeInConfig)
+        self.assertEqual(
+            barge_in_config.update_command_type, "voice_channel_update_barge_in_config"
+        )
+        proto = barge_in_config.build_update_proto()
+        self.assertEqual([field.name for field, _ in proto.ListFields()], ["enabled"])
+        self.assertTrue(proto.enabled)
+
+    def test_disabling_barge_in_sends_enabled_false(self):
+        """enabled=False must reach the wire, not be dropped as a proto default."""
+        _, updated, _ = self._asr_settings(barge_in=False).get_new_updated_deleted_subresources(
+            old_resource=self._asr_settings(barge_in=True)
+        )
+
+        proto = updated[0].build_update_proto()
+        self.assertTrue(proto.HasField("enabled"))
+        self.assertFalse(proto.enabled)
+
+    def test_unchanged_barge_in_sends_no_barge_in_config(self):
+        """Changing only interaction_style leaves the barge-in config alone."""
+        changes = self._asr_settings(
+            barge_in=True, interaction_style="swift"
+        ).get_new_updated_deleted_subresources(old_resource=self._asr_settings(barge_in=True))
+
+        self.assertEqual(changes, ([], [], []))
 
 
 class KeyphraseBoostingTests(unittest.TestCase):
@@ -7719,6 +7763,17 @@ class TestApiIntegrationValidate(unittest.TestCase):
         self.assertIn("must be one of", str(ctx.exception))
         for auth_type in AVAILABLE_AUTH_TYPES:
             self.assertIn(auth_type, str(ctx.exception))
+
+    def test_environment_with_each_available_auth_type_is_valid(self):
+        """Every auth type Agent Studio can configure passes validation."""
+        for auth_type in AVAILABLE_AUTH_TYPES:
+            with self.subTest(auth_type=auth_type):
+                integration = self._make_integration(
+                    environments=ApiIntegrationEnvironments.from_dict(
+                        {"sandbox": {"base_url": "https://sb.example.com", "auth_type": auth_type}}
+                    )
+                )
+                integration.validate()
 
     def test_environment_with_invalid_base_url_raises_value_error(self):
         """Validation rejects an environment whose base_url is not a valid URL."""
@@ -12512,6 +12567,33 @@ class FlowStepFromProjection(unittest.TestCase):
         self.assertEqual(step.flow_name, "Booking")
         self.assertEqual(step.prompt, "Hello!")
 
+    def test_prompt_whitespace_is_stripped_on_every_path(self):
+        """Surrounding prompt whitespace must not affect equality — YAML reads
+        strip, so projection reads must too."""
+        projection = {
+            "flows": {
+                "flows": {
+                    "entities": {
+                        "FLOW-1": {
+                            "name": "Booking",
+                            "steps": {
+                                "entities": {
+                                    "STEP-A": {
+                                        "name": "greet",
+                                        "type": "default_step",
+                                        "prompt": "  Hello!\n",
+                                        "conditions": [],
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        step = FlowStep.from_projection(projection)["FLOW-1_STEP-A"]
+        self.assertEqual(step.prompt, "Hello!")
+
     def test_skips_function_steps(self):
         """function_step type entries should be excluded from FlowStep parsing."""
         projection = {
@@ -12655,6 +12737,64 @@ class FlowSettingsFromProjectionTest(unittest.TestCase):
         self.assertEqual(settings.to_yaml_dict(), {})
         self.assertEqual(settings.step_id, self.STEP_ID)
         self.assertEqual(settings.flow_id, self.FLOW_ID)
+
+
+class FlowSettingsEqualityTest(unittest.TestCase):
+    """Disabled asr_biasing/dtmf residuals must not affect equality.
+
+    YAML drops disabled sections entirely, so their residual values can never
+    round-trip through disk — a projection read carrying residuals must still
+    compare equal to a disk read of identical content.
+    """
+
+    STEP_ID = "step-1"
+    FLOW_ID = "FLOW-abc"
+
+    def _settings(self, **kwargs) -> FlowSettings:
+        return FlowSettings(step_id=self.STEP_ID, flow_id=self.FLOW_ID, **kwargs)
+
+    def test_disabled_dtmf_residuals_are_normalised(self):
+        with_residuals = self._settings(
+            dtmf=DTMFConfig(
+                is_enabled=False,
+                inter_digit_timeout=3,
+                end_key="",
+                collect_while_agent_speaking=True,
+                is_pii=True,
+                max_digits=1,
+            )
+        )
+        self.assertEqual(with_residuals, self._settings())
+        self.assertEqual(with_residuals.dtmf, DTMFConfig())
+
+    def test_disabled_asr_biasing_residuals_are_normalised(self):
+        with_residuals = self._settings(
+            asr_biasing=ASRBiasing(
+                is_enabled=False, precise_date=True, custom_keywords=["acme"]
+            )
+        )
+        self.assertEqual(with_residuals, self._settings())
+        self.assertEqual(with_residuals.asr_biasing, ASRBiasing())
+
+    def test_enabled_sections_still_compare_by_value(self):
+        enabled = self._settings(dtmf=DTMFConfig(is_enabled=True, inter_digit_timeout=3))
+        self.assertNotEqual(enabled, self._settings())
+        self.assertNotEqual(
+            enabled, self._settings(dtmf=DTMFConfig(is_enabled=True, inter_digit_timeout=5))
+        )
+        self.assertEqual(
+            enabled, self._settings(dtmf=DTMFConfig(is_enabled=True, inter_digit_timeout=3))
+        )
+
+    def test_enabling_or_disabling_is_still_a_change(self):
+        self.assertNotEqual(
+            self._settings(dtmf=DTMFConfig(is_enabled=True)),
+            self._settings(dtmf=DTMFConfig(is_enabled=False)),
+        )
+        self.assertNotEqual(
+            self._settings(asr_biasing=ASRBiasing(is_enabled=True)),
+            self._settings(),
+        )
 
 
 class FlowSettingsSerializationTest(unittest.TestCase):
@@ -12872,6 +13012,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
         ]
 
     def test_negative_dtmf_values_are_rejected(self):
+        # Enabled: a disabled section is normalised away before validation.
         for kwargs, expected in [
             ({"max_digits": -1}, "max_digits"),
             ({"inter_digit_timeout": -1}, "inter_digit_timeout"),
@@ -12880,7 +13021,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
                 settings = FlowSettings(
                     step_id="step-1",
                     flow_id="flow-123",
-                    dtmf=DTMFConfig(**kwargs),
+                    dtmf=DTMFConfig(is_enabled=True, **kwargs),
                 )
                 with self.assertRaises(ValueError) as ctx:
                     settings.validate()
@@ -12913,7 +13054,8 @@ class FlowSettingsValidationTest(unittest.TestCase):
 
     def test_flow_step_validate_checks_its_settings(self):
         """Settings are a sub-resource, so nothing else validates them."""
-        step = self._step(dtmf=DTMFConfig(max_digits=-1))
+        # Enabled: a disabled section is normalised away before validation.
+        step = self._step(dtmf=DTMFConfig(is_enabled=True, max_digits=-1))
 
         with self.assertRaises(ValueError) as ctx:
             step.validate(resource_mappings=self._mappings())
@@ -13158,6 +13300,38 @@ class AsrSettingsFromProjection(unittest.TestCase):
         """An empty projection should return an empty dict."""
         self.assertEqual(AsrSettings.from_projection({}), {})
 
+    def test_barge_in_config_overrides_legacy_barge_in(self):
+        """bargeInConfig.enabled is what runs, so it wins over asrSettings.bargeIn."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "asrSettings": {"bargeIn": True},
+                    "bargeInConfig": {"enabled": False, "allowedFirstTurn": True},
+                }
+            }
+        }
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertFalse(asr.barge_in)
+
+    def test_barge_in_config_without_enabled_is_disabled(self):
+        """The projection omits enabled when it is false, even if bargeIn is true."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "asrSettings": {"bargeIn": True},
+                    "bargeInConfig": {"allowedFirstTurn": True},
+                }
+            }
+        }
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertFalse(asr.barge_in)
+
+    def test_legacy_barge_in_used_without_barge_in_config(self):
+        """Without bargeInConfig, asrSettings.bargeIn is what runs."""
+        projection = {"channels": {"voice": {"asrSettings": {"bargeIn": True}}}}
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertTrue(asr.barge_in)
+
 
 class DeterministicConditionIdTests(unittest.TestCase):
     """Tests for condition ids being derived from the condition's scoped name.
@@ -13304,6 +13478,306 @@ class DeterministicParameterIdTests(unittest.TestCase):
         )
 
         self.assertEqual(parameters[0].id, "param-assigned-by-the-platform")
+
+
+MCP_PROJECTION = {
+    "mcpConfig": {
+        "servers": {
+            "ids": ["srv_header", "srv_oauth"],
+            "entities": {
+                "srv_header": {
+                    "id": "srv_header",
+                    "providerId": "ticketing",
+                    "url": "https://mcp.ticketing.example.com/v1",
+                    "auth": {
+                        "header": "Authorization",
+                        "queryParam": "",
+                        "secretName": "ticketing_mcp_token",
+                    },
+                    "timeout": 15,
+                    "enabledFunctions": ["search_tickets", "create_ticket"],
+                    "lastDiscoveredAt": "2026-08-01T12:00:00Z",
+                    "lastDiscoveredToolCount": 12,
+                },
+                "srv_oauth": {
+                    "id": "srv_oauth",
+                    "providerId": "internal-tools",
+                    "url": "https://internal.example.com/mcp",
+                    "auth": {
+                        "header": "",
+                        "queryParam": "",
+                        "secretName": "",
+                        "oauth": {
+                            "clientId": "client",
+                            "clientSecretName": "oauth_secret",
+                            "tokenUrl": "https://internal.example.com/oauth/token",
+                            "audience": "",
+                            "scope": "",
+                        },
+                    },
+                },
+            },
+        },
+        "savedProfiles": {
+            "ids": ["ticketing"],
+            "entities": {
+                "ticketing": {
+                    "providerId": "ticketing",
+                    "url": "https://mcp.ticketing.example.com/v1",
+                    "auth": {
+                        "header": "",
+                        "queryParam": "api_key",
+                        "secretName": "ticketing_mcp_token",
+                    },
+                    "timeout": 15,
+                }
+            },
+        },
+    }
+}
+
+MCP_TEST_PROJECT_DIR = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
+
+
+def _mcp_server(**overrides) -> MCPServer:
+    fields = {
+        "resource_id": "srv_1",
+        "name": "ticketing",
+        "url": "https://mcp.ticketing.example.com/v1",
+        "auth": MCPAuth(header="Authorization", secret_name="ticketing_mcp_token"),
+    }
+    fields.update(overrides)
+    return MCPServer(**fields)
+
+
+class MCPServerTests(unittest.TestCase):
+    """Tests for MCPServer."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+
+    def test_from_projection_reads_every_field(self):
+        """Servers are keyed by platform id and keep the discovery fields."""
+        servers = MCPServer.from_projection(MCP_PROJECTION)
+
+        self.assertEqual(set(servers), {"srv_header", "srv_oauth"})
+        server = servers["srv_header"]
+        self.assertEqual(server.name, "ticketing")
+        self.assertEqual(
+            server.auth, MCPAuth(header="Authorization", secret_name="ticketing_mcp_token")
+        )
+        self.assertEqual(server.timeout, 15)
+        self.assertEqual(server.enabled_functions, ["search_tickets", "create_ticket"])
+        self.assertEqual(server.last_discovered_at, "2026-08-01T12:00:00Z")
+        self.assertEqual(server.last_discovered_tool_count, 12)
+
+    def test_from_projection_without_mcp_config_returns_nothing(self):
+        """A user without read access gets no mcpConfig slice at all."""
+        with self.assertLogs("poly.resources.mcp", level="DEBUG"):
+            self.assertEqual(MCPServer.from_projection({}), {})
+
+    def test_to_yaml_dict_omits_id_discovery_fields_and_empty_auth(self):
+        """Only user config is written, so the id and discovery state stay off disk."""
+        server = MCPServer.from_projection(MCP_PROJECTION)["srv_oauth"]
+
+        self.assertEqual(
+            server.to_yaml_dict(),
+            {
+                "provider_id": "internal-tools",
+                "url": "https://internal.example.com/mcp",
+                "auth": {
+                    "oauth": {
+                        "client_id": "client",
+                        "client_secret_name": "oauth_secret",
+                        "token_url": "https://internal.example.com/oauth/token",
+                    }
+                },
+            },
+        )
+
+    def test_yaml_round_trip_preserves_config(self):
+        """to_yaml_dict then from_yaml_dict gives back the same YAML."""
+        server = MCPServer.from_projection(MCP_PROJECTION)["srv_header"]
+
+        reread = MCPServer.from_yaml_dict(server.to_yaml_dict(), resource_id="srv_header")
+
+        self.assertEqual(reread.to_yaml_dict(), server.to_yaml_dict())
+        self.assertEqual(reread.compute_hash(), server.compute_hash())
+
+    def test_empty_enabled_functions_round_trips_as_an_empty_list(self):
+        """[] disables every tool, unlike an absent key, which enables them all."""
+        none_enabled = _mcp_server(enabled_functions=[])
+        all_enabled = _mcp_server()
+
+        self.assertEqual(none_enabled.to_yaml_dict()["enabled_functions"], [])
+        self.assertNotIn("enabled_functions", all_enabled.to_yaml_dict())
+        self.assertTrue(none_enabled.build_update_proto().server.HasField("enabled_functions"))
+        self.assertFalse(all_enabled.build_update_proto().server.HasField("enabled_functions"))
+
+    def test_from_yaml_dict_takes_discovery_fields_from_known_values(self):
+        """Discovery state comes from the remote resource, not the YAML."""
+        server = MCPServer.from_yaml_dict(
+            {"provider_id": "ticketing", "url": "https://mcp.ticketing.example.com/v1"},
+            resource_id="srv_1",
+            known_last_discovered_at="2026-08-01T12:00:00Z",
+            known_last_discovered_tool_count=12,
+        )
+
+        upsert = server.build_update_proto().server
+        self.assertEqual(upsert.last_discovered_at, "2026-08-01T12:00:00Z")
+        self.assertEqual(upsert.last_discovered_tool_count, 12)
+
+    def test_upsert_proto_carries_id_and_config(self):
+        """Create and update both send MCPServer_Upsert under upsert_mcp_server."""
+        server = _mcp_server(timeout=15, enabled_functions=["search_tickets"])
+
+        upsert = server.build_create_proto().server
+        self.assertEqual(server.create_command_type, "upsert_mcp_server")
+        self.assertEqual(server.update_command_type, "upsert_mcp_server")
+        self.assertEqual(upsert.id, "srv_1")
+        self.assertEqual(upsert.provider_id, "ticketing")
+        self.assertEqual(upsert.auth.header, "Authorization")
+        self.assertEqual(upsert.auth.secret_name, "ticketing_mcp_token")
+        self.assertEqual(upsert.timeout, 15)
+        self.assertEqual(list(upsert.enabled_functions.names), ["search_tickets"])
+        self.assertFalse(upsert.HasField("last_discovered_at"))
+
+    def test_delete_proto_uses_platform_id(self):
+        server = _mcp_server()
+
+        self.assertEqual(server.delete_command_type, "delete_mcp_server")
+        self.assertEqual(server.build_delete_proto().id, "srv_1")
+
+    def test_file_path_uses_cleaned_provider_id(self):
+        server = _mcp_server(name="internal-tools")
+
+        self.assertEqual(
+            server.file_path,
+            os.path.join("config", "mcp.yaml", "mcp_servers", "internal_tools"),
+        )
+
+    def test_validate_accepts_each_auth_method(self):
+        for auth in (
+            None,
+            MCPAuth(header="Authorization", secret_name="token"),
+            MCPAuth(query_param="api_key", secret_name="token"),
+            MCPAuth(oauth=MCPOAuth(client_id="c", client_secret_name="s", token_url="https://example.com/token")),
+        ):
+            with self.subTest(auth=auth):
+                _mcp_server(auth=auth).validate()
+
+    def test_validate_rejects_invalid_config(self):
+        cases = {
+            "provider_id is required": {"name": ""},
+            "url is required": {"url": ""},
+            "must be an http(s) URL": {"url": "ftp://example.com"},
+            "timeout must be between 1 and 30": {"timeout": 31},
+            "Duplicate enabled_functions": {"enabled_functions": ["a", "a"]},
+            "enabled_functions entries cannot be empty": {"enabled_functions": [""]},
+            "only one of header, query_param or oauth": {
+                "auth": MCPAuth(
+                    header="Authorization",
+                    secret_name="token",
+                    oauth=MCPOAuth(client_id="c", client_secret_name="s", token_url="https://example.com/token"),
+                )
+            },
+            "secret_name is required when auth.header": {"auth": MCPAuth(header="Authorization")},
+            "needs auth.header or auth.query_param": {"auth": MCPAuth(secret_name="token")},
+            "client_id is required": {
+                "auth": MCPAuth(
+                    oauth=MCPOAuth(client_secret_name="s", token_url="https://example.com/token")
+                )
+            },
+            "client_secret_name is required": {
+                "auth": MCPAuth(oauth=MCPOAuth(client_id="c", token_url="https://example.com/token"))
+            },
+            "token_url is required": {
+                "auth": MCPAuth(oauth=MCPOAuth(client_id="c", client_secret_name="s"))
+            },
+            "token_url 'not-a-url' must be": {
+                "auth": MCPAuth(
+                    oauth=MCPOAuth(client_id="c", client_secret_name="s", token_url="not-a-url")
+                )
+            },
+        }
+        for message, overrides in cases.items():
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as cm:
+                    _mcp_server(**overrides).validate()
+                self.assertIn(message, str(cm.exception))
+
+    def test_auth_that_is_not_a_mapping_raises(self):
+        with self.assertRaises(ValueError):
+            MCPServer.from_yaml_dict(
+                {"provider_id": "ticketing", "url": "https://a.example.com", "auth": "token"},
+                resource_id="srv_1",
+            )
+
+    def test_validate_collection_rejects_duplicate_provider_ids(self):
+        servers = {
+            "srv_1": _mcp_server(resource_id="srv_1"),
+            "srv_2": _mcp_server(resource_id="srv_2"),
+        }
+
+        with self.assertRaises(ValueError) as cm:
+            MCPServer.validate_collection(servers)
+        self.assertIn("ticketing", str(cm.exception))
+
+    def test_discover_and_read_local_resource_from_fixture(self):
+        """Each server in config/mcp.yaml is discovered and read by provider_id."""
+        paths = MCPServer.discover_resources(MCP_TEST_PROJECT_DIR)
+
+        self.assertEqual(
+            [os.path.relpath(p, MCP_TEST_PROJECT_DIR) for p in paths],
+            [
+                os.path.join("config", "mcp.yaml", "mcp_servers", "ticketing"),
+                os.path.join("config", "mcp.yaml", "mcp_servers", "internal_tools"),
+                os.path.join("config", "mcp.yaml", "mcp_servers", "custom_1791899588123"),
+            ],
+        )
+        server = MCPServer.read_local_resource(
+            file_path=paths[1], resource_id="srv_oauth", resource_name="internal_tools"
+        )
+        self.assertEqual(server.name, "internal-tools")
+        self.assertEqual(server.auth.oauth.client_id, "adk-test-client")
+        self.assertIsNone(server.enabled_functions)
+
+    def test_discover_without_mcp_file_returns_nothing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertEqual(MCPServer.discover_resources(tmpdir), [])
+
+    def test_server_without_provider_id_is_keyed_like_agent_studio(self):
+        """A server with no providerId gets custom:<id>, the key Agent Studio shows.
+
+        Without it the server would have no name, discovery would skip it, and
+        the next push would delete it.
+        """
+        projection = {
+            "mcpConfig": {
+                "servers": {
+                    "entities": {
+                        "mcp-123": {"id": "mcp-123", "providerId": "", "url": "https://a.example.com"}
+                    }
+                }
+            }
+        }
+
+        server = MCPServer.from_projection(projection)["mcp-123"]
+
+        self.assertEqual(server.name, "custom:mcp-123")
+        self.assertEqual(server.to_yaml_dict()["provider_id"], "custom:mcp-123")
+        self.assertEqual(
+            server.file_path, os.path.join("config", "mcp.yaml", "mcp_servers", "custom_mcp_123")
+        )
+
+    def test_saved_profiles_are_not_pulled(self):
+        """Profiles duplicate server settings, so only servers come out of a projection."""
+        resources, slim = load_resources_from_projection(MCP_PROJECTION)
+
+        self.assertEqual(
+            {type(r) for by_id in resources.values() for r in by_id.values()}, {MCPServer}
+        )
+        self.assertEqual(slim, [])
 
 
 def _run_in_thread(func):

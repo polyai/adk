@@ -8,7 +8,7 @@ from poly.resources.api_integration import (
     ApiIntegrationEnvironments,
     ApiIntegrationOperation,
 )
-from poly.resources.asr_settings import AsrSettings
+from poly.resources.asr_settings import AsrSettings, VoiceBargeInConfig
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,
@@ -48,6 +48,7 @@ from poly.resources.handoff import (
 )
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage
+from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (

@@ -9,7 +9,7 @@ description: >
 metadata:
   author: PolyAI
   license: Apache-2.0
-  version: 0.67.2
+  version: 0.71.0
   requires:
     bins:
       - poly
@@ -81,7 +81,7 @@ A project looks like:
 <account>/<project>/
 ├── _gen/                    # Generated stubs — NEVER edit
 ├── agent_settings/          # persona.txt, rules.txt, guardrails, languages
-├── config/                  # entities, handoffs, sms_templates, api_integrations, variants, translations
+├── config/                  # entities, handoffs, sms_templates, api_integrations, mcp, variants, translations
 ├── context/                 # background docs for Studio Assistant
 ├── voice/                   # voice channel config, speech_recognition/, response_control/
 ├── chat/                    # webchat channel config

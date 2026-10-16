@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
+from pathlib import PurePath
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -40,6 +41,7 @@ from poly.resources import (
     FlowStep,
     Function,
     FunctionStep,
+    MCPServer,
     MultiResourceYamlResource,
     Pronunciation,
     Resource,
@@ -2276,6 +2278,14 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == MCPServer and original_resource:
+            if not isinstance(original_resource, MCPServer):
+                raise TypeError(f"Original resource is not an MCPServer: {original_resource}")
+            additional_kwargs["known_last_discovered_at"] = original_resource.last_discovered_at
+            additional_kwargs["known_last_discovered_tool_count"] = (
+                original_resource.last_discovered_tool_count
+            )
+
         try:
             resource = resource_class.read_local_resource(
                 file_path=resource.file_path,
@@ -3520,22 +3530,40 @@ class AgentStudioProject:
         Runs all tests by default. Use files or tags to filter.
 
         Args:
-            files: List of specific test file paths to select.
+            files: Test files to select. Each matches the end of a test's path, so a
+                bare file name (with or without .yaml) or a glob such as "smoke_*" works.
             tags: List of tags to filter by.
 
         Returns:
             list[TestCase]: The matched test cases.
+
+        Raises:
+            ValueError: If any entry in files or tags matches no test.
         """
         tests: dict[str, TestCase] = self.resources.get(TestCase, {})
         matched: list[TestCase] = []
         if tags:
+            unmatched = set(tags)
             for test in tests.values():
                 if any(tag in test.tags.tags for tag in tags):
                     matched.append(test)
+                    unmatched -= set(test.tags.tags)
+            if unmatched:
+                raise ValueError(f"No tests match these tags: {', '.join(sorted(unmatched))}")
         elif files:
+            patterns = {
+                f: os.path.relpath(f, self.root_path) if os.path.isabs(f) else f for f in files
+            }
+            unmatched = set(files)
             for test in tests.values():
-                if test.file_path in files:
+                path = PurePath(test.file_path)
+                hits = {f for f, p in patterns.items() if path.match(p) or path.match(f"{p}.yaml")}
+                if hits:
                     matched.append(test)
+                    unmatched -= hits
+
+            if unmatched:
+                raise ValueError(f"No tests match these files: {', '.join(sorted(unmatched))}")
         else:
             matched = list(tests.values())
 
@@ -3596,92 +3624,172 @@ class AgentStudioProject:
             self.region, self.project_id, limit, offset, branch_id=self.branch_id
         )
 
-    # ── A/B tests ───────────────────────────────────────────────────
+    # ── Experiments ─────────────────────────────────────────────────
 
-    def create_ab_test(
-        self, name: str, variant_deployment_id: str, traffic_percentage: int
-    ) -> dict:
-        """Create a new A/B test for the project.
+    @property
+    def experiments_enabled(self) -> bool:
+        """Check if the project is eligible to use experiments.
+
+        Experiments require both the simplified deployment model (flag +
+        convergence, see ``using_simplified_deployments``) and a
+        ``deployment_mode`` that supports top-level branches — a ``simple``
+        mode project has no branch to test.
+        """
+        return self.using_simplified_deployments and self.deployment_mode != DeploymentMode.SIMPLE
+
+    def create_experiment(self, name: str, branch_id: str, traffic_percentage: int) -> dict:
+        """Create a new experiment for the project.
 
         Args:
-            name: Display name for the test.
-            variant_deployment_id: ID of the pre-release variant deployment.
-            traffic_percentage: Percentage of traffic routed to variant (0-100).
+            name: Display name for the experiment.
+            branch_id: ID of the top-level branch to test as the variant.
+            traffic_percentage: Percentage of traffic routed to the variant (1-99).
 
         Returns:
-            dict: The created A/B test record.
+            dict: The created experiment record.
+
+        Raises:
+            ValueError: If the name is empty, the traffic percentage is outside 1-99, or
+                the branch doesn't exist or isn't an eligible variant (the platform
+                rejects ``main``, child branches and diverged branches).
         """
-        return self.api_handler.create_ab_test(
+        if not name.strip():
+            raise ValueError("Experiment name is required and cannot be empty.")
+        if not 1 <= traffic_percentage <= 99:
+            raise ValueError("Traffic percentage must be an integer between 1 and 99.")
+
+        _, branches = self.get_branches()
+        branch_name = next(
+            (n for n, meta in branches.items() if meta["branchId"] == branch_id), None
+        )
+        if branch_name is None:
+            raise ValueError(f"No branch found with ID '{branch_id}'.")
+        meta = branches[branch_name]
+        if branch_name == "main":
+            raise ValueError(
+                "Cannot test 'main' against itself — choose a different branch as the variant."
+            )
+        if meta.get("parentBranchId") not in (None, "main"):
+            raise ValueError(
+                f"Branch '{branch_name}' is not a top-level branch — only a top-level"
+                " branch can be tested as a variant."
+            )
+        if meta.get("isDiverged"):
+            raise ValueError(
+                f"Branch '{branch_name}' is diverged from its parent. Switch to it and run"
+                " 'poly branch sync' before testing it as a variant."
+            )
+
+        return self.api_handler.create_experiment(
             region=self.region,
             account_id=self.account_id,
             project_id=self.project_id,
             name=name,
-            variant_deployment_id=variant_deployment_id,
+            branch_id=branch_id,
             traffic_percentage=traffic_percentage,
         )
 
-    def list_ab_tests(self, limit: int | None = None) -> list[dict]:
-        """List A/B tests for the project.
+    def list_experiments(self, limit: int | None = None, offset: int | None = None) -> list[dict]:
+        """List experiments for the project.
 
         Args:
-            limit: Maximum number of tests to return.
+            limit: Maximum number of experiments to return.
+            offset: Number of experiments to skip before collecting results.
 
         Returns:
-            list[dict]: A list of A/B test records.
+            list[dict]: A list of experiment records.
         """
-        result = self.api_handler.list_ab_tests(
+        result = self.api_handler.list_experiments(
             region=self.region,
             account_id=self.account_id,
             project_id=self.project_id,
             limit=limit,
+            offset=offset,
         )
-        return result.get("ab_tests", [])
+        return result.get("experiments", [])
 
-    def get_active_ab_test(self) -> dict:
-        """Get the active A/B test for the project.
-
-        Returns:
-            dict: The active A/B test record, or empty dict if none.
-        """
-        return self.api_handler.get_active_ab_test(
-            region=self.region,
-            account_id=self.account_id,
-            project_id=self.project_id,
-        )
-
-    def end_ab_test(self, ab_test_id: str, chosen_deployment_id: str) -> dict:
-        """End an A/B test and choose a winner.
+    def get_experiment(self, experiment_id: str) -> dict:
+        """Get a single experiment by ID.
 
         Args:
-            ab_test_id: The A/B test ID.
-            chosen_deployment_id: Deployment ID to keep (control or variant).
+            experiment_id: The experiment ID.
 
         Returns:
-            dict: The ended A/B test record.
+            dict: The experiment record.
         """
-        return self.api_handler.end_ab_test(
+        return self.api_handler.get_experiment(
             region=self.region,
             account_id=self.account_id,
             project_id=self.project_id,
-            ab_test_id=ab_test_id,
-            chosen_deployment_id=chosen_deployment_id,
+            experiment_id=experiment_id,
         )
 
-    def update_ab_test(self, ab_test_id: str, traffic_percentage: int) -> dict:
-        """Update traffic percentage for an A/B test.
+    def get_active_experiment(self) -> dict:
+        """Get the active experiment for the project, if any.
 
-        Args:
-            ab_test_id: The A/B test ID.
-            traffic_percentage: New traffic percentage (0-100).
+        Experiments are listed newest first and only one can be active, so
+        check the first.
 
         Returns:
-            dict: The updated A/B test record.
+            dict: The active experiment record, or empty dict if none.
         """
-        return self.api_handler.update_ab_test(
+        page = self.list_experiments(limit=1)
+        if page and not page[0].get("ended_at"):
+            return page[0]
+        return {}
+
+    def end_experiment(self, experiment_id: str, chosen_branch_id: str) -> dict:
+        """End an experiment and choose a winning branch.
+
+        The platform redeploys the winning branch to live automatically as
+        part of ending the experiment — no separate promotion call is needed.
+
+        Args:
+            experiment_id: The experiment ID.
+            chosen_branch_id: ID of the branch to keep (control or variant).
+
+        Returns:
+            dict: The ended experiment record.
+        """
+        return self.api_handler.end_experiment(
             region=self.region,
             account_id=self.account_id,
             project_id=self.project_id,
-            ab_test_id=ab_test_id,
+            experiment_id=experiment_id,
+            chosen_branch_id=chosen_branch_id,
+        )
+
+    def update_experiment(
+        self,
+        experiment_id: str,
+        name: str | None = None,
+        branch_id: str | None = None,
+        traffic_percentage: int | None = None,
+    ) -> dict:
+        """Update the name and/or traffic split for an experiment.
+
+        Args:
+            experiment_id: The experiment ID.
+            name: New display name, if renaming.
+            branch_id: ID of the variant branch whose traffic share is changing.
+                Required together with ``traffic_percentage``.
+            traffic_percentage: New percentage of traffic to route to the variant (1-99).
+
+        Returns:
+            dict: The updated experiment record.
+
+        Raises:
+            ValueError: If only one of ``branch_id`` and ``traffic_percentage`` is given.
+        """
+        if (branch_id is None) != (traffic_percentage is None):
+            raise ValueError("branch_id and traffic_percentage must be given together.")
+        return self.api_handler.update_experiment(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            experiment_id=experiment_id,
+            name=name,
+            branch_id=branch_id,
             traffic_percentage=traffic_percentage,
         )
 
@@ -4308,14 +4416,18 @@ class AgentStudioProject:
 
     @property
     def deployment_mode(self) -> DeploymentMode:
-        """Get the deployment mode for the project."""
+        """Get the deployment mode for the project.
+
+        Mirrors the platform: template-engine children are always simple, other
+        projects get sub-branches once simplified deployments are on. The stored
+        `config.deployment_mode` is no longer used.
+        """
         if self._deployment_mode is None:
-            cfg = self.get_project_info().get("config") or {}
-            deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
-            if (
-                deployment_mode == DeploymentMode.RELEASES_BRANCHES
-                and not self.using_simplified_deployments
-            ):
+            if self.get_project_info().get("parent_template_ref_id"):
+                deployment_mode = DeploymentMode.SIMPLE
+            elif self.using_simplified_deployments:
+                deployment_mode = DeploymentMode.RELEASES_BRANCHES
+            else:
                 deployment_mode = DeploymentMode.RELEASES
             self._deployment_mode = deployment_mode
         return self._deployment_mode
