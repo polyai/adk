@@ -33,6 +33,10 @@ user interaction        logic and validation                 API facade         
   programmatically as `project.<method>()`. Tests and other tools build on the project directly,
   without going through the CLI. That includes reads: if a command needs project data, add a
   project method, even one that only forwards to the interface.
+- **A large feature area can be a namespace on the project** instead of more methods in
+  `project.py`: an object built lazily by a project property, such as `project.wren`
+  (`ProjectWren` in `src/poly/wren.py`). It holds a reference to the project, reads project
+  state when it needs it, and follows the same rules as project methods.
 - **`project.py` owns the logic and validation:** API calls, file I/O, merging, and checking
   inputs (raise `ValueError` with a clear message). Validating there gives programmatic callers
   the same checks as the CLI.
@@ -43,8 +47,8 @@ user interaction        logic and validation                 API facade         
   `project list` / `create`) may call `AgentStudioInterface` directly. Some project-scoped commands that
   still do (`audio_cache.py`, `functions.py`, `conversations.py`) are leftovers to fix, not
   patterns to copy.
-- New HTTP calls go through `PlatformAPIHandler.make_request`. If it lacks something you need,
-  extend it.
+- New HTTP calls go through `PlatformAPIHandler.make_request`, or `stream_events` for
+  server-sent events. If neither does what you need, extend `PlatformAPIHandler`.
 
 ## Where things go
 
@@ -53,6 +57,7 @@ user interaction        logic and validation                 API facade         
 | `src/poly/cli.py` | Thin dispatcher that registers command classes. No logic. |
 | `src/poly/cli_commands/` | One module per command family. See `src/poly/cli_commands/AGENTS.md`. |
 | `src/poly/project.py` | `AgentStudioProject`: everything a command needs, scoped to one local project. |
+| `src/poly/wren.py` | `ProjectWren`, reached as `project.wren`: talking to Wren about the project and following its branch. |
 | `src/poly/resources/` | One module per resource type that appears in the project projection. See `src/poly/resources/AGENTS.md`. |
 | `src/poly/handlers/` | API clients: `interface.py` (facade), `platform_api.py` (REST), `sdk.py` (protobuf command queue), auth, GitHub, PostHog. |
 | `src/poly/output/` | Terminal output (`console.py`) and `--json` output (`json_output.py`). |

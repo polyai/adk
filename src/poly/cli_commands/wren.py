@@ -11,9 +11,8 @@ from typing import Any, Callable, Iterable
 
 import requests
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
-from poly.handlers.wren_api import stream_wren_input_response, stream_wren_turn
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 from poly.utils import retrieve_api_key
@@ -63,63 +62,28 @@ class TurnResult:
     report: dict[str, str] | None = None
 
 
-def _build_context(project: AgentStudioProject, mode: str | None = None) -> dict[str, str]:
-    """Build the agent context dict from the loaded project.
-
-    Args:
-        project: The loaded project.
-        mode: Gate handling mode — "interactive" for the REPL (gates block and
-            are answered over input_response), "auto" for single-shot runs
-            (the server answers its own gates). Pinned explicitly rather than
-            relying on the server default.
-    """
-    ctx: dict[str, str] = {
-        "accountId": project.account_id,
-        "projectId": project.project_id,
-    }
-    if project.branch_id:
-        ctx["branchId"] = project.branch_id
-    if mode:
-        ctx["mode"] = mode
-    return ctx
-
-
-def _resolve_branch_name(project: AgentStudioProject, branch_id: str) -> str | None:
-    """Look up the human-readable branch name for a branch ID."""
-    try:
-        _, branches = project.get_branches()
-        for name, bid in branches.items():
-            if bid == branch_id:
-                return name
-    except Exception:
-        logger.debug("Failed to resolve branch name for %s", branch_id)
-    return None
-
-
-def _handle_branch_change(
+def _follow_branch(
     project: AgentStudioProject, branch_id: str, action: str, json_mode: bool
 ) -> dict[str, str]:
-    """Switch the project to a new branch by ID. Returns branch info dict."""
+    """Move the local project onto the branch Wren created or switched to."""
     from poly.output.console import info, plain, warning
 
-    branch_name = _resolve_branch_name(project, branch_id)
-    label = f"{branch_name} ({branch_id})" if branch_name else branch_id
     branch_info = {"id": branch_id, "action": action}
-    if branch_name:
-        branch_info["name"] = branch_name
-
-    if not json_mode:
-        info(f"⏇ Branch {action}: [bold]{label}[/bold] — switching local project…")
-
     try:
-        project.api_handler.switch_branch(branch_id)
-        project.branch_id = branch_id
-        project.save_config()
-        if not json_mode:
-            plain("[muted]  Local project now tracks this branch.[/muted]")
+        name = project.wren.follow_branch(branch_id)
     except Exception as e:
-        warning(f"Failed to switch branch: {e}")
+        # The session carries on remotely either way; pulls just miss Wren's branch.
+        branch_info["error"] = str(e)
+        if not json_mode:
+            warning(f"Couldn't move the local project to Wren's branch {branch_id}: {e}")
+        return branch_info
 
+    if name:
+        branch_info["name"] = name
+    if not json_mode:
+        label = f"{name} ({branch_id})" if name else branch_id
+        info(f"⏇ Branch {action}: [bold]{label}[/bold]")
+        plain("[muted]  Local project now tracks this branch.[/muted]")
     return branch_info
 
 
@@ -380,27 +344,51 @@ def _print_header(
         table.add_row("Session", session_id)
     console.print(Panel(table, title="[bold]Wren[/bold]", border_style="cyan", expand=False))
     if hints:
-        console.print("[muted]  Enter send · Ctrl+J newline · /exit quit[/muted]")
+        console.print("[muted]  Enter send · Ctrl+J newline · /usage cost · /exit quit[/muted]")
 
 
-def _print_exit_summary(session_id: str | None) -> None:
-    """Print the resume hint when a session was created."""
+def _format_cost(usage: dict[str, Any]) -> str:
+    """Describe a session's spend so far, e.g. "$0.4210 over 12 steps"."""
+    steps = usage.get("totalSteps", 0)
+    return f"${usage.get('costUsd', 0):.4f} over {steps} step{'s' if steps != 1 else ''}"
+
+
+def _add_usage(total: dict[str, Any], turn: dict[str, Any] | None) -> None:
+    """Add one turn's usage into a session total, in place."""
+    if turn:
+        total["totalSteps"] = total.get("totalSteps", 0) + turn.get("totalSteps", 0)
+        total["costUsd"] = total.get("costUsd", 0) + turn.get("costUsd", 0)
+
+
+def _print_exit_summary(session_id: str | None, usage: dict[str, Any] | None = None) -> None:
+    """Print the session's cost and how to resume it."""
     from poly.output.console import plain
 
+    if usage and usage.get("totalSteps"):
+        plain(f"\n[muted]  cost: {_format_cost(usage)}[/muted]")
     if session_id:
         plain(
-            f"\n[muted]  session {session_id} — resume with: "
-            f"poly wren --session-id {session_id}[/muted]"
+            f"[muted]  session {session_id} — resume with: "
+            f"poly wren chat --session-id {session_id}[/muted]"
         )
 
 
 _FREEFORM_CHOICE = "Other (type an answer)"
 
-# Declining a secret gate: the value shape differs per kind (user-input.ts).
-_SECRET_DECLINE_VALUES: dict[str, dict[str, Any]] = {
+# Questions the CLI can't answer, declined so the run doesn't stall. Each kind's
+# decline has its own shape on the server.
+_DECLINE_VALUES: dict[str, dict[str, Any]] = {
     "secret": {"created": False, "reason": "cancelled"},
     "edit-secret": {"updated": False, "reason": "cancelled"},
     "delete-secret": {"deleted": False, "reason": "cancelled"},
+    "api-credentials": {"configured": False, "reason": "cancelled"},
+}
+
+_DECLINE_MESSAGES: dict[str, str] = {
+    "secret": "Secrets can't be managed from the CLI",
+    "edit-secret": "Secrets can't be managed from the CLI",
+    "delete-secret": "Secrets can't be managed from the CLI",
+    "api-credentials": "API credentials can't be set from the CLI",
 }
 
 
@@ -415,6 +403,12 @@ def _collect_question_answers(event: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     plain("[info]Wren needs input:[/info]")
+    if event.get("context"):
+        from rich.markdown import Markdown
+
+        from poly.output.console import console
+
+        console.print(Markdown(str(event["context"])))
     answers: list[dict[str, Any]] = []
     for q in questions:
         question_text = q.get("question", "")
@@ -486,39 +480,58 @@ def _collect_user_input(event: dict[str, Any]) -> dict[str, Any] | None:
             return None
         return {"inputKind": "plan", "value": {"approved": False, "feedback": str(feedback)}}
 
-    elif input_kind in _SECRET_DECLINE_VALUES:
-        # Decline explicitly rather than leaving the run hanging: the agent
-        # learns the CLI can't do this and records it as a blocker.
+    elif input_kind == "config-change":
+        return _collect_config_change(event)
+
+    elif input_kind in _DECLINE_VALUES:
+        # Wren learns the CLI can't do this and records it as a blocker.
         warning(
-            "Secrets can't be managed from the CLI — declining this request. "
-            "Configure the secret in Agent Studio, then ask Wren to continue."
+            f"{_DECLINE_MESSAGES[input_kind]} — declining this request. "
+            "Set it up in Agent Studio, then ask Wren to continue."
         )
-        return {"inputKind": input_kind, "value": _SECRET_DECLINE_VALUES[input_kind]}
+        return {"inputKind": input_kind, "value": _DECLINE_VALUES[input_kind]}
 
     return None
 
 
-def _answer_as_prompt(event: dict[str, Any], answer: dict[str, Any]) -> str | None:
-    """Flatten a typed gate answer into prose, for servers without requestId."""
-    value = answer.get("value", {})
-    kind = answer.get("inputKind")
+def _collect_config_change(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Show a configuration write Wren wants to make and ask whether to apply it."""
+    import questionary
 
-    if kind == "plan":
-        if value.get("approved"):
-            return "Approved, go ahead."
-        return value.get("feedback") or None
+    from poly.output.console import plain, warning
 
-    if kind == "question":
-        questions = event.get("questions", []) or []
-        lines = []
-        for q, item in zip(questions, value.get("answers", [])):
-            selected = item.get("selected") or []
-            text = ", ".join(str(s) for s in selected) or item.get("freeform", "")
-            if text:
-                lines.append(f"{q.get('question', '')}: {text}")
-        return "\n".join(lines) or None
+    env = event.get("clientEnv", "")
+    target = event.get("target", "values")
+    summary = event.get("summary") or {}
 
-    return None
+    plain(f"\n[bold]Wren wants to change the {target} of the {env} configuration[/bold]")
+    if event.get("reason"):
+        plain(f"  {event['reason']}")
+    for key in event.get("keys") or []:
+        counts = key.get("counts") or {}
+        detail = ", ".join(
+            f"{counts[status]} {status}"
+            for status in ("added", "changed", "removed")
+            if counts.get(status)
+        )
+        line = f"  {key.get('status', 'changed')}: {key.get('label') or key.get('key', '')}"
+        plain(f"{line} ({detail})" if detail else line)
+
+    if env == "live":
+        warning("This writes straight to live.")
+    removals = (summary.get("removed") or 0) + (summary.get("removedLeaves") or 0)
+    if removals:
+        warning(f"This removes {removals} existing value{'s' if removals != 1 else ''}.")
+
+    approved = questionary.confirm("Apply this change?", default=False).ask()
+    if approved is None:
+        return None
+    if not approved:
+        return {"inputKind": "config-change", "value": {"approved": False, "reason": "cancelled"}}
+    value: dict[str, Any] = {"approved": True}
+    if removals:
+        value["acknowledgedRemovals"] = True
+    return {"inputKind": "config-change", "value": value}
 
 
 def _render_events(
@@ -658,19 +671,21 @@ def _render_events(
         elif event_type == "complete":
             display.clear()
             result.suspended = bool(event.get("suspended", False))
-            if verbose and not json_mode:
-                total_steps = event.get("totalSteps", 0)
-                usage_by_agent = event.get("usageByAgent", {})
-                total_cost = sum(
-                    a.get("costUSD", a.get("costUsd", 0))
-                    for a in usage_by_agent.values()
-                    if isinstance(a, dict)
-                )
-                plain(f"[muted]  turn done — {total_steps} steps, ${total_cost:.4f}[/muted]")
-                result.usage = {
-                    "totalSteps": event.get("totalSteps", 0),
-                    "costUsd": total_cost,
+            # Each run ends with one top-level complete covering all its agents;
+            # a turn that hands off to subagents spans several runs.
+            if depth == 0:
+                run_usage = {
+                    "totalSteps": event.get("totalSteps", 0) or 0,
+                    "costUsd": sum(
+                        a.get("costUSD", a.get("costUsd", 0)) or 0
+                        for a in (event.get("usageByAgent") or {}).values()
+                        if isinstance(a, dict)
+                    ),
                 }
+                result.usage = result.usage or {}
+                _add_usage(result.usage, run_usage)
+                if verbose and not json_mode:
+                    plain(f"[muted]  run done — {_format_cost(run_usage)}[/muted]")
 
         elif event_type == "error":
             display.clear()
@@ -789,7 +804,6 @@ def _render_events(
 
 def _stream_turn(
     project: AgentStudioProject,
-    api_key: str,
     prompt: str,
     session_id: str | None,
     verbose: bool = False,
@@ -804,7 +818,6 @@ def _stream_turn(
 
     Args:
         project: The loaded project.
-        api_key: PAT for authentication.
         prompt: User prompt to send (ignored when input_response is set).
         session_id: Session ID to continue, or None for new session.
         verbose: Whether to show verbose output.
@@ -814,7 +827,8 @@ def _stream_turn(
         mode: Gate handling mode for the request context.
         agent_name: Optional top-level agent override.
         input_response: (requestId, answer) answering a pending gate instead of
-            sending a new prompt. Resumes the paused run on a fresh stream.
+            sending a new prompt. Resumes the paused run in session_id on a fresh
+            stream.
 
     Returns:
         TurnResult with session state and what happened.
@@ -829,25 +843,10 @@ def _stream_turn(
             _pull_local(project)
 
     def _open_stream() -> Iterable[dict[str, Any]]:
-        if input_response is not None and session_id:
+        if input_response is not None:
             request_id, answer = input_response
-            # The resumed run keeps the mode it was started with.
-            return stream_wren_input_response(
-                region=project.region,
-                api_key=api_key,
-                request_id=request_id,
-                answer=answer,
-                context=_build_context(project),
-                session_id=session_id,
-            )
-        return stream_wren_turn(
-            region=project.region,
-            api_key=api_key,
-            prompt=prompt,
-            context=_build_context(project, mode=mode),
-            session_id=session_id,
-            agent_name=agent_name,
-        )
+            return project.wren.answer(session_id or "", request_id, answer)
+        return project.wren.turn(prompt, session_id=session_id, mode=mode, agent_name=agent_name)
 
     try:
         _render_events(
@@ -857,7 +856,7 @@ def _stream_turn(
             verbose=verbose,
             json_mode=json_mode,
             first_turn=first_turn,
-            on_branch_change=lambda branch_id, action: _handle_branch_change(
+            on_branch_change=lambda branch_id, action: _follow_branch(
                 project, branch_id, action, json_mode
             ),
             on_changes_applied=_pull_on_apply,
@@ -928,7 +927,6 @@ _BUSY_RETRY_LIMIT = 200  # ~10 minutes; plan/build chains can run for several
 
 def _turn_with_retry(
     project: AgentStudioProject,
-    api_key: str,
     prompt: str,
     session_id: str | None,
     verbose: bool = False,
@@ -953,7 +951,6 @@ def _turn_with_retry(
     while True:
         result = _stream_turn(
             project,
-            api_key,
             prompt,
             session_id,
             verbose=verbose,
@@ -1008,114 +1005,103 @@ def _make_prompt_session() -> Any:
 
 
 class WrenCommand(BaseCommand):
-    """Start an AI-assisted editing session with Wren."""
+    """Work on the project with Wren, Agent Studio's AI builder."""
 
     command = "wren"
+    group = BUILDER_API_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
-        """Register the wren subcommand."""
-        parser = subparsers.add_parser(
+        """Register the ``wren`` subcommand tree."""
+        wren_parser = subparsers.add_parser(
             "wren",
-            parents=[parents.verbose, parents.debug, parents.json],
-            help="AI-assisted agent editing",
+            parents=[parents.verbose, parents.debug],
+            help="Work on the project with Wren, Agent Studio's AI builder.",
             description=(
-                "Start an AI-assisted editing session with Wren.\n\n"
-                "Wren works remotely on a branch. When it finishes,\n"
-                "changes are pulled to your local workspace.\n\n"
+                "Work on the project with Wren, Agent Studio's AI builder.\n\n"
                 "Examples:\n"
-                "  poly wren\n"
-                "  poly wren -m 'Add a transfer flow for billing'\n"
-                "  poly wren --json -m 'Add an FAQ topic'\n"
-                "  poly wren --session-id <id>\n"
+                "  poly wren chat\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
-        parser.add_argument(
-            "--path",
-            type=str,
-            default=None,
-            help="Path to the project. Defaults to current directory.",
+        wren_subparsers = wren_parser.add_subparsers(dest="wren_subcommand", required=True)
+
+        chat_parser = wren_subparsers.add_parser(
+            "chat",
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
+            help="Chat with Wren about the project.",
+            description=(
+                "Chat with Wren about the project.\n\n"
+                "Wren works remotely on a branch. The local project follows that\n"
+                "branch and pulls Wren's changes as it applies them.\n\n"
+                "Examples:\n"
+                "  poly wren chat\n"
+                "  poly wren chat -m 'Add a transfer flow for billing'\n"
+                "  poly wren chat --json -m 'Add an FAQ topic'\n"
+                "  poly wren chat --session-id <id>\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
         )
-        parser.add_argument(
+        chat_parser.add_argument(
             "--message",
             "-m",
             type=str,
             default=None,
-            help="Send a single prompt (non-interactive mode).",
+            help="Send one message instead of starting an interactive session.",
         )
-        parser.add_argument(
+        chat_parser.add_argument(
             "--session-id",
             type=str,
             default=None,
-            help="Resume an existing wren session.",
+            help="Continue an existing Wren session.",
         )
-        parser.add_argument(
+        chat_parser.add_argument(
             "--no-pull",
             action="store_true",
             default=False,
-            help="Skip pulling changes after the session ends.",
+            help="Don't pull Wren's changes into the local project.",
         )
-        parser.add_argument(
+        chat_parser.add_argument(
             "--force",
             action="store_true",
             default=False,
-            help="Start even if there are local uncommitted changes (they will be overwritten).",
+            help="Start even if there are local changes. Wren's changes overwrite them.",
         )
-        # Dev tool: override the top-level agent (server default:
-        # "orchestrator"). Non-top-level agents are rejected by the server.
-        parser.add_argument("--agent", type=str, default=None, help=SUPPRESS)
+        # Dev tool: run a different top-level agent (server default: "orchestrator").
+        chat_parser.add_argument("--agent", type=str, default=None, help=SUPPRESS)
         # Dev tool: render a downloaded conversation JSON through the real
         # renderer, no project or API access needed.
-        parser.add_argument("--replay", type=str, default=None, help=SUPPRESS)
-        parser.add_argument("--replay-delay", type=int, default=0, help=SUPPRESS)
-        parser.set_defaults(func=cls.run)
+        chat_parser.add_argument("--replay", type=str, default=None, help=SUPPRESS)
+        chat_parser.add_argument("--replay-delay", type=int, default=0, help=SUPPRESS)
 
     @classmethod
     def run(cls, args: Namespace) -> None:
-        """Run the wren command."""
-        import os
+        """Dispatch to the matching wren sub-handler."""
+        if args.wren_subcommand == "chat":
+            cls.chat(args)
 
+    @classmethod
+    def chat(cls, args: Namespace) -> None:
+        """Run a Wren chat: one message, a JSON round trip, or an interactive session."""
         from poly.output.console import error
 
-        replay_file = getattr(args, "replay", None)
-        verbose = getattr(args, "verbose", False)
-        if replay_file:
-            cls._run_replay(replay_file, getattr(args, "replay_delay", 0), verbose)
+        verbose = args.verbose
+        if args.replay:
+            cls._run_replay(args.replay, args.replay_delay, verbose)
             return
 
-        base_path = args.path or os.getcwd()
-        json_mode = getattr(args, "json", False)
-        single_message = getattr(args, "message", None)
-        no_pull = getattr(args, "no_pull", False)
-        force = getattr(args, "force", False)
-        session_id = getattr(args, "session_id", None)
-        agent_name = getattr(args, "agent", None)
-
-        if json_mode and not single_message:
+        json_mode = args.json
+        if json_mode and not args.message:
             json_print({"success": False, "error": "--json requires --message (-m)"})
             sys.exit(1)
 
-        project = load_project(base_path, output_json=json_mode)
-
-        if not force:
-            try:
-                diffs = project.get_diffs()
-                if diffs:
-                    msg = (
-                        "You have local changes that would be overwritten by wren. "
-                        "Push or revert them first, or re-run with --force to discard them."
-                    )
-                    if json_mode:
-                        json_print({"success": False, "error": msg})
-                    else:
-                        error(msg)
-                    sys.exit(1)
-            except Exception:
-                pass
+        project = load_project(args.path, output_json=json_mode)
 
         try:
-            api_key = retrieve_api_key(project.region)
+            # Fails early with login instructions rather than mid-stream.
+            retrieve_api_key(project.region)
+            if not args.force:
+                project.wren.ensure_no_local_changes()
         except ValueError as e:
             if json_mode:
                 json_print({"success": False, "error": str(e)})
@@ -1124,13 +1110,13 @@ class WrenCommand(BaseCommand):
             sys.exit(1)
 
         if json_mode:
-            cls._run_json(project, api_key, single_message, session_id, no_pull, agent_name)
-        elif single_message:
+            cls._run_json(project, args.message, args.session_id, args.no_pull, args.agent)
+        elif args.message:
             cls._run_single(
-                project, api_key, single_message, session_id, no_pull, verbose, agent_name
+                project, args.message, args.session_id, args.no_pull, verbose, args.agent
             )
         else:
-            cls._run_interactive(project, api_key, session_id, no_pull, verbose, agent_name)
+            cls._run_interactive(project, args.session_id, args.no_pull, verbose, args.agent)
 
     @classmethod
     def _run_replay(cls, path: str, delay_ms: int, verbose: bool) -> None:
@@ -1151,7 +1137,7 @@ class WrenCommand(BaseCommand):
             sys.exit(1)
 
         def replay_branch_change(branch_id: str, action: str) -> dict[str, str]:
-            info(f"⏇ Branch {action}: [bold]{branch_id}[/bold] — switching local project…")
+            info(f"⏇ Branch {action}: [bold]{branch_id}[/bold]")
             plain("[muted]  Local project now tracks this branch.[/muted]")
             return {"id": branch_id, "action": action}
 
@@ -1164,6 +1150,7 @@ class WrenCommand(BaseCommand):
 
         delay_s = max(delay_ms, 0) / 1000
         first_turn = True
+        usage: dict[str, Any] = {}
         for prompt, segment in replay_segments(conv):
             if prompt is not None:
                 console.print(f"\n[bold]You:[/bold] {escape(prompt)}")
@@ -1183,15 +1170,15 @@ class WrenCommand(BaseCommand):
                 )
             finally:
                 display.clear()
+            _add_usage(usage, result.usage)
             first_turn = False
 
-        _print_exit_summary(conv.get("sessionId"))
+        _print_exit_summary(conv.get("sessionId"), usage)
 
     @classmethod
     def _run_json(
         cls,
         project: AgentStudioProject,
-        api_key: str,
         message: str,
         session_id: str | None,
         no_pull: bool,
@@ -1200,16 +1187,14 @@ class WrenCommand(BaseCommand):
         """Single-shot JSON mode — emit one JSON object and exit."""
         result = _turn_with_retry(
             project,
-            api_key,
             message,
             session_id,
             verbose=False,
             json_mode=True,
             first_turn=True,
             no_pull=no_pull,
-            # Auto: the server answers its own gates so a scripted single-shot
-            # run always reaches a terminal state ("headless" would instead
-            # feed error strings to the agent's gate tools).
+            # Auto: Wren answers its own questions, so a scripted run finishes with
+            # Wren's best guess. "headless" would refuse every question instead.
             mode="auto",
             agent_name=agent_name,
         )
@@ -1247,7 +1232,6 @@ class WrenCommand(BaseCommand):
     def _run_single(
         cls,
         project: AgentStudioProject,
-        api_key: str,
         message: str,
         session_id: str | None,
         no_pull: bool,
@@ -1259,41 +1243,39 @@ class WrenCommand(BaseCommand):
 
         result = _turn_with_retry(
             project,
-            api_key,
             message,
             session_id,
             verbose=verbose,
             json_mode=False,
             first_turn=True,
             no_pull=no_pull,
-            # See _run_json: a non-looping invocation can't answer gates.
+            # See _run_json: a single message can't answer Wren's questions.
             mode="auto",
             agent_name=agent_name,
         )
         if result.pending_input:
             plain(
-                "[muted]  Wren is waiting for input — resume with: "
-                f"poly wren --session-id {result.session_id}[/muted]"
+                "[muted]  Wren needs an answer to continue. Run "
+                "poly wren chat without -m to answer it in an interactive session.[/muted]"
             )
         if result.suspended:
             plain(
                 "[muted]  Wren is continuing to work remotely — "
                 "run 'poly pull' later or resume with --session-id to see the result.[/muted]"
             )
-        _print_exit_summary(result.session_id)
+        _print_exit_summary(result.session_id, result.usage)
 
     @classmethod
     def _run_interactive(
         cls,
         project: AgentStudioProject,
-        api_key: str,
         session_id: str | None,
         no_pull: bool,
         verbose: bool,
         agent_name: str | None = None,
     ) -> None:
         """Interactive REPL mode."""
-        from poly.output.console import plain
+        from poly.output.console import plain, warning
 
         _print_header(
             project.account_id,
@@ -1305,16 +1287,14 @@ class WrenCommand(BaseCommand):
         prompt_session = _make_prompt_session()
         first_turn = True
         pending_pull = False
-        # Either a typed gate answer to resume with, or (older servers that
-        # send no requestId) a plain prompt to send as the next message.
+        usage: dict[str, Any] = {}
+        # A typed answer to one of Wren's questions, sent instead of a new prompt.
         pending_response: tuple[str, dict[str, Any]] | None = None
-        auto_prompt: str | None = None
 
         try:
             while True:
-                if pending_response is not None or auto_prompt is not None:
-                    user_input = auto_prompt or ""
-                    auto_prompt = None
+                if pending_response is not None:
+                    user_input = ""
                 else:
                     try:
                         user_input = prompt_session.prompt("\nYou: ").strip()
@@ -1326,10 +1306,16 @@ class WrenCommand(BaseCommand):
                         continue
                     if user_input.lower() == "/exit":
                         break
+                    if user_input.lower() == "/usage":
+                        plain(
+                            f"[muted]  cost so far: {_format_cost(usage)}[/muted]"
+                            if usage
+                            else "[muted]  Nothing spent yet this session.[/muted]"
+                        )
+                        continue
 
                 turn = _turn_with_retry(
                     project,
-                    api_key,
                     user_input,
                     session_id,
                     verbose=verbose,
@@ -1344,6 +1330,7 @@ class WrenCommand(BaseCommand):
                 pending_response = None
                 session_id = turn.session_id or session_id
                 first_turn = False
+                _add_usage(usage, turn.usage)
 
                 if turn.changes_applied:
                     pending_pull = False
@@ -1360,14 +1347,11 @@ class WrenCommand(BaseCommand):
                 if turn.pending_input:
                     request_id = turn.pending_input.get("requestId")
                     answer = _collect_user_input(turn.pending_input)
-                    if answer:
-                        if request_id and session_id:
-                            pending_response = (str(request_id), answer)
-                        else:
-                            # Older server: no requestId to resume with, so
-                            # fall back to sending the answer as a prompt.
-                            auto_prompt = _answer_as_prompt(turn.pending_input, answer)
+                    if answer and request_id and session_id:
+                        pending_response = (str(request_id), answer)
                         continue
+                    if answer:
+                        warning("Wren's question can't be answered: it has no request ID.")
 
                 if turn.fatal:
                     break
@@ -1376,4 +1360,4 @@ class WrenCommand(BaseCommand):
 
         if pending_pull and not no_pull:
             _pull_local(project)
-        _print_exit_summary(session_id)
+        _print_exit_summary(session_id, usage)

@@ -19,6 +19,20 @@ from poly.handlers.utils import camel_to_snake_keys
 from poly.utils import any_credentials_exist, retrieve_api_key
 
 logger = logging.getLogger(__name__)
+
+
+def _error_detail(response: requests.Response) -> ty.Optional[str]:
+    """Return the ``error`` string from a JSON error body, if there is one."""
+    try:
+        body = response.json()
+    except ValueError:
+        # A body that isn't JSON must not hide the HTTP error itself.
+        return None
+    if isinstance(body, dict) and isinstance(body.get("error"), str) and body["error"]:
+        return body["error"]
+    return None
+
+
 ACCOUNTS_URL = "/adk/v1/accounts"
 PROJECTS_URL = "/adk/v1/accounts/{account_id}/projects"
 PROJECT_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}"
@@ -149,14 +163,9 @@ class PlatformAPIHandler:
             dict: The parsed response.
         """
         url = PlatformAPIHandler.get_base_url(region, use_jupiter_api) + endpoint
-        correlation_id = f"adk-{uuid.uuid4()}"
 
         if headers is None:
-            headers = {
-                "X-API-KEY": retrieve_api_key(region),
-                "X-PolyAI-Correlation-Id": correlation_id,
-                "X-Poly-Source": "adk",
-            }
+            headers = PlatformAPIHandler._default_headers(region)
             if not files:
                 headers["Content-Type"] = "application/json"
 
@@ -209,6 +218,71 @@ class PlatformAPIHandler:
 
         logger.info(f"Request to {url} successful")
         return parsed
+
+    @staticmethod
+    def _default_headers(region: str) -> dict[str, str]:
+        """Build the auth and tracing headers sent with every Platform API request."""
+        return {
+            "X-API-KEY": retrieve_api_key(region),
+            "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+            "X-Poly-Source": "adk",
+        }
+
+    @staticmethod
+    def stream_events(
+        region: str,
+        endpoint: str,
+        data: dict,
+        timeout: int = 300,
+    ) -> ty.Generator[dict, None, None]:
+        """POST to a server-sent events endpoint and yield each event's JSON payload.
+
+        Comment and non-``data:`` lines are skipped, as are frames that aren't JSON. The
+        caller decides when to stop reading; the connection closes when the generator does.
+
+        Args:
+            region (str): The region name.
+            endpoint (str): The API endpoint.
+            data (dict): The JSON request body.
+            timeout (int): Seconds to wait for the next bytes before giving up.
+
+        Yields:
+            dict: Each parsed event.
+
+        Raises:
+            requests.HTTPError: On a non-2xx response before the stream opens. When the
+                body carries an ``error`` string, that becomes the exception message.
+        """
+        url = PlatformAPIHandler.get_base_url(region) + endpoint
+        headers = PlatformAPIHandler._default_headers(region)
+        headers["Accept"] = "text/event-stream"
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
+
+        logger.info(f"Opening event stream to {url}")
+        response = requests.post(url, json=data, headers=headers, stream=True, timeout=timeout)
+        if not response.ok:
+            detail = _error_detail(response)
+            try:
+                response.raise_for_status()
+            except requests.HTTPError as e:
+                if detail:
+                    raise requests.HTTPError(detail, response=response) from e
+                raise
+        # requests assumes ISO-8859-1 for text/event-stream; the stream is UTF-8.
+        response.encoding = "utf-8"
+
+        try:
+            for line in response.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data: "):
+                    continue
+                raw = line[len("data: ") :]
+                try:
+                    yield json.loads(raw)
+                except json.JSONDecodeError:
+                    logger.warning("Skipping non-JSON event frame: %s", raw[:100])
+        finally:
+            response.close()
 
     @staticmethod
     def get_accessible_regions(regions: list[str]) -> list[str]:

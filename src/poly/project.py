@@ -16,7 +16,7 @@ from datetime import datetime
 from enum import Enum
 from functools import cached_property
 from pathlib import PurePath
-from typing import Any, Optional, TypeAlias
+from typing import TYPE_CHECKING, Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
 
@@ -60,6 +60,9 @@ from poly.resources.resource import (
 )
 from poly.utils import prepush
 from poly.utils.commands import queue_set_default_commands
+
+if TYPE_CHECKING:
+    from poly.wren import ProjectWren
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +153,13 @@ class AgentStudioProject:
         if self.branch_id:
             self.save_config()  # To save branch if it changed (e.g. deleted in remote)
         return self._api_handler
+
+    @cached_property
+    def wren(self) -> "ProjectWren":
+        """Wren operations scoped to this project."""
+        from poly.wren import ProjectWren
+
+        return ProjectWren(self)
 
     def build_project_config(self) -> dict:
         """Build the project configuration dictionary"""
@@ -2661,6 +2671,16 @@ class AgentStudioProject:
                 force=True, format=format, projection_json=projection_json, on_save=on_save
             )
         return success, projection
+
+    def track_branch(self, branch_id: str) -> None:
+        """Point the local project at an existing remote branch, by ID, without pulling.
+
+        Args:
+            branch_id (str): The ID of the branch to track.
+        """
+        self.api_handler.switch_branch(branch_id)
+        self.branch_id = branch_id
+        self.save_config()
 
     def get_current_branch(self) -> Optional[str]:
         """Get the current branch name.
