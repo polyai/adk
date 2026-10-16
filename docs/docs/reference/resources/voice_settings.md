@@ -147,13 +147,12 @@ disclaimer_messages:
 
 ## Filler phrases
 
-Filler phrases are what the agent says while the caller waits on a slow turn, such as a long function call. The section is optional: removing it resets filler phrases on the next push.
+Filler phrases are what the agent says while the caller waits on a slow turn, such as a long function call. They play while the section is in the file; removing it turns them off.
 
 ### Fields
 
 | Field | Description |
 |---|---|
-| `enabled` | Whether filler phrases are played. |
 | `phrases` | The phrases to say. |
 | `randomize` | Whether to pick phrases in random order. |
 | `initial_interval_seconds` | How long to wait before the first phrase. |
@@ -163,7 +162,6 @@ Filler phrases are what the agent says while the caller waits on a slow turn, su
 
 ~~~yaml
 filler_phrases:
-  enabled: true
   phrases:
     - One moment...
     - Just a second...
@@ -213,7 +211,6 @@ disclaimer_messages:
   language_code: en-GB
 
 filler_phrases:
-  enabled: true
   phrases:
     - One moment...
     - Just a second...
@@ -228,7 +225,7 @@ background_ambience:
 
 ## Validation
 
-- `filler_phrases.initial_interval_seconds` must be at least 0.5, and `interval_seconds` at least 1. An enabled `filler_phrases` needs at least one phrase.
+- `filler_phrases.initial_interval_seconds` must be at least 0.5, and `interval_seconds` at least 1. `filler_phrases` needs at least one phrase.
 - `background_ambience` needs a `preset`, and `loudness` must be between -70 and -20. A preset Agent Studio doesn't know is a warning, not an error.
 - Keys inside `filler_phrases` and `background_ambience` must be ones listed above, so a misspelt key is an error rather than being ignored.
 

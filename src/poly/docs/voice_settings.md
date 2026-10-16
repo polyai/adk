@@ -54,12 +54,11 @@ disclaimer_messages:
 
 ## Filler Phrases
 
-Phrases the agent says while the caller waits on a slow turn. Optional: removing the section
-resets filler phrases on the next push.
+Phrases the agent says while the caller waits on a slow turn. They play while the section is in
+the file; removing it turns them off.
 
 ### Fields
-- **enabled** (bool)
-- **phrases** (list of strings): at least one when enabled.
+- **phrases** (list of strings): at least one.
 - **randomize** (bool): pick phrases in random order.
 - **initial_interval_seconds** (float, at least 0.5): wait before the first phrase.
 - **interval_seconds** (float, at least 1): wait between phrases.
@@ -67,7 +66,6 @@ resets filler phrases on the next push.
 ### Example
 ```yaml
 filler_phrases:
-  enabled: true
   phrases:
     - One moment...
     - Just a second...
@@ -108,7 +106,6 @@ disclaimer_messages:
   enabled: true
   language_code: en-GB
 filler_phrases:
-  enabled: true
   phrases:
     - One moment...
     - Just a second...

@@ -9,7 +9,6 @@ disclaimer_messages:
   enabled: true
   language_code: en-GB
 filler_phrases:
-  enabled: true
   phrases:
   - One moment...
   - Just a second...

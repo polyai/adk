@@ -514,10 +514,10 @@ class ChatStylePrompt(ChannelStylePrompt):
 class VoiceFillerPhrases(MultiResourceYamlResource):
     """Phrases the agent says while the caller waits on a slow turn.
 
-    Pushed as the voice channel's silence filler utterances. Removing the section resets them.
+    Pushed as the voice channel's silence filler utterances. The section exists only while
+    they're on; removing it resets them to the platform default, which is off.
     """
 
-    enabled: bool = False
     phrases: list[str] = field(default_factory=lambda: list(DEFAULT_FILLER_PHRASES))
     randomize: bool = True
     initial_interval_seconds: float = 2.5
@@ -526,7 +526,6 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
     top_level_name: ClassVar[str] = "filler_phrases"
     _singleton: ClassVar[bool] = True
     yaml_keys: ClassVar[tuple[str, ...]] = (
-        "enabled",
         "phrases",
         "randomize",
         "initial_interval_seconds",
@@ -539,7 +538,6 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
 
     def to_yaml_dict(self) -> dict:
         return {
-            "enabled": self.enabled,
             "phrases": list(self.phrases),
             "randomize": self.randomize,
             "initial_interval_seconds": self.initial_interval_seconds,
@@ -565,13 +563,12 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
             return {}
 
         filler = projection.get("channels", {}).get("voice", {}).get("silenceFillerUtterances")
-        if not filler:
+        if not filler or not filler.get("enabled"):
             return {}
         return {
             "voice_filler_phrases": cls(
                 resource_id="voice_filler_phrases",
                 name="voice_filler_phrases",
-                enabled=filler.get("enabled", False),
                 phrases=[
                     utterance.get("message", "") for utterance in filler.get("utterances", [])
                 ],
@@ -582,8 +579,8 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
         }
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
-        if self.enabled and not any(phrase.strip() for phrase in self.phrases):
-            raise ValueError("filler_phrases needs at least one phrase when enabled.")
+        if not any(phrase.strip() for phrase in self.phrases):
+            raise ValueError("filler_phrases needs at least one phrase.")
         if self.initial_interval_seconds < FILLER_INITIAL_INTERVAL_MIN_SECONDS:
             raise ValueError(
                 "filler_phrases.initial_interval_seconds must be at least "
@@ -613,7 +610,7 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
     def build_update_proto(self) -> VoiceChannel_UpdateSilenceFillerUtterances:
         return VoiceChannel_UpdateSilenceFillerUtterances(
             silence_filler_utterances=FillerUtterances(
-                enabled=self.enabled,
+                enabled=True,
                 utterances=[FillerUtterances.Utterance(message=phrase) for phrase in self.phrases],
                 randomize=self.randomize,
                 initial_interval_seconds=self.initial_interval_seconds,

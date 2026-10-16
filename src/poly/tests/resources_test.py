@@ -7389,7 +7389,6 @@ class VoiceFillerPhrasesTests(unittest.TestCase):
     """Tests for the filler_phrases section of voice/configuration.yaml."""
 
     YAML = {
-        "enabled": True,
         "phrases": ["One moment..."],
         "randomize": True,
         "initial_interval_seconds": 2.5,
@@ -7415,7 +7414,7 @@ class VoiceFillerPhrasesTests(unittest.TestCase):
     def test_unknown_key_raises(self):
         """A misspelt key is an error, not silently dropped."""
         with self.assertRaises(ValueError) as cm:
-            self._from_yaml({"enabled": True, "phrase": ["Hi"]})
+            self._from_yaml({"phrase": ["Hi"]})
         self.assertIn("phrase", str(cm.exception))
 
     def test_validate_rejects_out_of_range_values(self):
@@ -7423,7 +7422,7 @@ class VoiceFillerPhrasesTests(unittest.TestCase):
         cases = {
             "initial_interval_seconds": {"initial_interval_seconds": 0.2},
             "interval_seconds": {"interval_seconds": 0.5},
-            "at least one phrase": {"enabled": True, "phrases": [" "]},
+            "at least one phrase": {"phrases": [" "]},
         }
         for expected, yaml_dict in cases.items():
             with self.subTest(expected):
@@ -7468,6 +7467,26 @@ class VoiceFillerPhrasesTests(unittest.TestCase):
         }
         result = VoiceFillerPhrases.from_projection(projection)
         self.assertEqual(result["voice_filler_phrases"].to_yaml_dict(), self.YAML)
+
+    def test_filler_phrases_that_are_off_pull_no_section(self):
+        """Filler phrases that are off are written by leaving the section out."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "silenceFillerUtterances": {
+                        "enabled": False,
+                        "utterances": [{"message": "One moment..."}],
+                    }
+                }
+            }
+        }
+        self.assertEqual(VoiceFillerPhrases.from_projection(projection), {})
+
+    def test_enabled_is_not_written(self):
+        """The section only exists while filler phrases are on, so it has no enabled key."""
+        self.assertNotIn("enabled", self._from_yaml(self.YAML).to_yaml_dict())
+        with self.assertRaises(ValueError):
+            self._from_yaml({**self.YAML, "enabled": True})
 
     def test_unset_in_projection_yields_nothing(self):
         """No silenceFillerUtterances, or no channel access, pulls no section."""

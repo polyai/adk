@@ -1207,7 +1207,6 @@
       "voice_filler_phrases": {
         "resource_id": "voice_filler_phrases",
         "name": "voice_filler_phrases",
-        "enabled": true,
         "phrases": [
           "One moment...",
           "Just a second..."
