@@ -26,10 +26,10 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   ├── translations.yaml               # Optional
 │   └── variant_attributes.yaml         # Optional
 ├── voice/                              # Voice channel settings
-│   ├── configuration.yaml              # Greeting, disclaimer, style prompt
+│   ├── configuration.yaml              # Greeting, disclaimer, style prompt, filler phrases, ambience
 │   ├── safety_filters.yaml             # Optional
 │   ├── speech_recognition/
-│   │   ├── asr_settings.yaml           # Barge-in, interaction style
+│   │   ├── asr_settings.yaml           # Turn-taking: speech end delay, barge-in
 │   │   ├── keyphrase_boosting.yaml     # Optional
 │   │   └── transcript_corrections.yaml # Optional
 │   └── response_control/

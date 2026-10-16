@@ -57,6 +57,7 @@ from poly.resources import (
     VoiceDisclaimerMessage,
     VoiceGreeting,
     VoiceStylePrompt,
+    VoiceVadConfig,
 )
 from poly.resources.flows import (
     ASRBiasing,
@@ -2609,8 +2610,9 @@ class PushProjectTest(unittest.TestCase):
         self.assertIn("TRANSCRIPT_CORRECTIONS-extra", deleted_resources[TranscriptCorrection])
 
     def test_push_project_modified_asr_settings(self):
+        """Only the changed section is pushed, through its own voice channel command."""
         project_data = deepcopy(PROJECT_DATA)
-        project_data["resources"]["asr_settings"]["asr_settings"]["barge_in"] = True
+        project_data["resources"]["asr_settings"]["asr_settings"]["barge_in"]["enabled"] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
         success, message, commands = project.push_project(force=True)
@@ -2619,10 +2621,26 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.queue_resources.assert_called_once()
         call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
-        self.assertIn(AsrSettings, updated_resources)
-        self.assertIn("asr_settings", updated_resources[AsrSettings])
-        # The fixture file has barge_in: false, so barge-in is switched off
-        self.assertFalse(updated_resources[VoiceBargeInConfig]["asr_settings"].enabled)
+        # The file has no command of its own; each section is pushed separately.
+        self.assertNotIn(AsrSettings, updated_resources)
+        self.assertNotIn(VoiceVadConfig, updated_resources)
+        # The fixture file has barge_in.enabled: false, so barge-in is switched off
+        self.assertFalse(updated_resources[VoiceBargeInConfig]["asr_settings"].barge_in.enabled)
+
+    def test_push_project_removed_asr_settings_section_is_reset(self):
+        """A section in the last pulled state but not in the file is reset."""
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        local_settings = project.resources[AsrSettings]["asr_settings"].to_yaml_dict()
+        local_settings.pop("speech_end_delay_ms")
+
+        with patch.object(AsrSettings, "_read_yaml_dict", return_value=local_settings):
+            success, message, commands = project.push_project(force=True)
+
+        self.assertTrue(success)
+        call_args = self.mock_api_handler.queue_resources.call_args
+        deleted_resources = call_args.kwargs["deleted_resources"]
+        self.assertIn(VoiceVadConfig, deleted_resources)
+        self.assertNotIn(AsrSettings, call_args.kwargs["updated_resources"])
 
     def test_push_project_validation_error(self):
         project_data = deepcopy(PROJECT_DATA)

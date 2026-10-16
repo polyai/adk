@@ -24,6 +24,7 @@ class MigrationFlag(Enum):
     MIGRATED_FLOW_STEP_RESOURCE_IDS = "migrated_flow_step_resource_ids"
     MIGRATED_FLOW_STEP_SETTINGS = "migrated_flow_step_settings"
     REMOVED_PERSONALITY_AND_ROLE_FILES = "removed_personality_and_role_files"
+    MIGRATED_ASR_SETTINGS_BARGE_IN = "migrated_asr_settings_barge_in"
 
 
 def load_migration_flags(flags: list[str]) -> set[MigrationFlag]:
@@ -89,6 +90,10 @@ def run_migrations(
         remove_personality_and_role_files(root_path)
         new_flags.add(MigrationFlag.REMOVED_PERSONALITY_AND_ROLE_FILES)
 
+    if MigrationFlag.MIGRATED_ASR_SETTINGS_BARGE_IN not in applied_migrations:
+        migrate_asr_settings_barge_in(root_path, status_dict)
+        new_flags.add(MigrationFlag.MIGRATED_ASR_SETTINGS_BARGE_IN)
+
     return new_flags
 
 
@@ -111,6 +116,51 @@ def remove_personality_and_role_files(root_path: str) -> None:
             f"Removed {', '.join(removed)}: personality and role have been replaced by "
             "agent_settings/persona.txt. Run 'poly pull' to fetch it."
         )
+
+
+ASR_SETTINGS_PATH = os.path.join("voice", "speech_recognition", "asr_settings.yaml")
+
+
+def _migrate_asr_settings_dict(settings: dict) -> bool:
+    """Rewrite one ASR settings mapping in place; return whether anything changed.
+
+    Older versions stored barge-in as a bool and kept an ``interaction_style`` that
+    the runtime no longer uses.
+    """
+    changed = False
+    if isinstance(settings.get("barge_in"), bool):
+        settings["barge_in"] = {"enabled": settings["barge_in"]}
+        changed = True
+    if "interaction_style" in settings:
+        del settings["interaction_style"]
+        changed = True
+    return changed
+
+
+def migrate_asr_settings_barge_in(root_path: str, status_dict: dict | None) -> None:
+    """Move ``barge_in: true/false`` under ``barge_in.enabled`` and drop ``interaction_style``.
+
+    Applied to both ``asr_settings.yaml`` and the status dict, so the file and the last
+    pulled state still match and the file doesn't show as modified.
+    """
+    file_path = os.path.join(root_path, ASR_SETTINGS_PATH)
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                settings = resource_utils.load_yaml(f.read())
+        except Exception as e:
+            logger.debug(f"Skipping asr_settings.yaml migration, file unreadable: {e}")
+            settings = None
+        if isinstance(settings, dict) and _migrate_asr_settings_dict(settings):
+            with open(file_path, "w", encoding="utf-8") as f:
+                resource_utils.dump_yaml(settings, f)
+            logger.info(f"Updated {ASR_SETTINGS_PATH} to the current format.")
+
+    if status_dict is None:
+        return
+    for resource_dict in status_dict.get("resources", {}).get("asr_settings", {}).values():
+        if isinstance(resource_dict, dict):
+            _migrate_asr_settings_dict(resource_dict)
 
 
 # Sub-config keys set internally by the config classes rather than accepted as __init__ args.

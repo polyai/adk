@@ -1,2 +1,5 @@
-barge_in: false
-interaction_style: balanced
+speech_end_delay_ms: 800
+barge_in:
+  enabled: false
+  allow_on_first_turn: false
+  max_per_call: 5
