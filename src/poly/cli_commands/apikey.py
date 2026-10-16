@@ -21,6 +21,7 @@ from typing import Callable
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
+from poly.cli_commands.shared import REGION_ALIASES_HELP, region_type
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
 from poly.handlers.interface import REGIONS, AgentStudioInterface
 from poly.utils.api_keys import select_reusable_api_key
@@ -257,13 +258,14 @@ class ApiKeyCommand(BaseCommand):
         )
         apikey_parser.add_argument(
             "--region",
-            type=str,
+            type=region_type,
             choices=REGIONS,
             required=True,
             help=(
                 "Region/cluster to create the key for. 'studio' is the self-serve cluster"
                 " individual developers sign up on via GitHub; any other region uses the"
                 " standard sign-in page (email/SSO), the same one `poly login` uses."
+                f" {REGION_ALIASES_HELP}"
             ),
         )
         apikey_parser.add_argument(

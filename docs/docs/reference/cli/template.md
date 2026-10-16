@@ -27,7 +27,7 @@ poly template list --region us-1
 
 | Flag | Description |
 |---|---|
-| `--region` | Region to query for templates. Defaults to the current project's region. Choices: `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. |
+| `--region` | Region to query for templates. Defaults to the current project's region. Choices: `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
 
 `--json` output shape:
 
@@ -56,7 +56,7 @@ poly template load restaurant-booking --force
 
 | Flag | Description |
 |---|---|
-| `--region` | Region to load the template from. Defaults to the current project's region. |
+| `--region` | Region to load the template from. Defaults to the current project's region. Choices: `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
 | `--force`, `-f` | Skip the confirmation prompt. |
 
 !!! info "`--json` requires `template_name`"

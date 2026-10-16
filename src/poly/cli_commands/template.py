@@ -10,7 +10,12 @@ from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParser
 from contextlib import nullcontext
 
 from poly.cli_commands.base import BaseCommand, Parents
-from poly.cli_commands.shared import load_project, read_project_config
+from poly.cli_commands.shared import (
+    REGION_ALIASES_HELP,
+    load_project,
+    read_project_config,
+    region_type,
+)
 from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
@@ -57,9 +62,9 @@ class TemplateCommand(BaseCommand):
         )
         template_list_parser.add_argument(
             "--region",
-            type=str,
+            type=region_type,
             choices=REGIONS,
-            help="Region to query for templates. Defaults to the current project's region.",
+            help=f"Region to query for templates. Defaults to the current project's region. {REGION_ALIASES_HELP}",
         )
 
         # TEMPLATE LOAD
@@ -92,9 +97,9 @@ class TemplateCommand(BaseCommand):
         )
         template_load_parser.add_argument(
             "--region",
-            type=str,
+            type=region_type,
             choices=REGIONS,
-            help="Region to query for templates. Defaults to the current project's region.",
+            help=f"Region to query for templates. Defaults to the current project's region. {REGION_ALIASES_HELP}",
         )
         template_load_parser.add_argument(
             "--force",

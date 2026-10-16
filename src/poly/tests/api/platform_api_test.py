@@ -250,7 +250,7 @@ class MakeRequest(unittest.TestCase):
 class GetAccessibleRegions(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_accessible_regions."""
 
-    @patch("poly.handlers.platform_api.any_credentials_exist", return_value=True)
+    @patch("poly.utils.credentials.any_credentials_exist", return_value=True)
     @patch("poly.handlers.platform_api.PlatformAPIHandler.get_accounts")
     def test_returns_accessible_regions_in_input_order(self, mock_get_accounts, _mock_creds):
         """Regions returning accounts are kept; exceptions are swallowed; order preserved."""
@@ -270,15 +270,17 @@ class GetAccessibleRegions(unittest.TestCase):
 
         self.assertEqual(result, ["us-1", "euw-1"])
 
-    @patch("poly.handlers.platform_api.any_credentials_exist", return_value=False)
-    @patch(
-        "poly.handlers.platform_api.retrieve_api_key",
-        side_effect=ValueError("No API key configured"),
-    )
-    def test_missing_credentials_raises_value_error(self, _mock_key, _mock_creds):
-        """When no credentials exist, the probe raises a ValueError with setup guidance."""
-        with self.assertRaises(ValueError):
+    @patch("poly.utils.credentials.any_credentials_exist", return_value=False)
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.get_accounts")
+    def test_missing_credentials_raises_value_error(self, mock_get_accounts, _mock_creds):
+        """When no credentials exist, the probe raises a ValueError that points at `poly login`."""
+        with self.assertRaises(ValueError) as ctx:
             PlatformAPIHandler.get_accessible_regions(["studio"])
+
+        self.assertIn("No ADK key found.", str(ctx.exception))
+        self.assertIn("Run `poly login` to sign in.", str(ctx.exception))
+        self.assertNotIn("'studio'", str(ctx.exception))
+        mock_get_accounts.assert_not_called()
 
 
 class GetAccounts(unittest.TestCase):

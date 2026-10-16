@@ -33,7 +33,7 @@ from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.rtc import RTCCommand
 from poly.cli_commands.setup import SetupCommand
-from poly.cli_commands.shared import get_package_version
+from poly.cli_commands.shared import REGION_ALIASES_HELP, get_package_version, region_type
 from poly.cli_commands.sync import (
     DiffCommand,
     FetchCommand,
@@ -143,11 +143,11 @@ class AgentStudioCLI:
         scope_parent = ArgumentParser(add_help=False)
         scope_parent.add_argument(
             "--region",
-            type=str,
+            type=region_type,
             choices=REGIONS,
             default=None,
             help="Region, for headless use without a local project. Requires "
-            "--project_id and --branch_id.",
+            f"--project_id and --branch_id. {REGION_ALIASES_HELP}",
         )
         scope_parent.add_argument(
             "--project_id",

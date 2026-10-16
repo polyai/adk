@@ -22,7 +22,7 @@ Every subcommand also accepts `--region`, `--project_id` and `--branch_id` direc
 poly functions execute <function_name> --region us-1 --project_id abc123 --branch_id main
 ~~~
 
-All three must be given together — if any one is set, all three are required. With none set, the current local project's region/project/branch are used, as before.
+All three must be given together — if any one is set, all three are required. With none set, the current local project's region/project/branch are used, as before. `--region` takes the canonical names (`us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`). Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`.
 
 ## `poly functions execute`
 

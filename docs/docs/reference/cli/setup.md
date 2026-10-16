@@ -25,7 +25,7 @@ The four steps, in order:
 
 | Flag | Description |
 |---|---|
-| `--region` | Region to sign in to. If omitted, you will be prompted to select one. |
+| `--region` | Region to sign in to. One of `us-1`, `euw-1`, `uk-1`, `studio`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. If omitted, you will be prompted to select one. |
 | `--base-path` | Base path for project setup. Defaults to the current working directory. |
 | `--skip-auth` | Skip the authentication step. |
 | `--skip-skills` | Skip installing AI agent skills. |
