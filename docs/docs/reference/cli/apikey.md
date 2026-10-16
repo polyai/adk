@@ -40,7 +40,7 @@ Install [uv](https://docs.astral.sh/uv/) with `winget install astral-sh.uv`. If 
 
 | Flag | Description |
 |---|---|
-| `--region REGION` | Region/cluster to create the key for. Required. Choices match the standard region list. |
+| `--region REGION` | Region/cluster to create the key for. Required. Choices match the standard region list. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
 | `--key-name NAME` | Name for the account-scoped API key. Defaults to `cli-generated-key` for `studio`, or `cli-generated-key-<region>` for any other region. |
 | `--account-id ID` | Account ID to scope the key to. Skips polling for a newly created account. With more than one account and no `--account-id`, a terminal shows a picker; otherwise the command stops and lists the accounts. |
 | `--force`, `-f` | Overwrite an existing `POLY_API_KEY` in your profile if it holds a different value. |

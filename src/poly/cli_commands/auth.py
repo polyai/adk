@@ -11,6 +11,7 @@ import requests
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
+from poly.cli_commands.shared import REGION_ALIASES_HELP, region_type
 from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS
 from poly.handlers.interface import REGIONS, AgentStudioInterface
 from poly.utils import (
@@ -177,10 +178,10 @@ class LoginCommand(BaseCommand):
         )
         login_parser.add_argument(
             "--region",
-            type=str,
+            type=region_type,
             choices=REGIONS,
             default=None,
-            help="Region to log in to. If omitted, you will be prompted to select one.",
+            help=f"Region to log in to. If omitted, you will be prompted to select one. {REGION_ALIASES_HELP}",
         )
 
     @classmethod

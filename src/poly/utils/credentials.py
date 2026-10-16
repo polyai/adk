@@ -77,12 +77,93 @@ def load_api_key_from_credential_file(region: str) -> Optional[str]:
     return None
 
 
+_ACCOUNT_API_KEY_ENV_VAR = "POLY_API_KEY"
+_CREDENTIALS_FILE_DISPLAY_PATH = "~/.poly/credentials.json"
+
+
+def _regions_with_stored_keys() -> list[str]:
+    """Regions that hold an ADK key in the credential file or a per-region env var.
+
+    Ordered as in ``_REGION_TO_KEY_SUFFIX``. A credential file that does not
+    parse contributes nothing.
+    """
+    stored: dict = {}
+    if os.path.isfile(CREDENTIALS_FILE_PATH):
+        with open(CREDENTIALS_FILE_PATH, "r", encoding="utf-8") as f:
+            try:
+                stored = json.load(f)
+            except json.JSONDecodeError:
+                stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
+    return [
+        region
+        for region, suffix in _REGION_TO_KEY_SUFFIX.items()
+        if stored.get(region) or os.getenv(f"{_API_KEY_ENV_VAR}_{suffix}")
+    ]
+
+
+def _missing_key_message(region: Optional[str] = None) -> str:
+    """The error shown when no ADK key resolves for ``region``.
+
+    Plain text, no markup: it is also returned verbatim as ``error`` under
+    ``--json``. Sentence order: what is missing, how to get it, what the user
+    already has, what they have that does not count, the CI alternative.
+    With ``region`` None the message covers any region and points at the bare
+    ``poly login`` picker.
+    """
+    if region:
+        sentences = [
+            f"No ADK key found for region '{region}'.",
+            f"ADK commands need an ADK key, which `poly login` creates and saves to"
+            f" {_CREDENTIALS_FILE_DISPLAY_PATH}.",
+            f"Run `poly login --region {region}` to sign in to that region.",
+        ]
+        others = [r for r in _regions_with_stored_keys() if r != region]
+        if others:
+            suggestion = (
+                f"`--region {others[0]}`" if len(others) == 1 else "`--region <one of those>`"
+            )
+            sentences.append(
+                f"You already have an ADK key for: {', '.join(others)} — re-run with"
+                f" {suggestion} if that is the workspace you meant."
+            )
+    else:
+        sentences = [
+            "No ADK key found.",
+            f"ADK commands need an ADK key, which `poly login` creates and saves to"
+            f" {_CREDENTIALS_FILE_DISPLAY_PATH}.",
+            "Run `poly login` to sign in.",
+        ]
+    if os.getenv(_ACCOUNT_API_KEY_ENV_VAR):
+        sentences.append(
+            f"{_ACCOUNT_API_KEY_ENV_VAR} is set, but that is an account API key for the PolyAI"
+            " APIs and the ADK does not use it."
+        )
+    suffix = _REGION_TO_KEY_SUFFIX.get(region) if region else None
+    per_region = f"{_API_KEY_ENV_VAR}_{suffix}" if suffix else f"{_API_KEY_ENV_VAR}_<REGION>"
+    sentences.append(f"(CI or scripts: set {_API_KEY_ENV_VAR} or {per_region} instead.)")
+    return " ".join(sentences)
+
+
+def raise_if_no_credentials() -> None:
+    """Raise ``ValueError`` when no ADK key exists for any region.
+
+    For callers that have not settled on a region yet (``poly init`` with no
+    ``--region``): the message points at the bare ``poly login`` picker rather
+    than a specific region.
+    """
+    if not any_credentials_exist():
+        raise ValueError(_missing_key_message())
+
+
 def retrieve_api_key(region: str) -> str:
     """Return an API key, preferring a per-region key when available.
 
     Resolution order:
-      1. ``POLY_ADK_KEY_{REGION}`` (if *region* is provided, e.g. ``POLY_ADK_KEY_US``)
-      2. ``POLY_ADK_KEY``
+      1. The credential file entry for *region* (written by ``poly login``)
+      2. ``POLY_ADK_KEY_{REGION}`` (e.g. ``POLY_ADK_KEY_US``)
+      3. ``POLY_ADK_KEY``
 
     Raises ``ValueError`` with a helpful message when no key is found.
     """
@@ -98,10 +179,7 @@ def retrieve_api_key(region: str) -> str:
 
     api_key = os.getenv(_API_KEY_ENV_VAR)
     if not api_key:
-        raise ValueError(
-            f"{_API_KEY_ENV_VAR} environment variable is not set. "
-            f"Export your API key with: export {_API_KEY_ENV_VAR}=<your-api-key>"
-        )
+        raise ValueError(_missing_key_message(region))
     return api_key
 
 

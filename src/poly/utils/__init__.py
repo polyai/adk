@@ -14,6 +14,7 @@ from poly.utils.commands import create_command_webchat_channel_update_status
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
     any_credentials_exist,
+    raise_if_no_credentials,
     retrieve_api_key,
     save_api_key_credential_file,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "CREDENTIALS_FILE_PATH",
     "FUNCTION_TYPE_TO_VAR_REF_FIELD",
     "any_credentials_exist",
+    "raise_if_no_credentials",
     "compute_variable_references",
     "diff_dicts",
     "create_command_webchat_channel_update_status",
