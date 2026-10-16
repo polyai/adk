@@ -51,7 +51,6 @@ from poly.resources import (
     SubResourceMap,
     TestCase,
     Topic,
-    VoiceBackgroundAmbience,
 )
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
@@ -1414,16 +1413,6 @@ class AgentStudioProject:
 
         if not (updated_resources or new_resources or deleted_resources):
             return False, "No changes detected", []
-
-        # Agent Studio can't clear ambience, so a removed section can't be pushed and would
-        # come back on the next pull.
-        if VoiceBackgroundAmbience in deleted_resources:
-            return (
-                False,
-                "background_ambience can't be removed from voice/configuration.yaml. "
-                "Set 'enabled: false' to turn ambience off.",
-                [],
-            )
 
         # 4. Validate all resources with new state
         if not skip_validation:

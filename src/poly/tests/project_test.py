@@ -53,7 +53,6 @@ from poly.resources import (
     Variable,
     Variant,
     VariantAttribute,
-    VoiceBackgroundAmbience,
     VoiceBargeInConfig,
     VoiceDisclaimerMessage,
     VoiceGreeting,
@@ -2642,17 +2641,6 @@ class PushProjectTest(unittest.TestCase):
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(VoiceVadConfig, deleted_resources)
         self.assertNotIn(AsrSettings, call_args.kwargs["updated_resources"])
-
-    def test_push_project_refuses_removed_background_ambience(self):
-        """Ambience can't be cleared on the platform, so removing the section fails the push."""
-        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
-
-        with patch.object(VoiceBackgroundAmbience, "discover_resources", return_value=[]):
-            success, message, commands = project.push_project(force=True)
-
-        self.assertFalse(success)
-        self.assertIn("enabled: false", message)
-        self.mock_api_handler.queue_resources.assert_not_called()
 
     def test_push_project_validation_error(self):
         project_data = deepcopy(PROJECT_DATA)

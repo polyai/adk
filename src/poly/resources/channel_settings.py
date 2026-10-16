@@ -638,7 +638,7 @@ class VoiceBackgroundAmbience(MultiResourceYamlResource):
     """Background sound played under the agent's speech.
 
     The platform has no command to clear ambience, so once it exists it can only be turned
-    on or off. Pushing with the section removed is refused (see AgentStudioProject.push_project).
+    on or off, and removing the section can't be pushed.
     """
 
     preset: str = ""
@@ -726,7 +726,10 @@ class VoiceBackgroundAmbience(MultiResourceYamlResource):
         return self.build_update_proto()
 
     def build_delete_proto(self) -> None:
-        raise NotImplementedError("Ambience cannot be reset")
+        raise NotImplementedError(
+            "background_ambience can't be removed from voice/configuration.yaml. "
+            "Set 'enabled: false' to turn ambience off."
+        )
 
     @classmethod
     def discover_resources(cls, base_path: str) -> list[str]:

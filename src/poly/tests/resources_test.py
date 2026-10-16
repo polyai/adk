@@ -7529,6 +7529,12 @@ class VoiceBackgroundAmbienceTests(unittest.TestCase):
         self.assertEqual(proto.preset, "office-ambiance")
         self.assertEqual(proto.loudness, -40)
 
+    def test_removing_the_section_cannot_be_pushed(self):
+        """Agent Studio can't clear ambience, so building its delete command raises."""
+        with self.assertRaises(NotImplementedError) as cm:
+            self._from_yaml(self.YAML).build_delete_proto()
+        self.assertIn("enabled: false", str(cm.exception))
+
     def test_ambience_that_is_off_is_pulled_with_enabled_false(self):
         """Ambience that exists but is off keeps its preset and loudness in the file."""
         off = {**self.YAML, "enabled": False}
