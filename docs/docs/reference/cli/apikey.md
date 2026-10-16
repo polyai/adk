@@ -44,7 +44,7 @@ Install [uv](https://docs.astral.sh/uv/) with `winget install astral-sh.uv`. If 
 | `--key-name NAME` | Name for the account-scoped API key. Defaults to `cli-generated-key` for `studio`, or `cli-generated-key-<region>` for any other region. |
 | `--account-id ID` | Account ID to scope the key to. Skips polling for a newly created account. With more than one account and no `--account-id`, a terminal shows a picker; otherwise the command stops and lists the accounts. |
 | `--force`, `-f` | Overwrite an existing `POLY_API_KEY` in your profile if it holds a different value. |
-| `--no-session-cache` | Sign in fresh and do not keep the sign-in for later runs. |
+| `--no-session-cache` | Sign in fresh and do not keep the sign-in for later runs. By default the sign-in is kept in `~/.poly/apikey_session` (readable only by you) until it expires, so a re-run does not sign in again. |
 
 `--json` output shape:
 
@@ -59,17 +59,21 @@ Install [uv](https://docs.astral.sh/uv/) with `winget install astral-sh.uv`. If 
   "profile_path": "/home/user/.zshrc",
   "profile_shell": "zsh",
   "key_active": true,
-  "next_step_url": "https://docs.poly.ai/dialog-rsn-1"
+  "next_step_url": "https://docs.poly.ai/dialog-rsn-1",
+  "cli_version": "0.70.0",
+  "cli_path": "/home/user/.local/bin/poly"
 }
 ~~~
 
-On failure, stdout is `{"success": false, "error": "...", "step": "..."}`. `step` is one of `start`, `signin`, `authorise`, `account`, `key`, `credentials`, `activation`, `env`. When the failure is more than one account, the object also has `accounts`:
+On failure, stdout is `{"success": false, "error": "...", "step": "...", "cli_version": "...", "cli_path": "..."}`. `step` is one of `start`, `signin`, `authorise`, `account`, `key`, `credentials`, `activation`, `env`. When the failure is more than one account, the object also has `accounts`:
 
 ~~~json
 {
   "success": false,
   "error": "Multiple accounts found for studio: acc-1 (Team), acc-2 (Other). Re-run with --account-id <id> to pick one. Your sign-in is kept, so the re-run will not ask you to sign in again.",
   "step": "account",
+  "cli_version": "0.70.0",
+  "cli_path": "/home/user/.local/bin/poly",
   "accounts": [
     {"id": "acc-1", "name": "Team", "role": "Member", "created_by": "lead@example.com"},
     {"id": "acc-2", "name": "Other", "role": "Admin", "created_by": "someone@example.com"}
