@@ -60,12 +60,21 @@ class InstallsTestCase(unittest.TestCase):
         self._patch("poly.utils.installs.SHADOW_SEEN_FILE", self.stamp_file)
         self._patch("poly.utils.installs._shadow_field", None)
         self._patch("poly.utils.installs.running_version", return_value="0.71.0")
+        # The fixtures are POSIX-shaped (no PATHEXT); the Windows tests flip this themselves.
+        self._patch("poly.utils.installs._is_windows", return_value=False)
 
     def _patch(self, target: str, *args, **kwargs) -> MagicMock:
         patcher = patch(target, *args, **kwargs)
         mock = patcher.start()
         self.addCleanup(patcher.stop)
         return mock
+
+    def _symlink(self, link: Path, target: str) -> None:
+        """Create a symlink, or skip where the runner cannot (Windows without the privilege)."""
+        try:
+            link.symlink_to(target)
+        except OSError as e:
+            self.skipTest(f"symlinks unavailable here: {e}")
 
     def _set_path(self, *directories: Path | str) -> None:
         patcher = patch.dict(os.environ, {"PATH": os.pathsep.join(str(d) for d in directories)})
@@ -82,7 +91,7 @@ class RunningBinaryTest(InstallsTestCase):
 
     def test_compare_path_is_realpath(self):
         link = self.root / "link"
-        link.symlink_to(self.ours)
+        self._symlink(link, self.ours)
         with patch("sys.argv", [str(link)]):
             self.assertEqual(running_binary().compare_path, os.path.realpath(self.ours))
 
@@ -96,7 +105,7 @@ class ShadowingInstallTest(InstallsTestCase):
     def test_no_shadow_when_first_is_symlink_to_us(self):
         link_dir = self.root / "links"
         link_dir.mkdir()
-        (link_dir / "poly").symlink_to(self.ours)
+        self._symlink(link_dir / "poly", self.ours)
         self._set_path(link_dir, self.theirs_dir)
         self.assertIsNone(shadowing_install())
 

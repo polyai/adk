@@ -6208,6 +6208,8 @@ class StartupShadowWarningTest(unittest.TestCase):
         self.mark_warned = self._patch("poly.cli_commands.update.mark_warned")
         self._patch("poly.cli_commands.update.get_package_version", return_value="0.71.0")
         self._patch("sys.argv", ["/Users/you/.local/bin/poly", "project", "list"])
+        # The expected wording is the POSIX one; the Windows wording has its own test.
+        self._patch("poly.cli_commands.update.os.name", "posix")
         # display_shadow_warning imports warning() lazily, so the console module is the seam.
         self.warning = self._patch("poly.output.console.warning")
         patcher = patch("sys.stdout", _FakeStdout(True))
