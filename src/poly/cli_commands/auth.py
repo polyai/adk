@@ -7,6 +7,8 @@ import os
 import sys
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 
+import requests
+
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS
@@ -33,6 +35,35 @@ def _select_region() -> str:
     ).ask()
 
 
+def authorise_or_explain(
+    api: AgentStudioInterface, region: str, jwt_token: str, *, self_serve_hint: str
+) -> dict:
+    """Authorise the signed-in user on ``region``, explaining the one expected failure.
+
+    On an enterprise region (anything but ``studio``) the authorise endpoint only
+    auto-provisions PolyAI staff; anyone else who signs in at that region's Auth0
+    tenant without having been invited into an account gets a 403. Turn that into a
+    ValueError that says what to do, and let every other error propagate.
+
+    Args:
+        api: The platform API interface.
+        region: The region the user signed in to.
+        jwt_token: The JWT from the device flow.
+        self_serve_hint: How to reach the self-serve studio region from this command,
+            e.g. "run `poly apikey --region studio`".
+    """
+    try:
+        return api.authorise(region=region, jwt_token=jwt_token)
+    except requests.HTTPError as e:
+        if region != "studio" and e.response is not None and e.response.status_code == 403:
+            raise ValueError(
+                f"No account is provisioned for you on {region}. Enterprise accounts are"
+                " set up by PolyAI - contact your PolyAI representative, or"
+                f" {self_serve_hint} to create a self-serve studio account."
+            ) from e
+        raise
+
+
 def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
     """Authorise the user, fetch or create a PAT, and save it to the credential file.
 
@@ -47,7 +78,16 @@ def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
     api_handler = AgentStudioInterface()
 
     info("Setting up your account...")
-    api_handler.authorise(region=region, jwt_token=jwt_access_token)
+    try:
+        authorise_or_explain(
+            api_handler,
+            region,
+            jwt_access_token,
+            self_serve_hint="run `poly login --region studio`",
+        )
+    except ValueError as e:
+        error(str(e))
+        sys.exit(1)
 
     info("Fetching API key...")
     user_pats = api_handler.get_pats(region=region, jwt_token=jwt_access_token)
