@@ -60,11 +60,14 @@ from poly.cli_commands.update import (
     _record_update_check,
     _update_check_is_due,
     _update_check_suppressed,
+    display_shadow_warning,
     display_update_message,
+    shadow_warning_text,
 )
 from poly.cli_commands.utils import CompletionCommand
 from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
+from poly.utils.installs import OtherInstall
 
 
 def _run_result(returncode: int, stdout: str = "", stderr: str = ""):
@@ -6186,6 +6189,147 @@ class StartupUpdateMessageTest(unittest.TestCase):
         display_update_message()
 
         self.plain.assert_not_called()
+
+
+class StartupShadowWarningTest(unittest.TestCase):
+    """Tests for display_shadow_warning, run at the start of every command, 'poly update' included."""
+
+    OTHER = OtherInstall(path="/opt/homebrew/bin/poly", version="0.7.3")
+
+    def setUp(self):
+        """Open every gate so the warning would be shown; each test closes one of them."""
+        self.shadowing_install = self._patch(
+            "poly.cli_commands.update.shadowing_install", return_value=self.OTHER
+        )
+        self.already_warned = self._patch(
+            "poly.cli_commands.update.already_warned", return_value=False
+        )
+        # Stubbed so no test can ever write to the real ~/.poly.
+        self.mark_warned = self._patch("poly.cli_commands.update.mark_warned")
+        self._patch("poly.cli_commands.update.get_package_version", return_value="0.71.0")
+        self._patch("sys.argv", ["/Users/you/.local/bin/poly", "project", "list"])
+        # display_shadow_warning imports warning() lazily, so the console module is the seam.
+        self.warning = self._patch("poly.output.console.warning")
+        patcher = patch("sys.stdout", _FakeStdout(True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = patch.dict(os.environ, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _patch(self, target: str, *args, **kwargs) -> MagicMock:
+        patcher = patch(target, *args, **kwargs)
+        mock = patcher.start()
+        self.addCleanup(patcher.stop)
+        return mock
+
+    def _message(self) -> str:
+        return " ".join(call.args[0] for call in self.warning.call_args_list)
+
+    def test_warns_at_a_terminal_and_stamps_the_session(self):
+        display_shadow_warning()
+
+        message = self._message()
+        self.assertIn(
+            "Another poly comes first on your PATH: /opt/homebrew/bin/poly (0.7.3)", message
+        )
+        self.assertIn("/Users/you/.local/bin/poly (0.71.0)", message)
+        self.assertIn("put /Users/you/.local/bin earlier on PATH", message)
+        self.mark_warned.assert_called_once_with(self.OTHER)
+
+    def test_paths_with_brackets_are_not_rich_markup(self):
+        self.shadowing_install.return_value = OtherInstall(path="/tmp/[old]/poly", version="0.7.3")
+
+        display_shadow_warning()
+
+        self.assertIn("\\[old]", self._message())
+
+    def test_silent_when_not_shadowed(self):
+        self.shadowing_install.return_value = None
+
+        display_shadow_warning()
+
+        self.warning.assert_not_called()
+        self.mark_warned.assert_not_called()
+
+    def test_silent_under_json(self):
+        display_shadow_warning(output_json=True)
+
+        self.warning.assert_not_called()
+        self.shadowing_install.assert_not_called()
+
+    def test_silent_when_not_a_tty(self):
+        with patch("sys.stdout", _FakeStdout(False)):
+            display_shadow_warning()
+
+        self.warning.assert_not_called()
+
+    def test_silent_in_ci(self):
+        with patch.dict(os.environ, {"CI": "true"}):
+            display_shadow_warning()
+
+        self.warning.assert_not_called()
+
+    def test_silent_with_opt_out(self):
+        with patch.dict(os.environ, {"POLY_NO_UPDATE_CHECK": "1"}):
+            display_shadow_warning()
+
+        self.warning.assert_not_called()
+
+    def test_silent_when_already_warned_this_session(self):
+        self.already_warned.return_value = True
+
+        display_shadow_warning()
+
+        self.warning.assert_not_called()
+        self.mark_warned.assert_not_called()
+
+    def test_never_raises(self):
+        self.shadowing_install.side_effect = RuntimeError("boom")
+
+        display_shadow_warning()
+
+        self.warning.assert_not_called()
+
+    def test_never_raises_when_printing_fails(self):
+        self.warning.side_effect = RuntimeError("boom")
+
+        display_shadow_warning()
+
+    def test_windows_wording_names_the_path_variable(self):
+        with patch("poly.cli_commands.update.os.name", "nt"):
+            text = shadow_warning_text(self.OTHER, "C:\\Users\\you\\.local\\bin\\poly", "0.71.0")
+
+        self.assertIn("PATH environment variable", text)
+
+    def test_poly_update_warns(self):
+        """The hook sits outside the 'skip for poly update' guard around the update notice."""
+        with (
+            patch.object(UpdateCommand, "update"),
+            patch("poly.cli.display_update_message") as update_message,
+        ):
+            AgentStudioCLI().main(["update", "--check"])
+
+        self.assertIn("Another poly comes first", self._message())
+        update_message.assert_not_called()
+
+    def test_poly_version_does_not_warn(self):
+        """argparse prints the version and exits before the hook; scripts parse that output."""
+        stdout = StringIO()
+        with patch("sys.stdout", stdout), self.assertRaises(SystemExit) as exit_info:
+            AgentStudioCLI().main(["--version"])
+
+        self.assertEqual(exit_info.exception.code, 0)
+        self.warning.assert_not_called()
+        self.assertNotIn("Another poly", stdout.getvalue())
+
+    def test_poly_help_does_not_warn(self):
+        stdout = StringIO()
+        with patch("sys.stdout", stdout), self.assertRaises(SystemExit) as exit_info:
+            AgentStudioCLI().main(["--help"])
+
+        self.assertEqual(exit_info.exception.code, 0)
+        self.warning.assert_not_called()
 
 
 class UpdateCheckSuppressionTest(unittest.TestCase):

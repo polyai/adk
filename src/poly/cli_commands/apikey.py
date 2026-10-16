@@ -34,6 +34,7 @@ from poly.utils.credentials import (
     save_api_key_credential_file,
 )
 from poly.utils.env_profile import EnvVarConflict, ProfileTarget, write_env_var
+from poly.utils.installs import shadow_json_field
 
 DEFAULT_KEY_NAME = "cli-generated-key"
 ACCOUNT_POLL_ATTEMPTS = 20
@@ -116,6 +117,7 @@ def _fail(exc: Exception, step: str, exit_code: int, *, output_json: bool, verbo
         payload = {"success": False, "error": message, "step": step}
         if isinstance(exc, MultipleAccountsError):
             payload["accounts"] = exc.accounts
+        payload.update(shadow_json_field())
         json_print(payload)
     else:
         from poly.output.console import error
@@ -281,6 +283,7 @@ def _print_json(
             "profile_shell": target.shell,
             "key_active": key_active,
             "next_step_url": NEXT_STEP_URL,
+            **shadow_json_field(),
         }
     )
 

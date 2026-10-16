@@ -29,6 +29,8 @@ Confirm it worked:
 poly --help
 ```
 
+If you had an older `poly` installed before (Homebrew, pip), plain `poly` may still run that one. The new install says so the first time you run a command in a terminal; see [Another poly comes first on your PATH](../reference/cli/setup.md#another-poly-comes-first-on-your-path).
+
 !!! tip "Optional — voice calling"
 
     To call your agent with [`poly call`](../reference/cli/call.md), install the `call` extra instead. It adds the audio and WebRTC dependencies, which are left out of the default install to keep it small:

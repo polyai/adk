@@ -41,6 +41,20 @@ The four steps, in order:
 
     Because every step checks whether it is already done, `poly setup` doubles as a repair command — re-run it after installing Node, switching shells, or clearing credentials, and only the missing pieces are redone.
 
+## "Another poly comes first on your PATH"
+
+If an older `poly` sits earlier on your `PATH` than the one you just installed (a Homebrew or pip install from before, for example), typing `poly` keeps running the old one. When the `poly` that is running notices this, the first command in each terminal session prints:
+
+~~~text
+Warning: Another poly comes first on your PATH: /opt/homebrew/bin/poly (0.7.3).
+This command ran /Users/you/.local/bin/poly (0.71.0); plain 'poly' runs the first one.
+Remove the older install, or put /Users/you/.local/bin earlier on PATH.
+~~~
+
+Do one of the two things it suggests, then open a new terminal. The warning shows once per terminal session (a new tab shows it again until the PATH is fixed), never under `--json`, in CI, when output is not a terminal, or with `POLY_NO_UPDATE_CHECK=1`. `poly --version` and `--help` never print it. [`poly apikey`](./apikey.md) and `poly update` also carry the fact in `--json` as `shadowed_by`, so an AI coding assistant can act on it.
+
+The check can only run inside the `poly` that is executing: if the older install is the one plain `poly` runs, it cannot warn. `which -a poly` (or `where poly` on Windows) lists every install in `PATH` order.
+
 ## Related pages
 
 - [Tooling](../../tooling/tooling.md) — the coding-agent integrations the skills step installs into

@@ -39,6 +39,7 @@ Assume `poly` is installed. If a command fails because it isn't:
 
 - **Install** → `uv tool install polyai-adk` (install `uv` first if needed: `curl -LsSf https://astral.sh/uv/install.sh | sh`)
 - **Update to latest** → `uv tool upgrade polyai-adk`
+- **Troubleshooting: "Another poly comes first on your PATH"** (or `shadowed_by` in `--json` output from `poly apikey` / `poly update`) → an older install is what plain `poly` runs. Run the commands as `uvx --from polyai-adk poly ...` instead, or ask the user to remove the older install (`which -a poly` lists them in `PATH` order).
 
 ## 2. Authentication
 

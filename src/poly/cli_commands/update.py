@@ -27,9 +27,23 @@ from poly.cli_commands.shared import (
 )
 from poly.cli_commands.skills import node_gate_reason, update_skills
 from poly.constants import POLY_HOME_DIR
-from poly.output.json_output import json_print
+from poly.output.json_output import json_print as _plain_json_print
+from poly.utils.installs import (
+    OtherInstall,
+    already_warned,
+    mark_warned,
+    running_binary,
+    shadow_json_field,
+    shadowing_install,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def json_print(data: dict) -> None:
+    """Print an ``update`` JSON object, adding ``shadowed_by`` while another ``poly`` is first on PATH."""
+    _plain_json_print({**data, **shadow_json_field()})
+
 
 UPDATE_CHECK_INTERVAL_SECONDS = 12 * 60 * 60
 UPDATE_CHECK_STAMP_FILE = Path(POLY_HOME_DIR) / ".update_check"
@@ -84,6 +98,10 @@ class UpdateCommand(BaseCommand):
                 "The CLI also notices new releases on its own, at most once every 12\n"
                 "hours. Set POLY_NO_UPDATE_CHECK=1 to silence that; it is already\n"
                 "suppressed in CI, for --json, and when output is not a terminal.\n"
+                "\n"
+                "If a different poly comes first on your PATH, the first command in a\n"
+                "terminal session says so (the same suppression applies), and every\n"
+                "--json object carries shadowed_by: {path, version} until it is fixed.\n"
             ),
         )
 
@@ -533,3 +551,51 @@ def display_update_message(output_json: bool = False) -> None:
         plain("[muted]Run 'poly update' to install it.[/muted]\n")
     except Exception as e:
         logger.debug(f"Update check failed: {e}")
+
+
+def shadow_warning_text(other: OtherInstall, running_path: str, running_version: str) -> str:
+    """Word the PATH shadow warning, with the fix phrased for the platform."""
+    running_dir = os.path.dirname(running_path)
+    if os.name == "nt":
+        fix = (
+            f"Remove the older install, or move {running_dir} earlier in your PATH "
+            "environment variable."
+        )
+    else:
+        fix = f"Remove the older install, or put {running_dir} earlier on PATH."
+    return (
+        f"Another poly comes first on your PATH: {other.path} ({other.version}).\n"
+        f"This command ran {running_path} ({running_version}); plain 'poly' runs the first one.\n"
+        f"{fix}"
+    )
+
+
+def display_shadow_warning(output_json: bool = False) -> None:
+    """Warn, once per terminal session, when a different ``poly`` comes first on PATH.
+
+    Runs on every command, including ``poly update``, so the developer sees it above
+    whatever fails next. Same suppression as the update notice (``--json``, no
+    terminal, CI, opt-out), because the ``--json`` objects carry the fact instead.
+
+    Never raises: a failure here must not break the command the user actually ran.
+
+    Args:
+        output_json: True if the command is producing machine-readable output.
+    """
+    try:
+        if _update_check_suppressed(output_json):
+            return
+        other = shadowing_install()
+        if other is None or already_warned(other):
+            return
+
+        from rich.markup import escape
+
+        from poly.output.console import warning
+
+        warning(
+            escape(shadow_warning_text(other, running_binary().display_path, get_package_version()))
+        )
+        mark_warned(other)
+    except Exception as e:
+        logger.debug(f"PATH shadow check failed: {e}")

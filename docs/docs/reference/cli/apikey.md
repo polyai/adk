@@ -63,6 +63,23 @@ Install [uv](https://docs.astral.sh/uv/) with `winget install astral-sh.uv`. If 
 }
 ~~~
 
+While a different `poly` comes first on your `PATH`, every `--json` object (success and failure) also carries `shadowed_by`; the key is absent otherwise. `poly update --json` carries the same field. The human-readable warning ("Another poly comes first on your PATH") is printed once per terminal session instead; see [`poly setup`](./setup.md#another-poly-comes-first-on-your-path).
+
+| Field | Commands | Meaning |
+|---|---|---|
+| `shadowed_by.path` | `apikey`, `update` | The `poly` that plain `poly` runs: the first one on `PATH`. |
+| `shadowed_by.version` | `apikey`, `update` | What that binary prints for `--version`, or `"unknown"` if it cannot be read. |
+
+~~~json
+{
+  "success": true,
+  "...": "...",
+  "shadowed_by": {"path": "/opt/homebrew/bin/poly", "version": "0.7.3"}
+}
+~~~
+
+If you see it, run the commands as `uvx --from polyai-adk poly ...` or by full path, or remove the older install.
+
 On failure, stdout is `{"success": false, "error": "...", "step": "..."}`. `step` is one of `start`, `signin`, `authorise`, `account`, `key`, `credentials`, `activation`, `env`. When the failure is more than one account, the object also has `accounts`:
 
 ~~~json

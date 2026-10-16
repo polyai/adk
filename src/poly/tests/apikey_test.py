@@ -16,8 +16,10 @@ from poly.auth.device_flow import DeviceFlowError
 from poly.cli_commands.apikey import NEXT_STEP_URL, ApiKeyCommand
 from poly.cli_commands.base import GETTING_STARTED_GROUP
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
+from poly.utils import installs
 from poly.utils.apikey_session import CachedSession
 from poly.utils.env_profile import EnvVarConflict, ProfileTarget
+from poly.utils.installs import OtherInstall
 
 # Distinctive, so a test can assert it never reaches any output.
 FAKE_JWT = "jwt-fresh-5e1f0c7a"
@@ -864,3 +866,57 @@ class CommandRegistration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShadowedByField(ApiKeyTestCase):
+    """Tests for the shadowed_by field that --json carries while another poly is first on PATH."""
+
+    OTHER = OtherInstall(path="/opt/homebrew/bin/poly", version="0.7.3")
+
+    def setUp(self):
+        super().setUp()
+        installs._shadow_field = None
+        self.shadowing_install = patch(
+            "poly.utils.installs.shadowing_install", return_value=self.OTHER
+        ).start()
+        self.addCleanup(patch.stopall)
+
+    def _json(self, **kwargs) -> dict:
+        stdout, _, _ = self.run_apikey(region="studio", output_json=True, **kwargs)
+        return json.loads(stdout)
+
+    def test_present_on_success(self):
+        payload = self._json()
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(
+            payload["shadowed_by"], {"path": "/opt/homebrew/bin/poly", "version": "0.7.3"}
+        )
+
+    def test_present_on_failure(self):
+        self.mocks["signin"].side_effect = DeviceFlowError("denied")
+
+        payload = self._json()
+
+        self.assertFalse(payload["success"])
+        self.assertEqual(payload["shadowed_by"]["path"], "/opt/homebrew/bin/poly")
+
+    def test_absent_when_not_shadowed(self):
+        installs._shadow_field = None
+        self.shadowing_install.return_value = None
+
+        self.assertNotIn("shadowed_by", self._json())
+
+    def test_present_on_a_second_run_in_the_same_session(self):
+        """The human warning is once per terminal session; the field never is."""
+        installs.mark_warned(self.OTHER)
+
+        self.assertIn("shadowed_by", self._json())
+        self.assertIn("shadowed_by", self._json())
+        self.shadowing_install.assert_called_once()
+
+    def test_absent_from_plain_output(self):
+        stdout, _, _ = self.run_apikey(region="studio", output_json=False)
+
+        self.assertNotIn("shadowed_by", stdout)
+        self.assertNotIn("Another poly", stdout)
