@@ -6231,12 +6231,14 @@ class StartupShadowWarningTest(unittest.TestCase):
     def test_warns_at_a_terminal_and_stamps_the_session(self):
         display_shadow_warning()
 
+        # abspath() rewrites the drive on Windows, so compare against what it produces.
+        running = os.path.abspath("/Users/you/.local/bin/poly")
         message = self._message()
         self.assertIn(
             "Another poly comes first on your PATH: /opt/homebrew/bin/poly (0.7.3)", message
         )
-        self.assertIn("/Users/you/.local/bin/poly (0.71.0)", message)
-        self.assertIn("put /Users/you/.local/bin earlier on PATH", message)
+        self.assertIn(f"{running} (0.71.0)", message)
+        self.assertIn(f"put {os.path.dirname(running)} earlier on PATH", message)
         self.mark_warned.assert_called_once_with(self.OTHER)
 
     def test_paths_with_brackets_are_not_rich_markup(self):

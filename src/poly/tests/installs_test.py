@@ -145,6 +145,7 @@ class ShadowingInstallTest(InstallsTestCase):
 
 
 class PathCandidatesTest(InstallsTestCase):
+    @unittest.skipIf(os.name == "nt", "Windows has no execute bit; every existing file is runnable")
     def test_candidates_skip_non_executable_and_missing(self):
         plain_dir = self.root / "plain"
         plain_dir.mkdir()
