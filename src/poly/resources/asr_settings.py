@@ -190,9 +190,6 @@ class AsrSettings(YamlResource):
                 allow_on_first_turn=barge_in_config.get("allowedFirstTurn", False),
                 max_per_call=barge_in_config.get("maxPerCall"),
             )
-        elif "bargeIn" in voice.get("asrSettings", {}):
-            # Without a barge-in config the runtime still follows the legacy flag.
-            barge_in = BargeIn(enabled=voice["asrSettings"]["bargeIn"])
 
         return {
             "asr_settings": cls(

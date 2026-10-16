@@ -9,6 +9,7 @@ disclaimer_messages:
   enabled: true
   language_code: en-GB
 filler_phrases:
+  enabled: true
   phrases:
   - One moment...
   - Just a second...
@@ -16,5 +17,6 @@ filler_phrases:
   initial_interval_seconds: 2.5
   interval_seconds: 5
 background_ambience:
+  enabled: false
   preset: office-ambiance
   loudness: -50

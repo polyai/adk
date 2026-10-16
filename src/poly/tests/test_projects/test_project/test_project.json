@@ -1207,6 +1207,7 @@
       "voice_filler_phrases": {
         "resource_id": "voice_filler_phrases",
         "name": "voice_filler_phrases",
+        "enabled": true,
         "phrases": [
           "One moment...",
           "Just a second..."
@@ -1221,6 +1222,7 @@
         "resource_id": "voice_background_ambience",
         "name": "voice_background_ambience",
         "preset": "office-ambiance",
+        "enabled": false,
         "loudness": -50
       }
     },

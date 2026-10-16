@@ -7389,6 +7389,7 @@ class VoiceFillerPhrasesTests(unittest.TestCase):
     """Tests for the filler_phrases section of voice/configuration.yaml."""
 
     YAML = {
+        "enabled": True,
         "phrases": ["One moment..."],
         "randomize": True,
         "initial_interval_seconds": 2.5,
@@ -7414,7 +7415,7 @@ class VoiceFillerPhrasesTests(unittest.TestCase):
     def test_unknown_key_raises(self):
         """A misspelt key is an error, not silently dropped."""
         with self.assertRaises(ValueError) as cm:
-            self._from_yaml({"phrase": ["Hi"]})
+            self._from_yaml({"enabled": True, "phrase": ["Hi"]})
         self.assertIn("phrase", str(cm.exception))
 
     def test_validate_rejects_out_of_range_values(self):
@@ -7422,7 +7423,7 @@ class VoiceFillerPhrasesTests(unittest.TestCase):
         cases = {
             "initial_interval_seconds": {"initial_interval_seconds": 0.2},
             "interval_seconds": {"interval_seconds": 0.5},
-            "at least one phrase": {"phrases": [" "]},
+            "at least one phrase": {"enabled": True, "phrases": [" "]},
         }
         for expected, yaml_dict in cases.items():
             with self.subTest(expected):
@@ -7468,26 +7469,6 @@ class VoiceFillerPhrasesTests(unittest.TestCase):
         result = VoiceFillerPhrases.from_projection(projection)
         self.assertEqual(result["voice_filler_phrases"].to_yaml_dict(), self.YAML)
 
-    def test_filler_phrases_that_are_off_pull_no_section(self):
-        """Filler phrases that are off are written by leaving the section out."""
-        projection = {
-            "channels": {
-                "voice": {
-                    "silenceFillerUtterances": {
-                        "enabled": False,
-                        "utterances": [{"message": "One moment..."}],
-                    }
-                }
-            }
-        }
-        self.assertEqual(VoiceFillerPhrases.from_projection(projection), {})
-
-    def test_enabled_is_not_written(self):
-        """The section only exists while filler phrases are on, so it has no enabled key."""
-        self.assertNotIn("enabled", self._from_yaml(self.YAML).to_yaml_dict())
-        with self.assertRaises(ValueError):
-            self._from_yaml({**self.YAML, "enabled": True})
-
     def test_unset_in_projection_yields_nothing(self):
         """No silenceFillerUtterances, or no channel access, pulls no section."""
         self.assertEqual(VoiceFillerPhrases.from_projection({"channels": {"voice": {}}}), {})
@@ -7497,7 +7478,7 @@ class VoiceFillerPhrasesTests(unittest.TestCase):
 class VoiceBackgroundAmbienceTests(unittest.TestCase):
     """Tests for the background_ambience section of voice/configuration.yaml."""
 
-    YAML = {"preset": "office-ambiance", "loudness": -40}
+    YAML = {"enabled": True, "preset": "office-ambiance", "loudness": -40}
 
     def _from_yaml(self, yaml_dict: dict) -> VoiceBackgroundAmbience:
         return VoiceBackgroundAmbience.from_yaml_dict(
@@ -7530,7 +7511,7 @@ class VoiceBackgroundAmbienceTests(unittest.TestCase):
     def test_validate_requires_preset(self):
         """A section without a preset is rejected."""
         with self.assertRaises(ValueError) as cm:
-            self._from_yaml({"loudness": -40}).validate()
+            self._from_yaml({"enabled": True}).validate()
         self.assertIn("preset", str(cm.exception))
 
     def test_validate_warns_on_unknown_preset(self):
@@ -7548,29 +7529,18 @@ class VoiceBackgroundAmbienceTests(unittest.TestCase):
         self.assertEqual(proto.preset, "office-ambiance")
         self.assertEqual(proto.loudness, -40)
 
-    def test_enabled_is_not_written(self):
-        """The section only exists while ambience is on, so it has no enabled key."""
-        self.assertNotIn("enabled", self._from_yaml(self.YAML).to_yaml_dict())
-        with self.assertRaises(ValueError):
-            self._from_yaml({**self.YAML, "enabled": True})
-
-    def test_switched_off_turns_ambience_off_with_the_same_preset(self):
-        """Removing the section sends enabled: false with the old preset and loudness."""
-        proto = self._from_yaml(self.YAML).switched_off().build_update_proto().ambience
-        self.assertFalse(proto.enabled)
-        self.assertEqual(proto.preset, "office-ambiance")
-        self.assertEqual(proto.loudness, -40)
+    def test_ambience_that_is_off_is_pulled_with_enabled_false(self):
+        """Ambience that exists but is off keeps its preset and loudness in the file."""
+        off = {**self.YAML, "enabled": False}
+        projection = {"channels": {"voice": {"ambience": dict(off)}}}
+        result = VoiceBackgroundAmbience.from_projection(projection)
+        self.assertEqual(result["voice_background_ambience"].to_yaml_dict(), off)
 
     def test_from_projection(self):
-        """Ambience that is on maps to the background_ambience section."""
-        projection = {"channels": {"voice": {"ambience": {"enabled": True, **self.YAML}}}}
+        """ambience maps to the background_ambience section."""
+        projection = {"channels": {"voice": {"ambience": dict(self.YAML)}}}
         result = VoiceBackgroundAmbience.from_projection(projection)
         self.assertEqual(result["voice_background_ambience"].to_yaml_dict(), self.YAML)
-
-    def test_ambience_that_is_off_pulls_no_section(self):
-        """Ambience that is off is written by leaving the section out."""
-        projection = {"channels": {"voice": {"ambience": {"enabled": False, **self.YAML}}}}
-        self.assertEqual(VoiceBackgroundAmbience.from_projection(projection), {})
 
     def test_unset_in_projection_yields_nothing(self):
         """No ambience, or no channel access, pulls no section."""
@@ -13561,11 +13531,11 @@ class AsrSettingsFromProjection(unittest.TestCase):
         asr = AsrSettings.from_projection(projection)["asr_settings"]
         self.assertFalse(asr.barge_in.enabled)
 
-    def test_legacy_barge_in_used_without_barge_in_config(self):
-        """Without bargeInConfig, asrSettings.bargeIn is what runs."""
+    def test_no_barge_in_config_pulls_no_section(self):
+        """Without bargeInConfig the platform default applies, so nothing is written."""
         projection = {"channels": {"voice": {"asrSettings": {"bargeIn": True}}}}
         asr = AsrSettings.from_projection(projection)["asr_settings"]
-        self.assertEqual(asr.barge_in, BargeIn(enabled=True))
+        self.assertIsNone(asr.barge_in)
 
     def test_pull_then_push_round_trips(self):
         """A pulled file, read back unchanged, sends no commands."""

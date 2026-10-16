@@ -514,10 +514,10 @@ class ChatStylePrompt(ChannelStylePrompt):
 class VoiceFillerPhrases(MultiResourceYamlResource):
     """Phrases the agent says while the caller waits on a slow turn.
 
-    Pushed as the voice channel's silence filler utterances. The section exists only while
-    they're on; removing it resets them to the platform default, which is off.
+    Pushed as the voice channel's silence filler utterances. Removing the section resets them.
     """
 
+    enabled: bool = False
     phrases: list[str] = field(default_factory=lambda: list(DEFAULT_FILLER_PHRASES))
     randomize: bool = True
     initial_interval_seconds: float = 2.5
@@ -526,6 +526,7 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
     top_level_name: ClassVar[str] = "filler_phrases"
     _singleton: ClassVar[bool] = True
     yaml_keys: ClassVar[tuple[str, ...]] = (
+        "enabled",
         "phrases",
         "randomize",
         "initial_interval_seconds",
@@ -538,6 +539,7 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
 
     def to_yaml_dict(self) -> dict:
         return {
+            "enabled": self.enabled,
             "phrases": list(self.phrases),
             "randomize": self.randomize,
             "initial_interval_seconds": self.initial_interval_seconds,
@@ -563,12 +565,13 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
             return {}
 
         filler = projection.get("channels", {}).get("voice", {}).get("silenceFillerUtterances")
-        if not filler or not filler.get("enabled"):
+        if not filler:
             return {}
         return {
             "voice_filler_phrases": cls(
                 resource_id="voice_filler_phrases",
                 name="voice_filler_phrases",
+                enabled=filler.get("enabled", False),
                 phrases=[
                     utterance.get("message", "") for utterance in filler.get("utterances", [])
                 ],
@@ -579,8 +582,8 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
         }
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
-        if not any(phrase.strip() for phrase in self.phrases):
-            raise ValueError("filler_phrases needs at least one phrase.")
+        if self.enabled and not any(phrase.strip() for phrase in self.phrases):
+            raise ValueError("filler_phrases needs at least one phrase when enabled.")
         if self.initial_interval_seconds < FILLER_INITIAL_INTERVAL_MIN_SECONDS:
             raise ValueError(
                 "filler_phrases.initial_interval_seconds must be at least "
@@ -610,7 +613,7 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
     def build_update_proto(self) -> VoiceChannel_UpdateSilenceFillerUtterances:
         return VoiceChannel_UpdateSilenceFillerUtterances(
             silence_filler_utterances=FillerUtterances(
-                enabled=True,
+                enabled=self.enabled,
                 utterances=[FillerUtterances.Utterance(message=phrase) for phrase in self.phrases],
                 randomize=self.randomize,
                 initial_interval_seconds=self.initial_interval_seconds,
@@ -634,26 +637,24 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
 class VoiceBackgroundAmbience(MultiResourceYamlResource):
     """Background sound played under the agent's speech.
 
-    The section exists only while ambience is on. The platform has no command to clear
-    ambience, so a removed section is pushed as an update that turns it off (see
-    prepush.switch_off_removed_ambience).
+    The platform has no command to clear ambience, so once it exists it can only be turned
+    on or off. Pushing with the section removed is refused (see AgentStudioProject.push_project).
     """
 
     preset: str = ""
+    enabled: bool = False
     loudness: float = -50
-    # Only False on the update built to turn ambience off; never read from or written to YAML.
-    enabled: bool = field(default=True, init=False, repr=False)
 
     top_level_name: ClassVar[str] = "background_ambience"
     _singleton: ClassVar[bool] = True
-    yaml_keys: ClassVar[tuple[str, ...]] = ("preset", "loudness")
+    yaml_keys: ClassVar[tuple[str, ...]] = ("enabled", "preset", "loudness")
 
     @cached_property
     def file_path(self) -> str:
         return os.path.join(_config_path("voice"), self.top_level_name)
 
     def to_yaml_dict(self) -> dict:
-        return {"preset": self.preset, "loudness": self.loudness}
+        return {"enabled": self.enabled, "preset": self.preset, "loudness": self.loudness}
 
     @classmethod
     def from_yaml_dict(
@@ -674,12 +675,13 @@ class VoiceBackgroundAmbience(MultiResourceYamlResource):
             return {}
 
         ambience = projection.get("channels", {}).get("voice", {}).get("ambience")
-        if not ambience or not ambience.get("enabled"):
+        if not ambience:
             return {}
         return {
             "voice_background_ambience": cls(
                 resource_id="voice_background_ambience",
                 name="voice_background_ambience",
+                enabled=ambience.get("enabled", False),
                 preset=ambience.get("preset", ""),
                 loudness=ambience.get("loudness", -50),
             )
@@ -700,17 +702,6 @@ class VoiceBackgroundAmbience(MultiResourceYamlResource):
                 f"background_ambience.preset '{self.preset}' is not a known preset "
                 f"({', '.join(AMBIENCE_PRESETS)}). Agent Studio may reject it."
             )
-
-    def switched_off(self) -> "VoiceBackgroundAmbience":
-        """Return a copy that turns ambience off, keeping its preset and loudness."""
-        off = VoiceBackgroundAmbience(
-            resource_id=self.resource_id,
-            name=self.name,
-            preset=self.preset,
-            loudness=self.loudness,
-        )
-        off.enabled = False
-        return off
 
     @property
     def command_type(self) -> str:

@@ -54,11 +54,12 @@ disclaimer_messages:
 
 ## Filler Phrases
 
-Phrases the agent says while the caller waits on a slow turn. They play while the section is in
-the file; removing it turns them off.
+Phrases the agent says while the caller waits on a slow turn. Optional; removing the section
+resets them to the platform default, which is off.
 
 ### Fields
-- **phrases** (list of strings): at least one.
+- **enabled** (bool)
+- **phrases** (list of strings): at least one when enabled.
 - **randomize** (bool): pick phrases in random order.
 - **initial_interval_seconds** (float, at least 0.5): wait before the first phrase.
 - **interval_seconds** (float, at least 1): wait between phrases.
@@ -66,6 +67,7 @@ the file; removing it turns them off.
 ### Example
 ```yaml
 filler_phrases:
+  enabled: true
   phrases:
     - One moment...
     - Just a second...
@@ -76,10 +78,11 @@ filler_phrases:
 
 ## Background Ambience
 
-Background sound played under the agent's speech. Plays while the section is in the file;
-removing it turns ambience off.
+Background sound played under the agent's speech. The section appears once ambience has been set.
+To turn it off, set `enabled: false`; the section can't be removed.
 
 ### Fields
+- **enabled** (bool)
 - **preset**: `office-ambiance`, `restaurant-ambiance` or `whitenoise-subtle`. An unknown preset
   is a warning, not an error.
 - **loudness** (dB, -70 to -20): Agent Studio shows -70 as volume 0 and -20 as volume 100.
@@ -87,6 +90,7 @@ removing it turns ambience off.
 ### Example
 ```yaml
 background_ambience:
+  enabled: false
   preset: office-ambiance
   loudness: -50
 ```
@@ -106,6 +110,7 @@ disclaimer_messages:
   enabled: true
   language_code: en-GB
 filler_phrases:
+  enabled: true
   phrases:
     - One moment...
     - Just a second...
@@ -113,6 +118,7 @@ filler_phrases:
   initial_interval_seconds: 2.5
   interval_seconds: 5
 background_ambience:
+  enabled: false
   preset: office-ambiance
   loudness: -50
 ```

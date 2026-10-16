@@ -32,7 +32,6 @@ from poly.resources import (
     Variable,
     Variant,
     VariantAttribute,
-    VoiceBackgroundAmbience,
 )
 from poly.resources.test_suite import (
     TestCaseApiOperationMock,
@@ -287,20 +286,6 @@ def push_asr_settings_by_section(
     """
     new_resources.pop(AsrSettings, None)
     updated_resources.pop(AsrSettings, None)
-
-
-def switch_off_removed_ambience(
-    updated_resources: ResourceMap, deleted_resources: ResourceMap
-) -> None:
-    """Turn a removed background_ambience section into an update that turns ambience off.
-
-    Agent Studio has no command to clear ambience.
-    """
-    removed = deleted_resources.pop(VoiceBackgroundAmbience, {})
-    for resource_id, ambience in removed.items():
-        updated_resources.setdefault(VoiceBackgroundAmbience, {})[resource_id] = (
-            ambience.switched_off()
-        )
 
 
 def prune_cascade_deleted_flow_children(deleted_resources: ResourceMap) -> None:
