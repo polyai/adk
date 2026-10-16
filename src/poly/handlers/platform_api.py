@@ -16,7 +16,7 @@ from ruamel.yaml import YAML
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
 from poly.handlers.utils import camel_to_snake_keys
-from poly.utils import any_credentials_exist, retrieve_api_key
+from poly.utils import raise_if_no_credentials, retrieve_api_key
 
 logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/adk/v1/accounts"
@@ -226,9 +226,8 @@ class PlatformAPIHandler:
                 the original ordering.
         """
 
-        if not any_credentials_exist():
-            # Will raise a ValueError with instructions on how to set the API key
-            retrieve_api_key(region="studio")
+        # Raises a ValueError with instructions on how to get an ADK key
+        raise_if_no_credentials()
 
         accessible: set[str] = set()
 

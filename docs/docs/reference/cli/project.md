@@ -22,7 +22,7 @@ Run with no arguments and `poly project list` walks you through interactive drop
 
 | Flag | Description |
 |---|---|
-| `--region` | Region for the Agent Studio project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. |
+| `--region` | Region for the Agent Studio project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
 | `--account_id` | Account ID for the Agent Studio project. |
 
 !!! info "`--json` requires explicit flags for `poly project list`"
@@ -68,7 +68,7 @@ After the project is created in Agent Studio, `poly project create` automaticall
 | Flag | Description |
 |---|---|
 | `--base-path` | Base path to initialize the project. Defaults to the current working directory. |
-| `--region` | Region for the new project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. |
+| `--region` | Region for the new project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
 | `--account_id` | Account ID to create the project under. |
 | `--name` | Display name for the new project. |
 | `--id`, `--project_id` | Optional slug/ID for the project. If omitted, the platform generates one. |
@@ -103,7 +103,7 @@ Run with no arguments and `poly project delete` opens an interactive picker to s
 
 | Flag | Description |
 |---|---|
-| `--region` | Region of the project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. |
+| `--region` | Region of the project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
 | `--account_id` | Account ID the project exists under. |
 | `--project_id` | Project ID to delete. |
 | `-f`, `--force` | Skip the confirmation prompt. |
@@ -142,7 +142,7 @@ Run with no arguments and `poly project duplicate` walks you through interactive
 
 | Flag | Description |
 |---|---|
-| `--region` | Region of the project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. |
+| `--region` | Region of the project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
 | `--account_id` | Account ID the project exists under. |
 | `--project_id` | Project ID to duplicate. |
 | `--name` | Name for the duplicated project. |

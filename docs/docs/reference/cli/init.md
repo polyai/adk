@@ -13,6 +13,7 @@ Examples:
 poly init
 poly init --account_id 123 --project_id my_project
 poly init --region us-1 --account_id 123 --project_id my_project
+poly init --region uk
 poly init --base-path /path/to/projects
 poly init --format
 ~~~
@@ -41,10 +42,14 @@ Pass any combination of `--region`, `--account_id`, and `--project_id` to skip t
 | Flag | Description |
 |---|---|
 | `--base-path` | Base path to initialize the project. Defaults to the current working directory. |
-| `--region` | Region for the Agent Studio project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. |
+| `--region` | Region for the Agent Studio project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
 | `--account_id` | Account ID for the Agent Studio project. |
 | `--project_id` | Project ID for the Agent Studio project. |
 | `--format` | Format resources after init. |
+
+!!! info "`poly init` needs an ADK key"
+
+    ADK commands authenticate with an ADK key, which [`poly login`](./login.md) creates and saves to `~/.poly/credentials.json` for the chosen region (CI or scripts can set `POLY_ADK_KEY` or `POLY_ADK_KEY_<REGION>` instead). If no key is found for the region, `poly init` says so, names any other regions you already hold a key for, and points out when `POLY_API_KEY` is set: that is an account API key for the PolyAI APIs, and the ADK does not read it.
 
 !!! info "`--json` requires explicit flags for `poly init`"
 

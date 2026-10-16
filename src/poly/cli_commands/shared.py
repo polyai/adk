@@ -6,6 +6,7 @@ import them directly (e.g. ``from poly.cli_commands.shared import load_project``
 Copyright PolyAI Limited
 """
 
+import argparse
 import base64
 import json
 import logging
@@ -13,6 +14,7 @@ import os
 import sys
 from typing import Any, Optional
 
+from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
 
@@ -26,6 +28,25 @@ PYPI_JSON_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
 # so waiting is expected. A check on the CLI's startup path would need to be far
 # shorter, since every command would pay it.
 PYPI_TIMEOUT_SECONDS = 10
+
+# Short region names accepted by every ``--region`` flag, resolved to the canonical
+# names in ``REGIONS`` before any command sees the value.
+REGION_ALIASES = {"uk": "uk-1", "us": "us-1", "eu": "euw-1"}
+REGION_ALIASES_HELP = "Aliases: uk→uk-1, us→us-1, eu→euw-1."
+
+
+def region_type(value: str) -> str:
+    """argparse ``type=`` for ``--region``: canonical names and the short aliases.
+
+    Case-insensitive. Anything else raises ``ArgumentTypeError`` so argparse
+    rejects it with a message that lists the canonical names.
+    """
+    canonical = REGION_ALIASES.get(value.lower(), value.lower())
+    if canonical not in REGIONS:
+        raise argparse.ArgumentTypeError(
+            f"'{value}' is not a region. Use one of: {', '.join(REGIONS)} (aliases: uk, us, eu)."
+        )
+    return canonical
 
 
 def read_project_config(base_path: str) -> AgentStudioProject | None:
