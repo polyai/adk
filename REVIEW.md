@@ -9,12 +9,14 @@ Report **blocking** issues first, then **nits**. Don't comment on what the ignor
 ## Blocking
 
 1. **Layering.** Anything that acts on a project must be callable as an `AgentStudioProject`
-   method, with its logic and validation there. User interaction stays in the CLI layer. Flag:
+   method, or a method on a project namespace such as `project.wren`, with its logic and
+   validation there. User interaction stays in the CLI layer. Flag:
    - API calls, file I/O, validation or merge logic in `src/poly/cli_commands/`. The fix is a
      project method, even a thin wrapper.
    - A project-scoped command calling `AgentStudioInterface` directly. Commands that run before a
      project exists (`login`, `apikey`, `setup`, `init`, `project list` / `create`) are allowed to.
-   - `print`, prompts, console output or `sys.exit` inside `project.py`. Project methods return
+   - `print`, prompts, console output or `sys.exit` inside `project.py` or a project namespace
+     module such as `wren.py`. Project methods return
      data or raise, and the command decides how to show it.
 2. **PR title type.** The title becomes the release. `feat:` for anything a user can see,
    including output or on-disk changes. `fix:`/`perf:` for patches. `chore:`/`docs:`/`ci:`/`build:`/

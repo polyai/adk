@@ -6,7 +6,8 @@ Rules for `src/poly/cli_commands/`. The repo-wide rules in the root `AGENTS.md` 
   listed in `COMMANDS` in `src/poly/cli.py`. Subcommands dispatch from `run` to one classmethod
   per action.
 - This layer handles user interaction only: parse arguments, prompt or confirm, call
-  `AgentStudioProject` methods, and print the result or exit. Get the project with
+  `AgentStudioProject` methods (or a project namespace such as `project.wren`), and print the
+  result or exit. Get the project with
   `load_project(args.path, output_json=args.json)` (`shared.py`).
 - Logic and validation belong in the project method, not here, so `project.<method>()` behaves the
   same without the CLI. If a command needs data or an action the project doesn't expose, add a
