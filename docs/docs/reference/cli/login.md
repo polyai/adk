@@ -15,6 +15,8 @@ For first-time onboarding, [`poly setup`](./setup.md) runs this same sign-in flo
 2. Opens a browser window for sign-in via the Auth0 device authorization flow.
 3. Fetches or creates an API key for your user and saves it to `~/.poly/credentials.json` under the chosen region.
 
+On an enterprise region (`us-1`, `uk-1`, `euw-1`) your account must already be provisioned by PolyAI. If it isn't, the command stops with a message saying so; `studio` is the self-serve region, where signing in creates your workspace.
+
 Run `poly login` once per region you need access to — credentials for multiple regions are stored side by side in the credential file.
 
 Examples:

@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
+from poly.cli_commands.auth import authorise_or_explain
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import get_package_version
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
@@ -471,21 +472,12 @@ class ApiKeyCommand(BaseCommand):
                 try:
                     step = "authorise"
                     _say(output_json, info, "Setting up your account...")
-                    try:
-                        auth_response = api.authorise(region=region, jwt_token=jwt_token)
-                    except requests.HTTPError as e:
-                        if (
-                            region != "studio"
-                            and e.response is not None
-                            and e.response.status_code == 403
-                        ):
-                            raise ValueError(
-                                f"No account is provisioned for you on {region}. Enterprise"
-                                " accounts are set up by PolyAI - contact your PolyAI"
-                                " representative, or run `poly apikey --region studio` to"
-                                " create a self-serve studio account."
-                            ) from e
-                        raise
+                    auth_response = authorise_or_explain(
+                        api,
+                        region,
+                        jwt_token,
+                        self_serve_hint="run `poly apikey --region studio`",
+                    )
 
                     step = "account"
                     try:
