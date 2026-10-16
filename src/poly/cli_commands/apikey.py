@@ -15,7 +15,6 @@ Copyright PolyAI Limited
 """
 
 import contextlib
-import os
 import sys
 import time
 from argparse import ArgumentParser, Namespace, _SubParsersAction
@@ -25,7 +24,6 @@ from typing import Callable
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.auth import authorise_or_explain
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
-from poly.cli_commands.shared import get_package_version
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
 from poly.handlers.interface import REGIONS, AgentStudioInterface
 from poly.utils import apikey_session
@@ -77,15 +75,6 @@ def _say(output_json: bool, fn: Callable[[str], None], message: str) -> None:
         fn(message)
 
 
-def _cli_identity() -> tuple[str, str]:
-    """The running poly's version and the path it was started from, for `--json`.
-
-    The path is the one the shell resolved (not symlink-resolved), so it can be
-    compared directly with `which -a poly` when an older install shadows this one.
-    """
-    return get_package_version(), os.path.abspath(sys.argv[0])
-
-
 def _account_summary(account: dict) -> dict:
     """The account fields worth showing someone choosing between accounts."""
     return {key: account.get(key) for key in ("id", "name", "role", "created_by")}
@@ -124,14 +113,7 @@ def _fail(exc: Exception, step: str, exit_code: int, *, output_json: bool, verbo
     if output_json:
         from poly.output.json_output import json_print
 
-        cli_version, cli_path = _cli_identity()
-        payload = {
-            "success": False,
-            "error": message,
-            "step": step,
-            "cli_version": cli_version,
-            "cli_path": cli_path,
-        }
+        payload = {"success": False, "error": message, "step": step}
         if isinstance(exc, MultipleAccountsError):
             payload["accounts"] = exc.accounts
         json_print(payload)
@@ -287,7 +269,6 @@ def _print_json(
     from poly.output.console import mask_secret
     from poly.output.json_output import json_print
 
-    cli_version, cli_path = _cli_identity()
     json_print(
         {
             "success": True,
@@ -299,8 +280,6 @@ def _print_json(
             "profile_path": str(target.path),
             "profile_shell": target.shell,
             "key_active": key_active,
-            "cli_version": cli_version,
-            "cli_path": cli_path,
             "next_step_url": NEXT_STEP_URL,
         }
     )

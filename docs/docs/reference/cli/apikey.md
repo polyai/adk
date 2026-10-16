@@ -59,23 +59,17 @@ Install [uv](https://docs.astral.sh/uv/) with `winget install astral-sh.uv`. If 
   "profile_path": "/home/user/.zshrc",
   "profile_shell": "zsh",
   "key_active": true,
-  "cli_version": "0.70.0",
-  "cli_path": "/home/user/.local/bin/poly",
   "next_step_url": "https://docs.poly.ai/dialog-rsn-1"
 }
 ~~~
 
-`cli_version` and `cli_path` name the `poly` that ran, so an agent can tell when an older install earlier on `PATH` answered instead of the one it just installed.
-
-On failure, stdout is `{"success": false, "error": "...", "step": "...", "cli_version": "...", "cli_path": "..."}`. `step` is one of `start`, `signin`, `authorise`, `account`, `key`, `credentials`, `activation`, `env`. When the failure is more than one account, the object also has `accounts`:
+On failure, stdout is `{"success": false, "error": "...", "step": "..."}`. `step` is one of `start`, `signin`, `authorise`, `account`, `key`, `credentials`, `activation`, `env`. When the failure is more than one account, the object also has `accounts`:
 
 ~~~json
 {
   "success": false,
   "error": "Multiple accounts found for studio: acc-1 (Team), acc-2 (Other). Re-run with --account-id <id> to pick one. Your sign-in is kept, so the re-run will not ask you to sign in again.",
   "step": "account",
-  "cli_version": "0.70.0",
-  "cli_path": "/home/user/.local/bin/poly",
   "accounts": [
     {"id": "acc-1", "name": "Team", "role": "Member", "created_by": "lead@example.com"},
     {"id": "acc-2", "name": "Other", "role": "Admin", "created_by": "someone@example.com"}

@@ -6,8 +6,6 @@ Copyright PolyAI Limited
 import contextlib
 import io
 import json
-import os
-import sys
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -180,8 +178,6 @@ class HappyPath(ApiKeyTestCase):
             "profile_path",
             "profile_shell",
             "key_active",
-            "cli_version",
-            "cli_path",
             "next_step_url",
         ):
             self.assertIn(key, payload)
@@ -658,40 +654,8 @@ class TokenNeverInOutput(ApiKeyTestCase):
             self.assertNotIn(FAKE_JWT, stdout + stderr)
 
 
-class VersionAndNextStep(ApiKeyTestCase):
-    """--json names the running poly, and the run ends with the next step."""
-
-    # Absolute on the host, so the expectation holds on Windows too.
-    CLI_PATH = os.path.abspath("/opt/tools/bin/poly")
-
-    def setUp(self):
-        super().setUp()
-        for p in (
-            patch("poly.cli_commands.apikey.get_package_version", return_value="9.9.9"),
-            patch.object(sys, "argv", [self.CLI_PATH, "apikey"]),
-        ):
-            p.start()
-            self.addCleanup(p.stop)
-
-    def test_plain_output_does_not_print_version_and_path(self):
-        """The version and path are for --json only; the plain output stays as it was."""
-        stdout, _, _ = self.run_apikey(region="studio")
-
-        self.assertNotIn("9.9.9", stdout)
-        self.assertNotIn(self.CLI_PATH, stdout)
-
-    def test_json_has_cli_version_and_path(self):
-        """--json carries cli_version and cli_path, on success and on failure."""
-        stdout, _, _ = self.run_apikey(region="studio", output_json=True)
-        payload = json.loads(stdout)
-        self.assertEqual(payload["cli_version"], "9.9.9")
-        self.assertEqual(payload["cli_path"], self.CLI_PATH)
-
-        self.mocks["get_accounts"].return_value = []
-        stdout, _, _ = self.run_apikey(region="studio", output_json=True)
-        payload = json.loads(stdout)
-        self.assertFalse(payload["success"])
-        self.assertEqual(payload["cli_version"], "9.9.9")
+class NextStep(ApiKeyTestCase):
+    """The run ends with the next step."""
 
     def test_summary_and_json_carry_next_step_url(self):
         """The plain summary ends with the next step; only --json carries next_step_url."""
