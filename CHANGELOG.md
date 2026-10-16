@@ -1,6 +1,138 @@
 # CHANGELOG
 
 
+## v0.71.1 (2026-10-16)
+
+### Bug Fixes
+
+- Poly apikey picks an account, keeps the sign-in, and names the next step
+  ([#360](https://github.com/polyai/adk/pull/360),
+  [`432c55b`](https://github.com/polyai/adk/commit/432c55bc9a1446106cb27228ef96d6c952fda7de))
+
+## Summary
+
+`poly apikey` now gets someone who belongs to more than one workspace to a key in one sign-in. It
+  also tells an agent which `poly` ran (in `--json`), and ends with the next step: a first API call.
+
+## Motivation
+
+With more than one account and no `--account-id`, `poly apikey` exited 1 and asked for a re-run. The
+  sign-in lived only in that process, so the re-run meant a second GitHub sign-in. Anyone invited to
+  a teammate's workspace hit this on first use. An AI assistant following the setup prompt stopped
+  there. The `--json` output also didn't say which `poly` binary ran, so an agent couldn't tell when
+  an older install earlier on `PATH` answered. And it ended without a next step.
+
+## Changes
+
+- **Several accounts:** at a terminal without `--json`, a picker (the same one `poly project create`
+  uses). Without a terminal, or with `--json`, it stops and lists the accounts so you can re-run
+  with one; with `--json`, they also come back in a new `accounts` array on the error object (`id`,
+  `name`, `role`, `created_by`). No guessing. - **Sign-in kept:** the device-flow token is saved to
+  `~/.poly/apikey_session` (mode 600, per region, until the token's `exp`), so a re-run with
+  `--account-id` skips the browser. If a kept token gets a 401 from authorise or accounts, it is
+  dropped and the run signs in once more. New `--no-session-cache` flag: sign in fresh and keep
+  nothing. The token is never printed and never in `--json`. - **Which `poly`:** `--json` (success
+  and error) gains `cli_version` and `cli_path`. The human output is unchanged; `poly update`
+  already reports stale installs. - **Next step:** the summary ends with `Next: make your first API
+  call (POLY_API_KEY is already set).` and the Dialog RSN 1 link
+  `https://docs.poly.ai/dialog-rsn-1`. `--json` gains `next_step_url`. - **Wording:** "never
+  prompts" is now "never prompts when run by an agent (no terminal, or `--json`)" in the help, the
+  module docstring, `docs/docs/reference/cli/apikey.md` and `docs/docs/get-started/get-started.md`.
+  The reference page documents the behaviours, the new flag, and the success and error JSON shapes.
+
+No breaking changes: `--account-id` behaves as before, `--json` only gains keys, and the exit codes
+  are the same.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New `apikey_session_test.py` covers save/load, `exp` parsing, expiry margin, bad or partial JSON,
+  clear, and mode 600. `apikey_test.py` covers:
+
+- the picker: choices, choice used, cancel - several accounts without a terminal: error with
+  `accounts`, in plain and `--json` - `--json` at a TTY never prompts - `--account-id` still wins -
+  cached sign-in reused; 401 on authorise or accounts clears it and signs in once; no retry loop on
+  a fresh token - `--no-session-cache` reads and writes nothing - `cli_version`/`cli_path` on
+  success and on error, and absent from the plain output - `next_step_url` - a sweep over every
+  failure path (plain and `--json`, fresh and cached) asserting the token never reaches stdout or
+  stderr
+
+The old multiple-accounts tests are rewritten to the new contract.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (2300 passed locally; CI
+  green on Ubuntu and Windows) - [x] No breaking changes to the `poly` CLI interface (or migration
+  path documented) - [x] PR title follows [conventional
+  commits](https://www.conventionalcommits.org/), and its type matches the change (`fix:`, per
+  review) - [x] User-facing changes are reflected in `docs/docs/`, `src/poly/docs/` (resource
+  shapes) and `skills/` (no resource shapes or skills reference `poly apikey`)
+
+## Screenshots / Logs
+
+Several accounts, no terminal (`--json`):
+
+~~~json { "success": false, "error": "Multiple accounts found for studio: acc-1 (Team), acc-2
+  (Other). Re-run with --account-id <id> to pick one. Your sign-in is kept, so the re-run will not
+  ask you to sign in again.", "step": "account", "cli_version": "0.70.0", "cli_path":
+  "/home/user/.local/bin/poly", "accounts": [ {"id": "acc-1", "name": "Team", "role": "Member",
+  "created_by": "lead@example.com"}, {"id": "acc-2", "name": "Other", "role": "Admin", "created_by":
+  "someone@example.com"} ] } ~~~
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Chores
+
+- Update pluggy URL in licenses.json ([#369](https://github.com/polyai/adk/pull/369),
+  [`7c686ae`](https://github.com/polyai/adk/commit/7c686ae37f63918a0ca7753cc59ca10d2da88822))
+
+## Summary
+
+Updates the pluggy entry in `licenses.json` so it matches what CI now generates.
+
+## Motivation
+
+CI installs dependencies fresh and regenerates `licenses.json` with `pip-licenses`, then fails if
+  the committed file differs. pluggy 1.7.0 now publishes its project URL, so CI generates
+  `https://github.com/pytest-dev/pluggy` where the committed file has `UNKNOWN`. Every open PR fails
+  the check until this lands.
+
+## Changes
+
+- `licenses.json`: pluggy's URL changes from `UNKNOWN` to `https://github.com/pytest-dev/pluggy`.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+The change matches the diff CI's own regeneration produced on Ubuntu with Python 3.14 and pluggy
+  1.7.0. Regenerating on macOS also changes the Pygments and ruff licence strings, so those were
+  left as CI generates them.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+``` - "URL": "UNKNOWN" + "URL": "https://github.com/pytest-dev/pluggy" ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.71.0 (2026-10-14)
 
 ### Features
