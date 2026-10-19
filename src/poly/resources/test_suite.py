@@ -595,6 +595,15 @@ class TestCaseApiMocks:
                 mocks[integration_name][operation_name] = parsed_rules
         return cls(mocks=mocks)
 
+    def has_legacy_body(self) -> bool:
+        """Whether any response body is still held in the platform's old non-text form."""
+        return any(
+            rule.respond.legacy_body
+            for operations in self.mocks.values()
+            for rules in operations.values()
+            for rule in rules
+        )
+
     def validate(self, known_integrations: set[str]) -> None:
         """Validate the mocked API responses.
 
@@ -866,6 +875,12 @@ class TestCase(YamlResource):
     def file_path(self) -> str:
         file_name = f"{utils.clean_name(self.name)}.yaml"
         return os.path.join("test_suite", file_name)
+
+    def compute_hash(self) -> str:
+        # Push only diffs files whose hash changed. A pulled case with an old-format
+        # body hashes apart from its unchanged YAML, so the next push rewrites it as text.
+        content_hash = super().compute_hash()
+        return f"{content_hash}:legacy-body" if self.api_mocks.has_legacy_body() else content_hash
 
     def to_yaml_dict(self) -> dict:
         output = {

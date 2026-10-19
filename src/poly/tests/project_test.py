@@ -67,6 +67,7 @@ from poly.resources.flows import (
 )
 from poly.resources.function import FunctionParameters, FunctionType
 from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
+from poly.resources.test_suite import TestCaseApiOperationMock
 from poly.tests.testing_utils import mock_read_from_file
 from poly.utils import merge_strings
 
@@ -2315,6 +2316,31 @@ class PushProjectTest(unittest.TestCase):
         kwargs = self.mock_api_handler.queue_resources.call_args.kwargs
         self.assertEqual(list(kwargs["updated_resources"][TestCaseTags]), ["TEST-greeting_flow"])
         self.assertNotIn(TestCaseAssertion, kwargs["updated_resources"])
+
+    def test_push_project_rewrites_a_legacy_mock_body_once(self):
+        """A mock body pulled in the old object form is pushed again as text, though the
+        YAML file is unchanged, and the next push finds nothing to do."""
+        project_data = deepcopy(PROJECT_DATA)
+        saved = project_data["resources"]["test_cases"]["TEST-greeting_flow"]
+        saved["api_mocks"]["mocks"]["customer_api"]["get_confirmation_status"][0]["respond"][
+            "legacy_body"
+        ] = True
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        updated = self.mock_api_handler.queue_resources.call_args.kwargs["updated_resources"]
+        mock_updates = list(updated[TestCaseApiOperationMock].values())
+        self.assertEqual(len(mock_updates), 1)
+        self.assertEqual(
+            mock_updates[0].rules[0].respond.to_proto().body.string_value, '{"confirmed": true}'
+        )
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
 
     def test_push_project_ambiguous_rename_stays_delete_and_create(self):
         """Two saved cases share the local file's scenario: no pairing is guessed."""
