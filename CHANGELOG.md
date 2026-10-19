@@ -1,6 +1,75 @@
 # CHANGELOG
 
 
+## v0.71.2 (2026-10-19)
+
+### Bug Fixes
+
+- Keep number types in api mock bodies ([#368](https://github.com/polyai/adk/pull/368),
+  [`68c6713`](https://github.com/polyai/adk/commit/68c671358e0f99bf43fa5abdfe887dd8791ae161))
+
+## Summary
+
+Numbers in an `api_mocks` body now reach the function exactly as written: `2` stays an integer and
+  `2.0` stays a decimal. Before this, an integer arrived as `2.0`, and a decimal like `2.0` was
+  rewritten to `2` on pull.
+
+## Motivation
+
+A rule like `body: {party_size: 2}` reached the function as `r.json()["party_size"] == 2.0`, while
+  the real API returns an integer, so tests and production saw different types. The body was sent as
+  a protobuf `Value`, which stores every number as a double. On top of that, the ADK folded whole
+  floats back to ints on load and pull, so `2.0` couldn't be expressed at all.
+
+## Changes
+
+- The body is pushed as JSON text, and no longer as a `Value`. The platform returns a text body to
+  the function as the raw response, so its `r.json()` sees exactly what was written. - On pull, text
+  bodies are read back into YAML maps with their number types. Plain text bodies such as `OK` stay
+  text. - Bodies are compared strictly when deciding what to push. Editing `2` to `2.0` (or `1` to
+  `true`) now pushes, where `==` treated them as equal. - A body the platform still holds in the old
+  object form is pushed again once, as text, on the next `poly push` after a pull with this version.
+  Until then `poly status` lists that test file as modified, though its YAML is unchanged. - Older
+  ADK versions pull a text body as a one-line JSON string, e.g. `body: '{"party_size": 2}'`, instead
+  of a YAML map. It still works, and pushing it back sends the same text. Upgrading turns it back
+  into a map on the next pull. - Docs updated: `docs/docs/reference/resources/tests.md` and
+  `src/poly/docs/tests.md`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+`uv run pytest src/poly/tests/`: 2334 passed (rebased on main).
+
+Against a live project, on a throwaway branch:
+
+| Check | Result | |---|---| | Push a body with `2`, `2.0`, `1.5` and a nested list | Stored as the
+  exact text `{"party_size": 2, "price": 2.0, "items": [1, 1.5, {"n": 3}]}` | | Pull it back | YAML
+  keeps `2`, `2.0` and `1.5`; `poly status` shows no changes | | Push again with no edits | "No
+  changes detected" | | Edit `2` to `2.0`, push, pull | One `update_test_case_api_operation_mock` is
+  sent; the stored text and pulled YAML both read `2.0` | | Body pushed in the old object form by
+  0.71.1, then pull and push with this branch | `poly status` flags the file; one push rewrites it
+  as text; a second push finds no changes | | 0.71.1 pulls a text body with no local edits | No
+  conflict; the body shows as a JSON string |
+
+Not covered: a simulation run checking the types the function sees from `r.json()`.
+
+---------
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.71.1 (2026-10-16)
 
 ### Bug Fixes
