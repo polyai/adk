@@ -15,14 +15,14 @@ Examples:
 
 ~~~bash
 poly project list
-poly project list --region us-1 --account_id my-account
+poly project list --region us --account_id my-account
 ~~~
 
 Run with no arguments and `poly project list` walks you through interactive dropdowns for region and account, auto-selecting either one if there's only a single option.
 
 | Flag | Description |
 |---|---|
-| `--region` | Region for the Agent Studio project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
+| `--region` | Region for the Agent Studio project. One of `us`, `eu`, `uk`, `studio` — see [Regions](../cli.md#regions). |
 | `--account_id` | Account ID for the Agent Studio project. |
 
 !!! info "`--json` requires explicit flags for `poly project list`"
@@ -53,9 +53,9 @@ Examples:
 
 ~~~bash
 poly project create
-poly project create --region us-1 --account_id my-account --name my-project
-poly project create --region us-1 --account_id my-account --name "My Project" --id my-project
-poly project create --region us-1 --account_id my-account --name my-project --greeting "Hi, how can I help?"
+poly project create --region us --account_id my-account --name my-project
+poly project create --region us --account_id my-account --name "My Project" --id my-project
+poly project create --region us --account_id my-account --name my-project --greeting "Hi, how can I help?"
 poly project create --base-path /path/to/projects
 ~~~
 
@@ -68,7 +68,7 @@ After the project is created in Agent Studio, `poly project create` automaticall
 | Flag | Description |
 |---|---|
 | `--base-path` | Base path to initialize the project. Defaults to the current working directory. |
-| `--region` | Region for the new project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
+| `--region` | Region for the new project. One of `us`, `eu`, `uk`, `studio` — see [Regions](../cli.md#regions). |
 | `--account_id` | Account ID to create the project under. |
 | `--name` | Display name for the new project. |
 | `--id`, `--project_id` | Optional slug/ID for the project. If omitted, the platform generates one. |
@@ -96,14 +96,14 @@ Examples:
 
 ~~~bash
 poly project delete
-poly project delete --region us-1 --account_id my-account --project_id my-project
+poly project delete --region us --account_id my-account --project_id my-project
 ~~~
 
 Run with no arguments and `poly project delete` opens an interactive picker to select the project to delete. Any delete requires a confirmation step, which can be skipped with `--force`.
 
 | Flag | Description |
 |---|---|
-| `--region` | Region of the project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
+| `--region` | Region of the project. One of `us`, `eu`, `uk`, `studio` — see [Regions](../cli.md#regions). |
 | `--account_id` | Account ID the project exists under. |
 | `--project_id` | Project ID to delete. |
 | `-f`, `--force` | Skip the confirmation prompt. |
@@ -133,7 +133,7 @@ Examples:
 
 ~~~bash
 poly project duplicate
-poly project duplicate --region us-1 --account_id my-account --project_id my-project --name my-copy
+poly project duplicate --region us --account_id my-account --project_id my-project --name my-copy
 ~~~
 
 Run with no arguments and `poly project duplicate` walks you through interactive dropdowns for region and account, then a searchable list of projects to duplicate. It then prompts for a name for the copy (defaulting to `"<original name> (copy)"`) and an optional project ID for the copy.
@@ -142,7 +142,7 @@ Run with no arguments and `poly project duplicate` walks you through interactive
 
 | Flag | Description |
 |---|---|
-| `--region` | Region of the project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
+| `--region` | Region of the project. One of `us`, `eu`, `uk`, `studio` — see [Regions](../cli.md#regions). |
 | `--account_id` | Account ID the project exists under. |
 | `--project_id` | Project ID to duplicate. |
 | `--name` | Name for the duplicated project. |

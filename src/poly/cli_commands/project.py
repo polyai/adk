@@ -11,12 +11,12 @@ from contextlib import nullcontext
 
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import (
-    REGION_ALIASES_HELP,
+    REGION_CHOICES,
     load_project,
     parse_from_projection_json,
     region_type,
 )
-from poly.handlers.interface import REGIONS, AgentStudioInterface
+from poly.handlers.interface import AgentStudioInterface
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 
@@ -57,15 +57,15 @@ class ProjectCommand(BaseCommand):
                 "List Agent Studio projects in an account.\n\n"
                 "Examples:\n"
                 "  poly project list\n"
-                "  poly project list --region us-1 --account_id my-account\n"
+                "  poly project list --region us --account_id my-account\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
         project_list_parser.add_argument(
             "--region",
             type=region_type,
-            choices=REGIONS,
-            help=f"Region for the Agent Studio project. {REGION_ALIASES_HELP}",
+            choices=REGION_CHOICES,
+            help="Region for the Agent Studio project.",
         )
         project_list_parser.add_argument(
             "--account_id",
@@ -82,7 +82,7 @@ class ProjectCommand(BaseCommand):
                 "Create a new Agent Studio project under an interactively selected account.\n\n"
                 "Examples:\n"
                 "  poly project create\n"
-                "  poly project create --region us-1 --account_id my-account --name my-project\n"
+                "  poly project create --region us --account_id my-account --name my-project\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -95,8 +95,8 @@ class ProjectCommand(BaseCommand):
         project_create_parser.add_argument(
             "--region",
             type=region_type,
-            choices=REGIONS,
-            help=f"Region for the Agent Studio project. {REGION_ALIASES_HELP}",
+            choices=REGION_CHOICES,
+            help="Region for the Agent Studio project.",
         )
         project_create_parser.add_argument(
             "--account_id",
@@ -138,7 +138,7 @@ class ProjectCommand(BaseCommand):
                 "Delete an Agent Studio project.\n\n"
                 "Examples:\n"
                 "  poly project delete\n"
-                "  poly project delete --region us-1 --account_id my-account"
+                "  poly project delete --region us --account_id my-account"
                 " --project_id my-project\n"
             ),
             formatter_class=RawTextHelpFormatter,
@@ -146,8 +146,8 @@ class ProjectCommand(BaseCommand):
         project_delete_parser.add_argument(
             "--region",
             type=region_type,
-            choices=REGIONS,
-            help=f"Region for the Agent Studio project. {REGION_ALIASES_HELP}",
+            choices=REGION_CHOICES,
+            help="Region for the Agent Studio project.",
         )
         project_delete_parser.add_argument(
             "--account_id",
@@ -176,7 +176,7 @@ class ProjectCommand(BaseCommand):
                 "Duplicate an Agent Studio project.\n\n"
                 "Examples:\n"
                 "  poly project duplicate\n"
-                "  poly project duplicate --region us-1 --account_id my-account"
+                "  poly project duplicate --region us --account_id my-account"
                 " --project_id my-project --name my-copy\n"
             ),
             formatter_class=RawTextHelpFormatter,
@@ -184,8 +184,8 @@ class ProjectCommand(BaseCommand):
         project_duplicate_parser.add_argument(
             "--region",
             type=region_type,
-            choices=REGIONS,
-            help=f"Region for the Agent Studio project. {REGION_ALIASES_HELP}",
+            choices=REGION_CHOICES,
+            help="Region for the Agent Studio project.",
         )
         project_duplicate_parser.add_argument(
             "--account_id",
@@ -893,7 +893,7 @@ class InitCommand(BaseCommand):
             "init",
             parents=[parents.verbose, parents.json, parents.debug],
             help="Initialize a new Agent Studio project.",
-            description="Initialize a new Agent Studio project.\n\nExamples:\n  poly init --region euw-1 --account_id 123 --project_id my_project\n  poly init  # (interactive selection)",
+            description="Initialize a new Agent Studio project.\n\nExamples:\n  poly init --region eu --account_id 123 --project_id my_project\n  poly init  # (interactive selection)",
             formatter_class=RawTextHelpFormatter,
         )
         init_parser.add_argument(
@@ -905,8 +905,8 @@ class InitCommand(BaseCommand):
         init_parser.add_argument(
             "--region",
             type=region_type,
-            choices=REGIONS,
-            help=f"Region for the Agent Studio project. {REGION_ALIASES_HELP}",
+            choices=REGION_CHOICES,
+            help="Region for the Agent Studio project.",
         )
         init_parser.add_argument(
             "--account_id",

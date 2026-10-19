@@ -8,7 +8,7 @@ import logging
 import os
 from typing import Optional
 
-from poly.constants import POLY_HOME_DIR
+from poly.constants import POLY_HOME_DIR, region_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -113,13 +113,14 @@ def _missing_key_message(region: Optional[str] = None) -> str:
     ``poly login`` picker.
     """
     if region:
+        shown = region_display_name(region)
         sentences = [
-            f"No ADK key found for region '{region}'.",
+            f"No ADK key found for region '{shown}'.",
             f"ADK commands need an ADK key, which `poly login` creates and saves to"
             f" {_CREDENTIALS_FILE_DISPLAY_PATH}.",
-            f"Run `poly login --region {region}` to sign in to that region.",
+            f"Run `poly login --region {shown}` to sign in to that region.",
         ]
-        others = [r for r in _regions_with_stored_keys() if r != region]
+        others = [region_display_name(r) for r in _regions_with_stored_keys() if r != region]
         if others:
             suggestion = (
                 f"`--region {others[0]}`" if len(others) == 1 else "`--region <one of those>`"

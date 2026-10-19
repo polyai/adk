@@ -15,9 +15,8 @@ from pathlib import Path
 from poly.cli_commands.auth import _authenticate_and_save_key, _select_region, _signin
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.project import InitCommand, ProjectCommand
-from poly.cli_commands.shared import REGION_ALIASES_HELP, region_type
+from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.cli_commands.skills import install_skills, node_gate_reason
-from poly.handlers.interface import REGIONS
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE
 from poly.utils import any_credentials_exist
 
@@ -57,7 +56,7 @@ class SetupCommand(BaseCommand):
                 "  4. Project setup (create a new project or connect an existing one)\n\n"
                 "Examples:\n"
                 "  poly setup\n"
-                "  poly setup --region us-1\n"
+                "  poly setup --region us\n"
                 "  poly setup --skip-auth --agent claude-code\n"
                 "  poly setup --dev -g\n"
             ),
@@ -65,9 +64,9 @@ class SetupCommand(BaseCommand):
         setup_parser.add_argument(
             "--region",
             type=region_type,
-            choices=REGIONS,
+            choices=REGION_CHOICES,
             default=None,
-            help=f"Region to sign in to. If omitted, you will be prompted to select one. {REGION_ALIASES_HELP}",
+            help="Region to sign in to. If omitted, you will be prompted to select one.",
         )
         setup_parser.add_argument(
             "--base-path",

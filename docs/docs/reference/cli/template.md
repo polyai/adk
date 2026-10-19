@@ -22,12 +22,12 @@ Examples:
 
 ~~~bash
 poly template list
-poly template list --region us-1
+poly template list --region us
 ~~~
 
 | Flag | Description |
 |---|---|
-| `--region` | Region to query for templates. Defaults to the current project's region. Choices: `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
+| `--region` | Region to query for templates. Defaults to the current project's region. One of `us`, `eu`, `uk`, `studio` — see [Regions](../cli.md#regions). |
 
 `--json` output shape:
 
@@ -56,7 +56,7 @@ poly template load restaurant-booking --force
 
 | Flag | Description |
 |---|---|
-| `--region` | Region to load the template from. Defaults to the current project's region. Choices: `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. Aliases: `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. |
+| `--region` | Region to load the template from. Defaults to the current project's region. One of `us`, `eu`, `uk`, `studio` — see [Regions](../cli.md#regions). |
 | `--force`, `-f` | Skip the confirmation prompt. |
 
 !!! info "`--json` requires `template_name`"

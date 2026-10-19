@@ -61,12 +61,12 @@ You are asked to pick a region when signing in. Choose based on your account typ
 | Region | Account type |
 |---|---|
 | `studio` | Self-serve — signed up at [studio.poly.ai](https://studio.poly.ai) |
-| `us-1`, `euw-1`, `uk-1` | Enterprise — a workspace provisioned by PolyAI |
+| `us`, `eu`, `uk` | Enterprise — a workspace provisioned by PolyAI |
 
 To skip the prompt, pass the region directly:
 
 ```bash
-poly setup --region studio   # or us-1, euw-1, uk-1
+poly setup --region studio   # or us, eu, uk
 ```
 
 If you're not sure which account type you have, your PolyAI contact can confirm.
@@ -82,7 +82,7 @@ To set up credentials without the rest, `poly login` runs the sign-in step on it
 
 ```bash
 poly login
-poly login --region us-1
+poly login --region us
 ```
 
 To sign in to more than one region from the same machine, re-run `poly login` for each — the credential file stores them side by side.

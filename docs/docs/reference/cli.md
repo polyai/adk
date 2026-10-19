@@ -106,6 +106,19 @@ Most commands accept the same four flags:
 
     ADK commands are expected to be run from within your local project directory. If needed, use `--path` to point to a project explicitly.
 
+## Regions
+
+Every command that takes `--region` accepts the same names:
+
+| Region | Description |
+|---|---|
+| `us` | US — enterprise workspaces |
+| `eu` | EU West — enterprise workspaces |
+| `uk` | UK — enterprise workspaces |
+| `studio` | Agent Studio self-serve accounts |
+
+Enterprise regions need an account provisioned by PolyAI; `studio` is where self-serve sign-up creates your workspace. The region is saved in the project's `project.yaml` and the ADK key for it in `~/.poly/credentials.json`, so you only pass `--region` when creating, connecting or logging in to a project. The older spellings `us-1`, `euw-1` and `uk-1` are still accepted.
+
 ## Machine-readable JSON output
 
 All core subcommands accept a `--json` flag that switches stdout to a single JSON object. This is designed for scripting, CI pipelines, and any integration that needs stable, parseable output rather than human-readable console text.
@@ -125,8 +138,8 @@ poly branch delete --json
 poly branch delete my-feature --json
 poly branch merge 'Merge message' --json
 poly format --json
-poly init --region us-1 --account_id 123 --project_id my_project --json
-poly project create --region us-1 --account_id my-account --name my-project --json
+poly init --region us --account_id 123 --project_id my_project --json
+poly project create --region us --account_id my-account --name my-project --json
 poly chat --json -m 'Hello'
 poly chat --json --input-file ./script.txt
 poly deployments show abc123def --json

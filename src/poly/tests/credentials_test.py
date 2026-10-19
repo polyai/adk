@@ -49,9 +49,9 @@ class MissingKeyMessageTest(_CredentialsTestCase):
         message = str(ctx.exception)
         self.assertEqual(
             message,
-            "No ADK key found for region 'uk-1'. ADK commands need an ADK key, which "
+            "No ADK key found for region 'uk'. ADK commands need an ADK key, which "
             "`poly login` creates and saves to ~/.poly/credentials.json. Run "
-            "`poly login --region uk-1` to sign in to that region. "
+            "`poly login --region uk` to sign in to that region. "
             "(CI or scripts: set POLY_ADK_KEY or POLY_ADK_KEY_UK instead.)",
         )
         self.assertNotIn("PAT", message)
@@ -72,7 +72,7 @@ class MissingKeyMessageTest(_CredentialsTestCase):
             message,
         )
         # Sentence order: how to get it, then what you already have, then the CI clause.
-        self.assertLess(message.index("Run `poly login --region uk-1`"), message.index("You already"))
+        self.assertLess(message.index("Run `poly login --region uk`"), message.index("You already"))
         self.assertLess(message.index("You already"), message.index("(CI or scripts"))
 
     def test_missing_key_message_lists_other_regions_from_env_vars(self):
@@ -84,7 +84,7 @@ class MissingKeyMessageTest(_CredentialsTestCase):
             retrieve_api_key("euw-1")
 
         message = str(ctx.exception)
-        self.assertIn("You already have an ADK key for: us-1, studio", message)
+        self.assertIn("You already have an ADK key for: us, studio", message)
         self.assertIn("re-run with `--region <one of those>`", message)
 
     def test_missing_key_message_combines_file_and_env_var_regions(self):
@@ -95,7 +95,7 @@ class MissingKeyMessageTest(_CredentialsTestCase):
         with self.assertRaises(ValueError) as ctx:
             retrieve_api_key("uk-1")
 
-        self.assertIn("You already have an ADK key for: euw-1, studio", str(ctx.exception))
+        self.assertIn("You already have an ADK key for: eu, studio", str(ctx.exception))
 
     def test_missing_key_message_omits_other_regions_when_file_empty_or_absent(self):
         """No other-region sentence when there is nothing to point at."""

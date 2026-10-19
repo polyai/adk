@@ -42,7 +42,7 @@ Assume `poly` is installed. If a command fails because it isn't:
 
 ## 2. Authentication
 
-Assume the user is already logged in — do not check credentials up front. Only if a command fails with an authentication error, ask the user to run `poly login` — it opens a browser to sign in, so they must complete it themselves. Regions: `studio` for self-serve accounts, `us-1` / `euw-1` / `uk-1` for enterprise workspaces; every `--region` flag also accepts the aliases `uk` → `uk-1`, `us` → `us-1`, `eu` → `euw-1`. On a fresh machine, `poly setup` runs sign-in plus shell completion, AI skills, and project setup in one command.
+Assume the user is already logged in — do not check credentials up front. Only if a command fails with an authentication error, ask the user to run `poly login` — it opens a browser to sign in, so they must complete it themselves. Regions: `studio` for self-serve accounts, `us` / `eu` / `uk` for enterprise workspaces. On a fresh machine, `poly setup` runs sign-in plus shell completion, AI skills, and project setup in one command.
 
 Credentials are resolved in this order: `~/.poly/credentials.json` (written by `poly login`), then a region-scoped env var (`POLY_ADK_KEY_US` / `POLY_ADK_KEY_EUW` / `POLY_ADK_KEY_UK` / `POLY_ADK_KEY_STUDIO`), then `POLY_ADK_KEY` — useful when debugging why the CLI is using the wrong account or region. `POLY_API_KEY` is an account API key for the PolyAI APIs; the ADK does not read it, so exporting it does not log the CLI in. When no ADK key resolves, the error names the region, any other regions that already hold a key, and `poly login --region <region>` as the fix.
 

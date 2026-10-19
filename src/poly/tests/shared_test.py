@@ -1,4 +1,4 @@
-"""Tests for the shared CLI helpers: region aliases on every --region flag.
+"""Tests for the shared CLI helpers: region names on every --region flag.
 
 Copyright PolyAI Limited
 """
@@ -9,7 +9,8 @@ from io import StringIO
 from unittest.mock import patch
 
 from poly.cli import AgentStudioCLI
-from poly.cli_commands.shared import REGION_ALIASES, REGION_ALIASES_HELP, region_type
+from poly.cli_commands.shared import REGION_CHOICES, region_type
+from poly.constants import REGION_NAMES
 from poly.handlers.interface import REGIONS
 
 
@@ -22,13 +23,16 @@ def _parser():
 class RegionTypeTest(unittest.TestCase):
     """The argparse converter shared by every --region flag."""
 
-    def test_aliases_map_to_canonical_regions(self):
-        self.assertEqual(REGION_ALIASES, {"uk": "uk-1", "us": "us-1", "eu": "euw-1"})
-        for alias, canonical in REGION_ALIASES.items():
-            self.assertEqual(region_type(alias), canonical)
-            self.assertIn(canonical, REGIONS)
+    def test_advertised_names_map_to_internal_regions(self):
+        self.assertEqual(
+            REGION_NAMES, {"us": "us-1", "eu": "euw-1", "uk": "uk-1", "studio": "studio"}
+        )
+        for name, internal in REGION_NAMES.items():
+            self.assertEqual(region_type(name), internal)
+            self.assertIn(internal, REGIONS)
 
-    def test_canonical_regions_pass_through(self):
+    def test_older_spellings_still_accepted(self):
+        """``us-1``/``euw-1``/``uk-1`` and the internal ``staging``/``dev`` keep working."""
         for region in REGIONS:
             self.assertEqual(region_type(region), region)
 
@@ -38,22 +42,27 @@ class RegionTypeTest(unittest.TestCase):
         self.assertEqual(region_type("UK-1"), "uk-1")
         self.assertEqual(region_type("Studio"), "studio")
 
-    def test_euw_is_not_an_alias(self):
+    def test_euw_is_not_a_region(self):
         with self.assertRaises(argparse.ArgumentTypeError):
             region_type("euw")
 
-    def test_unknown_region_raises_with_canonical_names(self):
+    def test_unknown_region_raises_with_advertised_names(self):
         with self.assertRaises(argparse.ArgumentTypeError) as ctx:
             region_type("europe")
 
         self.assertEqual(
-            str(ctx.exception),
-            "'europe' is not a region. Use one of: us-1, euw-1, uk-1, studio, staging, dev "
-            "(aliases: uk, us, eu).",
+            str(ctx.exception), "'europe' is not a region. Use one of: us, eu, uk, studio."
         )
 
+    def test_choices_advertise_short_names_but_accept_internal(self):
+        """argparse checks ``choices`` after ``type``, so the internal ids must pass."""
+        self.assertEqual(list(REGION_CHOICES), ["us", "eu", "uk", "studio"])
+        for region in REGIONS:
+            self.assertIn(region, REGION_CHOICES)
+        self.assertNotIn("europe", REGION_CHOICES)
 
-# Every `--region` site in the CLI: (label, argv up to and including the alias).
+
+# Every `--region` site in the CLI: (label, argv up to and including the region).
 # `functions execute` and `functions validate` inherit --region from the shared
 # headless scope parent in cli.py, so they are covered here as well.
 REGION_SITES = [
@@ -72,30 +81,30 @@ REGION_SITES = [
 ]
 
 
-class RegionAliasParseTest(unittest.TestCase):
+class RegionParseTest(unittest.TestCase):
     """`--region uk` lands as `uk-1` on every command that takes --region."""
 
     def setUp(self):
         self.parser = _parser()
 
-    def test_alias_resolves_on_every_site(self):
+    def test_name_resolves_on_every_site(self):
         for label, argv in REGION_SITES:
             with self.subTest(site=label):
                 args = self.parser.parse_args(argv)
                 self.assertEqual(args.region, "uk-1")
 
-    def test_other_aliases_resolve_on_init(self):
+    def test_other_names_resolve_on_init(self):
         self.assertEqual(self.parser.parse_args(["init", "--region", "us"]).region, "us-1")
         self.assertEqual(self.parser.parse_args(["init", "--region", "eu"]).region, "euw-1")
         self.assertEqual(self.parser.parse_args(["init", "--region", "UK"]).region, "uk-1")
 
-    def test_canonical_region_still_accepted_on_every_site(self):
+    def test_older_spelling_still_accepted_on_every_site(self):
         for label, argv in REGION_SITES:
             with self.subTest(site=label):
                 canonical = [a if a != "uk" else "uk-1" for a in argv]
                 self.assertEqual(self.parser.parse_args(canonical).region, "uk-1")
 
-    def test_unknown_region_is_rejected_with_canonical_names(self):
+    def test_unknown_region_is_rejected_with_advertised_names(self):
         for label, argv in REGION_SITES:
             with self.subTest(site=label):
                 garbage = [a if a != "uk" else "europe" for a in argv]
@@ -103,23 +112,28 @@ class RegionAliasParseTest(unittest.TestCase):
                 with patch("sys.stderr", stderr), self.assertRaises(SystemExit) as ctx:
                     self.parser.parse_args(garbage)
                 self.assertEqual(ctx.exception.code, 2)
-                self.assertIn("'europe' is not a region. Use one of: us-1, euw-1", stderr.getvalue())
+                self.assertIn(
+                    "'europe' is not a region. Use one of: us, eu, uk, studio.", stderr.getvalue()
+                )
 
-    def test_help_shows_alias_line_on_every_site(self):
+    def test_help_advertises_only_short_names_on_every_site(self):
         for label, argv in REGION_SITES:
             with self.subTest(site=label):
                 stdout = StringIO()
                 with patch("sys.stdout", stdout), self.assertRaises(SystemExit):
                     self.parser.parse_args(_help_argv(argv))
-                self.assertIn(REGION_ALIASES_HELP, stdout.getvalue())
+                help_text = stdout.getvalue()
+                self.assertIn("{us,eu,uk,studio}", help_text)
+                for older in ("us-1", "euw-1", "uk-1"):
+                    self.assertNotIn(older, help_text)
 
-    def test_region_choices_still_canonical_for_completion(self):
-        """argcomplete reads `choices`; the converter must not replace them."""
+    def test_region_choices_are_short_names_for_completion(self):
+        """argcomplete reads `choices`; it should offer the advertised names only."""
         for label, argv in REGION_SITES:
             with self.subTest(site=label):
                 subparser = _subparser_for(self.parser, argv)
                 action = next(a for a in subparser._actions if "--region" in a.option_strings)
-                self.assertEqual(list(action.choices), REGIONS)
+                self.assertEqual(list(action.choices), ["us", "eu", "uk", "studio"])
                 self.assertIs(action.type, region_type)
 
 
