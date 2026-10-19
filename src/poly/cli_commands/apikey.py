@@ -24,8 +24,9 @@ from typing import Callable
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.auth import authorise_or_explain
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
+from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
-from poly.handlers.interface import REGIONS, AgentStudioInterface
+from poly.handlers.interface import AgentStudioInterface
 from poly.utils import apikey_session
 from poly.utils.api_keys import select_reusable_api_key
 from poly.utils.credentials import (
@@ -311,14 +312,14 @@ class ApiKeyCommand(BaseCommand):
                 "Examples:\n"
                 "  poly apikey --region studio\n"
                 "  poly apikey --region studio --account-id acc-123\n"
-                "  poly apikey --region us-1\n"
+                "  poly apikey --region us\n"
                 "  poly apikey --region studio --json\n"
             ),
         )
         apikey_parser.add_argument(
             "--region",
-            type=str,
-            choices=REGIONS,
+            type=region_type,
+            choices=REGION_CHOICES,
             required=True,
             help=(
                 "Region/cluster to create the key for. 'studio' is the self-serve cluster"

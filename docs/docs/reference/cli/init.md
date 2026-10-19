@@ -12,7 +12,8 @@ Examples:
 ~~~bash
 poly init
 poly init --account_id 123 --project_id my_project
-poly init --region us-1 --account_id 123 --project_id my_project
+poly init --region us --account_id 123 --project_id my_project
+poly init --region uk
 poly init --base-path /path/to/projects
 poly init --format
 ~~~
@@ -41,7 +42,7 @@ Pass any combination of `--region`, `--account_id`, and `--project_id` to skip t
 | Flag | Description |
 |---|---|
 | `--base-path` | Base path to initialize the project. Defaults to the current working directory. |
-| `--region` | Region for the Agent Studio project. One of `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, `dev`. |
+| `--region` | Region for the Agent Studio project. One of `us`, `eu`, `uk`, `studio` — see [Regions](../cli.md#regions). |
 | `--account_id` | Account ID for the Agent Studio project. |
 | `--project_id` | Project ID for the Agent Studio project. |
 | `--format` | Format resources after init. |

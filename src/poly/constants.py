@@ -9,6 +9,20 @@ import os
 # anything else that belongs to the user rather than to a single project.
 POLY_HOME_DIR = os.path.expanduser("~/.poly")
 
+# The region names the CLI advertises, keyed to the internal identifier that the
+# credential file, the ``POLY_ADK_KEY_<REGION>`` suffixes and the API hosts use.
+REGION_NAMES: dict[str, str] = {"us": "us-1", "eu": "euw-1", "uk": "uk-1", "studio": "studio"}
+_REGION_DISPLAY_NAMES = {internal: name for name, internal in REGION_NAMES.items()}
+
+
+def region_display_name(region: str) -> str:
+    """The advertised name for an internal region identifier (``uk-1`` -> ``uk``).
+
+    Identifiers without an advertised name (``staging``, ``dev``) are returned as is.
+    """
+    return _REGION_DISPLAY_NAMES.get(region, region)
+
+
 DEFAULT_VOICE_IDS: dict[str, str] = {
     "us-1": "VOICE-6fad73f6",  # Anne
     "euw-1": "VOICE-8b814724",  # Ben

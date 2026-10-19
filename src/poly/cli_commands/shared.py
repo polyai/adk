@@ -6,6 +6,7 @@ import them directly (e.g. ``from poly.cli_commands.shared import load_project``
 Copyright PolyAI Limited
 """
 
+import argparse
 import base64
 import json
 import logging
@@ -13,6 +14,8 @@ import os
 import sys
 from typing import Any, Optional
 
+from poly.constants import REGION_NAMES
+from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
 
@@ -26,6 +29,38 @@ PYPI_JSON_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
 # so waiting is expected. A check on the CLI's startup path would need to be far
 # shorter, since every command would pay it.
 PYPI_TIMEOUT_SECONDS = 10
+
+
+class RegionChoices(list):
+    """argparse ``choices`` for every ``--region`` flag.
+
+    Lists the advertised names, so ``--help`` and shell completion show ``us``,
+    ``eu``, ``uk`` and ``studio``. Membership also accepts the internal identifiers
+    ``region_type`` resolves to, since argparse checks ``choices`` after ``type``.
+    """
+
+    def __contains__(self, item: object) -> bool:
+        return item in REGIONS or super().__contains__(item)
+
+
+REGION_CHOICES = RegionChoices(REGION_NAMES)
+
+
+def region_type(value: str) -> str:
+    """argparse ``type=`` for ``--region``: an advertised name to its internal identifier.
+
+    Case-insensitive. The older spellings ``us-1``, ``euw-1`` and ``uk-1`` and the
+    internal ``staging``/``dev`` are still accepted for backwards compatibility but
+    are not advertised. Anything else raises ``ArgumentTypeError`` so argparse
+    rejects it with a message that lists the advertised names.
+    """
+    name = value.lower()
+    region = REGION_NAMES.get(name, name)
+    if region not in REGIONS:
+        raise argparse.ArgumentTypeError(
+            f"'{value}' is not a region. Use one of: {', '.join(REGION_NAMES)}."
+        )
+    return region
 
 
 def read_project_config(base_path: str) -> AgentStudioProject | None:

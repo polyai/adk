@@ -11,8 +11,9 @@ import requests
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
+from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS
-from poly.handlers.interface import REGIONS, AgentStudioInterface
+from poly.handlers.interface import AgentStudioInterface
 from poly.utils import (
     CREDENTIALS_FILE_PATH,
     save_api_key_credential_file,
@@ -27,9 +28,9 @@ def _select_region() -> str:
         "Select your region:",
         choices=[
             questionary.Choice("Studio", value="studio"),
-            questionary.Choice("US (us-1) — Enterprise", value="us-1"),
-            questionary.Choice("UK (uk-1) — Enterprise", value="uk-1"),
-            questionary.Choice("EU West (euw-1) — Enterprise", value="euw-1"),
+            questionary.Choice("US — Enterprise", value="us-1"),
+            questionary.Choice("UK — Enterprise", value="uk-1"),
+            questionary.Choice("EU West — Enterprise", value="euw-1"),
         ],
         default="studio",
     ).ask()
@@ -172,13 +173,13 @@ class LoginCommand(BaseCommand):
                 " will be saved to a local credential file for future CLI commands.\n\n"
                 "Examples:\n"
                 "  poly login\n"
-                "  poly login --region us-1\n"
+                "  poly login --region us\n"
             ),
         )
         login_parser.add_argument(
             "--region",
-            type=str,
-            choices=REGIONS,
+            type=region_type,
+            choices=REGION_CHOICES,
             default=None,
             help="Region to log in to. If omitted, you will be prompted to select one.",
         )

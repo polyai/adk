@@ -19,10 +19,10 @@ poly functions validate
 Every subcommand also accepts `--region`, `--project_id` and `--branch_id` directly, so `poly functions` can run headlessly (CI, scripts, or against a branch you haven't pulled locally) without a local project checkout:
 
 ~~~bash
-poly functions execute <function_name> --region us-1 --project_id abc123 --branch_id main
+poly functions execute <function_name> --region us --project_id abc123 --branch_id main
 ~~~
 
-All three must be given together — if any one is set, all three are required. With none set, the current local project's region/project/branch are used, as before.
+All three must be given together — if any one is set, all three are required. With none set, the current local project's region/project/branch are used, as before. `--region` is one of `us`, `eu`, `uk`, `studio` — see [Regions](../cli.md#regions).
 
 ## `poly functions execute`
 

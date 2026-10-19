@@ -105,7 +105,7 @@ Initialize a new Agent Studio project locally. Runs interactively by default, pr
 
 ```bash
 poly init
-poly init --region us-1 --account_id 123 --project_id my_project
+poly init --region us --account_id 123 --project_id my_project
 poly init --base-path /path/to/projects
 poly init --format   # format resources after init
 ```

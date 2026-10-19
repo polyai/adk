@@ -15,14 +15,14 @@ Examples:
 poly apikey --region studio
 poly apikey --region studio --account-id acc-123
 poly apikey --region studio --key-name my-key --force
-poly apikey --region us-1
+poly apikey --region us
 poly apikey --region studio --no-session-cache
 ~~~
 
 `poly apikey`:
 
 1. Signs in via the Auth0 device authorization flow. For `--region studio`, this is a dedicated client whose login page shows only "Continue with GitHub". For any other `--region`, it's the same standard sign-in page (email/SSO) that [`poly login`](./login.md) uses. The sign-in is kept in `~/.poly/apikey_session` (readable only by you) until it expires, so a re-run does not sign you in again; `--no-session-cache` skips this.
-2. Calls the authorise endpoint. On `studio`, this creates your workspace if you don't already have one. On an enterprise region (`us-1`, `uk-1`, `euw-1`), your account must already be provisioned by PolyAI — the command stops with a clear message if it isn't.
+2. Calls the authorise endpoint. On `studio`, this creates your workspace if you don't already have one. On an enterprise region (`us`, `uk`, `eu`), your account must already be provisioned by PolyAI — the command stops with a clear message if it isn't.
 3. Resolves your account id — by default, polls for up to 20 seconds for the newly created account to appear; pass `--account-id` to skip this. With more than one account, a terminal shows a picker; otherwise the command stops and lists them so you can re-run with `--account-id`.
 4. Reuses an active, unexpired API key with the default name if one already exists for the account, otherwise creates one. Unlike [`poly login`](./login.md)'s Personal Access Token, this key is **account-scoped**.
 5. Saves the key to `~/.poly/credentials.json` under `--region` — but only if no entry for that region already exists there. An existing ADK credential is never overwritten, and credentials for different regions coexist independently.
@@ -32,7 +32,7 @@ poly apikey --region studio --no-session-cache
 Exit codes: `0` on success, `1` on a sign-in, account, or API failure, `2` when `POLY_API_KEY` is already set in your profile to a different value and `--force` was not passed.
 
 !!! info "Which region should I pick?"
-    `--region` is required. `studio` is the self-serve cluster individual developers sign up on via GitHub. Pick a production region (`us-1`, `uk-1`, `euw-1`) only if you already have an enterprise account provisioned there; those regions require signing in through the standard email/SSO login page rather than GitHub, since the GitHub-only client only exists for `studio`.
+    `--region` is required. `studio` is the self-serve cluster individual developers sign up on via GitHub. Pick a production region (`us`, `uk`, `eu`) only if you already have an enterprise account provisioned there; those regions require signing in through the standard email/SSO login page rather than GitHub, since the GitHub-only client only exists for `studio`.
 
 ### Windows
 
@@ -40,7 +40,7 @@ Install [uv](https://docs.astral.sh/uv/) with `winget install astral-sh.uv`. If 
 
 | Flag | Description |
 |---|---|
-| `--region REGION` | Region/cluster to create the key for. Required. Choices match the standard region list. |
+| `--region REGION` | Region/cluster to create the key for. Required. One of `us`, `eu`, `uk`, `studio` — see [Regions](../cli.md#regions). |
 | `--key-name NAME` | Name for the account-scoped API key. Defaults to `cli-generated-key` for `studio`, or `cli-generated-key-<region>` for any other region. |
 | `--account-id ID` | Account ID to scope the key to. Skips polling for a newly created account. With more than one account and no `--account-id`, a terminal shows a picker; otherwise the command stops and lists the accounts. |
 | `--force`, `-f` | Overwrite an existing `POLY_API_KEY` in your profile if it holds a different value. |
