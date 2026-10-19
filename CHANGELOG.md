@@ -1,6 +1,102 @@
 # CHANGELOG
 
 
+## v0.71.3 (2026-10-19)
+
+### Bug Fixes
+
+- Name the ADK key in the missing-key error and take us/eu/uk/studio as the region names
+  ([#370](https://github.com/polyai/adk/pull/370),
+  [`22899fb`](https://github.com/polyai/adk/commit/22899fb7a06bf4db88aab241387f4bb3f6560574))
+
+## Summary
+
+The missing-key error now tells a developer what the ADK actually wants (an ADK key from `poly
+  login`, not `POLY_API_KEY`), and every `--region` flag takes `us`, `eu`, `uk` and `studio`, the
+  names developer home and the docs show. The older spellings `us-1`, `euw-1`, `uk-1` keep working
+  but are no longer advertised.
+
+## Motivation
+
+A CLI-first developer coming from developer home has an account API key exported as `POLY_API_KEY`
+  and a page that says "choose your region: uk". Running `poly init --region uk` today is refused by
+  argparse, and `poly init --region uk-1` fails with `POLY_ADK_KEY environment variable is not set`,
+  a variable the page never mentions. Neither message says that `poly login` is how you get an ADK
+  key, that `POLY_API_KEY` is a different kind of key, or which regions you already hold a key for.
+
+Closes # (ticket linked in a comment)
+
+## Changes
+
+- `credentials.py`: `_missing_key_message(region)` builds the error in a fixed sentence order: what
+  is missing, `poly login --region <r>` as the fix, other regions that already hold a key
+  (credentials file or `POLY_ADK_KEY_<SUFFIX>`), a note when `POLY_API_KEY` is set that it is an
+  account API key the ADK does not use, and the CI env vars as a closing clause. Plain text, still a
+  `ValueError`, resolution order unchanged. Regions are shown by their advertised name (`uk`, not
+  `uk-1`). - `raise_if_no_credentials()` replaces the `retrieve_api_key("studio")` call in
+  `get_accessible_regions`, so a no-flag `poly init` no longer reports a missing key "for region
+  'studio'". - `constants.py`: `REGION_NAMES` maps the advertised names (`us`, `eu`, `uk`, `studio`)
+  to the internal identifiers the credential file, env-var suffixes and API hosts use;
+  `region_display_name()` goes the other way. - `cli_commands/shared.py`: `region_type` argparse
+  converter (case-insensitive) resolves an advertised name to its internal identifier and still
+  accepts `us-1`/`euw-1`/`uk-1` and the internal `staging`/`dev` for backwards compatibility.
+  `REGION_CHOICES` lists only the advertised names, so `--help` and tab completion show
+  `{us,eu,uk,studio}`, while its membership check lets argparse's post-conversion `choices` test
+  pass. All eleven `--region` sites use `type=region_type, choices=REGION_CHOICES`. - `poly login`'s
+  interactive picker drops the `(us-1)` style labels. - Docs: one **Regions** section on the CLI
+  index page; every `--region` row points at it rather than listing spellings; `dev` and `staging`
+  are no longer documented; the ADK key vs account API key explanation lives on `login.md`; examples
+  use the short names. `skills/poly-adk-workflow/SKILL.md` and the README follow. - Tests:
+  `credentials_test.py` (message branches, resolution order, region-less variant) and
+  `shared_test.py` (converter, one parse test per `--region` site including `functions` via the
+  scope parent, `--help` shows only the short names, `choices` are the short names and accept the
+  internal ids).
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+Before (`poly init --region uk-1`, only `POLY_API_KEY` exported):
+
+``` Error: Invalid value: POLY_ADK_KEY environment variable is not set. Export your API key with:
+  export POLY_ADK_KEY=<your-api-key> ```
+
+After (`poly init --region uk`, same setup):
+
+``` Error: Invalid value: No ADK key found for region 'uk'. ADK commands need an ADK key, which
+  `poly login` creates and saves to ~/.poly/credentials.json. Run `poly login --region uk` to sign
+  in to that region. POLY_API_KEY is set, but that is an account API key for the PolyAI APIs and the
+  ADK does not use it. (CI or scripts: set POLY_ADK_KEY or POLY_ADK_KEY_UK instead.) ```
+
+`poly init --region europe`:
+
+``` poly init: error: argument --region: 'europe' is not a region. Use one of: us, eu, uk, studio.
+  ```
+
+`poly init --help`:
+
+``` --region {us,eu,uk,studio} Region for the Agent Studio project. ```
+
+cc @Ruari-Phipps as repo owner.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5.1 <noreply@anthropic.com>
+
+
 ## v0.71.2 (2026-10-19)
 
 ### Bug Fixes
