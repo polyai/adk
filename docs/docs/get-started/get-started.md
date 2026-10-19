@@ -118,9 +118,9 @@ If you work across multiple regions, you can set region-scoped environment varia
 
 | Region | Environment variable |
 |---|---|
-| `us-1` | `POLY_ADK_KEY_US` |
-| `euw-1` | `POLY_ADK_KEY_EUW` |
-| `uk-1` | `POLY_ADK_KEY_UK` |
+| `us` | `POLY_ADK_KEY_US` |
+| `eu` | `POLY_ADK_KEY_EUW` |
+| `uk` | `POLY_ADK_KEY_UK` |
 | `studio` | `POLY_ADK_KEY_STUDIO` |
 
 ```bash
@@ -135,7 +135,7 @@ export POLY_ADK_KEY=<your-fallback-api-key>   # used for any other region
     2. **Region-specific env var** — e.g. `POLY_ADK_KEY_US`
     3. **General env var** — `POLY_ADK_KEY`
 
-    The first match wins. If nothing is found, the CLI raises an error.
+    The first match wins. If nothing is found, the CLI raises an error pointing at `poly login` as the fix.
 
 !!! tip "Workspace scoped API keys"
     Credentials from `poly login` are Personal Access Tokens and are user-scoped. If you would rather use a workspace-scoped API key, look for the API keys tab in your workspace settings.
