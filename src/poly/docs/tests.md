@@ -158,7 +158,7 @@ Each rule has:
 
 - **respond**: The response to return.
   - **status**: HTTP status code (100–599).
-  - **body** (optional): Response body. Keeps its type through to the flow, same rules as `integration_attributes` — quote dates, and only text, numbers, `true`/`false`, `null`, lists and nested maps are supported.
+  - **body** (optional): Response body. Reaches the flow exactly as written: `2` stays an integer and `2.0` stays a decimal. Quote dates; only text, numbers, `true`/`false`, `null`, lists and nested maps are supported. A text body is returned as the raw response text.
   - **headers** (optional): Response headers, always sent as text.
 - **repeat** (optional): How many times to return this response before moving to the next rule in the list. Omit it to respond once. Set it to `-1` to respond with this rule forever — only valid on the last rule in a list. `0` and other negative values are rejected. Once a list's rules are exhausted (no trailing `-1` rule), further calls to that operation fall through to the real API.
 
