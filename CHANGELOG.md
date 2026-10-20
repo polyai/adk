@@ -1,6 +1,144 @@
 # CHANGELOG
 
 
+## v0.72.0 (2026-10-20)
+
+### Features
+
+- Sync voice turn-taking, filler phrases and background ambience
+  ([#359](https://github.com/polyai/adk/pull/359),
+  [`8073cd8`](https://github.com/polyai/adk/commit/8073cd85587a328af9894fac6b41337f96b76b14))
+
+## Summary
+
+The ADK now syncs the voice channel's turn-taking, filler phrases and background ambience:
+
+- `voice/speech_recognition/asr_settings.yaml` holds the turn-taking settings: speech end delay and
+  barge-in. - `voice/configuration.yaml` gains `filler_phrases` and `background_ambience` sections,
+  next to the greeting and disclaimer.
+
+Each section is pulled from, and pushed to, its own voice channel setting.
+
+## Motivation
+
+`asr_settings.yaml` held only `barge_in` and `interaction_style`, both legacy fields that Agent
+  Studio has replaced:
+
+- `barge_in` is ignored whenever the newer barge-in config is set. - `interaction_style` no longer
+  affects anything: the speech end delay overrides the end-of-speech timing it sets. - The speech
+  end delay, the rest of the barge-in config, filler phrases and background ambience could only be
+  set in the UI. They weren't version-controlled or diffable, and agents working in the ADK couldn't
+  see them.
+
+Filler phrases and ambience are audio the agent plays, not speech recognition, and Agent Studio
+  shows them with the voice channel's general settings. So they go in `voice/configuration.yaml`
+  rather than `asr_settings.yaml`.
+
+## Changes
+
+- New shape for `asr_settings.yaml`. Every section is optional: - `speech_end_delay_ms`: pushed as
+  seconds. - `barge_in`: `enabled`, `allow_on_first_turn`, `max_per_call`. - New optional sections
+  in `voice/configuration.yaml`: - `filler_phrases`: `enabled`, `phrases`, `randomize`,
+  `initial_interval_seconds`, `interval_seconds`. - `background_ambience`: `enabled`, `preset`,
+  `loudness` in dB. - A section is written when Agent Studio has the setting stored, whether it's on
+  or off, and left out when it doesn't, in which case the platform default applies. - Push: - Each
+  changed section is pushed with its own voice channel command. `asr_settings.yaml` no longer sends
+  the legacy ASR settings command. - A removed section is reset, so the next pull leaves it out too.
+  - Removing `background_ambience` fails the push. Agent Studio can't clear ambience once it's set,
+  so the message says to set `enabled: false` instead. - Barge-in updates merge on the platform, so
+  removing `max_per_call` sends a reset followed by an update. - Pull: a project without a barge-in
+  config gets no `barge_in` section. - Validation: - `speech_end_delay_ms` must be 200–1500. -
+  Filler intervals must be at least 0.5 s (first phrase) and 1 s (between phrases). Enabled filler
+  phrases need at least one phrase. - `max_per_call` must be 0 or more, and ambience loudness −70 to
+  −20 dB. - Unknown keys inside a section are errors. - An unknown ambience preset is a warning
+  rather than an error, so a preset added to the platform later can still be pushed. - Migration: a
+  one-time migration, run when a project is loaded like the existing ones, rewrites an older
+  `asr_settings.yaml`: - `barge_in: true` / `false` moves under `barge_in.enabled`, keeping its
+  value. - `interaction_style` is dropped. - The last pulled state is rewritten the same way, so
+  upgrading doesn't show the file as changed. - After the migration, a bool `barge_in` is a
+  validation error rather than being read with a warning. - Docs: - The speech recognition and voice
+  settings reference pages, the matching `poly docs` resource pages, and the resource architecture
+  guide. - A note that `speech_end_delay_ms` is overwritten at runtime when PolyAI manages a
+  project's voice configuration, and that the project's **Voice › Model** page in Agent Studio shows
+  this as a **Best defaults** tag. - The end-to-end model is called Dialog-RSN-1 in the speech
+  recognition and experimental config pages. - The `test_project` fixture now covers every section.
+
+Not in this PR: - The ASR model. Agent Studio accepts any provider/model pair today, so a typo in
+  the file would only show up as broken calls. It moves to a follow-up PR that waits for the
+  platform to reject models it doesn't offer. - Treating `speech_end_delay_ms` as read-only on
+  projects whose voice configuration is managed by PolyAI. The ADK has no API route that says which
+  projects are managed; the docs explain how to check in Agent Studio.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+- Unit tests cover: - the YAML, projection and status-file round trips, including that a pulled file
+  pushes nothing; - the migration of older files and status files, including that a current file is
+  left alone and that the migration runs only once; - validation; - the update and reset commands
+  for every section; - a new filler or ambience section being sent as an update, filler phrases and
+  ambience that are off being pulled with `enabled: false`, and a removed `background_ambience`
+  failing the push; - a project without a barge-in config pulling no `barge_in` section; -
+  project-level pushes of a changed and a removed `asr_settings.yaml` section. - Against a live
+  project, on a new branch: - Pulled an `asr_settings.yaml` in the old format: it was migrated, and
+  `poly status` showed no changes. - Set every section, pushed and pulled: both files came back
+  identical. - Turned filler phrases and ambience off with `enabled: false`, and removed
+  `max_per_call`: identical after a pull, with `allow_on_first_turn` kept. - Removed
+  `filler_phrases`, `speech_end_delay_ms` and `barge_in`, and pushed: they were reset, and the next
+  pull left them out with no diff.
+
+- Removed `background_ambience`: the push failed with the `enabled: false` message, exited 1 (with
+  and without `--json`), and nothing changed on the platform.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`: no skill mentions
+  `asr_settings.yaml`, filler phrases or ambience
+
+## Screenshots / Logs
+
+`voice/speech_recognition/asr_settings.yaml`:
+
+```yaml speech_end_delay_ms: 800
+
+barge_in: enabled: true
+
+allow_on_first_turn: false
+
+max_per_call: 5 ```
+
+`voice/configuration.yaml`, with the new sections after the existing ones:
+
+```yaml greeting: welcome_message: Hello! How can I help you today?
+
+language_code: en-GB
+
+filler_phrases: enabled: true
+
+phrases: - One moment... - Just a second... randomize: true
+
+initial_interval_seconds: 2.5
+
+interval_seconds: 5
+
+background_ambience: enabled: false
+
+preset: office-ambiance
+
+loudness: -50 ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.71.3 (2026-10-19)
 
 ### Bug Fixes
