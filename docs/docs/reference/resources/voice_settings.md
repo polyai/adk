@@ -1,6 +1,6 @@
 ---
 title: Voice settings
-description: Configure how the agent behaves on the voice channel, including greetings, style guidance, and disclaimers.
+description: Configure how the agent behaves on the voice channel, including greetings, style guidance, disclaimers, filler phrases and background ambience.
 ---
 
 # Voice settings
@@ -44,6 +44,18 @@ voice/
     ---
 
     An optional message played before the greeting, such as a recording notice.
+
+-   **Filler phrases**
+
+    ---
+
+    Phrases the agent says while the caller waits on a slow turn.
+
+-   **Background ambience**
+
+    ---
+
+    Background sound played under the agent's speech.
 
 -   **Safety filters**
 
@@ -133,6 +145,54 @@ disclaimer_messages:
   language_code: en-GB
 ~~~
 
+## Filler phrases
+
+Filler phrases are what the agent says while the caller waits on a slow turn, such as a long function call. The section is optional; removing it resets filler phrases to the platform default, which is off.
+
+### Fields
+
+| Field | Description |
+|---|---|
+| `enabled` | Whether filler phrases are played. |
+| `phrases` | The phrases to say. |
+| `randomize` | Whether to pick phrases in random order. |
+| `initial_interval_seconds` | How long to wait before the first phrase. |
+| `interval_seconds` | How long to wait between phrases. |
+
+### Example
+
+~~~yaml
+filler_phrases:
+  enabled: true
+  phrases:
+    - One moment...
+    - Just a second...
+  randomize: true
+  initial_interval_seconds: 2.5
+  interval_seconds: 5
+~~~
+
+## Background ambience
+
+Background ambience is a sound played under the agent's speech, such as office noise. The section appears once ambience has been set. To turn it off, set `enabled: false`; the section can't be removed.
+
+### Fields
+
+| Field | Description |
+|---|---|
+| `enabled` | Whether ambience is played. |
+| `preset` | One of `office-ambiance`, `restaurant-ambiance` or `whitenoise-subtle`. |
+| `loudness` | Volume in dB. Agent Studio shows -70 dB as volume 0 and -20 dB as volume 100. |
+
+### Example
+
+~~~yaml
+background_ambience:
+  enabled: false
+  preset: office-ambiance
+  loudness: -50
+~~~
+
 ## Safety filters
 
 `voice/safety_filters.yaml` is an optional file that overrides the project-level safety filter settings for the voice channel. When present, it takes precedence over `agent_settings/safety_filters.yaml` for voice interactions.
@@ -153,7 +213,28 @@ disclaimer_messages:
   message: This conversation may be recorded for quality assurance.
   enabled: true
   language_code: en-GB
+
+filler_phrases:
+  enabled: true
+  phrases:
+    - One moment...
+    - Just a second...
+  randomize: true
+  initial_interval_seconds: 2.5
+  interval_seconds: 5
+
+background_ambience:
+  enabled: false
+  preset: office-ambiance
+  loudness: -50
 ~~~
+
+## Validation
+
+- `filler_phrases.initial_interval_seconds` must be at least 0.5, and `interval_seconds` at least 1. An enabled `filler_phrases` needs at least one phrase.
+- `background_ambience` can't be removed once it exists; set `enabled: false` instead.
+- `background_ambience` needs a `preset`, and `loudness` must be between -70 and -20. A preset Agent Studio doesn't know is a warning, not an error.
+- Keys inside `filler_phrases` and `background_ambience` must be ones listed above, so a misspelt key is an error rather than being ignored.
 
 ## Related pages
 
@@ -170,7 +251,7 @@ disclaimer_messages:
 
     ---
 
-    Configure ASR settings, keyphrase boosting, and transcript corrections.
+    Configure turn-taking, keyphrase boosting, and transcript corrections.
     [Open speech recognition](./speech_recognition.md)
 
 -   **Response control**

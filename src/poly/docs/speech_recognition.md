@@ -6,34 +6,40 @@ Speech recognition resources control how the agent processes user speech input o
 
 ```
 voice/speech_recognition/
-├── asr_settings.yaml               # Barge-in, interaction style
+├── asr_settings.yaml               # Turn-taking: speech end delay, barge-in
 ├── keyphrase_boosting.yaml         # Optional - bias ASR toward specific words
 └── transcript_corrections.yaml     # Optional - regex corrections on ASR output
 ```
 
 ## ASR Settings (`asr_settings.yaml`)
 
-Global speech recognition settings for the voice channel.
+The voice channel's turn-taking. Update only: the file can't be created or deleted.
+
+Every section is optional. A section that is left out uses the platform default, and removing
+a section resets it on the next push.
 
 ### Fields
-- **barge_in** (bool): Allow the user to interrupt the agent while it's speaking. Default: `false`.
-- **interaction_style** (string): Controls ASR latency/accuracy trade-off. One of: `balanced`, `precise`, `swift`, `sonic`, `turbo`. Default: `balanced`.
+- **speech_end_delay_ms** (int): Silence, in milliseconds, before the caller's turn is treated as finished. 200–1500.
+- **barge_in**: Whether the caller can interrupt the agent.
+  - **enabled** (bool), **allow_on_first_turn** (bool), **max_per_call** (int, 0 or more).
+
+Keys inside a section are checked, so a misspelt key is an error.
+
+If PolyAI manages the project's voice configuration, `speech_end_delay_ms` is overwritten at
+runtime. You can check on the project's **Voice › Model** page in Agent Studio, which shows a
+**Best defaults** tag when it's managed.
 
 ### Example
 ```yaml
-barge_in: false
-interaction_style: balanced
+speech_end_delay_ms: 800
+barge_in:
+  enabled: true
+  allow_on_first_turn: false
+  max_per_call: 5
 ```
 
 These apply to the whole voice channel. Individual flow steps can override barge-in, ASR
 provider, VAD and LLM settings for a single turn — see [step settings](flows.md#step-settings).
-
-| Style | Behavior |
-|-------|----------|
-| `precise` | Higher accuracy, higher latency |
-| `balanced` | Default balance of speed and accuracy |
-| `swift` | Faster responses, slightly less accurate |
-| `sonic` / `turbo` | Lowest latency |
 
 ## Keyphrase Boosting (`keyphrase_boosting.yaml`)
 
