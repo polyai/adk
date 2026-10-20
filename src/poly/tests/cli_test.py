@@ -817,6 +817,71 @@ class BranchCurrentTest(unittest.TestCase):
         mock_json_print.assert_called_once_with({"current_branch": "main", "parent_branch": None})
 
 
+class BranchSwitchTest(unittest.TestCase):
+    """Tests for 'poly branch switch <name>' and its --keep-files / --create / --from flags."""
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.branch.load_project").start()
+        self.proj = MagicMock()
+        self.proj.get_branches.return_value = ("main", {"main": {"branchId": "main"}})
+        self.proj.switch_branch.return_value = (True, {})
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.output.console.plain")
+    @patch("poly.output.console.success")
+    def test_flags_are_parsed_and_forwarded(self, mock_success, mock_plain):
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(
+            ["branch", "switch", "feature-b", "--create", "--from", "main", "--keep-files"]
+        )
+
+        BranchCommand.run(args)
+
+        kwargs = self.proj.switch_branch.call_args.kwargs
+        self.assertEqual(self.proj.switch_branch.call_args[0][0], "feature-b")
+        self.assertTrue(kwargs["keep_files"])
+        self.assertTrue(kwargs["create"])
+        self.assertEqual(kwargs["source_branch_name"], "main")
+        self.assertIn("Created branch 'feature-b'", mock_success.call_args[0][0])
+        self.assertIn("poly push", mock_plain.call_args[0][0])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output_reports_whether_the_branch_was_created(self, mock_json):
+        BranchCommand.branch_switch(
+            TEST_DIR, "feature-b", output_json=True, keep_files=True, create=True
+        )
+
+        mock_json.assert_called_once_with(
+            {"success": True, "branch_name": "feature-b", "created": True}
+        )
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output_reports_an_existing_branch_as_not_created(self, mock_json):
+        self.proj.get_branches.return_value = ("main", {"feature-b": {"branchId": "id-b"}})
+
+        BranchCommand.branch_switch(TEST_DIR, "feature-b", output_json=True, create=True)
+
+        mock_json.assert_called_once_with(
+            {"success": True, "branch_name": "feature-b", "created": False}
+        )
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output_reports_validation_errors(self, mock_json):
+        self.proj.switch_branch.side_effect = ValueError("Branch feature-b does not exist.")
+
+        with self.assertRaises(SystemExit) as exit_ctx:
+            BranchCommand.branch_switch(TEST_DIR, "feature-b", output_json=True)
+
+        self.assertEqual(exit_ctx.exception.code, 1)
+        mock_json.assert_called_once_with(
+            {"success": False, "error": "Branch feature-b does not exist."}
+        )
+
+
 class BranchSwitchInteractiveTest(unittest.TestCase):
     """Tests for BranchCommand.branch_switch's interactive picker (no branch_name given)."""
 
