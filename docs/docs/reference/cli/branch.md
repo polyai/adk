@@ -84,7 +84,7 @@ poly branch create my-feature --from other-branch
 
 | Flag | Description |
 |---|---|
-| `--env`, `--environment` | Source the new branch from a deployed environment snapshot instead of `main`. Choices: `sandbox`, `pre-release`, `live`. |
+| `--env`, `--environment` | Source the new branch from a deployed environment snapshot. Choices: `sandbox`, `pre-release`, `live`. Only `pre-release` and `live` take a snapshot (see below); `sandbox` creates a normal branch. |
 | `--from BRANCH` | Source the new branch from a different existing branch instead of your current one. In the standard deployment mode, `main` is the only valid value. |
 | `--force`, `-f` | Create the branch even if there are uncommitted local changes on `main`. |
 
