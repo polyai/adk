@@ -119,6 +119,7 @@ the public release note.
 |---|---|
 | `feat:` | Minor. Anything a user can see, including output or on-disk changes. |
 | `fix:`, `perf:` | Patch |
+| `sync:` | Patch. Only for bringing the bundled experimental config schema or runtime stubs up to date with production. |
 | `feat!:` or a `BREAKING CHANGE:` footer | Major |
 | `chore:`, `docs:`, `ci:`, `build:`, `refactor:`, `style:`, `test:` | No release |
 
