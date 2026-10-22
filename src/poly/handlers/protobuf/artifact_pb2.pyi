@@ -261,14 +261,16 @@ class ConversationLimits(_message.Message):
     def __init__(self, call_duration_limit: _Optional[int] = ..., chat_turn_limit: _Optional[int] = ...) -> None: ...
 
 class Voice(_message.Message):
-    __slots__ = ("provider_voice_id", "provider", "config")
+    __slots__ = ("provider_voice_id", "provider", "config", "name")
     PROVIDER_VOICE_ID_FIELD_NUMBER: _ClassVar[int]
     PROVIDER_FIELD_NUMBER: _ClassVar[int]
     CONFIG_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
     provider_voice_id: str
     provider: str
     config: _struct_pb2.Struct
-    def __init__(self, provider_voice_id: _Optional[str] = ..., provider: _Optional[str] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+    name: str
+    def __init__(self, provider_voice_id: _Optional[str] = ..., provider: _Optional[str] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., name: _Optional[str] = ...) -> None: ...
 
 class Asr(_message.Message):
     __slots__ = ("provider_id", "model_id", "language", "config")
@@ -1077,16 +1079,27 @@ class ApiIntegrationConfig(_message.Message):
     def __init__(self, base_url: _Optional[str] = ..., auth_type: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationOperation(_message.Message):
-    __slots__ = ("id", "name", "method", "resource")
+    __slots__ = ("id", "name", "method", "resource", "headers", "description")
+    class HeadersEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     METHOD_FIELD_NUMBER: _ClassVar[int]
     RESOURCE_FIELD_NUMBER: _ClassVar[int]
+    HEADERS_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     method: str
     resource: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ...) -> None: ...
+    headers: _containers.ScalarMap[str, str]
+    description: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., headers: _Optional[_Mapping[str, str]] = ..., description: _Optional[str] = ...) -> None: ...
 
 class Language(_message.Message):
     __slots__ = ("code",)
@@ -1189,8 +1202,18 @@ class ChannelConfig(_message.Message):
     temperature: float
     def __init__(self, model_id: _Optional[str] = ..., style_prompt: _Optional[_Union[StylePrompt, _Mapping]] = ..., greeting: _Optional[_Union[Greeting, _Mapping]] = ..., safety_filters: _Optional[_Union[ContentFilter, _Mapping]] = ..., temperature: _Optional[float] = ...) -> None: ...
 
+class AmbienceSettings(_message.Message):
+    __slots__ = ("enabled", "preset", "loudness")
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    PRESET_FIELD_NUMBER: _ClassVar[int]
+    LOUDNESS_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    preset: str
+    loudness: float
+    def __init__(self, enabled: bool = ..., preset: _Optional[str] = ..., loudness: _Optional[float] = ...) -> None: ...
+
 class VoiceChannel(_message.Message):
-    __slots__ = ("enabled", "config", "barge_in_config", "latency_config", "disclaimer", "vad_config", "audioEnhancement", "silenceFillerUtterances", "asrConfig")
+    __slots__ = ("enabled", "config", "barge_in_config", "latency_config", "disclaimer", "vad_config", "audioEnhancement", "silenceFillerUtterances", "asrConfig", "ambience")
     ENABLED_FIELD_NUMBER: _ClassVar[int]
     CONFIG_FIELD_NUMBER: _ClassVar[int]
     BARGE_IN_CONFIG_FIELD_NUMBER: _ClassVar[int]
@@ -1200,6 +1223,7 @@ class VoiceChannel(_message.Message):
     AUDIOENHANCEMENT_FIELD_NUMBER: _ClassVar[int]
     SILENCEFILLERUTTERANCES_FIELD_NUMBER: _ClassVar[int]
     ASRCONFIG_FIELD_NUMBER: _ClassVar[int]
+    AMBIENCE_FIELD_NUMBER: _ClassVar[int]
     enabled: bool
     config: ChannelConfig
     barge_in_config: BargeInConfig
@@ -1209,7 +1233,8 @@ class VoiceChannel(_message.Message):
     audioEnhancement: AudioEnhancement
     silenceFillerUtterances: FillerUtterances
     asrConfig: Asr
-    def __init__(self, enabled: bool = ..., config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ..., latency_config: _Optional[_Union[LatencyConfig, _Mapping]] = ..., disclaimer: _Optional[_Union[IntroMessage, _Mapping]] = ..., vad_config: _Optional[_Union[VADConfig, _Mapping]] = ..., audioEnhancement: _Optional[_Union[AudioEnhancement, _Mapping]] = ..., silenceFillerUtterances: _Optional[_Union[FillerUtterances, _Mapping]] = ..., asrConfig: _Optional[_Union[Asr, _Mapping]] = ...) -> None: ...
+    ambience: AmbienceSettings
+    def __init__(self, enabled: bool = ..., config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ..., latency_config: _Optional[_Union[LatencyConfig, _Mapping]] = ..., disclaimer: _Optional[_Union[IntroMessage, _Mapping]] = ..., vad_config: _Optional[_Union[VADConfig, _Mapping]] = ..., audioEnhancement: _Optional[_Union[AudioEnhancement, _Mapping]] = ..., silenceFillerUtterances: _Optional[_Union[FillerUtterances, _Mapping]] = ..., asrConfig: _Optional[_Union[Asr, _Mapping]] = ..., ambience: _Optional[_Union[AmbienceSettings, _Mapping]] = ...) -> None: ...
 
 class WebChatChannel(_message.Message):
     __slots__ = ("enabled", "config")
@@ -1220,14 +1245,16 @@ class WebChatChannel(_message.Message):
     def __init__(self, enabled: bool = ..., config: _Optional[_Union[ChannelConfig, _Mapping]] = ...) -> None: ...
 
 class MessagingChannel(_message.Message):
-    __slots__ = ("session", "twilio", "csat")
+    __slots__ = ("session", "twilio", "csat", "attachments")
     SESSION_FIELD_NUMBER: _ClassVar[int]
     TWILIO_FIELD_NUMBER: _ClassVar[int]
     CSAT_FIELD_NUMBER: _ClassVar[int]
+    ATTACHMENTS_FIELD_NUMBER: _ClassVar[int]
     session: MessagingSessionConfig
     twilio: MessagingTwilioConfig
     csat: MessagingCSATConfig
-    def __init__(self, session: _Optional[_Union[MessagingSessionConfig, _Mapping]] = ..., twilio: _Optional[_Union[MessagingTwilioConfig, _Mapping]] = ..., csat: _Optional[_Union[MessagingCSATConfig, _Mapping]] = ...) -> None: ...
+    attachments: MessagingAttachmentsConfig
+    def __init__(self, session: _Optional[_Union[MessagingSessionConfig, _Mapping]] = ..., twilio: _Optional[_Union[MessagingTwilioConfig, _Mapping]] = ..., csat: _Optional[_Union[MessagingCSATConfig, _Mapping]] = ..., attachments: _Optional[_Union[MessagingAttachmentsConfig, _Mapping]] = ...) -> None: ...
 
 class MessagingTwilioConfig(_message.Message):
     __slots__ = ("content_templates",)
@@ -1290,12 +1317,20 @@ class MessagingSessionTtls(_message.Message):
     def __init__(self, websocket: _Optional[int] = ..., sms: _Optional[int] = ..., rcs: _Optional[int] = ..., email: _Optional[int] = ...) -> None: ...
 
 class MessagingInactivityWarning(_message.Message):
-    __slots__ = ("enabled", "delay_seconds")
+    __slots__ = ("enabled", "delay_seconds", "message", "nudge_enabled", "nudge_delay_seconds", "nudge_message")
     ENABLED_FIELD_NUMBER: _ClassVar[int]
     DELAY_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    NUDGE_ENABLED_FIELD_NUMBER: _ClassVar[int]
+    NUDGE_DELAY_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    NUDGE_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     enabled: bool
     delay_seconds: int
-    def __init__(self, enabled: bool = ..., delay_seconds: _Optional[int] = ...) -> None: ...
+    message: str
+    nudge_enabled: bool
+    nudge_delay_seconds: int
+    nudge_message: str
+    def __init__(self, enabled: bool = ..., delay_seconds: _Optional[int] = ..., message: _Optional[str] = ..., nudge_enabled: bool = ..., nudge_delay_seconds: _Optional[int] = ..., nudge_message: _Optional[str] = ...) -> None: ...
 
 class MessagingCloseNotification(_message.Message):
     __slots__ = ("enabled",)
@@ -1336,6 +1371,34 @@ class MessagingCSATQuestion(_message.Message):
     id: str
     text: _containers.ScalarMap[str, str]
     def __init__(self, id: _Optional[str] = ..., text: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class MessagingAttachmentsConfig(_message.Message):
+    __slots__ = ("enabled", "allowed_mime_types", "max_bytes", "max_per_message", "max_per_session", "max_project_bytes_daily", "retention")
+    class Retention(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+        __slots__ = ()
+        RETENTION_UNSPECIFIED: _ClassVar[MessagingAttachmentsConfig.Retention]
+        RETENTION_28_DAYS: _ClassVar[MessagingAttachmentsConfig.Retention]
+        RETENTION_30_DAYS: _ClassVar[MessagingAttachmentsConfig.Retention]
+        RETENTION_90_DAYS: _ClassVar[MessagingAttachmentsConfig.Retention]
+    RETENTION_UNSPECIFIED: MessagingAttachmentsConfig.Retention
+    RETENTION_28_DAYS: MessagingAttachmentsConfig.Retention
+    RETENTION_30_DAYS: MessagingAttachmentsConfig.Retention
+    RETENTION_90_DAYS: MessagingAttachmentsConfig.Retention
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    ALLOWED_MIME_TYPES_FIELD_NUMBER: _ClassVar[int]
+    MAX_BYTES_FIELD_NUMBER: _ClassVar[int]
+    MAX_PER_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    MAX_PER_SESSION_FIELD_NUMBER: _ClassVar[int]
+    MAX_PROJECT_BYTES_DAILY_FIELD_NUMBER: _ClassVar[int]
+    RETENTION_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    allowed_mime_types: _containers.RepeatedScalarFieldContainer[str]
+    max_bytes: int
+    max_per_message: int
+    max_per_session: int
+    max_project_bytes_daily: int
+    retention: MessagingAttachmentsConfig.Retention
+    def __init__(self, enabled: bool = ..., allowed_mime_types: _Optional[_Iterable[str]] = ..., max_bytes: _Optional[int] = ..., max_per_message: _Optional[int] = ..., max_per_session: _Optional[int] = ..., max_project_bytes_daily: _Optional[int] = ..., retention: _Optional[_Union[MessagingAttachmentsConfig.Retention, str]] = ...) -> None: ...
 
 class SmsBehaviorConfig(_message.Message):
     __slots__ = ("tones", "emoji_use", "sign_off", "opener", "date_format", "time_format")
@@ -1383,17 +1446,27 @@ class SmsChannel(_message.Message):
     compliance_keywords: _containers.RepeatedCompositeFieldContainer[SmsComplianceKeyword]
     def __init__(self, enabled: bool = ..., config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., sender_phone_number: _Optional[str] = ..., channel_behavior_mode: _Optional[str] = ..., behavior_config: _Optional[_Union[SmsBehaviorConfig, _Mapping]] = ..., ending_message: _Optional[str] = ..., error_fallback_message: _Optional[str] = ..., compliance_keywords: _Optional[_Iterable[_Union[SmsComplianceKeyword, _Mapping]]] = ...) -> None: ...
 
+class EmailChannel(_message.Message):
+    __slots__ = ("enabled", "config")
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    CONFIG_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    config: ChannelConfig
+    def __init__(self, enabled: bool = ..., config: _Optional[_Union[ChannelConfig, _Mapping]] = ...) -> None: ...
+
 class Channels(_message.Message):
-    __slots__ = ("voice", "web_chat", "messaging", "sms")
+    __slots__ = ("voice", "web_chat", "messaging", "sms", "email")
     VOICE_FIELD_NUMBER: _ClassVar[int]
     WEB_CHAT_FIELD_NUMBER: _ClassVar[int]
     MESSAGING_FIELD_NUMBER: _ClassVar[int]
     SMS_FIELD_NUMBER: _ClassVar[int]
+    EMAIL_FIELD_NUMBER: _ClassVar[int]
     voice: VoiceChannel
     web_chat: WebChatChannel
     messaging: MessagingChannel
     sms: SmsChannel
-    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ..., messaging: _Optional[_Union[MessagingChannel, _Mapping]] = ..., sms: _Optional[_Union[SmsChannel, _Mapping]] = ...) -> None: ...
+    email: EmailChannel
+    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ..., messaging: _Optional[_Union[MessagingChannel, _Mapping]] = ..., sms: _Optional[_Union[SmsChannel, _Mapping]] = ..., email: _Optional[_Union[EmailChannel, _Mapping]] = ...) -> None: ...
 
 class AudioEnhancement(_message.Message):
     __slots__ = ("ai_coustics",)

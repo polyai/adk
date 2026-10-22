@@ -46,8 +46,16 @@ class HumeTtsConfig(_message.Message):
     provider: str
     def __init__(self, model_id: _Optional[str] = ..., voice_description: _Optional[str] = ..., instant_mode: bool = ..., provider: _Optional[str] = ...) -> None: ...
 
+class GoogleGeminiTtsConfig(_message.Message):
+    __slots__ = ("model_id", "prompt")
+    MODEL_ID_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    model_id: str
+    prompt: str
+    def __init__(self, model_id: _Optional[str] = ..., prompt: _Optional[str] = ...) -> None: ...
+
 class Voice(_message.Message):
-    __slots__ = ("voice_id", "created_by", "created_at", "updated_by", "updated_at", "eleven_labs", "play_ht", "cartesia", "hume", "id")
+    __slots__ = ("voice_id", "created_by", "created_at", "updated_by", "updated_at", "eleven_labs", "play_ht", "cartesia", "hume", "google_gemini", "id")
     VOICE_ID_FIELD_NUMBER: _ClassVar[int]
     CREATED_BY_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
@@ -57,6 +65,7 @@ class Voice(_message.Message):
     PLAY_HT_FIELD_NUMBER: _ClassVar[int]
     CARTESIA_FIELD_NUMBER: _ClassVar[int]
     HUME_FIELD_NUMBER: _ClassVar[int]
+    GOOGLE_GEMINI_FIELD_NUMBER: _ClassVar[int]
     ID_FIELD_NUMBER: _ClassVar[int]
     voice_id: str
     created_by: str
@@ -67,24 +76,27 @@ class Voice(_message.Message):
     play_ht: PlayHTTtsConfig
     cartesia: CartesiaTtsConfig
     hume: HumeTtsConfig
+    google_gemini: GoogleGeminiTtsConfig
     id: str
-    def __init__(self, voice_id: _Optional[str] = ..., created_by: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., eleven_labs: _Optional[_Union[ElevenLabsTtsConfig, _Mapping]] = ..., play_ht: _Optional[_Union[PlayHTTtsConfig, _Mapping]] = ..., cartesia: _Optional[_Union[CartesiaTtsConfig, _Mapping]] = ..., hume: _Optional[_Union[HumeTtsConfig, _Mapping]] = ..., id: _Optional[str] = ...) -> None: ...
+    def __init__(self, voice_id: _Optional[str] = ..., created_by: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., eleven_labs: _Optional[_Union[ElevenLabsTtsConfig, _Mapping]] = ..., play_ht: _Optional[_Union[PlayHTTtsConfig, _Mapping]] = ..., cartesia: _Optional[_Union[CartesiaTtsConfig, _Mapping]] = ..., hume: _Optional[_Union[HumeTtsConfig, _Mapping]] = ..., google_gemini: _Optional[_Union[GoogleGeminiTtsConfig, _Mapping]] = ..., id: _Optional[str] = ...) -> None: ...
 
 class AgentVoice(_message.Message):
-    __slots__ = ("voice_id", "probability", "updated_by", "updated_at", "language_code", "id")
+    __slots__ = ("voice_id", "probability", "updated_by", "updated_at", "language_code", "id", "name")
     VOICE_ID_FIELD_NUMBER: _ClassVar[int]
     PROBABILITY_FIELD_NUMBER: _ClassVar[int]
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
     LANGUAGE_CODE_FIELD_NUMBER: _ClassVar[int]
     ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
     voice_id: str
     probability: float
     updated_by: str
     updated_at: _timestamp_pb2.Timestamp
     language_code: str
     id: str
-    def __init__(self, voice_id: _Optional[str] = ..., probability: _Optional[float] = ..., updated_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., language_code: _Optional[str] = ..., id: _Optional[str] = ...) -> None: ...
+    name: str
+    def __init__(self, voice_id: _Optional[str] = ..., probability: _Optional[float] = ..., updated_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., language_code: _Optional[str] = ..., id: _Optional[str] = ..., name: _Optional[str] = ...) -> None: ...
 
 class DisclaimerVoice(_message.Message):
     __slots__ = ("voice_id", "updated_by", "updated_at", "language_code")
@@ -129,16 +141,18 @@ class Voices(_message.Message):
     def __init__(self, agent_voices: _Optional[_Iterable[_Union[AgentVoice, _Mapping]]] = ..., disclaimer_voices: _Optional[_Iterable[_Union[DisclaimerVoice, _Mapping]]] = ..., agent_voice_settings: _Optional[_Iterable[_Union[Voice, _Mapping]]] = ..., disclaimer_voice_settings: _Optional[_Iterable[_Union[Voice, _Mapping]]] = ..., favorite_voices: _Optional[_Iterable[_Union[FavoriteVoice, _Mapping]]] = ...) -> None: ...
 
 class Voice_AddAgentVoice(_message.Message):
-    __slots__ = ("voice_id", "probability", "language_code", "id")
+    __slots__ = ("voice_id", "probability", "language_code", "id", "name")
     VOICE_ID_FIELD_NUMBER: _ClassVar[int]
     PROBABILITY_FIELD_NUMBER: _ClassVar[int]
     LANGUAGE_CODE_FIELD_NUMBER: _ClassVar[int]
     ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
     voice_id: str
     probability: float
     language_code: str
     id: str
-    def __init__(self, voice_id: _Optional[str] = ..., probability: _Optional[float] = ..., language_code: _Optional[str] = ..., id: _Optional[str] = ...) -> None: ...
+    name: str
+    def __init__(self, voice_id: _Optional[str] = ..., probability: _Optional[float] = ..., language_code: _Optional[str] = ..., id: _Optional[str] = ..., name: _Optional[str] = ...) -> None: ...
 
 class Voice_DeleteAgentVoice(_message.Message):
     __slots__ = ("voice_id", "id")
@@ -149,44 +163,50 @@ class Voice_DeleteAgentVoice(_message.Message):
     def __init__(self, voice_id: _Optional[str] = ..., id: _Optional[str] = ...) -> None: ...
 
 class Voice_UpdateAgentVoice(_message.Message):
-    __slots__ = ("voice_id", "probability", "new_voice_id", "id")
+    __slots__ = ("voice_id", "probability", "new_voice_id", "id", "name")
     VOICE_ID_FIELD_NUMBER: _ClassVar[int]
     PROBABILITY_FIELD_NUMBER: _ClassVar[int]
     NEW_VOICE_ID_FIELD_NUMBER: _ClassVar[int]
     ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
     voice_id: str
     probability: float
     new_voice_id: str
     id: str
-    def __init__(self, voice_id: _Optional[str] = ..., probability: _Optional[float] = ..., new_voice_id: _Optional[str] = ..., id: _Optional[str] = ...) -> None: ...
+    name: str
+    def __init__(self, voice_id: _Optional[str] = ..., probability: _Optional[float] = ..., new_voice_id: _Optional[str] = ..., id: _Optional[str] = ..., name: _Optional[str] = ...) -> None: ...
 
 class Voice_CreateAgentVoiceSettings(_message.Message):
-    __slots__ = ("voice_id", "eleven_labs", "play_ht", "cartesia", "hume")
+    __slots__ = ("voice_id", "eleven_labs", "play_ht", "cartesia", "hume", "google_gemini")
     VOICE_ID_FIELD_NUMBER: _ClassVar[int]
     ELEVEN_LABS_FIELD_NUMBER: _ClassVar[int]
     PLAY_HT_FIELD_NUMBER: _ClassVar[int]
     CARTESIA_FIELD_NUMBER: _ClassVar[int]
     HUME_FIELD_NUMBER: _ClassVar[int]
+    GOOGLE_GEMINI_FIELD_NUMBER: _ClassVar[int]
     voice_id: str
     eleven_labs: ElevenLabsTtsConfig
     play_ht: PlayHTTtsConfig
     cartesia: CartesiaTtsConfig
     hume: HumeTtsConfig
-    def __init__(self, voice_id: _Optional[str] = ..., eleven_labs: _Optional[_Union[ElevenLabsTtsConfig, _Mapping]] = ..., play_ht: _Optional[_Union[PlayHTTtsConfig, _Mapping]] = ..., cartesia: _Optional[_Union[CartesiaTtsConfig, _Mapping]] = ..., hume: _Optional[_Union[HumeTtsConfig, _Mapping]] = ...) -> None: ...
+    google_gemini: GoogleGeminiTtsConfig
+    def __init__(self, voice_id: _Optional[str] = ..., eleven_labs: _Optional[_Union[ElevenLabsTtsConfig, _Mapping]] = ..., play_ht: _Optional[_Union[PlayHTTtsConfig, _Mapping]] = ..., cartesia: _Optional[_Union[CartesiaTtsConfig, _Mapping]] = ..., hume: _Optional[_Union[HumeTtsConfig, _Mapping]] = ..., google_gemini: _Optional[_Union[GoogleGeminiTtsConfig, _Mapping]] = ...) -> None: ...
 
 class Voice_UpdateAgentVoiceSettings(_message.Message):
-    __slots__ = ("voice_id", "eleven_labs", "play_ht", "cartesia", "hume")
+    __slots__ = ("voice_id", "eleven_labs", "play_ht", "cartesia", "hume", "google_gemini")
     VOICE_ID_FIELD_NUMBER: _ClassVar[int]
     ELEVEN_LABS_FIELD_NUMBER: _ClassVar[int]
     PLAY_HT_FIELD_NUMBER: _ClassVar[int]
     CARTESIA_FIELD_NUMBER: _ClassVar[int]
     HUME_FIELD_NUMBER: _ClassVar[int]
+    GOOGLE_GEMINI_FIELD_NUMBER: _ClassVar[int]
     voice_id: str
     eleven_labs: ElevenLabsTtsConfig
     play_ht: PlayHTTtsConfig
     cartesia: CartesiaTtsConfig
     hume: HumeTtsConfig
-    def __init__(self, voice_id: _Optional[str] = ..., eleven_labs: _Optional[_Union[ElevenLabsTtsConfig, _Mapping]] = ..., play_ht: _Optional[_Union[PlayHTTtsConfig, _Mapping]] = ..., cartesia: _Optional[_Union[CartesiaTtsConfig, _Mapping]] = ..., hume: _Optional[_Union[HumeTtsConfig, _Mapping]] = ...) -> None: ...
+    google_gemini: GoogleGeminiTtsConfig
+    def __init__(self, voice_id: _Optional[str] = ..., eleven_labs: _Optional[_Union[ElevenLabsTtsConfig, _Mapping]] = ..., play_ht: _Optional[_Union[PlayHTTtsConfig, _Mapping]] = ..., cartesia: _Optional[_Union[CartesiaTtsConfig, _Mapping]] = ..., hume: _Optional[_Union[HumeTtsConfig, _Mapping]] = ..., google_gemini: _Optional[_Union[GoogleGeminiTtsConfig, _Mapping]] = ...) -> None: ...
 
 class Voice_UpdateDisclaimerVoice(_message.Message):
     __slots__ = ("voice_id", "language_code")
@@ -197,32 +217,36 @@ class Voice_UpdateDisclaimerVoice(_message.Message):
     def __init__(self, voice_id: _Optional[str] = ..., language_code: _Optional[str] = ...) -> None: ...
 
 class Voice_CreateDisclaimerVoiceSettings(_message.Message):
-    __slots__ = ("voice_id", "eleven_labs", "play_ht", "cartesia", "hume")
+    __slots__ = ("voice_id", "eleven_labs", "play_ht", "cartesia", "hume", "google_gemini")
     VOICE_ID_FIELD_NUMBER: _ClassVar[int]
     ELEVEN_LABS_FIELD_NUMBER: _ClassVar[int]
     PLAY_HT_FIELD_NUMBER: _ClassVar[int]
     CARTESIA_FIELD_NUMBER: _ClassVar[int]
     HUME_FIELD_NUMBER: _ClassVar[int]
+    GOOGLE_GEMINI_FIELD_NUMBER: _ClassVar[int]
     voice_id: str
     eleven_labs: ElevenLabsTtsConfig
     play_ht: PlayHTTtsConfig
     cartesia: CartesiaTtsConfig
     hume: HumeTtsConfig
-    def __init__(self, voice_id: _Optional[str] = ..., eleven_labs: _Optional[_Union[ElevenLabsTtsConfig, _Mapping]] = ..., play_ht: _Optional[_Union[PlayHTTtsConfig, _Mapping]] = ..., cartesia: _Optional[_Union[CartesiaTtsConfig, _Mapping]] = ..., hume: _Optional[_Union[HumeTtsConfig, _Mapping]] = ...) -> None: ...
+    google_gemini: GoogleGeminiTtsConfig
+    def __init__(self, voice_id: _Optional[str] = ..., eleven_labs: _Optional[_Union[ElevenLabsTtsConfig, _Mapping]] = ..., play_ht: _Optional[_Union[PlayHTTtsConfig, _Mapping]] = ..., cartesia: _Optional[_Union[CartesiaTtsConfig, _Mapping]] = ..., hume: _Optional[_Union[HumeTtsConfig, _Mapping]] = ..., google_gemini: _Optional[_Union[GoogleGeminiTtsConfig, _Mapping]] = ...) -> None: ...
 
 class Voice_UpdateDisclaimerVoiceSettings(_message.Message):
-    __slots__ = ("voice_id", "eleven_labs", "play_ht", "cartesia", "hume")
+    __slots__ = ("voice_id", "eleven_labs", "play_ht", "cartesia", "hume", "google_gemini")
     VOICE_ID_FIELD_NUMBER: _ClassVar[int]
     ELEVEN_LABS_FIELD_NUMBER: _ClassVar[int]
     PLAY_HT_FIELD_NUMBER: _ClassVar[int]
     CARTESIA_FIELD_NUMBER: _ClassVar[int]
     HUME_FIELD_NUMBER: _ClassVar[int]
+    GOOGLE_GEMINI_FIELD_NUMBER: _ClassVar[int]
     voice_id: str
     eleven_labs: ElevenLabsTtsConfig
     play_ht: PlayHTTtsConfig
     cartesia: CartesiaTtsConfig
     hume: HumeTtsConfig
-    def __init__(self, voice_id: _Optional[str] = ..., eleven_labs: _Optional[_Union[ElevenLabsTtsConfig, _Mapping]] = ..., play_ht: _Optional[_Union[PlayHTTtsConfig, _Mapping]] = ..., cartesia: _Optional[_Union[CartesiaTtsConfig, _Mapping]] = ..., hume: _Optional[_Union[HumeTtsConfig, _Mapping]] = ...) -> None: ...
+    google_gemini: GoogleGeminiTtsConfig
+    def __init__(self, voice_id: _Optional[str] = ..., eleven_labs: _Optional[_Union[ElevenLabsTtsConfig, _Mapping]] = ..., play_ht: _Optional[_Union[PlayHTTtsConfig, _Mapping]] = ..., cartesia: _Optional[_Union[CartesiaTtsConfig, _Mapping]] = ..., hume: _Optional[_Union[HumeTtsConfig, _Mapping]] = ..., google_gemini: _Optional[_Union[GoogleGeminiTtsConfig, _Mapping]] = ...) -> None: ...
 
 class Voice_AddFavoriteVoice(_message.Message):
     __slots__ = ("voice_id", "account_id")
