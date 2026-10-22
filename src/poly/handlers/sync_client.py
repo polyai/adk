@@ -521,3 +521,25 @@ class SyncClientHandler:
 
         logger.info(f"Successfully removed staging tag from branch ID:'{branch_id}'")
         return True
+
+    def validate_outbound_campaign(self, campaign_id: str) -> dict[str, Any]:
+        self.assert_branch_exists()
+        return self.sdk.validate_outbound_campaign(self.branch_id, campaign_id)
+
+    def dry_run_outbound_campaign(self, campaign_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        self.assert_branch_exists()
+        return self.sdk.dry_run_outbound_campaign(self.branch_id, campaign_id, body)
+
+    def start_outbound_campaign_test_step(
+        self, campaign_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self.sdk.start_outbound_campaign_test_step(campaign_id, body)
+
+    def get_outbound_campaign_test_step(self, campaign_id: str, step_id: str) -> dict[str, Any]:
+        return self.sdk.get_outbound_campaign_test_step(campaign_id, step_id)
+
+    def send_command_to_main(self, command: Command) -> dict[str, Any]:
+        command.metadata.CopyFrom(self.sdk.create_metadata())
+        command.command_id = str(uuid.uuid4())
+        logger.info(f"Sending {command.type} to main")
+        return self.sdk.send_commands_to_branch([command], "main")
