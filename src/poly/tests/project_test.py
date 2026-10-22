@@ -16,6 +16,8 @@ from datetime import datetime
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
+from google.protobuf.json_format import MessageToDict
+
 import poly.resources.resource_utils as resource_utils
 from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
@@ -8014,6 +8016,389 @@ class PullRemoteRenameTest(unittest.TestCase):
         ) as file:
             self.assertIn("Open 9 to 5", file.read())
         self.assertFalse(os.path.exists(path))
+
+
+def _campaign_projection(
+    name: str = "Reminders",
+    trigger_code: str = "def map_contacts(contacts, outbound_campaign):\n    return {}\n",
+    **settings,
+) -> dict:
+    def function(function_name: str, code: str = "") -> dict:
+        return {
+            "name": function_name,
+            "description": "",
+            "code": code,
+            "parameters": {"ids": [], "entities": {}},
+        }
+
+    nodes = [
+        {
+            "id": "trigger-1",
+            "position": {"x": 0, "y": 0},
+            "data": {
+                "type": "trigger",
+                "function": function("map_contacts", trigger_code),
+                "routes": [{"targetNodeId": "call-1"}],
+                "sourceType": "csv",
+                "ingestInterval": "daily",
+            },
+        },
+        {
+            "id": "call-1",
+            "position": {"x": 0, "y": 200},
+            "label": "First call",
+            "data": {
+                "type": "call",
+                "flowName": "Booking",
+                "function": function("call_args"),
+                "greeting": "Hi",
+                "voicemailEnabled": False,
+                "maxAttempts": 2,
+                "backoff": 1,
+                "backoffUnit": "hours",
+                "routes": [],
+                "defaultRoute": "end-1",
+            },
+        },
+        {
+            "id": "end-1",
+            "position": {"x": 0, "y": 400},
+            "data": {"type": "end", "exitReason": "done", "writebackEnabled": False},
+        },
+    ]
+    campaign = {
+        "id": "CMPGN-ONE",
+        "name": name,
+        "description": None,
+        "status": "draft",
+        "settings": {"fromNumber": "+15550100", "country": "US", **settings},
+        "nodes": {"ids": [n["id"] for n in nodes], "entities": {n["id"]: n for n in nodes}},
+        "publishedNodes": None,
+        "archived": False,
+    }
+    return {
+        "outboundCampaigns": {
+            "outboundCampaigns": {"ids": ["CMPGN-ONE"], "entities": {"CMPGN-ONE": campaign}}
+        }
+    }
+
+
+class OutboundCampaignSyncTest(unittest.TestCase):
+    def setUp(self):
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.project = AgentStudioProject(
+            region="us-1",
+            account_id="account",
+            project_id="project",
+            root_path=self.root,
+            resources={},
+            last_updated=datetime.now(),
+            branch_id="main",
+            file_structure_info={},
+        )
+        conflicts, _ = self.project.pull_project(projection_json=_campaign_projection())
+        self.assertEqual(conflicts, [])
+        self.folder = os.path.join(self.root, "outbound_campaigns", "reminders")
+
+    def _yaml(self) -> dict:
+        with open(os.path.join(self.folder, "campaign.yaml"), encoding="utf-8") as file:
+            return resource_utils.load_yaml(file.read())
+
+    def _write_yaml(self, data: dict, folder: Optional[str] = None) -> None:
+        path = os.path.join(folder or self.folder, "campaign.yaml")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(resource_utils.dump_yaml(data))
+
+    def _write_function(self, node_id: str, code: str, folder: Optional[str] = None) -> None:
+        path = os.path.join(folder or self.folder, "functions", f"{node_id}.py")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(code)
+
+    def _push(self) -> list[tuple[str, dict]]:
+        success, message, commands = self.project.push_project(dry_run=True)
+        self.assertTrue(success, message)
+        return [
+            (command.type, MessageToDict(getattr(command, command.type))) for command in commands
+        ]
+
+    def test_pull_writes_campaign_yaml_and_function_files(self):
+        files = sorted(
+            os.path.relpath(os.path.join(directory, name), self.root)
+            for directory, _, names in os.walk(os.path.join(self.root, "outbound_campaigns"))
+            for name in names
+        )
+
+        self.assertEqual(
+            files,
+            [
+                os.path.join("outbound_campaigns", "reminders", "campaign.yaml"),
+                os.path.join("outbound_campaigns", "reminders", "functions", "trigger-1.py"),
+            ],
+        )
+        self.assertNotIn("code", self._yaml()["nodes"][0]["data"]["function"])
+
+    def test_pull_then_push_round_trips_with_no_changes(self):
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self.project.get_diffs(), {})
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+        self.assertEqual(commands, [])
+
+    def test_repeated_pull_keeps_local_edits_and_takes_remote_code(self):
+        data = self._yaml()
+        data["nodes"][1]["data"]["greeting"] = "Hello there"
+        self._write_yaml(data)
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=_campaign_projection(trigger_code="def map_contacts():\n    pass\n")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._yaml()["nodes"][1]["data"]["greeting"], "Hello there")
+        with open(os.path.join(self.folder, "functions", "trigger-1.py"), encoding="utf-8") as file:
+            self.assertEqual(file.read(), "def map_contacts():\n    pass\n")
+
+    def test_position_only_change_updates_just_the_position(self):
+        data = self._yaml()
+        data["nodes"][1]["position"]["x"] = 50
+
+        self._write_yaml(data)
+
+        self.assertEqual(
+            self._push(),
+            [
+                (
+                    "outbound_campaign_update_node",
+                    {
+                        "outboundCampaignId": "CMPGN-ONE",
+                        "nodeId": "call-1",
+                        "position": {"x": 50.0, "y": 200.0},
+                    },
+                )
+            ],
+        )
+
+    def test_data_change_sends_the_whole_node_data(self):
+        data = self._yaml()
+        data["nodes"][0]["data"]["sourceType"] = "api"
+        self._write_yaml(data)
+
+        [(command_type, payload)] = self._push()
+
+        self.assertEqual(command_type, "outbound_campaign_update_node")
+        self.assertEqual(set(payload), {"outboundCampaignId", "nodeId", "data"})
+        trigger = payload["data"]["trigger"]
+        self.assertEqual(trigger["sourceType"], "api")
+        self.assertEqual(trigger["routes"], [{"targetNodeId": "call-1"}])
+        self.assertEqual(
+            trigger["campaignFunction"]["code"],
+            "def map_contacts(contacts, outbound_campaign):\n    return {}\n",
+        )
+
+    def test_function_file_change_updates_its_node(self):
+        self._write_function("trigger-1", "def map_contacts(contacts, outbound_campaign):\n    1\n")
+
+        [(command_type, payload)] = self._push()
+
+        self.assertEqual(command_type, "outbound_campaign_update_node")
+        self.assertEqual(payload["nodeId"], "trigger-1")
+        self.assertEqual(
+            payload["data"]["trigger"]["campaignFunction"]["code"],
+            "def map_contacts(contacts, outbound_campaign):\n    1\n",
+        )
+
+    def test_new_function_file_adds_code_to_its_node(self):
+        self._write_function("call-1", "def call_args(outbound_contact, outbound_campaign):\n")
+
+        [(command_type, payload)] = self._push()
+
+        self.assertEqual(command_type, "outbound_campaign_update_node")
+        self.assertEqual(payload["nodeId"], "call-1")
+        self.assertEqual(
+            payload["data"]["call"]["campaignFunction"]["code"],
+            "def call_args(outbound_contact, outbound_campaign):\n",
+        )
+
+    def test_removed_function_file_clears_the_code(self):
+        os.remove(os.path.join(self.folder, "functions", "trigger-1.py"))
+
+        [(command_type, payload)] = self._push()
+
+        self.assertEqual(command_type, "outbound_campaign_update_node")
+        self.assertNotIn("code", payload["data"]["trigger"]["campaignFunction"])
+
+    def test_added_and_removed_nodes_are_created_and_deleted_last(self):
+        data = self._yaml()
+        data["nodes"][1]["data"]["defaultRoute"] = "wait-1"
+        data["nodes"].pop(2)
+        data["nodes"].append(
+            {
+                "id": "wait-1",
+                "position": {"x": 0, "y": 400},
+                "data": {"type": "wait", "amount": 1, "unit": "days", "targetNodeId": "call-1"},
+            }
+        )
+        self._write_yaml(data)
+
+        commands = self._push()
+
+        self.assertEqual(
+            [
+                (command_type, payload.get("nodeId") or payload["node"]["id"])
+                for command_type, payload in commands
+            ],
+            [
+                ("outbound_campaign_create_node", "wait-1"),
+                ("outbound_campaign_update_node", "call-1"),
+                ("outbound_campaign_delete_node", "end-1"),
+            ],
+        )
+
+    def test_settings_change_sends_the_whole_settings_object(self):
+        data = self._yaml()
+        data["settings"]["dailyContactLimit"] = 5
+        self._write_yaml(data)
+
+        self.assertEqual(
+            self._push(),
+            [
+                (
+                    "outbound_campaign_update_settings",
+                    {
+                        "id": "CMPGN-ONE",
+                        "settings": {
+                            "fromNumber": "+15550100",
+                            "country": "US",
+                            "dailyContactLimit": 5,
+                        },
+                    },
+                )
+            ],
+        )
+
+    def test_description_change_updates_the_campaign_only(self):
+        data = self._yaml()
+        data["description"] = "Monthly reminders"
+        self._write_yaml(data)
+
+        self.assertEqual(
+            self._push(),
+            [
+                (
+                    "outbound_campaign_update",
+                    {"id": "CMPGN-ONE", "name": "Reminders", "description": "Monthly reminders"},
+                )
+            ],
+        )
+
+    def test_new_campaign_is_created_then_given_settings_then_nodes(self):
+        folder = os.path.join(self.root, "outbound_campaigns", "follow_up")
+        self._write_yaml(
+            {
+                "name": "Follow up",
+                "settings": {"country": "GB"},
+                "nodes": [
+                    {
+                        "id": "t",
+                        "position": {"x": 0, "y": 0},
+                        "data": {
+                            "type": "trigger",
+                            "function": {"name": "f", "description": ""},
+                            "routes": [{"targetNodeId": "e"}],
+                        },
+                    },
+                    {
+                        "id": "e",
+                        "position": {"x": 0, "y": 100},
+                        "data": {"type": "end", "exitReason": "done", "writebackEnabled": False},
+                    },
+                ],
+            },
+            folder=folder,
+        )
+        self._write_function("t", "def f(contacts, outbound_campaign):\n", folder=folder)
+
+        commands = self._push()
+
+        self.assertEqual(
+            [command_type for command_type, _ in commands],
+            [
+                "outbound_campaign_create",
+                "outbound_campaign_update_settings",
+                "outbound_campaign_create_node",
+                "outbound_campaign_create_node",
+            ],
+        )
+        campaign_id = commands[0][1]["id"]
+        self.assertRegex(campaign_id, r"^CMPGN-[0-9A-F]{8}$")
+        self.assertEqual(commands[0][1], {"id": campaign_id, "name": "Follow up"})
+        self.assertEqual(commands[1][1]["settings"], {"country": "GB", "dailyContactLimit": 3})
+        self.assertEqual(
+            commands[2][1]["node"]["trigger"]["campaignFunction"]["code"],
+            "def f(contacts, outbound_campaign):\n",
+        )
+        self.assertTrue(
+            all(
+                payload.get("outboundCampaignId", campaign_id) == campaign_id
+                for _, payload in commands
+            )
+        )
+
+    def test_renamed_campaign_keeps_its_id(self):
+        renamed = os.path.join(self.root, "outbound_campaigns", "monthly_reminders")
+        shutil.move(self.folder, renamed)
+        self.folder = renamed
+        data = self._yaml()
+        data["name"] = "Monthly reminders"
+        self._write_yaml(data)
+
+        self.assertEqual(
+            self._push(),
+            [
+                (
+                    "outbound_campaign_update",
+                    {"id": "CMPGN-ONE", "name": "Monthly reminders", "clearDescription": True},
+                )
+            ],
+        )
+
+    def test_removed_campaign_folder_deletes_the_campaign(self):
+        shutil.rmtree(self.folder)
+
+        self.assertEqual(self._push(), [("outbound_campaign_delete", {"id": "CMPGN-ONE"})])
+
+    def test_diff_shows_yaml_and_code_changes(self):
+        data = self._yaml()
+        data["nodes"][1]["data"]["greeting"] = "Hello"
+        self._write_yaml(data)
+        self._write_function("trigger-1", "def map_contacts():\n    pass\n")
+
+        diffs = self.project.get_diffs()
+
+        yaml_diff = diffs[os.path.join("outbound_campaigns", "reminders", "campaign.yaml")]
+        code_diff = diffs[
+            os.path.join("outbound_campaigns", "reminders", "functions", "trigger-1.py")
+        ]
+        self.assertIn("-    greeting: Hi", yaml_diff)
+        self.assertIn("+    greeting: Hello", yaml_diff)
+        self.assertIn("+    pass", code_diff)
+
+    def test_remote_rename_moves_the_folder(self):
+        self.project.pull_project(projection_json=_campaign_projection(name="Monthly"))
+
+        self.assertFalse(os.path.exists(self.folder))
+        moved = os.path.join(self.root, "outbound_campaigns", "monthly")
+        self.assertTrue(os.path.isfile(os.path.join(moved, "campaign.yaml")))
+        self.assertTrue(os.path.isfile(os.path.join(moved, "functions", "trigger-1.py")))
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
 
 
 if __name__ == "__main__":

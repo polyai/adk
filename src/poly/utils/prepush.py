@@ -23,6 +23,10 @@ from poly.resources import (
     FlowStep,
     Function,
     FunctionStep,
+    OutboundCampaign,
+    OutboundCampaignFunction,
+    OutboundCampaignNode,
+    OutboundCampaignSettings,
     Resource,
     ResourceMapping,
     StepType,
@@ -274,6 +278,114 @@ _TEST_CASE_SUBRESOURCE_TYPES = (
     TestCaseIntegrationAttributes,
     TestCaseApiOperationMock,
 )
+
+
+def group_outbound_campaign_changes(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+    post_push_deleted_resources: ResourceMap,
+    current_resources: ResourceMap,
+) -> None:
+    _attach_campaign_function_code(state)
+    _attach_campaign_function_code(current_resources)
+    _pair_renamed_campaigns(state, new_resources, updated_resources, deleted_resources)
+
+    touched_folders = {
+        function.campaign_folder
+        for changes in (new_resources, updated_resources, deleted_resources)
+        for function in changes.pop(OutboundCampaignFunction, {}).values()
+        if isinstance(function, OutboundCampaignFunction)
+    }
+    new_campaigns = new_resources.get(OutboundCampaign, {})
+    for campaign_id, campaign in state.get(OutboundCampaign, {}).items():
+        if campaign.folder in touched_folders and campaign_id not in new_campaigns:
+            updated_resources.setdefault(OutboundCampaign, {}).setdefault(campaign_id, campaign)
+
+    def stage(changes: ResourceMap, resource: Resource) -> None:
+        changes.setdefault(type(resource), {})[resource.resource_id] = resource
+
+    for campaign in new_campaigns.values():
+        stage(new_resources, campaign.settings_change())
+        for node in campaign.node_changes(None)[0]:
+            stage(new_resources, node)
+
+    original_campaigns = current_resources.get(OutboundCampaign, {})
+    for campaign_id, campaign in list(updated_resources.get(OutboundCampaign, {}).items()):
+        original = original_campaigns.get(campaign_id)
+        created, changed, removed = campaign.node_changes(original)
+        for node in created:
+            stage(new_resources, node)
+        for node in changed:
+            stage(updated_resources, node)
+        for node in removed:
+            stage(post_push_deleted_resources, node)
+        if original is None or campaign.settings != original.settings:
+            stage(updated_resources, campaign.settings_change())
+        if original is not None and (campaign.name, campaign.description) == (
+            original.name,
+            original.description,
+        ):
+            updated_resources[OutboundCampaign].pop(campaign_id)
+
+    for changes in (new_resources, updated_resources, post_push_deleted_resources):
+        for resource_type in (OutboundCampaign, OutboundCampaignSettings, OutboundCampaignNode):
+            if resource_type in changes and not changes[resource_type]:
+                changes.pop(resource_type)
+
+
+def _attach_campaign_function_code(resources: ResourceMap) -> None:
+    code_by_folder: dict[str, dict[str, str]] = {}
+    for function in resources.get(OutboundCampaignFunction, {}).values():
+        code_by_folder.setdefault(function.campaign_folder, {})[function.node_id] = function.code
+    for campaign in resources.get(OutboundCampaign, {}).values():
+        campaign.function_code = code_by_folder.get(campaign.folder, {})
+
+
+def _pair_renamed_campaigns(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+) -> None:
+    new_campaigns = new_resources.get(OutboundCampaign, {})
+    deleted_campaigns = deleted_resources.get(OutboundCampaign, {})
+    if not new_campaigns or not deleted_campaigns:
+        return
+
+    def node_ids(campaign: Resource) -> set[str]:
+        if not isinstance(campaign, OutboundCampaign) or not isinstance(campaign.nodes, list):
+            return set()
+        return {node.get("id") for node in campaign.nodes if isinstance(node, dict)} - {None}
+
+    new_node_ids = {
+        campaign_id: node_ids(campaign) for campaign_id, campaign in new_campaigns.items()
+    }
+    old_node_ids = {
+        campaign_id: node_ids(campaign) for campaign_id, campaign in deleted_campaigns.items()
+    }
+    matches = {
+        old_id: [new_id for new_id, new_ids in new_node_ids.items() if new_ids & old_ids]
+        for old_id, old_ids in old_node_ids.items()
+    }
+    for old_id, new_ids in matches.items():
+        if len(new_ids) != 1:
+            continue
+        new_id = new_ids[0]
+        if sum(new_id in candidates for candidates in matches.values()) != 1:
+            continue
+        campaign = new_campaigns.pop(new_id)
+        deleted_campaigns.pop(old_id)
+        campaign.resource_id = old_id
+        updated_resources.setdefault(OutboundCampaign, {})[old_id] = campaign
+        state_campaigns = state.setdefault(OutboundCampaign, {})
+        state_campaigns.pop(new_id, None)
+        state_campaigns[old_id] = campaign
+
+    for changes in (new_resources, deleted_resources):
+        if OutboundCampaign in changes and not changes[OutboundCampaign]:
+            changes.pop(OutboundCampaign)
 
 
 def push_asr_settings_by_section(
