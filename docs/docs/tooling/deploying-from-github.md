@@ -26,7 +26,7 @@ sequenceDiagram
         participant ASMain as main
     end
     PR->>Branch: CI pushes on every PR push
-    Note over PR,ASMain: Merge queue
+    Note over PR,ASMain: Merge queue or /poly-merge
     Branch->>ASMain: Deploy merges the branch, which deploys to sandbox
     PR->>Main: The PR is squashed onto main
     Note over Main,ASMain: Later, in Agent Studio
@@ -38,7 +38,7 @@ sequenceDiagram
 | 1. Branch | Create a git branch. | Point the ADK at the Agent Studio branch with the same name, creating it if needed. |
 | 2. Pull request | CI lints, type-checks and tests the projects the PR changes. | CI pushes each changed project to its branch. |
 | 3. Try it | | Test the branch with `poly chat` or in Agent Studio. |
-| 4. Merge | The merge queue squashes the PR onto `main`. | Deploy merges each project's branch into `main`, which deploys to `sandbox`. |
+| 4. Merge | The merge queue, or a `/poly-merge` comment, squashes the PR onto `main`. | Each project's branch merges into `main`, which deploys to `sandbox`. |
 | 5. Edits in Agent Studio | Sync Projects commits the change to `main`. | A publish or rollback tells the repo through a webhook. |
 
 ## What's in a repo
@@ -48,7 +48,7 @@ agents/
   <account>/
     <project>/            # One Agent Studio project, as pulled by the ADK
 .github/
-  workflows/              # CI, Deploy (merge queue), Sync Projects, branch cleanup
+  workflows/              # CI, Deploy (merge queue), /poly-merge, Sync Projects, branch cleanup
   scripts/                # Shared scripts the workflows and git hooks use
 pyproject.toml            # Pins the polyai-adk version the workflows use
 .pre-commit-config.yaml   # Git hooks that format projects the way a sync does
@@ -77,11 +77,11 @@ Then, for each change:
 
 2. Make your changes and commit them. The git hooks format each project the way a sync from Agent Studio would, so CI and the merge queue accept it. If a hook reformats files, add them and commit again.
 3. Open a pull request. CI runs lint and tests, then pushes your changes to the Agent Studio branch.
-4. Merge through the merge queue.
+4. Merge through the merge queue, or comment `/poly-merge` if the repo uses it.
 
 ## Keeping Agent Studio and git in step
 
-**Before a merge**, Deploy checks that Agent Studio's `main` matches git's `main` for each project. If Agent Studio has changes the repo doesn't, the PR fails with `AS branch main is not in sync with git main`: run Sync Projects for that project, then add the PR to the queue again. To merge anyway and overwrite the Agent Studio changes, add the `skip-as-sync-check` label to the PR first.
+**Before a merge**, Deploy checks that Agent Studio's `main` matches git's `main` for each project. If Agent Studio has changes the repo doesn't, the PR fails with `AS branch main is not in sync with git main`: run Sync Projects for that project, then add the PR to the queue again or comment `/poly-merge` again. To merge anyway and overwrite the Agent Studio changes, add the `skip-as-sync-check` label to the PR first.
 
 **After a change in Agent Studio**, the Sync Projects workflow pulls it into the repo and pushes it to `main`. It runs:
 
@@ -97,12 +97,21 @@ The template's [SETUP.md](https://github.com/polyai/adk-repo-template/blob/main/
 1. Create a repo from the template.
 2. Create a GitHub App, which Sync Projects uses to push to `main`.
 3. Add your ADK API keys as repo secrets.
-4. Protect `main` with a ruleset that requires the CI check and the merge queue.
+4. Protect `main` with a ruleset that requires the CI check, and either the merge queue or [`/poly-merge`](#merging-with-poly-merge)'s check.
 5. Add a webhook to each project, so publishes and rollbacks start Sync Projects.
 
-!!! note "Merge queue availability"
 
-    GitHub offers merge queues on public repos, and on private repos only in organisations on GitHub Enterprise Cloud.
+## Merging with `/poly-merge`
+
+GitHub offers merge queues on public repos, and on private repos only in organisations on GitHub Enterprise Cloud. Without one, or instead of one, a repo can merge with a comment. Comment `/poly-merge` on a pull request that is approved and passing its checks. It then:
+
+1. checks the PR's approvals, required checks and conflicts with `main`;
+2. waits for any earlier `/poly-merge` on the same projects, while PRs on other projects go ahead at the same time;
+3. lints and tests the PR merged into `main`;
+4. pushes each changed project to its Agent Studio branch, then merges each into Agent Studio's `main`;
+5. squash-merges the PR, and posts the result on it.
+
+Each PR gets a `poly/deploy` check, which passes once its projects are deployed, so a PR that changes a project can only merge through `/poly-merge`. To turn it on, see the template's [SETUP.md](https://github.com/polyai/adk-repo-template/blob/main/SETUP.md){ target="_blank" rel="noopener" }.
 
 ## Keeping a repo up to date
 
