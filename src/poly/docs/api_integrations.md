@@ -103,7 +103,7 @@ Push the integration definition first, including its base URL and auth type for 
 poly api-integrations configure salesforce --env sandbox
 ```
 
-The command shows masked saved values; Enter keeps a saved required value. Newly typed values are visible, like `aws configure`. Missing required fields are prompted again, and credentials location uses an arrow-key picker. Scope is optional; Enter skips it. The command signs in to Studio unless `POLY_STUDIO_ACCESS_TOKEN` contains a Studio access token. Your Studio user needs permission to read and write secrets; the ADK API key is also needed to look up the integration.
+The command shows saved values in brackets, masking client IDs and secrets and displaying the full token URL; Enter keeps a saved required value. Newly typed values are visible, like `aws configure`. Missing required fields are prompted again, and credentials location uses an arrow-key picker. Scope is optional; Enter skips it. The command uses `POLY_STUDIO_ACCESS_TOKEN` if set, otherwise reuses a cached regional Studio session until it expires. It prompts for sign-in only when no unexpired session exists. Your Studio user needs permission to read and write secrets; the ADK API key is also needed to look up the integration.
 
 For automation, supply a Studio access token through `POLY_STUDIO_ACCESS_TOKEN` (or choose another variable with `--token-env`) and pipe a JSON object with `--stdin`:
 

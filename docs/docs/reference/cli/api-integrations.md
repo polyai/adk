@@ -18,19 +18,19 @@ poly api-integrations configure crm --env sandbox
 your-secret-provider | poly api-integrations configure crm --env sandbox --stdin --json
 ~~~
 
-Interactive mode loads saved credentials and displays masked defaults. Press Enter to keep a saved required value, or enter a replacement. Required fields are prompted again when neither a new value nor a saved value exists. Newly typed values are visible, like `aws configure`; saved secret values remain masked in brackets. Credentials location is selected from `header` and `body` using the arrow keys; Enter on the optional scope skips it.
+Interactive mode loads saved credentials and displays defaults in brackets. Client IDs and secrets are masked; the saved token URL is shown in full. Press Enter to keep a saved required value, or enter a replacement. Required fields are prompted again when neither a new value nor a saved value exists. Newly typed values are visible, like `aws configure`. Credentials location is selected from `header` and `body` using the arrow keys; Enter on the optional scope skips it.
 
 ~~~text
 Client ID [******ABC]:
 Client Secret [******DEF]:
-Token URL [****]:
+Token URL [https://example.com/oauth/token]:
 Scope (optional, Enter to skip):
 ? Credentials location: (Use arrow keys)
  » header
    body
 ~~~
 
-The command signs in to Studio unless `POLY_STUDIO_ACCESS_TOKEN` contains a Studio access token. Your user needs permission to read and write secrets. Non-interactive use requires both a token and `--stdin`, and stdin continues to supply a complete replacement for the selected environment.
+The command uses `POLY_STUDIO_ACCESS_TOKEN` when set, otherwise it reuses the regional Studio session saved from a previous run. It prompts for sign-in only when there is no unexpired session. Sessions are stored in the user's private ADK session file and kept separate from API-key login sessions. Your user needs permission to read and write secrets. Non-interactive use requires `--stdin` and either an explicit token or an unexpired cached session; stdin supplies a complete replacement for the selected environment.
 
 The command supports basic authentication, API keys, OAuth client credentials, and JWT client assertions. For `oauth2`, stdin accepts `client_id`, `client_secret`, `access_token_url`, optional `scope`, and optional `credentials_location` (`header` or `body`). For `oauth2_client_credentials`, use `client_id`, `client_secret`, `token_url`, and optional `client_auth` (`client_secret_basic` or `client_secret_post`).
 

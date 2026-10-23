@@ -15,6 +15,23 @@ from poly.cli_commands.shared import load_project
 from poly.output.console import success
 from poly.output.json_output import json_print
 from poly.project import INTEGRATION_CREDENTIAL_FIELDS as FIELDS
+from poly.utils import apikey_session
+
+
+def _studio_token(region: str, token_env: str, interactive: bool) -> str:
+    """Reuse an unexpired regional Studio session, keeping it separate from API-key login."""
+    if token := os.environ.get(token_env):
+        return token
+    session_key = f"studio:{region}"
+    if session := apikey_session.load(session_key):
+        return session.token
+    if not interactive:
+        raise ValueError(
+            f"Sign in interactively first or set {token_env} to a Studio access token."
+        )
+    token = _signin(region)
+    apikey_session.save(session_key, token)
+    return token
 
 
 def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | None) -> dict:
@@ -57,7 +74,9 @@ def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | 
         else:
             # Short saved values stay fully masked; never put real defaults in editable input.
             masked = "******" + saved[-3:] if saved and len(saved) > 3 else "******"
-            if field in {"access_token_url", "token_url", "private_key"}:
+            if field in {"access_token_url", "token_url"}:
+                masked = saved
+            elif field == "private_key":
                 masked = "****"
             prompt = f"{label}" + (f" [{masked}]" if saved else "") + ": "
             while True:
@@ -104,12 +123,7 @@ class ApiIntegrationsCommand(BaseCommand):
         config = getattr(integration.environments, args.env.replace("-", "_"))
         if args.private_key_file and config.auth_type != "jwt_client_assertion":
             raise ValueError("--private-key-file requires JWT client assertion authentication.")
-        token = os.environ.get(args.token_env)
         interactive = sys.stdin.isatty() and not args.stdin and not args.json
-        if not token and not interactive:
-            raise ValueError(
-                f"Set {args.token_env} to a Studio access token for non-interactive use."
-            )
         if not interactive and not args.stdin:
             raise ValueError("Use --stdin to provide credentials non-interactively.")
         if args.stdin:
@@ -122,7 +136,7 @@ class ApiIntegrationsCommand(BaseCommand):
         else:
             from poly.output.console import info
 
-            token = token or _signin(project.region)
+            token = _studio_token(project.region, args.token_env, interactive=True)
             existing = project.get_api_integration_credential_defaults(
                 args.integration, args.env, token
             )
@@ -140,7 +154,8 @@ class ApiIntegrationsCommand(BaseCommand):
             except (OSError, UnicodeError):
                 raise ValueError("Could not read the private key file.") from None
         project.build_api_integration_credentials(config.auth_type, values, config.base_url)
-        token = token or _signin(project.region)
+        if args.stdin:
+            token = _studio_token(project.region, args.token_env, interactive=False)
         project.configure_api_integration(args.integration, args.env, values, token)
         result = {
             "success": True,

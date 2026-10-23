@@ -1,10 +1,12 @@
-"""Sign-in reuse for `poly apikey`.
+"""Sign-in reuse for `poly apikey` and API integration configuration.
 
 Keeps the device-flow access token from the last `poly apikey` run, per region, so a
 re-run (for example with `--account-id` after a "Multiple accounts found" error) does
 not send the user back through the browser sign-in. The file sits next to the
 credentials file, is readable only by the user, and each entry is honoured only until
-the token's own expiry. The token is never printed or logged.
+the token's own expiry. Studio sessions use a `studio:` prefix on their region key
+so their tokens cannot be confused with the API-key login's separate auth tenant.
+The token is never printed or logged.
 
 Copyright PolyAI Limited
 """

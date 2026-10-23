@@ -12,7 +12,11 @@ from unittest.mock import MagicMock, call, patch
 import requests
 
 from poly.cli import AgentStudioCLI
-from poly.cli_commands.api_integrations import ApiIntegrationsCommand, _prompt_credentials
+from poly.cli_commands.api_integrations import (
+    ApiIntegrationsCommand,
+    _prompt_credentials,
+    _studio_token,
+)
 from poly.handlers.integration_credentials import IntegrationCredentialsHandler
 from poly.handlers.sdk import SourcererAPIError
 from poly.project import AgentStudioProject
@@ -229,7 +233,7 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         self.assertEqual(result["credentials_location"], "body")
         self.assertEqual(read.call_args_list[0].args[0], "Client ID [******ABC]: ")
         self.assertEqual(read.call_args_list[1].args[0], "Client Secret [******DEF]: ")
-        self.assertEqual(read.call_args_list[2].args[0], "Token URL [****]: ")
+        self.assertEqual(read.call_args_list[2].args[0], "Token URL [https://example.com/token]: ")
         select.assert_called_once_with("Credentials location:", choices=["header", "body"],
                                        default="header")
 
@@ -257,6 +261,39 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             _prompt_credentials("oauth2", {"client_id": "abc", "client_secret": "saved",
                                            "access_token_url": "https://example.com/token"}, None)
+
+    @patch.dict("os.environ", {"TEST_STUDIO_TOKEN": "explicit-token"})
+    @patch("poly.cli_commands.api_integrations.apikey_session.load")
+    def test_explicit_token_overrides_cached_session(self, load):
+        self.assertEqual(_studio_token("euw-1", "TEST_STUDIO_TOKEN", False), "explicit-token")
+        load.assert_not_called()
+
+    @patch.dict("os.environ", {}, clear=True)
+    @patch("poly.cli_commands.api_integrations._signin")
+    @patch("poly.cli_commands.api_integrations.apikey_session.load")
+    def test_unexpired_studio_session_does_not_prompt_for_login(self, load, signin):
+        load.return_value.token = "cached-token"
+        self.assertEqual(_studio_token("euw-1", "TEST_STUDIO_TOKEN", True), "cached-token")
+        load.assert_called_once_with("studio:euw-1")
+        signin.assert_not_called()
+
+    @patch.dict("os.environ", {}, clear=True)
+    @patch("poly.cli_commands.api_integrations.apikey_session.save")
+    @patch("poly.cli_commands.api_integrations.apikey_session.load", return_value=None)
+    @patch("poly.cli_commands.api_integrations._signin", return_value="new-token")
+    def test_missing_or_expired_session_signs_in_and_saves(self, signin, load, save):
+        self.assertEqual(_studio_token("euw-1", "TEST_STUDIO_TOKEN", True), "new-token")
+        signin.assert_called_once_with("euw-1")
+        save.assert_called_once_with("studio:euw-1", "new-token")
+
+    @patch.dict("os.environ", {}, clear=True)
+    @patch("poly.cli_commands.api_integrations._signin")
+    @patch("poly.cli_commands.api_integrations.apikey_session.load", return_value=None)
+    def test_noninteractive_run_does_not_start_browser_login(self, load, signin):
+        with self.assertRaisesRegex(ValueError, "TEST_STUDIO_TOKEN"):
+            _studio_token("us-1", "TEST_STUDIO_TOKEN", False)
+        load.assert_called_once_with("studio:us-1")
+        signin.assert_not_called()
 
     def test_project_reads_legacy_and_nested_oauth_defaults(self):
         for auth_type, saved in [
