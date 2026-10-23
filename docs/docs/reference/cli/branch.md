@@ -298,6 +298,35 @@ Run `poly branch merge` once to surface conflicts, then write a resolutions file
 
 Switching to the branch and clicking **Merge** in the Agent Studio UI hits the same platform endpoint as `poly branch merge` — the result is identical either way.
 
+## `poly branch sync`
+
+Bring the latest changes from the current branch's parent (`main`, unless you branched from another branch) into the branch, without merging the branch back.
+
+Examples:
+
+~~~bash
+poly branch sync
+poly branch sync --interactive
+poly branch sync --resolutions resolutions.json
+~~~
+
+The checkout must have no unpushed changes. If the sync has no conflicts, it completes immediately and the CLI pulls the updated branch into your checkout.
+
+| Flag | Description |
+|---|---|
+| `--interactive`, `-i` | Resolve conflicts in an interactive prompt. Set `$EDITOR` or `$VISUAL` for free-form edits during resolution. Cannot be combined with `--json`. |
+| `--resolutions <source>` | Pre-defined resolutions as a JSON file path, inline JSON string, or `-` for stdin. |
+
+`--json` output shape:
+
+~~~json
+{ "success": true }
+~~~
+
+On conflict or error, `"conflicts"` and/or `"errors"` arrays are added and the process exits non-zero.
+
+If the parent and the branch changed the same fields, the command prints the conflict table and exits non-zero. Resolve the conflicts the same way as for [`poly branch merge`](#conflicts): `"ours"` keeps the parent's value and `"theirs"` keeps the branch's.
+
 ## `poly branch diff`
 
 Show changes made on a branch since it was created — its own local-vs-remote analogue is [`poly diff`](./diff.md).

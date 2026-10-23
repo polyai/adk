@@ -85,6 +85,14 @@ On conflict the command exits non-zero and prints a table per conflicting field:
 
 `path` matches the conflict table's Path column; `strategy` is `"ours"`, `"theirs"`, or `"base"`; a custom `value` is only honored with `"theirs"`. Workflow: run `poly branch merge --json` once to surface the conflicts, build a resolutions file covering each path, re-run with `--resolutions`. Confirm resolution choices with the user when the right answer isn't obvious — both sides are real work.
 
+## Syncing with the parent branch
+
+```bash
+poly branch sync                        # bring the parent's newer changes into this branch
+```
+
+Needs a checkout with no unpushed changes; a clean sync pulls the updated branch. On conflict it exits non-zero with the same table, and takes the same `--interactive` and `--resolutions` routes as a merge (`"ours"` is the parent, `"theirs"` the branch). As an agent: `poly branch sync --json`, then re-run with `--resolutions`.
+
 ## Sharing changes for review
 
 Both review commands publish a private GitHub Gist (one `.diff` file per changed resource) so reviewers don't need filesystem access. Requires a GitHub token in the environment.
