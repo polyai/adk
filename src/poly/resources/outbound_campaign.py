@@ -18,6 +18,7 @@ from poly.resources.resource import (
     _strip_strings,
     register_resource,
 )
+from poly.resources.variant_attributes import Variant
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,8 @@ CAMPAIGN_FILE = "campaign.yaml"
 FUNCTIONS_DIR = "functions"
 
 NODE_KEYS = ("id", "position", "label", "data")
+VARIANT_ID_KEY = "defaultVariantId"
+VARIANT_NAME_KEY = "defaultVariant"
 FUNCTION_KEYS = ("name", "description")
 
 SETTINGS_DEFAULTS: dict[str, Any] = {
@@ -391,13 +394,66 @@ def _projection_nodes(campaign: dict) -> list[dict]:
     return [entities[node_id] for node_id in nodes.get("ids") or [] if node_id in entities]
 
 
+def _projection_function_code(campaign: dict) -> dict[str, str]:
+    code_by_node = {}
+    for node in _projection_nodes(campaign):
+        code = ((node.get("data") or {}).get("function") or {}).get("code") or ""
+        node_id = node.get("id") or ""
+        if code and SAFE_NODE_ID.fullmatch(node_id):
+            code_by_node[node_id] = code
+    return code_by_node
+
+
+def _read_function_files(campaign_folder: str) -> dict[str, str]:
+    functions_path = os.path.join(campaign_folder, FUNCTIONS_DIR)
+    if not os.path.isdir(functions_path):
+        return {}
+    code_by_node = {}
+    for file_name in sorted(os.listdir(functions_path)):
+        node_id, extension = os.path.splitext(file_name)
+        if extension == ".py":
+            code = Resource.read_from_file(os.path.join(functions_path, file_name))
+            if code:
+                code_by_node[node_id] = code
+    return code_by_node
+
+
+def _rename_key(values: dict, old_key: str, new_key: str, value: Any) -> dict:
+    return {
+        (new_key if key == old_key else key): (value if key == old_key else item)
+        for key, item in values.items()
+    }
+
+
+def _variant_name(variant_id: str, resource_mappings: Optional[list[ResourceMapping]]) -> str:
+    return next(
+        (
+            mapping.resource_name
+            for mapping in resource_mappings or []
+            if mapping.resource_type == Variant and mapping.resource_id == variant_id
+        ),
+        variant_id,
+    )
+
+
+def _variant_id(variant_name: str, resource_mappings: Optional[list[ResourceMapping]]) -> str:
+    return next(
+        (
+            mapping.resource_id
+            for mapping in resource_mappings or []
+            if mapping.resource_type == Variant and mapping.resource_name == variant_name
+        ),
+        variant_name,
+    )
+
+
 @register_resource("outbound_campaigns")
 @dataclass
 class OutboundCampaign(YamlResource):
     """An outbound campaign, kept as `outbound_campaigns/<name>/campaign.yaml`.
 
-    Node function code lives in `functions/<node_id>.py` beside it and is held in
-    `function_code` while pushing.
+    Node function code lives in `functions/<node_id>.py` beside it. `function_code` holds it by
+    node id, so the node diff can see code changes; it is not part of `campaign.yaml`.
     """
 
     resource_id_prefix = "CMPGN"
@@ -406,9 +462,7 @@ class OutboundCampaign(YamlResource):
     settings: dict = field(default_factory=lambda: normalise_settings({}))
     nodes: list[dict] = field(default_factory=list)
 
-    function_code: dict[str, str] = field(
-        default_factory=dict, init=False, repr=False, compare=False
-    )
+    function_code: dict[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def folder(self) -> str:
@@ -473,17 +527,45 @@ class OutboundCampaign(YamlResource):
                     _strip_strings(normalise_node(node, from_platform=True))
                     for node in _projection_nodes(campaign)
                 ],
+                function_code=_projection_function_code(campaign),
             )
             for campaign in campaigns
         }
 
     @classmethod
-    def from_pretty_dict(cls, yaml_dict: dict, **kwargs) -> dict:
-        return yaml_dict
+    def to_pretty_dict(
+        cls, d: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> dict:
+        """Show the default variant by name, under `defaultVariant`."""
+        settings = d.get("settings")
+        if isinstance(settings, dict) and VARIANT_ID_KEY in settings:
+            variant_id = settings[VARIANT_ID_KEY]
+            d["settings"] = _rename_key(
+                settings,
+                VARIANT_ID_KEY,
+                VARIANT_NAME_KEY,
+                _variant_name(variant_id, resource_mappings) if variant_id else variant_id,
+            )
+        return d
 
     @classmethod
-    def from_pretty(cls, contents: str, **kwargs) -> str:
-        return contents
+    def from_pretty_dict(
+        cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> dict:
+        """Turn `defaultVariant` back into the variant's id, under `defaultVariantId`."""
+        yaml_dict = super().from_pretty_dict(
+            yaml_dict, resource_mappings=resource_mappings, **kwargs
+        )
+        settings = yaml_dict.get("settings")
+        if isinstance(settings, dict) and VARIANT_NAME_KEY in settings:
+            variant_name = settings[VARIANT_NAME_KEY]
+            yaml_dict["settings"] = _rename_key(
+                settings,
+                VARIANT_NAME_KEY,
+                VARIANT_ID_KEY,
+                _variant_id(variant_name, resource_mappings) if variant_name else variant_name,
+            )
+        return yaml_dict
 
     @classmethod
     def read_local_resource(
@@ -498,6 +580,7 @@ class OutboundCampaign(YamlResource):
                 f"Campaign folder name does not match campaign name '{campaign.name}'. "
                 f"{folder} != {campaign.folder}"
             )
+        campaign.function_code = _read_function_files(os.path.dirname(file_path))
         return campaign
 
     @staticmethod
@@ -545,12 +628,14 @@ class OutboundCampaign(YamlResource):
                     errors.append(f"Node id '{node_id}' is used more than once.")
                 seen_ids.add(node_id)
 
-        errors.extend(self._function_file_errors(resource_mappings))
+        errors.extend(self._function_file_errors())
+        variant_id = self.settings.get(VARIANT_ID_KEY) if isinstance(self.settings, dict) else None
+        if variant_id and resource_mappings is not None:
+            if _variant_name(variant_id, resource_mappings) == variant_id:
+                errors.append(f"Variant '{variant_id}' not found.")
         return errors
 
-    def _function_file_errors(
-        self, resource_mappings: Optional[list[ResourceMapping]]
-    ) -> list[str]:
+    def _function_file_errors(self) -> list[str]:
         nodes_with_function = {
             node.get("id")
             for node in self.nodes
@@ -558,19 +643,12 @@ class OutboundCampaign(YamlResource):
             and isinstance(node.get("data"), dict)
             and node["data"].get("function")
         }
-        errors = []
-        for mapping in resource_mappings or []:
-            if mapping.resource_type is not OutboundCampaignFunction:
-                continue
-            if OutboundCampaignFunction.folder_from_path(mapping.file_path) != self.folder:
-                continue
-            node_id = mapping.resource_name
-            if node_id not in nodes_with_function:
-                errors.append(
-                    f"{FUNCTIONS_DIR}/{node_id}.py has no node '{node_id}' with a function "
-                    "in campaign.yaml."
-                )
-        return errors
+        return [
+            f"{FUNCTIONS_DIR}/{node_id}.py has no node '{node_id}' with a function "
+            "in campaign.yaml."
+            for node_id in sorted(self.function_code)
+            if node_id not in nodes_with_function
+        ]
 
     def build_create_proto(self) -> campaigns_pb2.OutboundCampaign_Create:
         return campaigns_pb2.OutboundCampaign_Create(
@@ -598,33 +676,41 @@ class OutboundCampaign(YamlResource):
             resource_id=self.resource_id, name=self.name, settings=self.settings
         )
 
-    def node_changes(
-        self, original: Optional["OutboundCampaign"]
-    ) -> tuple[
-        list["OutboundCampaignNode"], list["OutboundCampaignNode"], list["OutboundCampaignNode"]
-    ]:
-        """Compare nodes with `original` and return the new, updated and deleted ones.
+    def _node_change(self, node: dict) -> "OutboundCampaignNode":
+        return OutboundCampaignNode(
+            resource_id=f"{self.resource_id}:{node['id']}",
+            name=node.get("label") or node["id"],
+            campaign_id=self.resource_id,
+            node=node,
+            code=self.function_code.get(node["id"], ""),
+        )
 
-        A node counts as updated when its data, function code, position or label changed;
-        `changed_fields` says which, so the update carries only those.
+    def get_new_updated_deleted_subresources(
+        self, old_resource: Optional["OutboundCampaign"]
+    ) -> tuple[list[SubResource], list[SubResource], list[SubResource]]:
+        """Return the settings and node commands that turn `old_resource` into this campaign.
+
+        A new campaign (`old_resource` is None) gets its settings and every node as new. Otherwise
+        nodes are matched by id: a node counts as updated when its data, function code, position
+        or label changed, and `changed_fields` says which, so the update carries only those.
+        Settings are sent whole, and only when they changed.
         """
-        original_nodes = {node["id"]: node for node in (original.nodes if original else [])}
+        if not isinstance(self.nodes, list):
+            return [], [], []
+        if old_resource is None:
+            return [self.settings_change(), *map(self._node_change, self.nodes)], [], []
+
+        old_nodes = {node["id"]: node for node in old_resource.nodes}
         current_ids = {node["id"] for node in self.nodes}
-        new, updated = [], []
+        new: list[SubResource] = []
+        updated: list[SubResource] = []
         for node in self.nodes:
-            node_id = node["id"]
-            change = OutboundCampaignNode(
-                resource_id=f"{self.resource_id}:{node_id}",
-                name=node.get("label") or node_id,
-                campaign_id=self.resource_id,
-                node=node,
-                code=self.function_code.get(node_id, ""),
-            )
-            old = original_nodes.get(node_id)
+            change = self._node_change(node)
+            old = old_nodes.get(node["id"])
             if old is None:
                 new.append(change)
                 continue
-            old_code = original.function_code.get(node_id, "")
+            old_code = old_resource.function_code.get(node["id"], "")
             change.changed_fields = tuple(
                 name
                 for name, differs in (
@@ -636,14 +722,16 @@ class OutboundCampaign(YamlResource):
             )
             if change.changed_fields:
                 updated.append(change)
-        deleted = [
+        if self.settings != old_resource.settings:
+            updated.append(self.settings_change())
+        deleted: list[SubResource] = [
             OutboundCampaignNode(
                 resource_id=f"{self.resource_id}:{node_id}",
                 name=node.get("label") or node_id,
                 campaign_id=self.resource_id,
                 node=node,
             )
-            for node_id, node in original_nodes.items()
+            for node_id, node in old_nodes.items()
             if node_id not in current_ids
         ]
         return new, updated, deleted

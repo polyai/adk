@@ -83,6 +83,7 @@ from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
 from poly.resources.outbound_campaign import (
     OutboundCampaign,
     OutboundCampaignFunction,
+    OutboundCampaignSettings,
     node_data_proto,
 )
 from poly.resources.phrase_filter import PhraseFilter
@@ -14431,17 +14432,10 @@ class OutboundCampaignTests(unittest.TestCase):
     def test_validate_rejects_a_function_file_without_its_node(self):
         """A .py file for a node that doesn't exist is reported."""
         campaign = _campaign()
-        orphan = ResourceMapping(
-            resource_id="reminders/gone",
-            resource_type=OutboundCampaignFunction,
-            resource_name="gone",
-            file_path=os.path.join("outbound_campaigns", "reminders", "functions", "gone.py"),
-            flow_name=None,
-            resource_prefix=None,
-        )
+        campaign.function_code = {"gone": "def gone():\n    pass\n"}
 
         with self.assertRaisesRegex(ValueError, "functions/gone.py has no node 'gone'"):
-            campaign.validate(resource_mappings=[orphan])
+            campaign.validate()
 
     def test_function_file_needs_a_campaign_beside_it(self):
         """A functions/ folder without a campaign.yaml is reported."""
@@ -14452,7 +14446,7 @@ class OutboundCampaignTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "No campaign.yaml"):
             function.validate(resource_mappings=[])
 
-    def test_node_changes_match_nodes_by_id(self):
+    def test_subresource_diff_matches_nodes_by_id(self):
         """Nodes are matched by id, so a reorder alone is not a change."""
         original = _campaign()
         original.function_code = {"trigger-1": "old"}
@@ -14469,7 +14463,7 @@ class OutboundCampaignTests(unittest.TestCase):
             }
         )
 
-        created, updated, deleted = campaign.node_changes(original)
+        created, updated, deleted = campaign.get_new_updated_deleted_subresources(original)
 
         self.assertEqual([node.node_id for node in created], ["wait-1"])
         self.assertEqual(
@@ -14478,14 +14472,14 @@ class OutboundCampaignTests(unittest.TestCase):
         )
         self.assertEqual([node.node_id for node in deleted], ["trigger-1"])
 
-    def test_node_changes_count_function_code_as_data(self):
+    def test_subresource_diff_counts_function_code_as_data(self):
         """A code change updates the node's data."""
         original = _campaign()
         original.function_code = {"trigger-1": "old"}
         campaign = _campaign()
         campaign.function_code = {"trigger-1": "new"}
 
-        _, updated, _ = campaign.node_changes(original)
+        _, updated, _ = campaign.get_new_updated_deleted_subresources(original)
 
         self.assertEqual(
             [(node.node_id, node.changed_fields) for node in updated], [("trigger-1", ("data",))]
@@ -14501,7 +14495,7 @@ class OutboundCampaignTests(unittest.TestCase):
         campaign = _campaign()
         campaign.nodes[1]["position"] = {"x": 10.0, "y": 20.0}
 
-        _, updated, _ = campaign.node_changes(original)
+        _, updated, _ = campaign.get_new_updated_deleted_subresources(original)
         proto = updated[0].build_update_proto()
 
         self.assertEqual(proto.node_id, "call-1")
@@ -14515,12 +14509,90 @@ class OutboundCampaignTests(unittest.TestCase):
         campaign = _campaign()
         del campaign.nodes[1]["label"]
 
-        _, updated, _ = campaign.node_changes(original)
+        _, updated, _ = campaign.get_new_updated_deleted_subresources(original)
         proto = updated[0].build_update_proto()
 
         self.assertEqual(updated[0].changed_fields, ("label",))
         self.assertTrue(proto.HasField("label"))
         self.assertEqual(proto.label, "")
+
+    def test_new_campaign_sends_its_settings_and_every_node_as_new(self):
+        campaign = _campaign()
+
+        created, updated, deleted = campaign.get_new_updated_deleted_subresources(None)
+
+        self.assertIsInstance(created[0], OutboundCampaignSettings)
+        self.assertEqual(
+            [node.node_id for node in created[1:]], [node["id"] for node in campaign.nodes]
+        )
+        self.assertEqual((updated, deleted), ([], []))
+
+    def test_settings_are_diffed_only_when_they_changed(self):
+        """Unchanged settings send nothing; a changed field sends the whole object."""
+        original = _campaign()
+        campaign = _campaign()
+        self.assertEqual(campaign.get_new_updated_deleted_subresources(original), ([], [], []))
+
+        campaign.settings = {**campaign.settings, "dailyContactLimit": 5}
+        _, updated, _ = campaign.get_new_updated_deleted_subresources(original)
+
+        self.assertEqual([type(change) for change in updated], [OutboundCampaignSettings])
+
+    def test_read_local_resource_reads_the_function_files_beside_it(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        campaign = _campaign()
+        folder = os.path.join(root, "outbound_campaigns", campaign.folder)
+        os.makedirs(os.path.join(folder, "functions"))
+        with open(os.path.join(folder, "campaign.yaml"), "w", encoding="utf-8") as file:
+            file.write(campaign.raw)
+        for node_id, code in (("trigger-1", "def map_contacts():\n    pass\n"), ("call-1", "")):
+            with open(os.path.join(folder, "functions", f"{node_id}.py"), "w") as file:
+                file.write(code)
+
+        read = OutboundCampaign.read_local_resource(
+            os.path.join(folder, "campaign.yaml"),
+            resource_id="CMPGN-1",
+            resource_name=campaign.name,
+        )
+
+        self.assertEqual(read.function_code, {"trigger-1": "def map_contacts():\n    pass\n"})
+
+    def test_function_code_survives_the_status_file(self):
+        """Code is compared against the saved campaign, so the status file must keep it."""
+        campaign = _campaign()
+        campaign.function_code = {"trigger-1": "code"}
+
+        reloaded = OutboundCampaign(**resource_utils.resource_to_dict(campaign))
+
+        self.assertEqual(reloaded.function_code, {"trigger-1": "code"})
+
+    def test_default_variant_is_shown_by_name_and_read_back_as_its_id(self):
+        variant = ResourceMapping(
+            resource_id="VARIANT-1",
+            resource_type=Variant,
+            resource_name="Spanish",
+            file_path="variants.yaml",
+            flow_name=None,
+            resource_prefix=None,
+        )
+        campaign = _campaign()
+        campaign.settings = {**campaign.settings, "defaultVariantId": "VARIANT-1"}
+
+        pretty = resource_utils.load_yaml(campaign.to_pretty(resource_mappings=[variant]))
+        back = OutboundCampaign.from_pretty_dict(pretty, resource_mappings=[variant])
+
+        self.assertEqual(pretty["settings"]["defaultVariant"], "Spanish")
+        self.assertNotIn("defaultVariantId", pretty["settings"])
+        self.assertEqual(back["settings"]["defaultVariantId"], "VARIANT-1")
+        self.assertEqual(list(back["settings"]), list(campaign.settings))
+
+    def test_validate_rejects_a_default_variant_that_does_not_exist(self):
+        campaign = _campaign()
+        campaign.settings = {**campaign.settings, "defaultVariantId": "Klingon"}
+
+        with self.assertRaisesRegex(ValueError, "Variant 'Klingon' not found"):
+            campaign.validate(resource_mappings=[])
 
     def test_node_data_maps_onto_the_wire_field_names(self):
         """Every node type's camelCase fields map onto the proto fields."""

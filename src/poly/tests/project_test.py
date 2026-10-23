@@ -8091,6 +8091,11 @@ def _campaign_projection(
 class OutboundCampaignSyncTest(unittest.TestCase):
     """Pull, push and diff of a campaign in a real temp project."""
 
+    CAMPAIGN_UPDATE = (
+        "outbound_campaign_update",
+        {"id": "CMPGN-ONE", "name": "Reminders", "clearDescription": True},
+    )
+
     def setUp(self):
         patch.object(AgentStudioProject, "save_config").start()
         self.addCleanup(patch.stopall)
@@ -8186,6 +8191,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(
             self._push(),
             [
+                self.CAMPAIGN_UPDATE,
                 (
                     "outbound_campaign_update_node",
                     {
@@ -8193,7 +8199,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                         "nodeId": "call-1",
                         "position": {"x": 50.0, "y": 200.0},
                     },
-                )
+                ),
             ],
         )
 
@@ -8203,7 +8209,9 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         data["nodes"][0]["data"]["sourceType"] = "api"
         self._write_yaml(data)
 
-        [(command_type, payload)] = self._push()
+        [campaign_update, (command_type, payload)] = self._push()
+
+        self.assertEqual(campaign_update, self.CAMPAIGN_UPDATE)
 
         self.assertEqual(command_type, "outbound_campaign_update_node")
         self.assertEqual(set(payload), {"outboundCampaignId", "nodeId", "data"})
@@ -8268,11 +8276,15 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         self.assertEqual(
             [
-                (command_type, payload.get("nodeId") or payload["node"]["id"])
+                (
+                    command_type,
+                    payload.get("nodeId") or payload.get("node", {}).get("id") or payload["id"],
+                )
                 for command_type, payload in commands
             ],
             [
                 ("outbound_campaign_create_node", "wait-1"),
+                ("outbound_campaign_update", "CMPGN-ONE"),
                 ("outbound_campaign_update_node", "call-1"),
                 ("outbound_campaign_delete_node", "end-1"),
             ],
@@ -8287,6 +8299,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(
             self._push(),
             [
+                self.CAMPAIGN_UPDATE,
                 (
                     "outbound_campaign_update_settings",
                     {
@@ -8297,7 +8310,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                             "dailyContactLimit": 5,
                         },
                     },
-                )
+                ),
             ],
         )
 

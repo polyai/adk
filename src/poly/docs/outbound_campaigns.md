@@ -25,7 +25,7 @@ The folder name is the campaign's name, lowercased with punctuation replaced by 
 - **settings**: The whole settings object. Fields left out take their default (`dailyContactLimit: 3`, everything else empty).
   - **startDate**, **endDate**: ISO dates.
   - **fromNumber**, **smsFromNumber**: Numbers calls and texts come from.
-  - **defaultVariantId**: Variant the campaign's calls use.
+  - **defaultVariant**: Name of the variant the campaign's calls use.
   - **country**: ISO 3166-1 alpha-2 code (e.g. `US`). Required to publish.
   - **useCase**: `transactional` or `marketing`. Required to publish.
   - **dailyContactLimit**: Most times a contact is reached per day.
