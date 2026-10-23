@@ -76,6 +76,9 @@ FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+# Data API routes, served on the regional api.<region>.poly.ai hosts.
+DATA_METRICS_URL = "/api/v1/metrics"
+DATA_METRICS_AGGREGATE_URL = "/api/v1/metrics/aggregate"
 
 
 class PlatformAPIHandler:
@@ -1805,3 +1808,36 @@ class PlatformAPIHandler:
         """
         endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    @staticmethod
+    def get_available_metrics(region: str, project_id: ty.Optional[str] = None) -> dict:
+        """List the metrics that can be queried for an account or project.
+
+        Built-in metrics such as ``poly_score`` are included alongside custom
+        ones, so this is the set a ``query`` may name.
+
+        Args:
+            region: The region name.
+            project_id: Optional project ID to scope the catalog to.
+
+        Returns:
+            dict: ``{"metrics": [{name, description, type, values}], "total": int}``.
+        """
+        params = {"project_id": project_id} if project_id else None
+        return PlatformAPIHandler.make_request(region, DATA_METRICS_URL, "GET", params=params)
+
+    @staticmethod
+    def query_metric(region: str, body: dict) -> dict:
+        """Aggregate one metric over a window, optionally bucketed and grouped.
+
+        Args:
+            region: The region name.
+            body: The aggregate request body (metric, aggs, window, group_by,
+                filters, having, cohort restrictors, sort, pagination).
+
+        Returns:
+            dict: ``{"columns": [...], "rows": [[...]], "limit": int, "offset": int}``.
+        """
+        return PlatformAPIHandler.make_request(
+            region, DATA_METRICS_AGGREGATE_URL, "POST", data=body
+        )
