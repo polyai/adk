@@ -15,7 +15,7 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16\x61pi_integrations.proto\x12\x10\x61pi_integrations\x1a\x1fgoogle/protobuf/timestamp.proto\"M\n\x0f\x41piIntegrations\x12:\n\x10\x61pi_integrations\x18\x01 \x03(\x0b\x32 .api_integrations.ApiIntegration\"\xf9\x02\n\x0e\x41piIntegration\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x34\n\x0c\x65nvironments\x18\x04 \x01(\x0b\x32\x1e.api_integrations.Environments\x12.\n\ncreated_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\ncreated_by\x18\x06 \x01(\t\x12.\n\nupdated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\nupdated_by\x18\x08 \x01(\t\x12=\n\noperations\x18\t \x03(\x0b\x32).api_integrations.ApiIntegrationOperation\x12;\n\x10operation_groups\x18\n \x01(\x0b\x32!.api_integrations.OperationGroups\"C\n\x0fOperationGroups\x12\x30\n\x06groups\x18\x01 \x03(\x0b\x32 .api_integrations.OperationGroup\"A\n\x0eOperationGroup\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x15\n\roperation_ids\x18\x03 \x03(\t\"\xba\x01\n\x0c\x45nvironments\x12\x37\n\x07sandbox\x18\x01 \x01(\x0b\x32&.api_integrations.ApiIntegrationConfig\x12;\n\x0bpre_release\x18\x02 \x01(\x0b\x32&.api_integrations.ApiIntegrationConfig\x12\x34\n\x04live\x18\x03 \x01(\x0b\x32&.api_integrations.ApiIntegrationConfig\"A\n\x14\x41piIntegrationConfig\x12\x10\n\x08\x62\x61se_url\x18\x01 \x01(\t\x12\x11\n\tauth_type\x18\x02 \x01(\tJ\x04\x08\x03\x10\x04\"\xeb\x02\n\x17\x41piIntegrationOperation\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0e\n\x06method\x18\x03 \x01(\t\x12\x10\n\x08resource\x18\x04 \x01(\t\x12.\n\ncreated_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\ncreated_by\x18\x06 \x01(\t\x12.\n\nupdated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\nupdated_by\x18\x08 \x01(\t\x12G\n\x07headers\x18\t \x03(\x0b\x32\x36.api_integrations.ApiIntegrationOperation.HeadersEntry\x12\x13\n\x0b\x64\x65scription\x18\n \x01(\t\x1a.\n\x0cHeadersEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\x84\x01\n\x10OperationHeaders\x12@\n\x07\x65ntries\x18\x01 \x03(\x0b\x32/.api_integrations.OperationHeaders.EntriesEntry\x1a.\n\x0c\x45ntriesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\xa7\x01\n\x15\x41piIntegration_Create\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x18\n\x0b\x64\x65scription\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\x39\n\x0c\x65nvironments\x18\x04 \x01(\x0b\x32\x1e.api_integrations.EnvironmentsH\x01\x88\x01\x01\x42\x0e\n\x0c_descriptionB\x0f\n\r_environments\"\x8d\x01\n\x15\x41piIntegration_Update\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\x04name\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x18\n\x0b\x64\x65scription\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x15\n\x08old_name\x18\x04 \x01(\tH\x02\x88\x01\x01\x42\x07\n\x05_nameB\x0e\n\x0c_descriptionB\x0b\n\t_old_name\"?\n\x15\x41piIntegration_Delete\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\x04name\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x07\n\x05_name\"\x88\x01\n\x1b\x41piIntegrationConfig_Update\x12\n\n\x02id\x18\x01 \x01(\t\x12\x13\n\x0b\x65nvironment\x18\x02 \x01(\t\x12\x15\n\x08\x62\x61se_url\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\x16\n\tauth_type\x18\x04 \x01(\tH\x01\x88\x01\x01\x42\x0b\n\t_base_urlB\x0c\n\n_auth_type\"\xaa\x02\n\x1e\x41piIntegrationOperation_Create\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0e\n\x06method\x18\x03 \x01(\t\x12\x10\n\x08resource\x18\x04 \x01(\t\x12\x16\n\x0eintegration_id\x18\x05 \x01(\t\x12\n\n\x02id\x18\x07 \x01(\t\x12N\n\x07headers\x18\x08 \x03(\x0b\x32=.api_integrations.ApiIntegrationOperation_Create.HeadersEntry\x12\x18\n\x0b\x64\x65scription\x18\t \x01(\tH\x00\x88\x01\x01\x1a.\n\x0cHeadersEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\x0e\n\x0c_descriptionJ\x04\x08\x06\x10\x07J\x04\x08\x01\x10\x02\"\x8a\x03\n\x1e\x41piIntegrationOperation_Update\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\x04name\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x13\n\x06method\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x15\n\x08resource\x18\x04 \x01(\tH\x02\x88\x01\x01\x12\x1b\n\x0eintegration_id\x18\x05 \x01(\tH\x03\x88\x01\x01\x12\x1d\n\x10integration_name\x18\x07 \x01(\tH\x04\x88\x01\x01\x12\x15\n\x08old_name\x18\x08 \x01(\tH\x05\x88\x01\x01\x12\x38\n\x07headers\x18\t \x01(\x0b\x32\".api_integrations.OperationHeadersH\x06\x88\x01\x01\x12\x18\n\x0b\x64\x65scription\x18\n \x01(\tH\x07\x88\x01\x01\x42\x07\n\x05_nameB\t\n\x07_methodB\x0b\n\t_resourceB\x11\n\x0f_integration_idB\x13\n\x11_integration_nameB\x0b\n\t_old_nameB\n\n\x08_headersB\x0e\n\x0c_descriptionJ\x04\x08\x06\x10\x07\"\xae\x01\n\x1e\x41piIntegrationOperation_Delete\x12\n\n\x02id\x18\x01 \x01(\t\x12\x16\n\x0eintegration_id\x18\x02 \x01(\t\x12\x1d\n\x10integration_name\x18\x04 \x01(\tH\x00\x88\x01\x01\x12\x1b\n\x0eoperation_name\x18\x05 \x01(\tH\x01\x88\x01\x01\x42\x13\n\x11_integration_nameB\x11\n\x0f_operation_nameJ\x04\x08\x03\x10\x04\"m\n!ApiIntegrationOperationGroups_Set\x12\x16\n\x0eintegration_id\x18\x01 \x01(\t\x12\x30\n\x06groups\x18\x02 \x03(\x0b\x32 .api_integrations.OperationGroupb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16\x61pi_integrations.proto\x12\x10\x61pi_integrations\x1a\x1fgoogle/protobuf/timestamp.proto\"M\n\x0f\x41piIntegrations\x12:\n\x10\x61pi_integrations\x18\x01 \x03(\x0b\x32 .api_integrations.ApiIntegration\"\xf9\x02\n\x0e\x41piIntegration\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x34\n\x0c\x65nvironments\x18\x04 \x01(\x0b\x32\x1e.api_integrations.Environments\x12.\n\ncreated_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\ncreated_by\x18\x06 \x01(\t\x12.\n\nupdated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\nupdated_by\x18\x08 \x01(\t\x12=\n\noperations\x18\t \x03(\x0b\x32).api_integrations.ApiIntegrationOperation\x12;\n\x10operation_groups\x18\n \x01(\x0b\x32!.api_integrations.OperationGroups\"C\n\x0fOperationGroups\x12\x30\n\x06groups\x18\x01 \x03(\x0b\x32 .api_integrations.OperationGroup\"A\n\x0eOperationGroup\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x15\n\roperation_ids\x18\x03 \x03(\t\"\xba\x01\n\x0c\x45nvironments\x12\x37\n\x07sandbox\x18\x01 \x01(\x0b\x32&.api_integrations.ApiIntegrationConfig\x12;\n\x0bpre_release\x18\x02 \x01(\x0b\x32&.api_integrations.ApiIntegrationConfig\x12\x34\n\x04live\x18\x03 \x01(\x0b\x32&.api_integrations.ApiIntegrationConfig\"A\n\x14\x41piIntegrationConfig\x12\x10\n\x08\x62\x61se_url\x18\x01 \x01(\t\x12\x11\n\tauth_type\x18\x02 \x01(\tJ\x04\x08\x03\x10\x04\"\x8a\x05\n\x17\x41piIntegrationOperation\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0e\n\x06method\x18\x03 \x01(\t\x12\x10\n\x08resource\x18\x04 \x01(\t\x12.\n\ncreated_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\ncreated_by\x18\x06 \x01(\t\x12.\n\nupdated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\nupdated_by\x18\x08 \x01(\t\x12G\n\x07headers\x18\t \x03(\x0b\x32\x36.api_integrations.ApiIntegrationOperation.HeadersEntry\x12\x13\n\x0b\x64\x65scription\x18\n \x01(\t\x12!\n\x14request_query_schema\x18\x0b \x01(\tH\x00\x88\x01\x01\x12 \n\x13request_body_schema\x18\x0c \x01(\tH\x01\x88\x01\x01\x12X\n\x10response_schemas\x18\r \x03(\x0b\x32>.api_integrations.ApiIntegrationOperation.ResponseSchemasEntry\x12\x15\n\rschema_source\x18\x0e \x01(\t\x1a.\n\x0cHeadersEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x1a\x36\n\x14ResponseSchemasEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\x17\n\x15_request_query_schemaB\x16\n\x14_request_body_schema\"\x84\x01\n\x10OperationHeaders\x12@\n\x07\x65ntries\x18\x01 \x03(\x0b\x32/.api_integrations.OperationHeaders.EntriesEntry\x1a.\n\x0c\x45ntriesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\x94\x01\n\x18OperationResponseSchemas\x12H\n\x07\x65ntries\x18\x01 \x03(\x0b\x32\x37.api_integrations.OperationResponseSchemas.EntriesEntry\x1a.\n\x0c\x45ntriesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\xa7\x01\n\x15\x41piIntegration_Create\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x18\n\x0b\x64\x65scription\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\x39\n\x0c\x65nvironments\x18\x04 \x01(\x0b\x32\x1e.api_integrations.EnvironmentsH\x01\x88\x01\x01\x42\x0e\n\x0c_descriptionB\x0f\n\r_environments\"\x8d\x01\n\x15\x41piIntegration_Update\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\x04name\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x18\n\x0b\x64\x65scription\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x15\n\x08old_name\x18\x04 \x01(\tH\x02\x88\x01\x01\x42\x07\n\x05_nameB\x0e\n\x0c_descriptionB\x0b\n\t_old_name\"?\n\x15\x41piIntegration_Delete\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\x04name\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x07\n\x05_name\"\x88\x01\n\x1b\x41piIntegrationConfig_Update\x12\n\n\x02id\x18\x01 \x01(\t\x12\x13\n\x0b\x65nvironment\x18\x02 \x01(\t\x12\x15\n\x08\x62\x61se_url\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\x16\n\tauth_type\x18\x04 \x01(\tH\x01\x88\x01\x01\x42\x0b\n\t_base_urlB\x0c\n\n_auth_type\"\xe7\x04\n\x1e\x41piIntegrationOperation_Create\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0e\n\x06method\x18\x03 \x01(\t\x12\x10\n\x08resource\x18\x04 \x01(\t\x12\x16\n\x0eintegration_id\x18\x05 \x01(\t\x12\n\n\x02id\x18\x07 \x01(\t\x12N\n\x07headers\x18\x08 \x03(\x0b\x32=.api_integrations.ApiIntegrationOperation_Create.HeadersEntry\x12\x18\n\x0b\x64\x65scription\x18\t \x01(\tH\x00\x88\x01\x01\x12!\n\x14request_query_schema\x18\n \x01(\tH\x01\x88\x01\x01\x12 \n\x13request_body_schema\x18\x0b \x01(\tH\x02\x88\x01\x01\x12_\n\x10response_schemas\x18\x0c \x03(\x0b\x32\x45.api_integrations.ApiIntegrationOperation_Create.ResponseSchemasEntry\x12\x1a\n\rschema_source\x18\r \x01(\tH\x03\x88\x01\x01\x1a.\n\x0cHeadersEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x1a\x36\n\x14ResponseSchemasEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\x0e\n\x0c_descriptionB\x17\n\x15_request_query_schemaB\x16\n\x14_request_body_schemaB\x10\n\x0e_schema_sourceJ\x04\x08\x06\x10\x07J\x04\x08\x01\x10\x02\"\x8e\x05\n\x1e\x41piIntegrationOperation_Update\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\x04name\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x13\n\x06method\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x15\n\x08resource\x18\x04 \x01(\tH\x02\x88\x01\x01\x12\x1b\n\x0eintegration_id\x18\x05 \x01(\tH\x03\x88\x01\x01\x12\x1d\n\x10integration_name\x18\x07 \x01(\tH\x04\x88\x01\x01\x12\x15\n\x08old_name\x18\x08 \x01(\tH\x05\x88\x01\x01\x12\x38\n\x07headers\x18\t \x01(\x0b\x32\".api_integrations.OperationHeadersH\x06\x88\x01\x01\x12\x18\n\x0b\x64\x65scription\x18\n \x01(\tH\x07\x88\x01\x01\x12!\n\x14request_query_schema\x18\x0b \x01(\tH\x08\x88\x01\x01\x12 \n\x13request_body_schema\x18\x0c \x01(\tH\t\x88\x01\x01\x12I\n\x10response_schemas\x18\r \x01(\x0b\x32*.api_integrations.OperationResponseSchemasH\n\x88\x01\x01\x12\x1a\n\rschema_source\x18\x0e \x01(\tH\x0b\x88\x01\x01\x42\x07\n\x05_nameB\t\n\x07_methodB\x0b\n\t_resourceB\x11\n\x0f_integration_idB\x13\n\x11_integration_nameB\x0b\n\t_old_nameB\n\n\x08_headersB\x0e\n\x0c_descriptionB\x17\n\x15_request_query_schemaB\x16\n\x14_request_body_schemaB\x13\n\x11_response_schemasB\x10\n\x0e_schema_sourceJ\x04\x08\x06\x10\x07\"\xae\x01\n\x1e\x41piIntegrationOperation_Delete\x12\n\n\x02id\x18\x01 \x01(\t\x12\x16\n\x0eintegration_id\x18\x02 \x01(\t\x12\x1d\n\x10integration_name\x18\x04 \x01(\tH\x00\x88\x01\x01\x12\x1b\n\x0eoperation_name\x18\x05 \x01(\tH\x01\x88\x01\x01\x42\x13\n\x11_integration_nameB\x11\n\x0f_operation_nameJ\x04\x08\x03\x10\x04\"m\n!ApiIntegrationOperationGroups_Set\x12\x16\n\x0eintegration_id\x18\x01 \x01(\t\x12\x30\n\x06groups\x18\x02 \x03(\x0b\x32 .api_integrations.OperationGroupb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -24,10 +24,16 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   DESCRIPTOR._options = None
   _globals['_APIINTEGRATIONOPERATION_HEADERSENTRY']._options = None
   _globals['_APIINTEGRATIONOPERATION_HEADERSENTRY']._serialized_options = b'8\001'
+  _globals['_APIINTEGRATIONOPERATION_RESPONSESCHEMASENTRY']._options = None
+  _globals['_APIINTEGRATIONOPERATION_RESPONSESCHEMASENTRY']._serialized_options = b'8\001'
   _globals['_OPERATIONHEADERS_ENTRIESENTRY']._options = None
   _globals['_OPERATIONHEADERS_ENTRIESENTRY']._serialized_options = b'8\001'
+  _globals['_OPERATIONRESPONSESCHEMAS_ENTRIESENTRY']._options = None
+  _globals['_OPERATIONRESPONSESCHEMAS_ENTRIESENTRY']._serialized_options = b'8\001'
   _globals['_APIINTEGRATIONOPERATION_CREATE_HEADERSENTRY']._options = None
   _globals['_APIINTEGRATIONOPERATION_CREATE_HEADERSENTRY']._serialized_options = b'8\001'
+  _globals['_APIINTEGRATIONOPERATION_CREATE_RESPONSESCHEMASENTRY']._options = None
+  _globals['_APIINTEGRATIONOPERATION_CREATE_RESPONSESCHEMASENTRY']._serialized_options = b'8\001'
   _globals['_APIINTEGRATIONS']._serialized_start=77
   _globals['_APIINTEGRATIONS']._serialized_end=154
   _globals['_APIINTEGRATION']._serialized_start=157
@@ -41,29 +47,37 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_APIINTEGRATIONCONFIG']._serialized_start=861
   _globals['_APIINTEGRATIONCONFIG']._serialized_end=926
   _globals['_APIINTEGRATIONOPERATION']._serialized_start=929
-  _globals['_APIINTEGRATIONOPERATION']._serialized_end=1292
-  _globals['_APIINTEGRATIONOPERATION_HEADERSENTRY']._serialized_start=1246
-  _globals['_APIINTEGRATIONOPERATION_HEADERSENTRY']._serialized_end=1292
-  _globals['_OPERATIONHEADERS']._serialized_start=1295
-  _globals['_OPERATIONHEADERS']._serialized_end=1427
-  _globals['_OPERATIONHEADERS_ENTRIESENTRY']._serialized_start=1381
-  _globals['_OPERATIONHEADERS_ENTRIESENTRY']._serialized_end=1427
-  _globals['_APIINTEGRATION_CREATE']._serialized_start=1430
-  _globals['_APIINTEGRATION_CREATE']._serialized_end=1597
-  _globals['_APIINTEGRATION_UPDATE']._serialized_start=1600
-  _globals['_APIINTEGRATION_UPDATE']._serialized_end=1741
-  _globals['_APIINTEGRATION_DELETE']._serialized_start=1743
-  _globals['_APIINTEGRATION_DELETE']._serialized_end=1806
-  _globals['_APIINTEGRATIONCONFIG_UPDATE']._serialized_start=1809
-  _globals['_APIINTEGRATIONCONFIG_UPDATE']._serialized_end=1945
-  _globals['_APIINTEGRATIONOPERATION_CREATE']._serialized_start=1948
-  _globals['_APIINTEGRATIONOPERATION_CREATE']._serialized_end=2246
-  _globals['_APIINTEGRATIONOPERATION_CREATE_HEADERSENTRY']._serialized_start=1246
-  _globals['_APIINTEGRATIONOPERATION_CREATE_HEADERSENTRY']._serialized_end=1292
-  _globals['_APIINTEGRATIONOPERATION_UPDATE']._serialized_start=2249
-  _globals['_APIINTEGRATIONOPERATION_UPDATE']._serialized_end=2643
-  _globals['_APIINTEGRATIONOPERATION_DELETE']._serialized_start=2646
-  _globals['_APIINTEGRATIONOPERATION_DELETE']._serialized_end=2820
-  _globals['_APIINTEGRATIONOPERATIONGROUPS_SET']._serialized_start=2822
-  _globals['_APIINTEGRATIONOPERATIONGROUPS_SET']._serialized_end=2931
+  _globals['_APIINTEGRATIONOPERATION']._serialized_end=1579
+  _globals['_APIINTEGRATIONOPERATION_HEADERSENTRY']._serialized_start=1428
+  _globals['_APIINTEGRATIONOPERATION_HEADERSENTRY']._serialized_end=1474
+  _globals['_APIINTEGRATIONOPERATION_RESPONSESCHEMASENTRY']._serialized_start=1476
+  _globals['_APIINTEGRATIONOPERATION_RESPONSESCHEMASENTRY']._serialized_end=1530
+  _globals['_OPERATIONHEADERS']._serialized_start=1582
+  _globals['_OPERATIONHEADERS']._serialized_end=1714
+  _globals['_OPERATIONHEADERS_ENTRIESENTRY']._serialized_start=1668
+  _globals['_OPERATIONHEADERS_ENTRIESENTRY']._serialized_end=1714
+  _globals['_OPERATIONRESPONSESCHEMAS']._serialized_start=1717
+  _globals['_OPERATIONRESPONSESCHEMAS']._serialized_end=1865
+  _globals['_OPERATIONRESPONSESCHEMAS_ENTRIESENTRY']._serialized_start=1668
+  _globals['_OPERATIONRESPONSESCHEMAS_ENTRIESENTRY']._serialized_end=1714
+  _globals['_APIINTEGRATION_CREATE']._serialized_start=1868
+  _globals['_APIINTEGRATION_CREATE']._serialized_end=2035
+  _globals['_APIINTEGRATION_UPDATE']._serialized_start=2038
+  _globals['_APIINTEGRATION_UPDATE']._serialized_end=2179
+  _globals['_APIINTEGRATION_DELETE']._serialized_start=2181
+  _globals['_APIINTEGRATION_DELETE']._serialized_end=2244
+  _globals['_APIINTEGRATIONCONFIG_UPDATE']._serialized_start=2247
+  _globals['_APIINTEGRATIONCONFIG_UPDATE']._serialized_end=2383
+  _globals['_APIINTEGRATIONOPERATION_CREATE']._serialized_start=2386
+  _globals['_APIINTEGRATIONOPERATION_CREATE']._serialized_end=3001
+  _globals['_APIINTEGRATIONOPERATION_CREATE_HEADERSENTRY']._serialized_start=1428
+  _globals['_APIINTEGRATIONOPERATION_CREATE_HEADERSENTRY']._serialized_end=1474
+  _globals['_APIINTEGRATIONOPERATION_CREATE_RESPONSESCHEMASENTRY']._serialized_start=1476
+  _globals['_APIINTEGRATIONOPERATION_CREATE_RESPONSESCHEMASENTRY']._serialized_end=1530
+  _globals['_APIINTEGRATIONOPERATION_UPDATE']._serialized_start=3004
+  _globals['_APIINTEGRATIONOPERATION_UPDATE']._serialized_end=3658
+  _globals['_APIINTEGRATIONOPERATION_DELETE']._serialized_start=3661
+  _globals['_APIINTEGRATIONOPERATION_DELETE']._serialized_end=3835
+  _globals['_APIINTEGRATIONOPERATIONGROUPS_SET']._serialized_start=3837
+  _globals['_APIINTEGRATIONOPERATIONGROUPS_SET']._serialized_end=3946
 # @@protoc_insertion_point(module_scope)
