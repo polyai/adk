@@ -340,5 +340,77 @@ class GetBranchCallInfo(unittest.TestCase):
             sdk.get_branch_call_info("branch-1")
 
 
+class OutboundCampaignRequests(unittest.TestCase):
+    """Tests for the outbound campaign routes and how their errors are read."""
+
+    def setUp(self):
+        self.sdk = build_sdk()
+        self.session = MagicMock()
+        self.sdk._session = self.session
+
+    def _error_from(self, response) -> SourcererAPIError:
+        self.session.request.return_value = response
+        with self.assertRaises(SourcererAPIError) as error:
+            self.sdk.validate_outbound_campaign("main", "CMPGN-1")
+        return error.exception
+
+    def test_campaign_id_is_quoted_into_the_url(self):
+        self.session.request.return_value = make_mock_response(200, json_body={"valid": True})
+
+        self.sdk.validate_outbound_campaign("main", "CMPGN/1")
+
+        self.assertEqual(
+            self.session.request.call_args.args,
+            (
+                "POST",
+                "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/main"
+                "/outbound-campaigns/CMPGN%2F1/validate",
+            ),
+        )
+
+    def test_json_error_keeps_status_code_and_message(self):
+        error = self._error_from(
+            make_mock_response(
+                412, json_body={"error": "No campaigns key", "error_code": "CAMPAIGNS_KEY_MISSING"}
+            )
+        )
+
+        self.assertEqual(error.status_code, 412)
+        self.assertEqual(error.error_code, "CAMPAIGNS_KEY_MISSING")
+        self.assertEqual(error.server_message, "No campaigns key")
+
+    def test_error_that_is_not_json_keeps_the_body_text(self):
+        error = self._error_from(make_mock_response(502, content=b"Bad gateway"))
+
+        self.assertEqual(error.status_code, 502)
+        self.assertIsNone(error.error_code)
+        self.assertEqual(error.server_message, "Bad gateway")
+
+    def test_error_body_that_is_a_list_is_read_as_text(self):
+        response = make_mock_response(400, json_body=["bad"], content=b'["bad"]')
+
+        error = self._error_from(response)
+
+        self.assertEqual(error.status_code, 400)
+        self.assertEqual(error.server_message, '["bad"]')
+
+    @patch("poly.handlers.sdk.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.sdk.requests.post")
+    def test_command_batch_answered_200_with_an_error_raises(self, mock_post, _mock_key):
+        """The command-batch route can refuse with a 200 body that carries the error."""
+        self.session.get.return_value = make_mock_response(
+            200, json_body={"lastKnownSequence": "4"}
+        )
+        mock_post.return_value = make_mock_response(
+            200, json_body={"error": "Refused", "error_code": "OUTBOUND_CAMPAIGNS_DISABLED"}
+        )
+
+        with self.assertRaises(SourcererAPIError) as error:
+            self.sdk.send_commands_to_branch([Command(type="outbound_campaign_pause")], "main")
+
+        self.assertEqual(error.exception.error_code, "OUTBOUND_CAMPAIGNS_DISABLED")
+        self.assertIn("/branches/main/command-batch", mock_post.call_args.args[0])
+
+
 if __name__ == "__main__":
     unittest.main()

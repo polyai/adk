@@ -3613,7 +3613,23 @@ class AgentStudioProject:
 
         return matched
 
+    @property
+    def outbound_campaigns_enabled(self) -> bool:
+        """Whether outbound campaigns are turned on for this project in Agent Studio."""
+        return self.api_handler.feature_flag_enabled(
+            key="outbound-campaigns",
+            region=self.region,
+            project_id=self.project_id,
+            account_id=self.account_id,
+            default=False,
+        )
+
     def get_campaign(self, name: str) -> OutboundCampaign:
+        """Return the pushed campaign with this name or folder name.
+
+        Raises:
+            ValueError: if no campaign matches, several do, or it exists only in local files.
+        """
         campaigns = list(self.resources.get(OutboundCampaign, {}).values())
         for matches in (
             lambda campaign: campaign.name == name,
@@ -3649,6 +3665,8 @@ class AgentStudioProject:
                 "\nThis project is not set up to run campaigns yet. Publish or resume a "
                 "campaign once in Agent Studio, then try again."
             )
+        elif error.error_code == "OUTBOUND_CAMPAIGNS_DISABLED":
+            message += "\nOutbound campaigns aren't turned on for this project."
         return SourcererAPIError(
             message,
             status_code=error.status_code,
@@ -3657,6 +3675,7 @@ class AgentStudioProject:
         )
 
     def validate_campaign(self, name: str) -> dict[str, Any]:
+        """Check the campaign as pushed to the current branch; returns its errors and warnings."""
         campaign = self.get_campaign(name)
         try:
             return self.api_handler.validate_outbound_campaign(campaign.resource_id)
@@ -3684,6 +3703,11 @@ class AgentStudioProject:
         tools_called: Optional[list[str]] = None,
         ask_branches: Optional[bool] = None,
     ) -> dict[str, Any]:
+        """Walk a made-up contact through the campaign on the current branch. Nothing is sent.
+
+        Raises:
+            ValueError: if the contact or sample outputs aren't JSON objects.
+        """
         if not isinstance(contact_data, dict):
             raise ValueError("Contact data must be a JSON object.")
         if sample_outputs is not None and (
@@ -3715,6 +3739,14 @@ class AgentStudioProject:
         call_result: Optional[str] = None,
         tools_called: Optional[list[str]] = None,
     ) -> dict[str, Any]:
+        """Start one real test step of the live campaign, which calls and texts `contact`.
+
+        A first step takes neither `start_node_id` nor `run`; a later step needs both, from the
+        step before it.
+
+        Raises:
+            ValueError: if the contact has no phone, or the step inputs don't fit together.
+        """
         if not isinstance(contact, dict) or not isinstance(contact.get("phone"), str):
             raise ValueError("The test contact needs a phone number.")
         if (run is None) != (start_node_id is None):
@@ -3753,6 +3785,11 @@ class AgentStudioProject:
         timeout: float = 600,
         poll_interval: float = 5,
     ) -> dict[str, Any]:
+        """Poll a test step until it stops running and return it.
+
+        Raises:
+            TimeoutError: if it is still queued or running after `timeout` seconds.
+        """
         campaign = self.get_campaign(name)
         deadline = time.monotonic() + timeout
         while True:
@@ -3779,15 +3816,19 @@ class AgentStudioProject:
             raise self._campaign_error(action, campaign, e) from e
 
     def publish_campaign(self, name: str) -> None:
+        """Publish the campaign on live, so it starts contacting people."""
         self._send_campaign_lifecycle("publish", "outbound_campaign_publish", name)
 
     def pause_campaign(self, name: str) -> None:
+        """Pause the live campaign."""
         self._send_campaign_lifecycle("pause", "outbound_campaign_pause", name)
 
     def resume_campaign(self, name: str) -> None:
+        """Resume the paused live campaign, so it contacts people again."""
         self._send_campaign_lifecycle("resume", "outbound_campaign_resume", name)
 
     def archive_campaign(self, name: str) -> None:
+        """Archive the campaign on live."""
         self._send_campaign_lifecycle("archive", "outbound_campaign_archive_definition", name)
 
     def trigger_tests(self, test_ids: list[str], name: str | None = None) -> dict:

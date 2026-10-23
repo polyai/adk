@@ -6318,6 +6318,8 @@ class UpdateCheckStampTest(unittest.TestCase):
 
 
 class CampaignCommandTest(unittest.TestCase):
+    """`poly campaign` subcommands, with the HTTP layer mocked."""
+
     CAMPAIGN = "Appointment reminders"
     CAMPAIGN_ID = "CMPGN-TEST0001"
     CAMPAIGN_URL = (
@@ -6339,9 +6341,16 @@ class CampaignCommandTest(unittest.TestCase):
         self.post = patch("poly.handlers.sdk.requests.post").start()
         self.addCleanup(patch.stopall)
 
+        self.campaigns_enabled = patch.object(
+            AgentStudioProject,
+            "outbound_campaigns_enabled",
+            new_callable=PropertyMock,
+            return_value=True,
+        ).start()
         self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         patch("poly.cli_commands.campaign.load_project", return_value=self.project).start()
         self.json_print = patch("poly.cli_commands.campaign.json_print").start()
+        self.shared_json_print = patch("poly.cli_commands.shared.json_print").start()
 
     def _respond(self, *responses: MagicMock) -> None:
         self.session.request.side_effect = list(responses)
@@ -6354,6 +6363,7 @@ class CampaignCommandTest(unittest.TestCase):
         return self.json_print.call_args.args[0]
 
     def test_validate_posts_to_the_branch_route(self):
+        """validate checks the campaign on the current branch and returns the platform's result."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
         CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
@@ -6366,13 +6376,12 @@ class CampaignCommandTest(unittest.TestCase):
             {
                 "success": True,
                 "campaign": self.CAMPAIGN,
-                "valid": True,
-                "errors": [],
-                "warnings": [],
+                "result": {"valid": True, "errors": [], "warnings": []},
             },
         )
 
     def test_validate_names_nodes_by_label_and_fails(self):
+        """Issues name nodes by their label, and an invalid campaign exits 1."""
         self._respond(
             make_mock_response(
                 200,
@@ -6401,6 +6410,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
     def test_preview_sends_contact_and_sample_outputs(self):
+        """preview sends the contact and sample outputs to the branch's dry-run route."""
         result = {
             "steps": [],
             "stopped_at": "call-1",
@@ -6443,9 +6453,12 @@ class CampaignCommandTest(unittest.TestCase):
                 "callOutcome": {"toolsCalled": [], "result": "no_answer"},
             },
         )
-        self.assertEqual(self._output(), {"success": True, "campaign": self.CAMPAIGN, **result})
+        self.assertEqual(
+            self._output(), {"success": True, "campaign": self.CAMPAIGN, "result": result}
+        )
 
     def test_test_runs_on_main_and_waits_for_the_step(self):
+        """test always runs on main, whatever the branch, and polls until the step is done."""
         self.project.branch_id = "BRANCH-1"
         run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
         done = {"step_id": "TSTEP-1", "status": "done", "run": run, "result": {"steps": []}}
@@ -6470,9 +6483,12 @@ class CampaignCommandTest(unittest.TestCase):
             ),
         )
         self.assertEqual(self._request(2), ("GET", main_url + "/test-steps/TSTEP-1", None))
-        self.assertEqual(self._output(), {"success": True, "campaign": self.CAMPAIGN, **done})
+        self.assertEqual(
+            self._output(), {"success": True, "campaign": self.CAMPAIGN, "test_step": done}
+        )
 
     def test_test_continues_a_run(self):
+        """A later step sends the node to carry on from and the previous run."""
         run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
         self._respond(
             make_mock_response(202, {"step_id": "TSTEP-2", "status": "queued", "run": run}),
@@ -6501,6 +6517,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
     def test_test_refuses_a_run_without_its_node(self):
+        """A run without the node it stopped at is refused before anything is sent."""
         with self.assertRaises(SystemExit) as exit:
             CampaignCommand.campaign_test(
                 TEST_DIR,
@@ -6515,6 +6532,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.session.request.assert_not_called()
 
     def test_lifecycle_sends_one_command_to_main(self):
+        """Each lifecycle action sends exactly one command, straight to main."""
         expected = {
             "publish": "outbound_campaign_publish",
             "pause": "outbound_campaign_pause",
@@ -6548,6 +6566,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
     def test_missing_campaigns_key_says_to_publish_once_from_studio(self):
+        """A missing campaigns key tells the user how to set it up, by campaign name."""
         self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
         self.post.return_value = make_mock_response(
             412,
@@ -6568,6 +6587,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertNotIn(self.CAMPAIGN_ID, error)
 
     def test_lifecycle_asks_before_acting_on_live(self):
+        """Without --force, a lifecycle action asks first and sends nothing when declined."""
         with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
             confirm.return_value.ask.return_value = False
             CampaignCommand.campaign_lifecycle(TEST_DIR, "publish", self.CAMPAIGN)
@@ -6577,6 +6597,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.post.assert_not_called()
 
     def test_unknown_campaign_lists_the_known_ones(self):
+        """An unknown name lists the campaigns that do exist."""
         with self.assertRaises(SystemExit):
             CampaignCommand.campaign_validate(TEST_DIR, "Nope", output_json=True)
 
@@ -6586,8 +6607,108 @@ class CampaignCommandTest(unittest.TestCase):
         self.session.request.assert_not_called()
 
     def test_campaign_is_found_by_folder_name(self):
+        """A campaign can be named by its folder as well as its name."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
         CampaignCommand.campaign_validate(TEST_DIR, "appointment_reminders", output_json=True)
 
+        self.assertTrue(self._output()["success"])
+
+    def test_campaigns_turned_off_exit_before_any_request(self):
+        """The ADK checks the project's flag first, so nothing reaches the platform."""
+        self.campaigns_enabled.return_value = False
+
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertEqual(
+            self.shared_json_print.call_args.args[0],
+            {"success": False, "error": "Outbound campaigns aren't turned on for this project."},
+        )
+        self.session.request.assert_not_called()
+
+    def test_platform_refusal_for_campaigns_turned_off_says_so(self):
+        """The platform's own flag refusal is explained, not shown as a bare 403."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = make_mock_response(
+            403,
+            {
+                "error": "Outbound campaigns aren't turned on for this project",
+                "error_code": "OUTBOUND_CAMPAIGNS_DISABLED",
+            },
+        )
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        error = self._output()["error"]
+        self.assertIn(f"Could not pause campaign '{self.CAMPAIGN}'", error)
+        self.assertIn("aren't turned on for this project.", error)
+        self.assertNotIn("in Agent Studio", error)
+
+    def test_412_without_an_error_code_still_says_to_publish_once_from_studio(self):
+        """A platform from before the error code still answers 412 for a missing key."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = make_mock_response(412, {"error": "Precondition failed"})
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "publish", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertIn("in Agent Studio", self._output()["error"])
+
+    def test_test_step_that_fails_exits_1_with_its_error(self):
+        """A failed test step exits 1 and returns the step with its error."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        failed = {
+            "step_id": "TSTEP-1",
+            "status": "failed",
+            "run": run,
+            "error": {"error": "Number is not reachable"},
+        }
+        self._respond(
+            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
+            make_mock_response(200, failed),
+        )
+
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_test(
+                TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True, output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertEqual(
+            self._output(), {"success": False, "campaign": self.CAMPAIGN, "test_step": failed}
+        )
+
+    def test_test_step_still_running_at_the_timeout_exits_1(self):
+        """A step still running when --timeout runs out exits 1."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        self._respond(
+            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
+            make_mock_response(200, {"step_id": "TSTEP-1", "status": "running", "run": run}),
+        )
+
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_test(
+                TEST_DIR, self.CAMPAIGN, phone="+15550100", timeout=0, force=True, output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertIn("is still running after 0 seconds", self._output()["error"])
+
+    def test_parsed_command_line_reaches_validate(self):
+        """`poly campaign validate <name> --json` is wired through the parser to the handler."""
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(["campaign", "validate", self.CAMPAIGN, "--json"])
+        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
+
+        CampaignCommand.run(args)
+
+        self.assertEqual(self._request()[1], self.CAMPAIGN_URL.format(branch="main") + "/validate")
         self.assertTrue(self._output()["success"])

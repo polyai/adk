@@ -1074,6 +1074,7 @@ class SourcererSDK:
         return headers
 
     def send_commands_to_branch(self, commands: list[Command], branch_id: str) -> dict[str, Any]:
+        """Send `commands` as one batch to `branch_id`, apart from the queued commands."""
         command_batch = CommandBatch()
         command_batch.commands.extend(commands)
         command_batch.last_known_sequence = self.fetch_last_known_sequence_number(branch_id)
@@ -1115,22 +1116,26 @@ class SourcererSDK:
             raise SourcererAPIError(f"Failed to parse response: {e}") from e
 
     def validate_outbound_campaign(self, branch_id: str, campaign_id: str) -> dict[str, Any]:
+        """Validate a campaign as it is on `branch_id`."""
         url = self._outbound_campaign_url(branch_id, campaign_id, "validate")
         return self._campaign_request("POST", url)
 
     def dry_run_outbound_campaign(
         self, branch_id: str, campaign_id: str, body: dict[str, Any]
     ) -> dict[str, Any]:
+        """Dry-run a campaign on `branch_id`. Nothing is sent or stored."""
         url = self._outbound_campaign_url(branch_id, campaign_id, "dry-run")
         return self._campaign_request("POST", url, body)
 
     def start_outbound_campaign_test_step(
         self, campaign_id: str, body: dict[str, Any]
     ) -> dict[str, Any]:
+        """Start a real test step of the live campaign."""
         url = self._outbound_campaign_url("main", campaign_id, "test-steps")
         return self._campaign_request("POST", url, body)
 
     def get_outbound_campaign_test_step(self, campaign_id: str, step_id: str) -> dict[str, Any]:
+        """Read a test step of the live campaign."""
         url = self._outbound_campaign_url("main", campaign_id, "test-steps", step_id)
         return self._campaign_request("GET", url)
 

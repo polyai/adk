@@ -7,7 +7,7 @@ from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParser
 from typing import Any, Callable, Optional
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
-from poly.cli_commands.shared import load_project
+from poly.cli_commands.shared import load_project, require_outbound_campaigns_enabled
 from poly.handlers.sdk import SourcererAPIError
 from poly.output.json_output import json_print
 
@@ -36,12 +36,15 @@ LIFECYCLE_ACTIONS = {
 
 
 class CampaignCommand(BaseCommand):
+    """`poly campaign`: check, preview, test and run outbound campaigns."""
+
     command = "campaign"
 
     group = BUILDER_API_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
+        """Register the `campaign` subcommands and their flags."""
         campaign_parser = subparsers.add_parser(
             "campaign",
             parents=[parents.verbose],
@@ -225,6 +228,7 @@ class CampaignCommand(BaseCommand):
 
     @classmethod
     def run(cls, args: Namespace) -> None:
+        """Dispatch to the chosen `campaign` subcommand."""
         if args.campaign_subcommand == "validate":
             cls.campaign_validate(args.path, args.name, output_json=args.json)
         elif args.campaign_subcommand == "preview":
@@ -324,13 +328,15 @@ class CampaignCommand(BaseCommand):
 
     @classmethod
     def campaign_validate(cls, base_path: str, name: str, output_json: bool = False) -> None:
+        """Validate a pushed campaign on the current branch and report its issues. Exits 1 if invalid."""
         from poly.output.console import error, success, warning
 
         project = load_project(base_path, output_json=output_json)
+        require_outbound_campaigns_enabled(project, output_json=output_json)
         result = cls._call(output_json, lambda: project.validate_campaign(name))
         valid = bool(result.get("valid"))
         if output_json:
-            json_print({"success": valid, "campaign": name, **result})
+            json_print({"success": valid, "campaign": name, "result": result})
             if not valid:
                 sys.exit(1)
             return
@@ -402,6 +408,8 @@ class CampaignCommand(BaseCommand):
         ask_branches: Optional[bool] = None,
         output_json: bool = False,
     ) -> None:
+        """Dry-run a made-up contact through a campaign and print the steps. Nothing is sent."""
+
         def build_inputs() -> tuple[dict, Optional[dict]]:
             contact = cls._read_json(contact_file, "--contact") if contact_file else {}
             if not isinstance(contact, dict):
@@ -418,6 +426,7 @@ class CampaignCommand(BaseCommand):
 
         contact, outputs = cls._call(output_json, build_inputs)
         project = load_project(base_path, output_json=output_json)
+        require_outbound_campaigns_enabled(project, output_json=output_json)
         result = cls._call(
             output_json,
             lambda: project.preview_campaign(
@@ -432,7 +441,7 @@ class CampaignCommand(BaseCommand):
         )
         failed = result.get("stop_reason") == "error"
         if output_json:
-            json_print({"success": not failed, "campaign": name, **result})
+            json_print({"success": not failed, "campaign": name, "result": result})
         else:
             cls._print_steps(project, name, result)
         if failed:
@@ -457,6 +466,7 @@ class CampaignCommand(BaseCommand):
         force: bool = False,
         output_json: bool = False,
     ) -> None:
+        """Run one real test step on the live campaign and wait for its result."""
         import questionary
 
         from poly.output.console import error, info, success, warning
@@ -485,6 +495,7 @@ class CampaignCommand(BaseCommand):
 
         contact, previous_run = cls._call(output_json, build_inputs)
         project = load_project(base_path, output_json=output_json)
+        require_outbound_campaigns_enabled(project, output_json=output_json)
 
         if not output_json and not force:
             if not questionary.confirm(
@@ -514,7 +525,7 @@ class CampaignCommand(BaseCommand):
         )
         done = step.get("status") == "done"
         if output_json:
-            json_print({"success": done, "campaign": name, **step})
+            json_print({"success": done, "campaign": name, "test_step": step})
         else:
             if step.get("result"):
                 cls._print_steps(project, name, step["result"])
@@ -535,12 +546,14 @@ class CampaignCommand(BaseCommand):
         force: bool = False,
         output_json: bool = False,
     ) -> None:
+        """Publish, pause, resume or archive a live campaign after confirming."""
         import questionary
 
         from poly.output.console import success, warning
 
         _, prompt, done_message = LIFECYCLE_ACTIONS[action]
         project = load_project(base_path, output_json=output_json)
+        require_outbound_campaigns_enabled(project, output_json=output_json)
         if not output_json and not force:
             if not questionary.confirm(
                 prompt.format(name=name), default=False, auto_enter=False

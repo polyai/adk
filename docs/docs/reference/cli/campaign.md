@@ -17,6 +17,8 @@ poly campaign publish 'Appointment reminders'
 
 Every subcommand takes the campaign's name (or its folder name) and acts on the campaign as pushed, not on your local files: run [`poly push`](./push.md) first. `validate` and `preview` use your current branch. `test`, `publish`, `pause`, `resume` and `archive` act on the live campaign on `main`, whatever branch you are on, so a campaign made on a branch must be merged first.
 
+Outbound campaigns must be turned on for the project; otherwise every subcommand exits `1` and says so.
+
 | Argument | Description |
 |---|---|
 | `name` | The campaign's name. |
@@ -39,9 +41,11 @@ Exits `1` when the campaign is not valid. Warnings do not fail it.
 {
   "success": true,
   "campaign": "Appointment reminders",
-  "valid": true,
-  "errors": [],
-  "warnings": [{"node_id": "call-1", "field": "flowName", "message": "...", "is_warning": true}]
+  "result": {
+    "valid": true,
+    "errors": [],
+    "warnings": [{"node_id": "call-1", "field": "flowName", "message": "...", "is_warning": true}]
+  }
 }
 ~~~
 
@@ -75,11 +79,7 @@ poly campaign preview 'Appointment reminders' --phone +15550100 --start-node cal
 {
   "success": true,
   "campaign": "Appointment reminders",
-  "steps": [],
-  "stopped_at": "call-1",
-  "stop_reason": "call",
-  "error": null,
-  "notes": []
+  "result": {"steps": [], "stopped_at": "call-1", "stop_reason": "call", "error": null, "notes": []}
 }
 ~~~
 
@@ -118,11 +118,13 @@ poly campaign test 'Appointment reminders' --phone +15550100 --start-node call-1
 {
   "success": true,
   "campaign": "Appointment reminders",
-  "step_id": "TSTEP-...",
-  "status": "done",
-  "run": {"contact_id": "...", "enrolment_id": "...", "graph_hash": "..."},
-  "result": {"steps": [], "stopped_at": "call-1", "stop_reason": "call", "resume_node_id": null, "error": null, "notes": []},
-  "error": null
+  "test_step": {
+    "step_id": "TSTEP-...",
+    "status": "done",
+    "run": {"contact_id": "...", "enrolment_id": "...", "graph_hash": "..."},
+    "result": {"steps": [], "stopped_at": "call-1", "stop_reason": "call", "resume_node_id": null, "error": null, "notes": []},
+    "error": null
+  }
 }
 ~~~
 
