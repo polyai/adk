@@ -7261,7 +7261,9 @@ class AsrSettingsTests(unittest.TestCase):
     }
 
     def _from_yaml(self, yaml_dict: dict) -> AsrSettings:
-        return AsrSettings.from_yaml_dict(yaml_dict, resource_id="asr_settings", name="asr_settings")
+        return AsrSettings.from_yaml_dict(
+            yaml_dict, resource_id="asr_settings", name="asr_settings"
+        )
 
     def _changes(self, new: dict, old: Optional[dict]):
         old_resource = self._from_yaml(old) if old is not None else None
@@ -14226,7 +14228,10 @@ def _campaign(**fields) -> OutboundCampaign:
 
 
 class OutboundCampaignTests(unittest.TestCase):
+    """OutboundCampaign parsing, YAML, validation and the protos it builds."""
+
     def test_from_projection_reads_the_draft_graph_in_order(self):
+        """Nodes come from the draft graph, in the projection's id order."""
         campaign = _campaign()
 
         self.assertEqual(campaign.resource_id, "CMPGN-ONE")
@@ -14234,6 +14239,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertEqual([node["id"] for node in campaign.nodes], ["trigger-1", "call-1", "end-1"])
 
     def test_from_projection_never_reads_published_nodes(self):
+        """Published nodes are the live copy; local files always hold the draft."""
         entity = _campaign_entity(nodes=[])
         entity["publishedNodes"] = _campaign_entity()["nodes"]
 
@@ -14242,6 +14248,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertEqual(campaign.nodes, [])
 
     def test_from_projection_skips_archived_campaigns(self):
+        """Archived campaigns can't be edited, so they aren't pulled."""
         projection = _campaigns_projection(
             _campaign_entity(),
             _campaign_entity(campaign_id="CMPGN-OLD", name="Old", archived=True),
@@ -14253,10 +14260,12 @@ class OutboundCampaignTests(unittest.TestCase):
         )
 
     def test_from_projection_without_campaigns_pulls_nothing(self):
+        """A projection with no campaigns section yields no resources."""
         self.assertEqual(OutboundCampaign.from_projection({}), {})
         self.assertEqual(OutboundCampaignFunction.from_projection({}), {})
 
     def test_yaml_keeps_function_name_and_description_but_not_code(self):
+        """Function code lives in its own .py file, never in campaign.yaml."""
         function = _campaign().to_yaml_dict()["nodes"][0]["data"]["function"]
 
         self.assertEqual(
@@ -14264,6 +14273,7 @@ class OutboundCampaignTests(unittest.TestCase):
         )
 
     def test_yaml_fills_in_schema_defaults(self):
+        """Fields the platform leaves out are written with their defaults."""
         campaign = OutboundCampaign.from_yaml_dict(
             {
                 "name": "Reminders",
@@ -14294,6 +14304,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertEqual(campaign.nodes[0]["position"], {"x": 1.0, "y": 2.0})
 
     def test_yaml_round_trip(self):
+        """Writing and reading campaign.yaml gives back the same campaign."""
         campaign = _campaign(description="Monthly")
 
         loaded = OutboundCampaign.from_yaml_dict(
@@ -14305,6 +14316,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertEqual(loaded.compute_hash(), campaign.compute_hash())
 
     def test_file_paths(self):
+        """A campaign and its function files live under outbound_campaigns/<folder>/."""
         functions = OutboundCampaignFunction.from_projection(
             _campaigns_projection(_campaign_entity(name="Appointment Reminders!"))
         )
@@ -14323,6 +14335,7 @@ class OutboundCampaignTests(unittest.TestCase):
         )
 
     def test_function_files_only_for_non_empty_code(self):
+        """A node with no code gets no .py file."""
         functions = OutboundCampaignFunction.from_projection(
             _campaigns_projection(_campaign_entity())
         )
@@ -14331,6 +14344,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertEqual(functions["reminders/trigger-1"].code, "def map_contacts():\n    pass")
 
     def test_function_code_round_trips_through_its_py_file(self):
+        """Code written to functions/<node_id>.py reads back unchanged."""
         function = OutboundCampaignFunction.from_projection(
             _campaigns_projection(_campaign_entity())
         )["reminders/trigger-1"]
@@ -14347,6 +14361,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertEqual(read, function)
 
     def test_read_local_resource_rejects_a_folder_not_matching_the_name(self):
+        """A campaign.yaml whose name doesn't match its folder is reported."""
         campaign = _campaign()
         with tempfile.TemporaryDirectory() as root:
             path = os.path.join(root, "outbound_campaigns", "other", "campaign.yaml")
@@ -14358,9 +14373,11 @@ class OutboundCampaignTests(unittest.TestCase):
                 OutboundCampaign.read_local_resource(path, "CMPGN-ONE", "campaign")
 
     def test_validate_accepts_a_pulled_campaign(self):
+        """A campaign straight from the platform passes validation."""
         _campaign().validate(resource_mappings=[])
 
     def test_validate_rejects_shapes_the_platform_refuses(self):
+        """Each node shape the platform would reject fails locally first."""
         cases = {
             "a call node needs 'function'": lambda nodes: nodes[1]["data"].pop("function"),
             "'backoffUnit' must be one of": lambda nodes: nodes[1]["data"].update(
@@ -14390,6 +14407,7 @@ class OutboundCampaignTests(unittest.TestCase):
                     campaign.validate(resource_mappings=[])
 
     def test_validate_rejects_bad_settings(self):
+        """Each settings value the platform would reject fails locally first."""
         cases = {
             "'useCase' must be one of": {"useCase": "sales"},
             "'dailyContactLimit' must be": {"dailyContactLimit": 0},
@@ -14411,6 +14429,7 @@ class OutboundCampaignTests(unittest.TestCase):
                     campaign.validate(resource_mappings=[])
 
     def test_validate_rejects_a_function_file_without_its_node(self):
+        """A .py file for a node that doesn't exist is reported."""
         campaign = _campaign()
         orphan = ResourceMapping(
             resource_id="reminders/gone",
@@ -14425,6 +14444,7 @@ class OutboundCampaignTests(unittest.TestCase):
             campaign.validate(resource_mappings=[orphan])
 
     def test_function_file_needs_a_campaign_beside_it(self):
+        """A functions/ folder without a campaign.yaml is reported."""
         function = OutboundCampaignFunction(
             resource_id="nowhere/n", name="n", campaign_folder="nowhere", node_id="n", code="x"
         )
@@ -14433,6 +14453,7 @@ class OutboundCampaignTests(unittest.TestCase):
             function.validate(resource_mappings=[])
 
     def test_node_changes_match_nodes_by_id(self):
+        """Nodes are matched by id, so a reorder alone is not a change."""
         original = _campaign()
         original.function_code = {"trigger-1": "old"}
         campaign = _campaign()
@@ -14458,6 +14479,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertEqual([node.node_id for node in deleted], ["trigger-1"])
 
     def test_node_changes_count_function_code_as_data(self):
+        """A code change updates the node's data."""
         original = _campaign()
         original.function_code = {"trigger-1": "old"}
         campaign = _campaign()
@@ -14474,6 +14496,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertFalse(proto.HasField("label"))
 
     def test_position_only_update_sends_only_the_position(self):
+        """Moving a node on the canvas sends only its position."""
         original = _campaign()
         campaign = _campaign()
         campaign.nodes[1]["position"] = {"x": 10.0, "y": 20.0}
@@ -14487,6 +14510,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertFalse(proto.HasField("label"))
 
     def test_removed_label_is_cleared_with_an_empty_label(self):
+        """Deleting a label sends an empty one, which clears it."""
         original = _campaign()
         campaign = _campaign()
         del campaign.nodes[1]["label"]
@@ -14499,6 +14523,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertEqual(proto.label, "")
 
     def test_node_data_maps_onto_the_wire_field_names(self):
+        """Every node type's camelCase fields map onto the proto fields."""
         call = {
             "type": "call",
             "flowName": "Booking",
@@ -14596,6 +14621,7 @@ class OutboundCampaignTests(unittest.TestCase):
                 self.assertEqual(MessageToDict(message), wire)
 
     def test_end_node_without_function_sends_none(self):
+        """An end node with no function sends no function message."""
         _, message = node_data_proto(
             {"type": "end", "exitReason": "done", "writebackEnabled": False}, ""
         )
@@ -14604,6 +14630,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertFalse(message.HasField("campaign_function"))
 
     def test_settings_are_sent_whole(self):
+        """Settings replace the platform's copy, so every field is sent."""
         campaign = _campaign()
         campaign.settings["voiceDispatchLimits"] = {
             "maxConcurrent": 5,
@@ -14638,6 +14665,7 @@ class OutboundCampaignTests(unittest.TestCase):
         )
 
     def test_update_clears_a_removed_description(self):
+        """Removing the description clears it on the platform."""
         campaign = _campaign()
 
         proto = campaign.build_update_proto()

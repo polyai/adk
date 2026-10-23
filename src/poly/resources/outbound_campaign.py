@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf import outbound_campaigns_pb2 as campaigns_pb2
+from poly.resources.flows import _drop_unset
 from poly.resources.resource import (
     Resource,
     ResourceMapping,
@@ -179,6 +180,7 @@ def _normalise_position(position: Any) -> Any:
 
 
 def normalise_node(node: Any, from_platform: bool = False) -> Any:
+    """Fill a node's defaults and order its keys as in `campaign.yaml`. Non-dict input is returned as is."""
     if not isinstance(node, dict):
         return node
     node = dict(node)
@@ -190,6 +192,7 @@ def normalise_node(node: Any, from_platform: bool = False) -> Any:
 
 
 def normalise_settings(settings: Any) -> Any:
+    """Fill missing settings with their defaults and order the keys as in `campaign.yaml`."""
     if settings is None:
         settings = {}
     if not isinstance(settings, dict):
@@ -207,14 +210,12 @@ def normalise_settings(settings: Any) -> Any:
     return _ordered(settings, tuple(SETTINGS_DEFAULTS))
 
 
-def _drop_none(**values: Any) -> dict[str, Any]:
-    return {key: value for key, value in values.items() if value is not None}
-
-
 def _routes_proto(routes: list[dict]) -> list[campaigns_pb2.RouteEdge]:
     return [
         campaigns_pb2.RouteEdge(
-            **_drop_none(target_node_id=route.get("targetNodeId"), outcome=route.get("outcome"))
+            **_drop_unset(
+                dict(target_node_id=route.get("targetNodeId"), outcome=route.get("outcome"))
+            )
         )
         for route in routes or []
     ]
@@ -230,6 +231,11 @@ def _function_proto(function: Optional[dict], code: str) -> campaigns_pb2.Campai
 
 
 def node_data_proto(data: dict, code: str) -> tuple[str, Any]:
+    """Return the node-data oneof field name and message for a node's `data` and function code.
+
+    Raises:
+        ValueError: if `data.type` is not a known node type.
+    """
     node_type = data["type"]
     function = data.get("function")
     function_name = (function or {}).get("name") or ""
@@ -238,8 +244,8 @@ def node_data_proto(data: dict, code: str) -> tuple[str, Any]:
             function=function_name,
             routes=_routes_proto(data.get("routes")),
             campaign_function=_function_proto(function, code),
-            **_drop_none(
-                source_type=data.get("sourceType"), ingest_interval=data.get("ingestInterval")
+            **_drop_unset(
+                dict(source_type=data.get("sourceType"), ingest_interval=data.get("ingestInterval"))
             ),
         )
     elif node_type == "call":
@@ -253,11 +259,13 @@ def node_data_proto(data: dict, code: str) -> tuple[str, Any]:
             backoff_unit=data.get("backoffUnit") or "",
             routes=_routes_proto(data.get("routes")),
             campaign_function=_function_proto(function, code),
-            **_drop_none(
-                amd_flow_name=data.get("amdFlowName"),
-                voicemail_script=data.get("voicemailScript"),
-                voicemail_when=data.get("voicemailWhen"),
-                default_route=data.get("defaultRoute"),
+            **_drop_unset(
+                dict(
+                    amd_flow_name=data.get("amdFlowName"),
+                    voicemail_script=data.get("voicemailScript"),
+                    voicemail_when=data.get("voicemailWhen"),
+                    default_route=data.get("defaultRoute"),
+                )
             ),
         )
     elif node_type == "sms":
@@ -266,11 +274,13 @@ def node_data_proto(data: dict, code: str) -> tuple[str, Any]:
             message_template=data.get("messageTemplate") or "",
             routes=_routes_proto(data.get("routes")),
             campaign_function=_function_proto(function, code),
-            **_drop_none(
-                reply_flow_name=data.get("replyFlowName"),
-                reply_timeout_value=data.get("replyTimeoutValue"),
-                reply_timeout_unit=data.get("replyTimeoutUnit"),
-                default_route=data.get("defaultRoute"),
+            **_drop_unset(
+                dict(
+                    reply_flow_name=data.get("replyFlowName"),
+                    reply_timeout_value=data.get("replyTimeoutValue"),
+                    reply_timeout_unit=data.get("replyTimeoutUnit"),
+                    default_route=data.get("defaultRoute"),
+                )
             ),
         )
     elif node_type == "conditional":
@@ -285,7 +295,7 @@ def node_data_proto(data: dict, code: str) -> tuple[str, Any]:
                 for branch in data.get("branches") or []
             ],
             campaign_function=_function_proto(function, code),
-            **_drop_none(default_target_node_id=data.get("defaultTargetNodeId")),
+            **_drop_unset(dict(default_target_node_id=data.get("defaultTargetNodeId"))),
         )
     elif node_type == "wait":
         message = campaigns_pb2.WaitNodeData(
@@ -320,38 +330,43 @@ def _dispatch_limits_proto(limits: Optional[dict]) -> Optional[campaigns_pb2.Dis
     if limits is None:
         return None
     return campaigns_pb2.DispatchLimits(
-        **_drop_none(
-            max_concurrent=limits.get("maxConcurrent"),
-            per_hour=limits.get("perHour"),
-            per_day=limits.get("perDay"),
+        **_drop_unset(
+            dict(
+                max_concurrent=limits.get("maxConcurrent"),
+                per_hour=limits.get("perHour"),
+                per_day=limits.get("perDay"),
+            )
         )
     )
 
 
 def settings_proto(settings: dict) -> campaigns_pb2.OutboundCampaignSettings:
+    """Build the settings message from the camelCase settings block."""
     window = settings.get("contactWindow")
     return campaigns_pb2.OutboundCampaignSettings(
-        **_drop_none(
-            start_date=settings.get("startDate"),
-            end_date=settings.get("endDate"),
-            from_number=settings.get("fromNumber"),
-            sms_from_number=settings.get("smsFromNumber"),
-            default_variant_id=settings.get("defaultVariantId"),
-            country=settings.get("country"),
-            use_case=settings.get("useCase"),
-            daily_contact_limit=settings.get("dailyContactLimit"),
-            voice_dispatch_limits=_dispatch_limits_proto(settings.get("voiceDispatchLimits")),
-            sms_dispatch_limits=_dispatch_limits_proto(settings.get("smsDispatchLimits")),
-            default_timezone=settings.get("defaultTimezone"),
-            contact_window=(
-                campaigns_pb2.ContactWindow(
-                    days_of_week=window.get("daysOfWeek") or [],
-                    start_time=window.get("startTime") or "",
-                    end_time=window.get("endTime") or "",
-                )
-                if window is not None
-                else None
-            ),
+        **_drop_unset(
+            dict(
+                start_date=settings.get("startDate"),
+                end_date=settings.get("endDate"),
+                from_number=settings.get("fromNumber"),
+                sms_from_number=settings.get("smsFromNumber"),
+                default_variant_id=settings.get("defaultVariantId"),
+                country=settings.get("country"),
+                use_case=settings.get("useCase"),
+                daily_contact_limit=settings.get("dailyContactLimit"),
+                voice_dispatch_limits=_dispatch_limits_proto(settings.get("voiceDispatchLimits")),
+                sms_dispatch_limits=_dispatch_limits_proto(settings.get("smsDispatchLimits")),
+                default_timezone=settings.get("defaultTimezone"),
+                contact_window=(
+                    campaigns_pb2.ContactWindow(
+                        days_of_week=window.get("daysOfWeek") or [],
+                        start_time=window.get("startTime") or "",
+                        end_time=window.get("endTime") or "",
+                    )
+                    if window is not None
+                    else None
+                ),
+            )
         )
     )
 
@@ -379,6 +394,12 @@ def _projection_nodes(campaign: dict) -> list[dict]:
 @register_resource("outbound_campaigns")
 @dataclass
 class OutboundCampaign(YamlResource):
+    """An outbound campaign, kept as `outbound_campaigns/<name>/campaign.yaml`.
+
+    Node function code lives in `functions/<node_id>.py` beside it and is held in
+    `function_code` while pushing.
+    """
+
     resource_id_prefix = "CMPGN"
 
     description: Optional[str] = None
@@ -437,6 +458,7 @@ class OutboundCampaign(YamlResource):
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "OutboundCampaign"]:
+        """Parse campaigns from a projection, skipping archived ones. Returns `{}` if it has none."""
         campaigns = _projection_campaigns(projection)
         if campaigns is None:
             logger.debug("No outbound campaigns in projection - they will not be pulled.")
@@ -495,6 +517,7 @@ class OutboundCampaign(YamlResource):
             raise ValueError("; ".join(errors))
 
     def validation_errors(self, resource_mappings: list[ResourceMapping] = None) -> list[str]:
+        """Return every problem the platform would reject, so `validate` can report them all at once."""
         errors: list[str] = []
         if not isinstance(self.name, str) or not self.name.strip():
             errors.append("Name is required.")
@@ -553,7 +576,7 @@ class OutboundCampaign(YamlResource):
         return campaigns_pb2.OutboundCampaign_Create(
             id=self.resource_id,
             name=self.name,
-            **_drop_none(description=self.description),
+            **_drop_unset(dict(description=self.description)),
         )
 
     def build_update_proto(self) -> campaigns_pb2.OutboundCampaign_Update:
@@ -570,6 +593,7 @@ class OutboundCampaign(YamlResource):
         return campaigns_pb2.OutboundCampaign_Delete(id=self.resource_id)
 
     def settings_change(self) -> "OutboundCampaignSettings":
+        """Return the settings as a change to send. Settings are always sent whole."""
         return OutboundCampaignSettings(
             resource_id=self.resource_id, name=self.name, settings=self.settings
         )
@@ -579,6 +603,11 @@ class OutboundCampaign(YamlResource):
     ) -> tuple[
         list["OutboundCampaignNode"], list["OutboundCampaignNode"], list["OutboundCampaignNode"]
     ]:
+        """Compare nodes with `original` and return the new, updated and deleted ones.
+
+        A node counts as updated when its data, function code, position or label changed;
+        `changed_fields` says which, so the update carries only those.
+        """
         original_nodes = {node["id"]: node for node in (original.nodes if original else [])}
         current_ids = {node["id"] for node in self.nodes}
         new, updated = [], []
@@ -815,20 +844,29 @@ def _node_errors(node: Any) -> list[str]:
 @register_resource("outbound_campaign_functions")
 @dataclass
 class OutboundCampaignFunction(Resource):
+    """A node's function code in `functions/<node_id>.py`.
+
+    It is tracked so edits are detected, but never sent on its own: the code travels in its
+    node's create or update.
+    """
+
     campaign_folder: str = ""
     node_id: str = ""
     code: str = ""
 
     @staticmethod
     def id_for(campaign_folder: str, node_id: str) -> str:
+        """Return the status-file id for a node's function file."""
         return f"{campaign_folder}/{node_id}"
 
     @staticmethod
     def folder_from_path(file_path: str) -> str:
+        """Return the campaign folder name a function file belongs to."""
         return os.path.basename(os.path.dirname(os.path.dirname(file_path)))
 
     @classmethod
     def id_from_path(cls, file_path: str) -> str:
+        """Return the status-file id for the function file at `file_path`."""
         node_id = os.path.splitext(os.path.basename(file_path))[0]
         return cls.id_for(cls.folder_from_path(file_path), node_id)
 
@@ -933,6 +971,8 @@ class OutboundCampaignFunction(Resource):
 
 @dataclass
 class OutboundCampaignSettings(SubResource):
+    """A campaign's settings, sent as one update command."""
+
     settings: dict
 
     @property
@@ -961,6 +1001,8 @@ class OutboundCampaignSettings(SubResource):
 
 @dataclass
 class OutboundCampaignNode(SubResource):
+    """One node of a campaign, sent as a node create, update or delete command."""
+
     campaign_id: str
     node: dict
     code: str = ""
@@ -997,7 +1039,7 @@ class OutboundCampaignNode(SubResource):
             node=campaigns_pb2.OutboundCampaignNode(
                 id=self.node_id,
                 position=self._position_proto(),
-                **_drop_none(label=self.node.get("label")),
+                **_drop_unset(dict(label=self.node.get("label"))),
                 **{data_field: data},
             ),
         )
