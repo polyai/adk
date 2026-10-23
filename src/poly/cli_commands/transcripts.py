@@ -5,21 +5,19 @@ Copyright PolyAI Limited
 
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
-from typing import Any
 
 import requests
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
-from poly.cli_commands.shared import (
-    add_window_arguments,
-    describe_data_api_error,
-    load_project,
-    parse_datetime_flag,
+from poly.cli_commands.shared import add_window_arguments, describe_data_api_error, load_project
+from poly.constants import (
+    DATA_MAX_LIMIT,
+    DATA_MAX_OFFSET,
+    DATA_TRANSCRIPT_MAX_CONTEXT_TURNS,
+    DATA_TRANSCRIPT_QUERY_MAX_CHARS,
+    DATA_TRANSCRIPT_QUERY_MIN_CHARS,
 )
 from poly.output.json_output import json_print
-
-QUERY_MIN_CHARS = 3
-QUERY_MAX_CHARS = 300
 
 
 class TranscriptsCommand(BaseCommand):
@@ -68,16 +66,22 @@ class TranscriptsCommand(BaseCommand):
         search_parser.add_argument(
             "query",
             type=str,
-            help=f"Phrase to search for, {QUERY_MIN_CHARS} to {QUERY_MAX_CHARS} characters.",
+            help=(
+                "Phrase to search for, "
+                f"{DATA_TRANSCRIPT_QUERY_MIN_CHARS} to {DATA_TRANSCRIPT_QUERY_MAX_CHARS} characters."
+            ),
         )
         add_window_arguments(search_parser, default_help="Defaults to no lower bound.")
         search_parser.add_argument(
             "--context",
             type=int,
             default=1,
-            choices=range(0, 4),
+            choices=range(0, DATA_TRANSCRIPT_MAX_CONTEXT_TURNS + 1),
             metavar="N",
-            help="Turns of context to show on each side of a match, 0 to 3. Defaults to 1.",
+            help=(
+                "Turns of context to show on each side of a match, 0 to "
+                f"{DATA_TRANSCRIPT_MAX_CONTEXT_TURNS}. Defaults to 1."
+            ),
         )
         search_parser.add_argument(
             "--english",
@@ -86,10 +90,16 @@ class TranscriptsCommand(BaseCommand):
             help="Show the English translation of non-English turns where available.",
         )
         search_parser.add_argument(
-            "--limit", type=int, default=20, help="Conversations per page, 1 to 100."
+            "--limit",
+            type=int,
+            default=20,
+            help=f"Conversations per page, 1 to {DATA_MAX_LIMIT}.",
         )
         search_parser.add_argument(
-            "--offset", type=int, default=0, help="Conversations to skip, up to 1000."
+            "--offset",
+            type=int,
+            default=0,
+            help=f"Conversations to skip, up to {DATA_MAX_OFFSET}.",
         )
 
         get_parser = transcripts_subparsers.add_parser(
@@ -135,16 +145,18 @@ class TranscriptsCommand(BaseCommand):
         """
         from poly.output.console import info, paged_output, print_transcript_matches
 
-        try:
-            params = cls._build_search_params(args)
-        except ValueError as e:
-            cls._fail(str(e), output_json)
-
-        # The loaded project's id is always sent: Personal Access Tokens need it
-        # on this route, and account keys accept it as a scope.
         project = load_project(base_path, output_json=output_json)
         try:
-            result = project.search_transcripts(params)
+            result = project.search_transcripts(
+                args.query,
+                from_dt=args.from_dt,
+                to_dt=args.to_dt,
+                context_turns=args.context,
+                limit=args.limit,
+                offset=args.offset,
+            )
+        except ValueError as e:
+            cls._fail(str(e), output_json)
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e, needs_pii=True), output_json)
 
@@ -183,6 +195,8 @@ class TranscriptsCommand(BaseCommand):
         project = load_project(base_path, output_json=output_json)
         try:
             transcript = project.get_transcript(conversation_id)
+        except ValueError as e:
+            cls._fail(str(e), output_json)
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e, needs_pii=True), output_json)
 
@@ -195,30 +209,6 @@ class TranscriptsCommand(BaseCommand):
                 english=english,
                 studio_url=project.get_conversation_url(conversation_id),
             )
-
-    @staticmethod
-    def _build_search_params(args: Namespace) -> dict[str, Any]:
-        """Translate parsed ``search`` flags into Data API query parameters.
-
-        Raises:
-            ValueError: On a query outside the gateway's length limits or a bad date.
-        """
-        query = args.query.strip()
-        if not QUERY_MIN_CHARS <= len(query) <= QUERY_MAX_CHARS:
-            raise ValueError(
-                f"The search phrase must be {QUERY_MIN_CHARS} to {QUERY_MAX_CHARS} characters."
-            )
-        params: dict[str, Any] = {
-            "q": query,
-            "context_turns": args.context,
-            "limit": args.limit,
-            "offset": args.offset,
-        }
-        if args.from_dt:
-            params["from"] = parse_datetime_flag(args.from_dt)
-        if args.to_dt:
-            params["to"] = parse_datetime_flag(args.to_dt, exclusive_end=True)
-        return params
 
     @staticmethod
     def _fail(message: str, output_json: bool) -> None:

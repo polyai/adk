@@ -107,3 +107,19 @@ DATA_HAVING_OPS = ["eq", "gt", "gte", "lt", "lte"]
 DATA_MAX_LIMIT = 100
 DATA_MAX_OFFSET = 1000
 DATA_RATE_LIMIT_PER_MINUTE = 100
+DATA_CONVERSATION_FILTER_OPS = [
+    "eq",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "in",
+    "ex",
+    "contains",
+    "not_contains",
+    "exists",
+]
+DATA_CONVERSATION_SORT_FIELDS = ["started_at", "duration", "conversation_id"]
+DATA_TRANSCRIPT_QUERY_MIN_CHARS = 3
+DATA_TRANSCRIPT_QUERY_MAX_CHARS = 300
+DATA_TRANSCRIPT_MAX_CONTEXT_TURNS = 3
