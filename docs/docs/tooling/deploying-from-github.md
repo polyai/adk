@@ -15,6 +15,24 @@ The ADK repo template is a GitHub repository set up for ADK projects. Pull reque
 
 Each git branch maps to an Agent Studio branch with the same name. The workflows keep the two in step.
 
+```mermaid
+sequenceDiagram
+    box GitHub
+        participant PR as Pull request
+        participant Main as main
+    end
+    box Agent Studio
+        participant Branch as Branch
+        participant ASMain as main
+    end
+    PR->>Branch: CI pushes on every PR push
+    Note over PR,ASMain: Merge queue
+    Branch->>ASMain: Deploy merges the branch, which deploys to sandbox
+    PR->>Main: The PR is squashed onto main
+    Note over Main,ASMain: Later, in Agent Studio
+    ASMain->>Main: Publish or rollback: Sync Projects commits the change
+```
+
 | Step | In GitHub | In Agent Studio |
 |---|---|---|
 | 1. Branch | Create a git branch. | Point the ADK at the Agent Studio branch with the same name, creating it if needed. |
