@@ -109,7 +109,9 @@ class ApiIntegrationsCommand(BaseCommand):
             help="Configure credentials for one environment directly in Agent Studio (live changes across branches).",
         )
         setter.add_argument(
-            "integration", metavar="api_name", help="API integration name or ID on the current branch."
+            "integration",
+            metavar="api_name",
+            help="API integration name or ID on the current branch.",
         )
         setter.add_argument("--env", required=True, choices=["sandbox", "pre-release", "live"])
         setter.add_argument("--stdin", action="store_true", help="Read a JSON object from stdin.")
