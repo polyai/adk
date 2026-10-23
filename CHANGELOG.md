@@ -1,6 +1,73 @@
 # CHANGELOG
 
 
+## v0.73.0 (2026-10-23)
+
+### Features
+
+- Let poly branch switch keep local files and create missing branches
+  ([#372](https://github.com/polyai/adk/pull/372),
+  [`b9ae814`](https://github.com/polyai/adk/commit/b9ae8145cef739ff0193e557e8595bf6ae864b30))
+
+## Summary
+
+Adds `--keep-files`, `--create` and `--from` to `poly branch switch`, so a project's tracked Agent
+  Studio branch can be moved to match a git branch without overwriting the files git just checked
+  out.
+
+## Motivation
+
+When a project lives in a git repo and each git branch maps to an Agent Studio branch of the same
+  name, the two drift apart: the tracked branch lives in the gitignored `_gen/.agent_studio_config`,
+  so `git switch` doesn't move it. No CLI command could line them up without side effects:
+
+- `poly branch switch <name>` pulls the branch's state into the project files. It refuses while
+  there are local changes, and `--force` discards them, so after `git switch` it either refuses or
+  overwrites what git checked out. - `poly branch create <name>` keeps local files, but fails once
+  the branch exists.
+
+Scripts worked around this by calling ADK internals. Now one command does it:
+
+```bash poly branch switch "$(git branch --show-current)" --create --from main --keep-files ```
+
+## Changes
+
+- `poly branch switch --keep-files` tracks the target branch and refreshes the remote state without
+  writing any project files, so `poly status` and `poly push` compare the working copy against that
+  branch. It skips the uncommitted-changes check and can't be combined with `--force` or `--format`.
+  - `poly branch switch --create` / `-c` creates the branch if it doesn't exist, with the same
+  sourcing rules as `poly branch create`: from the current branch, or from `--from BRANCH`. An
+  existing branch is just switched to. - `--from` without `--create` is rejected. - `--json` output
+  gains `"created"`, and validation errors (missing branch, uncommitted changes, conflicting flags)
+  are now reported as `{"success": false, "error": ...}` with exit code 1, instead of as plain text.
+  - The logic and validation live in `AgentStudioProject.switch_branch`, which takes new
+  `keep_files`, `create` and `source_branch_name` arguments. Its return type is unchanged. - Updated
+  the `poly branch` CLI reference, the branches guide and the `poly-adk-branching` skill.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New `SwitchBranchTest` cases in `project_test.py` cover: refusing with local changes, `keep_files`
+  switching without pulling, a missing branch with and without `create`, creating from the current
+  branch and from `--from`, `create` on an existing branch, and the conflicting-flag errors. New
+  `BranchSwitchTest` cases in `cli_test.py` cover argument parsing and forwarding, `"created"` in
+  `--json` output, and `--json` error output. Not yet tried by hand against a live project.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.72.0 (2026-10-20)
 
 ### Features
