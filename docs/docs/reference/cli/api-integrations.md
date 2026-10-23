@@ -34,7 +34,7 @@ Token prefix [Bearer] (Enter to keep, - to clear):
 
 The command reuses the regional browser sign-in cached by `poly apikey`. If no unexpired session exists, interactive configuration opens browser sign-in and saves the session for later runs. Your user needs permission to read and write secrets. Non-interactive use requires `--stdin` and an unexpired cached session; run `poly apikey --region <region>` beforehand if needed. Stdin supplies a complete replacement for the selected environment.
 
-The command supports `basic`, `apiKey`, and `oauth2`. It does not yet configure `jwt_client_assertion` or `oauth2_client_credentials`. For `oauth2`, stdin accepts `client_id`, `client_secret`, `access_token_url`, optional `scope`, optional `credentials_location` (`header` or `body`), and the optional advanced fields `auth_header_name` and `token_prefix`. Saved advanced values are shown in full; Enter keeps them, and `-` clears them.
+The command supports basic authentication, API keys, OAuth client credentials, and JWT client assertions. For `oauth2`, stdin accepts `client_id`, `client_secret`, `access_token_url`, optional `scope`, optional `credentials_location` (`header` or `body`), and the optional advanced fields `auth_header_name` and `token_prefix`. Saved advanced values are shown in full; Enter keeps them, and `-` clears them. For `oauth2_client_credentials`, use `client_id`, `client_secret`, `token_url`, and optional `client_auth` (`client_secret_basic` or `client_secret_post`).
 
 Only the selected environment's credentials are replaced. Other environments and existing secret metadata are preserved. Secret values are never printed or written to project files.
 
@@ -46,6 +46,7 @@ Only the selected environment's credentials are replaced. Other environments and
 |---|---|
 | `--env` | Required: `sandbox`, `pre-release`, or `live`. |
 | `--stdin` | Read a credentials JSON object from stdin. |
+| `--private-key-file` | Read the JWT signing key from a PEM file. |
 
 !!! warning "Credentials update immediately"
     Credentials are shared across project branches and take effect directly, including in `live`. No later push is needed.

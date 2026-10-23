@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import json
 import sys
 from argparse import ArgumentParser, Namespace, _SubParsersAction
+from pathlib import Path
 
 from poly.cli_commands.auth import _signin
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
@@ -30,7 +31,7 @@ def _studio_token(region: str, interactive: bool) -> str:
     return token
 
 
-def _prompt_credentials(auth_type: str, existing: dict) -> dict:
+def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | None) -> dict:
     """Prompt with masked saved values, required-field retries, and constrained choices."""
     import questionary
 
@@ -40,17 +41,27 @@ def _prompt_credentials(auth_type: str, existing: dict) -> dict:
         "client_id": "Client ID",
         "client_secret": "Client Secret",
         "access_token_url": "Token URL",
+        "token_url": "Token URL",
         "credentials_location": "Credentials location",
         "auth_header_name": "Auth header name",
         "token_prefix": "Token prefix",
+        "key_id": "Key ID",
+        "private_key": "Private key",
+        "client_auth": "Client authentication",
     }
     choices = {
         "credentials_location": ["header", "body"],
         "location": ["header", "query_param"],
+        "client_auth": ["client_secret_basic", "client_secret_post"],
+        "algorithm": ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
     }
     values = {}
     for field, _, default in FIELDS[auth_type]:
+        if field == "private_key" and private_key_file:
+            continue
         saved = existing.get(field)
+        if field == "private_key" and not saved:
+            raise ValueError("Use --private-key-file for an interactive JWT signing key.")
         label = labels.get(field, field.replace("_", " ").capitalize())
         if field in choices:
             selected = saved if saved in choices[field] else default
@@ -68,8 +79,10 @@ def _prompt_credentials(auth_type: str, existing: dict) -> dict:
         else:
             # Short saved values stay fully masked; never put real defaults in editable input.
             masked = "******" + saved[-3:] if saved and len(saved) > 3 else "******"
-            if field == "access_token_url":
+            if field in {"access_token_url", "token_url"}:
                 masked = saved
+            elif field == "private_key":
+                masked = "****"
             prompt = f"{label}" + (f" [{masked}]" if saved else "") + ": "
             while True:
                 entered = input(prompt)
@@ -104,6 +117,7 @@ class ApiIntegrationsCommand(BaseCommand):
         )
         setter.add_argument("--env", required=True, choices=["sandbox", "pre-release", "live"])
         setter.add_argument("--stdin", action="store_true", help="Read a JSON object from stdin.")
+        setter.add_argument("--private-key-file", help="Read the JWT signing key from a PEM file.")
 
     @classmethod
     def run(cls, args: Namespace) -> None:
@@ -111,6 +125,8 @@ class ApiIntegrationsCommand(BaseCommand):
         project = load_project(args.path, output_json=args.json)
         integration = project.get_api_integration(args.integration, args.env)
         config = getattr(integration.environments, args.env.replace("-", "_"))
+        if args.private_key_file and config.auth_type != "jwt_client_assertion":
+            raise ValueError("--private-key-file requires JWT client assertion authentication.")
         interactive = sys.stdin.isatty() and not args.stdin and not args.json
         if not interactive and not args.stdin:
             raise ValueError("Use --stdin to provide credentials non-interactively.")
@@ -131,8 +147,17 @@ class ApiIntegrationsCommand(BaseCommand):
             info(
                 f"Configure credentials for {integration.name} ({args.env}); updates apply directly."
             )
-            values = _prompt_credentials(config.auth_type, existing)
-        project.build_api_integration_credentials(config.auth_type, values)
+            values = _prompt_credentials(config.auth_type, existing, args.private_key_file)
+        if args.private_key_file:
+            if "private_key" in values:
+                raise ValueError(
+                    "Provide the private key through stdin or --private-key-file, not both."
+                )
+            try:
+                values["private_key"] = Path(args.private_key_file).read_text()
+            except (OSError, UnicodeError):
+                raise ValueError("Could not read the private key file.") from None
+        project.build_api_integration_credentials(config.auth_type, values, config.base_url)
         if args.stdin:
             token = _studio_token(project.region, interactive=False)
         project.configure_api_integration(args.integration, args.env, values, token)

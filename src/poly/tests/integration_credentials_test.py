@@ -34,11 +34,22 @@ class CredentialSerializationTest(unittest.TestCase):
             ("apiKey", {"key": "X-Key", "value": "secret"}, "api_key"),
             ("oauth2", {"client_id": "client", "client_secret": "secret",
                          "access_token_url": "https://example.com/token"}, "oauth2"),
+            ("jwt_client_assertion", {"client_id": "client", "private_key": "private",
+                                      "token_url": "https://example.com/token", "key_id": "key"},
+             "jwt_client_assertion"),
+            ("oauth2_client_credentials", {"client_id": "client", "client_secret": "secret",
+                                          "token_url": "https://example.com/token"},
+             "oauth2_client_credentials"),
         ]
         for auth, values, stored_type in cases:
             with self.subTest(auth=auth):
-                result = build_credentials(auth, values)
-                self.assertEqual(result["type"], stored_type)
+                result = build_credentials(auth, values, "https://example.com")
+                if auth in {"jwt_client_assertion", "oauth2_client_credentials"}:
+                    self.assertEqual(result["base_url"], "https://example.com")
+                    self.assertEqual(result["auth"]["type"], stored_type)
+                    self.assertEqual(result["auth"]["config"]["client_id"], "client")
+                else:
+                    self.assertEqual(result["type"], stored_type)
                 if auth == "oauth2":
                     self.assertEqual(result["clientSecret"], "secret")
                     self.assertEqual(result["scope"], "")
@@ -49,12 +60,12 @@ class CredentialSerializationTest(unittest.TestCase):
                        {"username": "user", "password": "secret", "secret-extra": "secret"}]:
             with self.subTest(values_type=type(values)):
                 with self.assertRaises(ValueError) as caught:
-                    build_credentials("basic", values)
+                    build_credentials("basic", values, "https://example.com")
                 self.assertNotIn("secret", str(caught.exception))
 
     def test_invalid_location_is_rejected(self):
         with self.assertRaises(ValueError):
-            build_credentials("apiKey", {"key": "X-Key", "value": "secret", "location": "invalid"})
+            build_credentials("apiKey", {"key": "X-Key", "value": "secret", "location": "invalid"}, "")
 
     def test_oauth_header_and_prefix_match_studio_storage(self):
         for prefix in ["Token", ""]:
@@ -62,7 +73,7 @@ class CredentialSerializationTest(unittest.TestCase):
                 "client_id": "client", "client_secret": "secret",
                 "access_token_url": "https://example.com/token",
                 "auth_header_name": "X-Auth", "token_prefix": prefix,
-            })
+            }, "https://example.com")
             self.assertEqual(result["authHeaderName"], "X-Auth")
             self.assertEqual(result["tokenPrefix"], prefix)
 
@@ -74,7 +85,7 @@ class CredentialSerializationTest(unittest.TestCase):
             "client_id": "client", "client_secret": "secret",
             "access_token_url": "https://example.com/token",
             "auth_header_name": "X-Old", "token_prefix": "Token",
-        })
+        }, None)
         self.assertEqual(result["auth_header_name"], "X-New")
         self.assertEqual(result["token_prefix"], "")
         self.assertEqual(read.call_args_list[4].args[0], "Auth header name [X-Old] (Enter to keep, - to clear): ")
@@ -214,7 +225,7 @@ class CredentialStorageTest(unittest.TestCase):
 class ApiIntegrationsCommandTest(unittest.TestCase):
     def setUp(self):
         self.args = Namespace(path="/project", integration="crm", env="sandbox", stdin=True,
-                              json=True)
+                              json=True, private_key_file=None)
         self.project = AgentStudioProject(region="euw-1", account_id="account", project_id="project",
                                           root_path="/project", resources={}, last_updated=None,
                                           branch_id="main", _api_handler=MagicMock())
@@ -240,7 +251,7 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         saved = {"client_id": "saved-client-ABC", "client_secret": "saved-secret-DEF",
                  "access_token_url": "https://example.com/token", "scope": "old-scope",
                  "credentials_location": "header", "auth_header_name": "X-Auth", "token_prefix": "Token"}
-        result = _prompt_credentials("oauth2", saved)
+        result = _prompt_credentials("oauth2", saved, None)
         self.assertEqual(result["client_id"], saved["client_id"])
         self.assertEqual(result["client_secret"], saved["client_secret"])
         self.assertEqual(result["access_token_url"], saved["access_token_url"])
@@ -260,7 +271,7 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
     @patch("builtins.input", side_effect=["", "abc", "", "secret", "", "https://example.com/token", "", "", ""])
     def test_prompt_retries_required_fields_without_saved_values(self, read, select, warn):
         select.return_value.ask.return_value = "header"
-        result = _prompt_credentials("oauth2", {})
+        result = _prompt_credentials("oauth2", {}, None)
         self.assertEqual(result["client_id"], "abc")
         self.assertEqual(result["client_secret"], "secret")
         self.assertEqual(result["scope"], "")
@@ -274,12 +285,12 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
                  "access_token_url": "https://example.com/token", "scope": "old-scope"}
         for entered, expected in [("new-scope", "new-scope"), ("-", "")]:
             with self.subTest(entered=entered), patch("builtins.input", side_effect=["", "", "", entered, "", ""]):
-                result = _prompt_credentials("oauth2", saved)
+                result = _prompt_credentials("oauth2", saved, None)
                 self.assertEqual(result["scope"], expected)
 
     @patch("builtins.input", return_value="")
     def test_short_saved_values_stay_fully_masked(self, read):
-        result = _prompt_credentials("basic", {"username": "abc", "password": "xyz"})
+        result = _prompt_credentials("basic", {"username": "abc", "password": "xyz"}, None)
         self.assertEqual(result["password"], "xyz")
         read.assert_has_calls([call("Username [******]: "), call("Password [******]: ")])
 
@@ -289,7 +300,7 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         select.return_value.ask.return_value = None
         with self.assertRaises(KeyboardInterrupt):
             _prompt_credentials("oauth2", {"client_id": "abc", "client_secret": "saved",
-                                           "access_token_url": "https://example.com/token"})
+                                           "access_token_url": "https://example.com/token"}, None)
 
     @patch("poly.cli_commands.api_integrations._signin")
     def test_reuses_session_saved_by_apikey(self, signin):
@@ -325,29 +336,22 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         load.assert_called_once_with("us-1")
         signin.assert_not_called()
 
-    def test_project_reads_legacy_oauth_defaults(self):
-        self.projection["apiIntegrations"]["apiIntegrations"]["entities"]["integration"]["environments"]["sandbox"]["authType"] = "oauth2"
-        self.project._api_handler.get_api_integrations.return_value = ApiIntegration.from_projection(self.projection)
-        self.project._api_handler.get_api_integration_credentials.return_value = {
-            "type": "oauth2", "clientId": "abc", "clientSecret": "saved",
-            "accessTokenUrl": "https://example.com/token", "authHeaderName": "X-Auth", "tokenPrefix": "Token"}
-        values = self.project.get_api_integration_credential_defaults("crm", "sandbox", "token")
-        self.assertEqual(values["client_id"], "abc")
-        self.assertEqual(values["client_secret"], "saved")
-        self.assertEqual(values["auth_header_name"], "X-Auth")
-        self.assertEqual(values["token_prefix"], "Token")
-
-    def test_deferred_auth_types_fail_before_reading_or_writing_secrets(self):
-        for auth_type in ["jwt_client_assertion", "oauth2_client_credentials"]:
-            with self.subTest(auth_type=auth_type):
-                self.projection["apiIntegrations"]["apiIntegrations"]["entities"]["integration"]["environments"]["sandbox"]["authType"] = auth_type
-                self.project._api_handler.get_api_integrations.return_value = ApiIntegration.from_projection(self.projection)
-                with self.assertRaisesRegex(ValueError, "not supported.*configure"):
-                    self.project.configure_api_integration("crm", "sandbox", {}, "token")
-                self.project._api_handler.get_api_integration_credentials.assert_not_called()
-                self.project._api_handler.set_api_integration_credentials.assert_not_called()
-                with self.assertRaisesRegex(ValueError, "Unsupported"):
-                    build_credentials(auth_type, {})
+    def test_project_reads_legacy_and_nested_oauth_defaults(self):
+        for auth_type, saved in [
+            ("oauth2", {"type": "oauth2", "clientId": "abc", "clientSecret": "saved",
+                        "accessTokenUrl": "https://example.com/token", "authHeaderName": "X-Auth", "tokenPrefix": "Token"}),
+            ("oauth2_client_credentials", {"auth": {"type": "oauth2_client_credentials",
+                                          "config": {"client_id": "abc", "client_secret": "saved"}}}),
+        ]:
+            self.projection["apiIntegrations"]["apiIntegrations"]["entities"]["integration"]["environments"]["sandbox"]["authType"] = auth_type
+            self.project._api_handler.get_api_integrations.return_value = ApiIntegration.from_projection(self.projection)
+            self.project._api_handler.get_api_integration_credentials.return_value = saved
+            values = self.project.get_api_integration_credential_defaults("crm", "sandbox", "token")
+            self.assertEqual(values["client_id"], "abc")
+            self.assertEqual(values["client_secret"], "saved")
+            if auth_type == "oauth2":
+                self.assertEqual(values["auth_header_name"], "X-Auth")
+                self.assertEqual(values["token_prefix"], "Token")
 
     def test_changed_auth_type_does_not_reuse_incompatible_defaults(self):
         self.project._api_handler.get_api_integrations.return_value = ApiIntegration.from_projection(self.projection)
