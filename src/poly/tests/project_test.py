@@ -7958,6 +7958,8 @@ class CreateCallSessionTest(unittest.TestCase):
 
 
 class PullRemoteRenameTest(unittest.TestCase):
+    """Pulling a single-file resource that was renamed in Agent Studio."""
+
     @staticmethod
     def _topic_projection(name: str, content: str = "Opening hours") -> dict:
         return {
@@ -7995,6 +7997,7 @@ class PullRemoteRenameTest(unittest.TestCase):
         self.project.pull_project(projection_json=self._topic_projection("Hours"))
 
     def test_remote_rename_moves_the_file(self):
+        """The file moves to the new name and nothing is left to push."""
         conflicts, _ = self.project.pull_project(
             projection_json=self._topic_projection("Opening hours")
         )
@@ -8004,6 +8007,7 @@ class PullRemoteRenameTest(unittest.TestCase):
         self.assertEqual(self.project.project_status(), ([], [], [], []))
 
     def test_remote_rename_keeps_a_local_edit(self):
+        """A local edit moves with the file instead of being lost, which would delete it on push."""
         path = os.path.join(self.root, "topics", "hours.yaml")
         with open(path, encoding="utf-8") as file:
             contents = file.read()
