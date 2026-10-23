@@ -13,19 +13,15 @@ from ruamel.yaml import YAML
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import (
-    DATA_AGGS,
-    DATA_GROUP_BY,
-    DATA_INTERVALS,
     add_cohort_arguments,
     add_window_arguments,
-    default_window,
     describe_data_api_error,
+    filter_flags_to_filters,
+    having_flags_to_having,
     load_project,
-    parse_datetime_flag,
-    parse_filter_flags,
-    parse_having_flags,
-    parse_sort_flag,
+    sort_flag_to_sort,
 )
+from poly.constants import DATA_AGGS, DATA_GROUP_BY, DATA_INTERVALS, DATA_MAX_LIMIT, DATA_MAX_OFFSET
 from poly.output.console import (
     error,
     plain,
@@ -36,12 +32,11 @@ from poly.output.console import (
     warning,
 )
 from poly.output.json_output import json_print
+from poly.project import POLY_SCORE_DEFAULT_DAYS
 
 logger = logging.getLogger(__name__)
 
 VALID_METRIC_TYPES = ["string", "int", "bool", "float"]
-SCORE_METRIC = "poly_score"
-SCORE_DEFAULT_DAYS = 7
 
 
 def _parse_bool_flag(value: str) -> bool:
@@ -104,7 +99,7 @@ class MetricsCommand(BaseCommand):
                 "Show every metric you can query for the current project: built-in\n"
                 "metrics such as poly_score and duration, plus the custom metrics\n"
                 "defined in the project. These are the names `poly metrics query`\n"
-                "and the conversation search filters accept.\n\n"
+                "accepts.\n\n"
                 "Examples:\n"
                 "  poly metrics available\n"
                 "  poly metrics available --json"
@@ -342,7 +337,7 @@ class MetricsCommand(BaseCommand):
         add_window_arguments(
             parser,
             default_help=(
-                f"Defaults to {SCORE_DEFAULT_DAYS} days ago."
+                f"Defaults to {POLY_SCORE_DEFAULT_DAYS} days ago."
                 if score
                 else "Defaults to no lower bound."
             ),
@@ -403,8 +398,12 @@ class MetricsCommand(BaseCommand):
                 metavar="FIELD[:asc|desc]",
                 help="Secondary sort on a --by dimension or an aggregation.",
             )
-        parser.add_argument("--limit", type=int, default=20, help="Rows per page, 1 to 100.")
-        parser.add_argument("--offset", type=int, default=0, help="Rows to skip, up to 1000.")
+        parser.add_argument(
+            "--limit", type=int, default=20, help=f"Rows per page, 1 to {DATA_MAX_LIMIT}."
+        )
+        parser.add_argument(
+            "--offset", type=int, default=0, help=f"Rows to skip, up to {DATA_MAX_OFFSET}."
+        )
 
     @classmethod
     def metrics_available(cls, base_path: str, output_json: bool = False) -> None:
@@ -428,14 +427,29 @@ class MetricsCommand(BaseCommand):
         cls, base_path: str, metric: str, args: Namespace, output_json: bool = False
     ) -> None:
         """Aggregate one metric over a window and print the table."""
-        try:
-            body = cls._build_query_body(args, metric=metric, aggs=args.agg)
-        except ValueError as e:
-            cls._fail(str(e), output_json)
-
         project = load_project(base_path, output_json=output_json)
         try:
-            result = project.query_metric(body)
+            result = project.query_metric(
+                metric,
+                args.agg,
+                from_dt=args.from_dt,
+                to_dt=args.to_dt,
+                interval=args.interval,
+                timezone=args.timezone,
+                group_by=args.by,
+                channel=args.channel,
+                client_env=args.env,
+                deployment_id=args.deployment,
+                variant_id=args.variant,
+                filters=filter_flags_to_filters(args.filter),
+                match_any=args.any,
+                having=having_flags_to_having(args.having),
+                sort=sort_flag_to_sort(args.sort),
+                limit=args.limit,
+                offset=args.offset,
+            )
+        except ValueError as e:
+            cls._fail(str(e), output_json)
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e), output_json)
 
@@ -447,101 +461,45 @@ class MetricsCommand(BaseCommand):
     @classmethod
     def metrics_score(cls, base_path: str, args: Namespace, output_json: bool = False) -> None:
         """Poly Score over a window: a headline plus the bucketed table."""
+        project = load_project(base_path, output_json=output_json)
         try:
-            body = cls._build_query_body(
-                args,
-                metric=SCORE_METRIC,
-                aggs=["avg", "conversation_count"],
-                default_days=SCORE_DEFAULT_DAYS,
+            result = project.get_poly_score(
+                from_dt=args.from_dt,
+                to_dt=args.to_dt,
+                interval=args.interval,
+                timezone=args.timezone,
+                group_by=args.by,
+                channel=args.channel,
+                client_env=args.env,
+                limit=args.limit,
+                offset=args.offset,
             )
         except ValueError as e:
             cls._fail(str(e), output_json)
-
-        project = load_project(base_path, output_json=output_json)
-        try:
-            result = project.query_metric(body)
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e), output_json)
 
-        headline = cls._score_headline(result, body)
+        headline = cls._score_headline(result["summary"], args.from_dt, args.to_dt)
         if output_json:
-            json_print({**result, "summary": headline})
+            json_print({**result, "summary": {**result["summary"], "text": headline}})
         else:
-            print_aggregate(result, headline=headline["text"])
-
-    @classmethod
-    def _build_query_body(
-        cls,
-        args: Namespace,
-        metric: str,
-        aggs: list[str] | None,
-        default_days: int | None = None,
-    ) -> dict[str, Any]:
-        """Translate parsed flags into a Data API aggregate request body.
-
-        Raises:
-            ValueError: On a malformed date, filter, having or sort flag.
-        """
-        from_dt = parse_datetime_flag(args.from_dt) if args.from_dt else None
-        to_dt = parse_datetime_flag(args.to_dt, exclusive_end=True) if args.to_dt else None
-        if default_days is not None and from_dt is None and to_dt is None:
-            from_dt, to_dt = default_window(default_days)
-
-        body: dict[str, Any] = {
-            "metric": metric,
-            "aggs": aggs or ["avg", "conversation_count"],
-            "limit": args.limit,
-            "offset": args.offset,
-        }
-        optional = {
-            "from_datetime": from_dt,
-            "to_datetime": to_dt,
-            "interval": getattr(args, "interval", None),
-            "timezone": getattr(args, "timezone", None),
-            "group_by": getattr(args, "by", None),
-            "channel": getattr(args, "channel", None),
-            "client_env": getattr(args, "env", None),
-            "deployment_id": getattr(args, "deployment", None),
-            "variant_id": getattr(args, "variant", None),
-            "filters": parse_filter_flags(getattr(args, "filter", None)) or None,
-            "having": parse_having_flags(getattr(args, "having", None)) or None,
-            "sort": parse_sort_flag(getattr(args, "sort", None)),
-        }
-        if getattr(args, "any", False):
-            optional["filter_operator"] = "or"
-        body.update({k: v for k, v in optional.items() if v is not None})
-        return body
+            print_aggregate(result, headline=headline)
 
     @staticmethod
-    def _score_headline(result: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
-        """Summarise a Poly Score result: conversation-weighted average and total count.
+    def _score_headline(summary: dict[str, Any], from_flag: str | None, to_flag: str | None) -> str:
+        """One line for the overall Poly Score.
 
-        The gateway returns one row per bucket (and group), so the overall
-        figure is recomputed here from the rows rather than fetched again.
+        The window is shown as the user gave it, so ``--to 2026-09-30`` reads
+        "to 2026-09-30" even though the request's exclusive end is the next day.
         """
-        columns = result.get("columns") or []
-        rows = result.get("rows") or []
-        avg_i = columns.index("avg") if "avg" in columns else None
-        cnt_i = columns.index("conversation_count") if "conversation_count" in columns else None
-
-        total = 0
-        weighted = 0.0
-        for row in rows:
-            count = row[cnt_i] if cnt_i is not None and row[cnt_i] is not None else 0
-            avg = row[avg_i] if avg_i is not None else None
-            if avg is not None and count:
-                weighted += float(avg) * count
-                total += count
-        overall = round(weighted / total, 2) if total else None
-
-        window = ""
-        if body.get("from_datetime") or body.get("to_datetime"):
-            window = f" from {body.get('from_datetime', '…')[:10]} to {body.get('to_datetime', 'now')[:10]}"
-        if overall is None:
-            text = f"Poly Score{window}: no scored conversations."
-        else:
-            text = f"Poly Score{window}: {overall} average over {total:,} conversations."
-        return {"average": overall, "conversations": total, "text": text}
+        start = (from_flag or summary.get("from_datetime") or "")[:10]
+        end = (to_flag or summary.get("to_datetime") or "")[:10]
+        window = f" from {start or '…'} to {end or 'now'}" if start or end else ""
+        average = summary.get("average")
+        if average is None:
+            return f"Poly Score{window}: no scored conversations."
+        count = summary["conversations"]
+        return f"Poly Score{window}: {average} average over {count:,} conversations."
 
     @staticmethod
     def _fail(message: str, output_json: bool) -> None:

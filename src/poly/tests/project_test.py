@@ -12,6 +12,7 @@ import shutil
 import tempfile
 import unittest
 from copy import deepcopy
+from datetime import datetime
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
@@ -7820,6 +7821,129 @@ class TestProjectFixtureIntegrityTest(unittest.TestCase):
         # Without this the test passes vacuously if the path keying ever breaks.
         self.assertEqual(compared, len(self.mappings))
         self.assertEqual(differing, [])
+
+
+class ProjectQueryMetricTest(unittest.TestCase):
+    """Tests for AgentStudioProject.query_metric: validation and request building."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api = patch("poly.project.AgentStudioInterface.query_metric").start()
+        self.mock_api.return_value = {"columns": [], "rows": []}
+        self.addCleanup(patch.stopall)
+
+    def _body(self) -> dict:
+        return self.mock_api.call_args.kwargs["body"]
+
+    def test_scopes_the_request_to_the_project(self):
+        """The project id and region come from the loaded project."""
+        self.project.query_metric("poly_score")
+
+        self.assertEqual(self.mock_api.call_args.args[0], "us-1")
+        self.assertEqual(
+            self._body(),
+            {
+                "project_id": "test_project",
+                "metric": "poly_score",
+                "aggs": ["avg", "conversation_count"],
+                "limit": 20,
+                "offset": 0,
+            },
+        )
+
+    def test_date_bounds_are_normalised(self):
+        """A bare --to date rolls to the next midnight; Z becomes an offset."""
+        self.project.query_metric("poly_score", from_dt="2026-09-01T09:30:00Z", to_dt="2026-09-30")
+
+        self.assertEqual(self._body()["from_datetime"], "2026-09-01T09:30:00+00:00")
+        self.assertEqual(self._body()["to_datetime"], "2026-10-01T00:00:00")
+
+    def test_having_values_become_numbers_and_sort_order_is_lowercased(self):
+        """Thresholds are sent as floats and the sort order normalised."""
+        self.project.query_metric(
+            "CSAT",
+            ["avg"],
+            having=[{"field": "avg", "op": "GTE", "value": "4"}],
+            sort={"field": "avg", "order": "DESC"},
+        )
+
+        self.assertEqual(self._body()["having"], [{"field": "avg", "op": "gte", "value": 4.0}])
+        self.assertEqual(self._body()["sort"], {"field": "avg", "order": "desc"})
+
+    def test_rejects_what_the_data_api_would_reject(self):
+        """Every enum and bound is checked locally with a clear message."""
+        cases = [
+            ({"metric": ""}, "metric name"),
+            ({"metric": "x", "aggs": ["median"]}, "Aggregation"),
+            ({"metric": "x", "interval": "yearly"}, "Interval"),
+            ({"metric": "x", "group_by": ["caller"]}, "Group-by"),
+            ({"metric": "x", "channel": ["FAX"]}, "Channel"),
+            ({"metric": "x", "client_env": ["prod"]}, "Environment"),
+            ({"metric": "x", "limit": 0}, "Limit"),
+            ({"metric": "x", "limit": 101}, "Limit"),
+            ({"metric": "x", "offset": 1001}, "Offset"),
+            ({"metric": "x", "from_dt": "yesterday"}, "YYYY-MM-DD"),
+            ({"metric": "x", "filters": [{"metric": "a", "op": "like", "value": "b"}]}, "like"),
+            ({"metric": "x", "filters": [{"metric": "a", "op": "in", "value": "b"}]}, "list"),
+            ({"metric": "x", "having": [{"field": "median", "op": "gte", "value": 1}]}, "Having"),
+            ({"metric": "x", "having": [{"field": "avg", "op": "in", "value": 1}]}, "Having"),
+            ({"metric": "x", "having": [{"field": "avg", "op": "gte", "value": "high"}]}, "number"),
+            ({"metric": "x", "sort": {"field": "avg", "order": "sideways"}}, "Sort"),
+        ]
+        for kwargs, fragment in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.query_metric(**kwargs)
+                self.assertIn(fragment, str(ctx.exception))
+        self.mock_api.assert_not_called()
+
+
+class ProjectGetPolyScoreTest(unittest.TestCase):
+    """Tests for AgentStudioProject.get_poly_score."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api = patch("poly.project.AgentStudioInterface.query_metric").start()
+        self.addCleanup(patch.stopall)
+
+    def test_summary_is_fetched_separately_from_the_table(self):
+        """The overall figure comes from an unbucketed query over the same window."""
+        self.mock_api.side_effect = [
+            {"columns": ["avg", "conversation_count"], "rows": [[87.456, 40]]},
+            {"columns": ["bucket", "avg", "conversation_count"], "rows": [["b", 80.0, 10]]},
+        ]
+
+        result = self.project.get_poly_score(from_dt="2026-09-01", to_dt="2026-09-30", limit=5)
+
+        overall, table = (c.kwargs["body"] for c in self.mock_api.call_args_list)
+        self.assertNotIn("interval", overall)
+        self.assertEqual(overall["limit"], 1)
+        self.assertEqual(table["interval"], "daily")
+        self.assertEqual(table["limit"], 5)
+        self.assertEqual(overall["from_datetime"], table["from_datetime"])
+        self.assertEqual(
+            result["summary"],
+            {
+                "average": 87.46,
+                "conversations": 40,
+                "from_datetime": "2026-09-01T00:00:00",
+                "to_datetime": "2026-10-01T00:00:00",
+            },
+        )
+        self.assertEqual(result["rows"], [["b", 80.0, 10]])
+
+    def test_defaults_to_the_last_seven_days(self):
+        """With no bounds the window is the last seven days, applied to both queries."""
+        self.mock_api.return_value = {"columns": [], "rows": []}
+
+        result = self.project.get_poly_score()
+
+        overall = self.mock_api.call_args_list[0].kwargs["body"]
+        start = datetime.fromisoformat(overall["from_datetime"])
+        end = datetime.fromisoformat(overall["to_datetime"])
+        self.assertEqual((end - start).days, 7)
+        self.assertEqual(result["summary"]["average"], None)
+        self.assertEqual(result["summary"]["conversations"], 0)
 
 
 class ProjectCreateCustomMetricTest(unittest.TestCase):

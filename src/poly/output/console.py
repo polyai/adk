@@ -1865,7 +1865,8 @@ def print_aggregate(result: dict[str, Any], headline: str | None = None) -> None
     console.print(table)
     limit = result.get("limit")
     if limit is not None and len(rows) >= limit:
+        next_offset = result.get("offset", 0) + limit
         console.print(
-            f"\nShowing {len(rows)} rows (limit {limit}). Use --offset {result.get('offset', 0) + limit}"
-            " for the next page."
+            f"\nShowing {len(rows)} rows (limit {limit}). "
+            f"Use --offset {next_offset} for the next page."
         )
