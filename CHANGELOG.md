@@ -1,6 +1,136 @@
 # CHANGELOG
 
 
+## v0.73.1 (2026-10-23)
+
+### Bug Fixes
+
+- Report conflicts from poly branch sync instead of success
+  ([#374](https://github.com/polyai/adk/pull/374),
+  [`68ad3a0`](https://github.com/polyai/adk/commit/68ad3a0c0317b335956aca895e4eb70d18ade2b7))
+
+## Summary
+
+`poly branch sync` printed "synced successfully" when Agent Studio found conflicts, and nothing had
+  been synced. It now shows the conflicts and exits 1, as `poly branch merge` does.
+
+## Motivation
+
+Agent Studio answers a sync that hits conflicts with a 200 whose body is `{"outcome": "conflicts",
+  "conflicts": [...], "value": ..., "errors": []}`, without `hasConflicts`. A merge with conflicts
+  gets a 400 that has `hasConflicts`. `SyncClientHandler.sync_branch` only checked `hasConflicts`
+  and `errors`, so it read the conflict reply as a successful sync, and the CLI's conflict table,
+  `-i` and `--resolutions` paths never ran.
+
+## Changes
+
+- `SyncClientHandler.sync_branch` also treats `outcome: "conflicts"` as a sync with conflicts. - The
+  `SourcererSDK.sync_branch` docstring describes the reply Agent Studio sends. - Tests for a sync
+  with conflicts and one without. - `poly branch sync` was not in the CLI reference: it now has a
+  section (flags, `--json` shape, conflicts), the branching guide has a short "Syncing with the
+  parent branch" section, and the `poly-adk-branching` skill covers sync conflicts.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly branch sync`) - [x] Tested against a
+  live Agent Studio project: a branch and its parent branch changed the same function. Before, `poly
+  branch sync` on the child printed that it synced and exited 0, while the branch stayed diverged.
+  With this change it shows the conflict and exits 1.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+Before (0.71.0; 0.72.0 has the same code):
+
+``` $ poly branch sync Branch 'scratch-adk-sync-child' synced successfully. ```
+
+After:
+
+``` $ poly branch sync Error: Failed to sync branch 'scratch-adk-sync-child'.
+
+╭─ Merge conflicts ────────────────────────────────────────────────────────────╮ │
+  ╭────────────────────────────────────┬────────────────────┬────────────────╮ │ │ │ Conflict │
+  Status │ In resource │ │ │
+  ├────────────────────────────────────┼────────────────────┼────────────────┤ │ │ │
+  functions/functions/entities/defau │ Needs decision │ 1 conflict │ │ │ │ lt-function/code │ │ │ │
+  │ ╰────────────────────────────────────┴────────────────────┴────────────────╯ │
+  ╰──────────────────────────────────────────────────────────────────────────────╯ Merge conflicts
+  detected. To resolve: - Use 'poly branch sync -i' to resolve conflicts interactively - Use 'poly
+  branch sync --resolutions <file.json>' to provide pre-defined resolutions - Merge manually on
+  Agent Studio ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Documentation
+
+- Add a deploying from github page and split out the editor extension page
+  ([#375](https://github.com/polyai/adk/pull/375),
+  [`9c6b1d4`](https://github.com/polyai/adk/commit/9c6b1d44dd87a5bc1a319559c5d2286c43229e2e))
+
+## Summary
+
+Adds a "Deploying from GitHub" page under Tooling, and moves the VS Code and Cursor extension onto
+  its own Tooling page. It covers the ADK repo template: a GitHub repository that tests ADK projects
+  on every pull request, deploys them to Agent Studio when they merge, and syncs changes made in
+  Agent Studio back into git.
+
+## Motivation
+
+The docs don't mention the template, so the only way to learn how ADK projects work with GitHub is
+  to find the template repo and read its README. This page explains the flow and links to the
+  template's setup guide.
+
+## Changes
+
+- New page `docs/docs/tooling/deploying-from-github.md`: - a sequence diagram and a table of how a
+  change moves through GitHub and Agent Studio; - what's in a repo made from the template; - working
+  on a project, using `poly branch switch "$(git branch --show-current)" --create --from main
+  --keep-files`; - how the sync check and Sync Projects keep Agent Studio and git in step; - merging
+  with a `/poly-merge` comment, for repos without a merge queue, or instead of one; - an outline of
+  setting up a repo, linking to the template's `SETUP.md`; - keeping a repo up to date. -
+  `mkdocs.yml`: adds the page to the Tooling nav, and turns on mermaid diagrams through a
+  `pymdownx.superfences` custom fence, which Material for MkDocs renders natively. No existing page
+  used mermaid, so nothing else changes. - `tooling.md`: - links to the new page from "How tooling
+  fits into the workflow"; - keeps a short extension section linking to the new page; - its
+  next-step cards point at the tooling pages and the CLI reference. - "Recommended tooling" becomes
+  "Integrating with your workflow", with three parts: the VS Code and Cursor extension, coding
+  agents, and Git; - the coding-agents part (was "Claude Code") covers the ADK's agent skills for
+  Claude Code, Cursor, Codex and others, and links to the ADK repo's `skills/` folder; -
+  "Integrating Git with the ADK" says what the template does in one sentence, then links to the new
+  page. - Links to the old `#claude-code` anchor, in `working-locally.md` and `what-is-the-adk.md`,
+  now go to `#coding-agents`. - New page `docs/docs/tooling/editor-extension.md`: the extension's
+  features and install steps, moved from the overview, plus a note that `poly` stays the source of
+  truth. - Links to the extension in `working-locally.md`, `get-started.md`, `walkthrough-video.md`,
+  `what-is-the-adk.md` and `build-an-agent.md` now go to the new page. - `mkdocs.yml`: Tooling nav
+  is Overview, VS Code and Cursor extension, Deploying from GitHub.
+
+The `/poly-merge` section describes
+  [adk-repo-template#23](https://github.com/polyai/adk-repo-template/pull/23), so this should merge
+  after it.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+`mkdocs build --strict` passes.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (no Python changes) - [x] `pytest` passes (no
+  code changes) - [x] No breaking changes to the `poly` CLI interface (or migration path documented)
+  - [x] PR title follows [conventional commits](https://www.conventionalcommits.org/), and its type
+  matches the change (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing
+  changes are reflected in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+
 ## v0.73.0 (2026-10-23)
 
 ### Features
