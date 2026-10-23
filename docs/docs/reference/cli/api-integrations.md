@@ -18,7 +18,7 @@ poly api-integrations configure crm --env sandbox
 your-secret-provider | poly api-integrations configure crm --env sandbox --stdin --json
 ~~~
 
-Interactive mode loads saved credentials and displays masked defaults. Press Enter to keep a saved required value, or enter a replacement. Required fields are prompted again when neither a new value nor a saved value exists. Secret input is hidden. Credentials location is selected from `header` and `body` using the arrow keys; Enter on the optional scope skips it.
+Interactive mode loads saved credentials and displays masked defaults. Press Enter to keep a saved required value, or enter a replacement. Required fields are prompted again when neither a new value nor a saved value exists. Newly typed values are visible, like `aws configure`; saved secret values remain masked in brackets. Credentials location is selected from `header` and `body` using the arrow keys; Enter on the optional scope skips it.
 
 ~~~text
 Client ID [******ABC]:

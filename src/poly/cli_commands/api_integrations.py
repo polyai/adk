@@ -3,7 +3,6 @@
 Copyright PolyAI Limited
 """
 
-import getpass
 import json
 import os
 import sys
@@ -41,7 +40,7 @@ def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | 
         "algorithm": ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
     }
     values = {}
-    for field, hidden, default in FIELDS[auth_type]:
+    for field, _, default in FIELDS[auth_type]:
         if field == "private_key" and private_key_file:
             continue
         saved = existing.get(field)
@@ -62,7 +61,7 @@ def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | 
                 masked = "****"
             prompt = f"{label}" + (f" [{masked}]" if saved else "") + ": "
             while True:
-                entered = getpass.getpass(prompt) if hidden else input(prompt)
+                entered = input(prompt)
                 value = entered or saved or default
                 if isinstance(value, str) and value.strip():
                     break

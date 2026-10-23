@@ -7,7 +7,7 @@ import json
 import unittest
 from argparse import Namespace
 from io import StringIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import requests
 
@@ -215,9 +215,8 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         self.assertEqual(args.env, "sandbox")
 
     @patch("questionary.select")
-    @patch("poly.cli_commands.api_integrations.getpass.getpass", return_value="")
-    @patch("builtins.input", side_effect=["", "", ""])
-    def test_prompt_reuses_masked_defaults_and_picks_location(self, read, hidden, select):
+    @patch("builtins.input", side_effect=["", "", "", ""])
+    def test_prompt_reuses_masked_defaults_and_picks_location(self, read, select):
         select.return_value.ask.return_value = "body"
         saved = {"client_id": "saved-client-ABC", "client_secret": "saved-secret-DEF",
                  "access_token_url": "https://example.com/token", "scope": "old-scope",
@@ -229,36 +228,31 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         self.assertEqual(result["scope"], "")
         self.assertEqual(result["credentials_location"], "body")
         self.assertEqual(read.call_args_list[0].args[0], "Client ID [******ABC]: ")
-        hidden.assert_called_once_with("Client Secret [******DEF]: ")
-        self.assertEqual(read.call_args_list[1].args[0], "Token URL [****]: ")
+        self.assertEqual(read.call_args_list[1].args[0], "Client Secret [******DEF]: ")
+        self.assertEqual(read.call_args_list[2].args[0], "Token URL [****]: ")
         select.assert_called_once_with("Credentials location:", choices=["header", "body"],
                                        default="header")
 
     @patch("poly.output.console.warning")
     @patch("questionary.select")
-    @patch("poly.cli_commands.api_integrations.getpass.getpass", side_effect=["", "secret"])
-    @patch("builtins.input", side_effect=["", "abc", "", "https://example.com/token", ""])
-    def test_prompt_retries_required_fields_without_saved_values(self, read, hidden, select, warn):
+    @patch("builtins.input", side_effect=["", "abc", "", "secret", "", "https://example.com/token", ""])
+    def test_prompt_retries_required_fields_without_saved_values(self, read, select, warn):
         select.return_value.ask.return_value = "header"
         result = _prompt_credentials("oauth2", {}, None)
         self.assertEqual(result["client_id"], "abc")
         self.assertEqual(result["client_secret"], "secret")
         self.assertEqual(warn.call_count, 3)
-        self.assertEqual(read.call_count, 5)
-        self.assertEqual(hidden.call_count, 2)
+        self.assertEqual(read.call_count, 7)
 
-    @patch("poly.cli_commands.api_integrations.getpass.getpass", return_value="")
     @patch("builtins.input", return_value="")
-    def test_short_saved_values_stay_fully_masked(self, read, hidden):
+    def test_short_saved_values_stay_fully_masked(self, read):
         result = _prompt_credentials("basic", {"username": "abc", "password": "xyz"}, None)
         self.assertEqual(result["password"], "xyz")
-        read.assert_called_once_with("Username [******]: ")
-        hidden.assert_called_once_with("Password [******]: ")
+        read.assert_has_calls([call("Username [******]: "), call("Password [******]: ")])
 
     @patch("questionary.select")
-    @patch("poly.cli_commands.api_integrations.getpass.getpass", return_value="")
     @patch("builtins.input", return_value="")
-    def test_cancelled_picker_aborts_configuration(self, read, hidden, select):
+    def test_cancelled_picker_aborts_configuration(self, read, select):
         select.return_value.ask.return_value = None
         with self.assertRaises(KeyboardInterrupt):
             _prompt_credentials("oauth2", {"client_id": "abc", "client_secret": "saved",
