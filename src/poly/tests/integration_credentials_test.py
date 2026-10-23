@@ -229,11 +229,12 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         self.assertEqual(result["client_id"], saved["client_id"])
         self.assertEqual(result["client_secret"], saved["client_secret"])
         self.assertEqual(result["access_token_url"], saved["access_token_url"])
-        self.assertEqual(result["scope"], "")
+        self.assertEqual(result["scope"], "old-scope")
         self.assertEqual(result["credentials_location"], "body")
         self.assertEqual(read.call_args_list[0].args[0], "Client ID [******ABC]: ")
         self.assertEqual(read.call_args_list[1].args[0], "Client Secret [******DEF]: ")
         self.assertEqual(read.call_args_list[2].args[0], "Token URL [https://example.com/token]: ")
+        self.assertEqual(read.call_args_list[3].args[0], "Scope [old-scope] (Enter to keep, - to clear): ")
         select.assert_called_once_with("Credentials location:", choices=["header", "body"],
                                        default="header")
 
@@ -245,8 +246,19 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         result = _prompt_credentials("oauth2", {}, None)
         self.assertEqual(result["client_id"], "abc")
         self.assertEqual(result["client_secret"], "secret")
+        self.assertEqual(result["scope"], "")
         self.assertEqual(warn.call_count, 3)
         self.assertEqual(read.call_count, 7)
+
+    @patch("questionary.select")
+    def test_saved_scope_can_be_replaced_or_cleared(self, select):
+        select.return_value.ask.return_value = "header"
+        saved = {"client_id": "abc", "client_secret": "saved",
+                 "access_token_url": "https://example.com/token", "scope": "old-scope"}
+        for entered, expected in [("new-scope", "new-scope"), ("-", "")]:
+            with self.subTest(entered=entered), patch("builtins.input", side_effect=["", "", "", entered]):
+                result = _prompt_credentials("oauth2", saved, None)
+                self.assertEqual(result["scope"], expected)
 
     @patch("builtins.input", return_value="")
     def test_short_saved_values_stay_fully_masked(self, read):

@@ -70,7 +70,13 @@ def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | 
             if value is None:
                 raise KeyboardInterrupt
         elif field == "scope":
-            value = input("Scope (optional, Enter to skip): ")
+            prompt = (
+                f"Scope [{saved}] (Enter to keep, - to clear): "
+                if saved
+                else "Scope (optional, Enter to skip): "
+            )
+            entered = input(prompt)
+            value = "" if entered == "-" else entered or saved or ""
         else:
             # Short saved values stay fully masked; never put real defaults in editable input.
             masked = "******" + saved[-3:] if saved and len(saved) > 3 else "******"
