@@ -27,6 +27,8 @@ from poly.constants import (
     DATA_AGGS,
     DATA_CHANNELS,
     DATA_CLIENT_ENVS,
+    DATA_CONVERSATION_FILTER_OPS,
+    DATA_CONVERSATION_SORT_FIELDS,
     DATA_FILTER_OPS,
     DATA_GROUP_BY,
     DATA_HAVING_OPS,
@@ -34,6 +36,9 @@ from poly.constants import (
     DATA_LIST_OPS,
     DATA_MAX_LIMIT,
     DATA_MAX_OFFSET,
+    DATA_TRANSCRIPT_MAX_CONTEXT_TURNS,
+    DATA_TRANSCRIPT_QUERY_MAX_CHARS,
+    DATA_TRANSCRIPT_QUERY_MIN_CHARS,
 )
 from poly.handlers.interface import (
     AgentStudioInterface,
@@ -141,6 +146,46 @@ def _window_bound(value: str, *, exclusive_end: bool = False) -> str:
     return parsed.isoformat()
 
 
+def _check_paging(limit: int, offset: int) -> None:
+    """Raise ``ValueError`` if ``limit`` or ``offset`` is outside the Data API's bounds."""
+    if not 1 <= limit <= DATA_MAX_LIMIT:
+        raise ValueError(f"Limit must be between 1 and {DATA_MAX_LIMIT}. Got {limit}.")
+    if not 0 <= offset <= DATA_MAX_OFFSET:
+        raise ValueError(f"Offset must be between 0 and {DATA_MAX_OFFSET}. Got {offset}.")
+
+
+def _check_filters(filters: Optional[list[dict]], allowed_ops: list[str]) -> list[dict]:
+    """Normalise filter dicts and raise ``ValueError`` on an operator the route rejects."""
+    checked = []
+    for item in filters or []:
+        op = str(item.get("op", "")).lower()
+        if op not in allowed_ops:
+            raise ValueError(
+                f"Unknown filter operator {item.get('op')!r}. Use one of: {', '.join(allowed_ops)}."
+            )
+        if op in DATA_LIST_OPS and not isinstance(item.get("value"), list):
+            raise ValueError(f"Filter operator {op!r} takes a list of values.")
+        if not item.get("metric"):
+            raise ValueError("Each filter needs a metric name.")
+        checked.append({"metric": item["metric"], "op": op, "value": item.get("value")})
+    return checked
+
+
+def _check_sort(sort: Optional[dict], allowed_fields: Optional[list[str]] = None) -> Optional[dict]:
+    """Normalise a sort dict and raise ``ValueError`` on a bad field or order."""
+    if not sort:
+        return None
+    order = str(sort.get("order") or "asc").lower()
+    if order not in ("asc", "desc"):
+        raise ValueError(f"Sort order must be 'asc' or 'desc'. Got {sort.get('order')!r}.")
+    field = sort.get("field")
+    if not field:
+        raise ValueError("Sort needs a field.")
+    if allowed_fields is not None and field not in allowed_fields:
+        raise ValueError(f"Sort field must be one of: {', '.join(allowed_fields)}. Got {field!r}.")
+    return {"field": field, "order": order}
+
+
 def _check_choices(name: str, values: Optional[list[str]], allowed: list[str]) -> None:
     """Raise ``ValueError`` if any of ``values`` is not in ``allowed``."""
     for value in values or []:
@@ -182,24 +227,8 @@ def _build_metric_query(
     _check_choices("Group-by dimension", group_by, DATA_GROUP_BY)
     _check_choices("Channel", channel, DATA_CHANNELS)
     _check_choices("Environment", client_env, DATA_CLIENT_ENVS)
-    if not 1 <= limit <= DATA_MAX_LIMIT:
-        raise ValueError(f"Limit must be between 1 and {DATA_MAX_LIMIT}. Got {limit}.")
-    if not 0 <= offset <= DATA_MAX_OFFSET:
-        raise ValueError(f"Offset must be between 0 and {DATA_MAX_OFFSET}. Got {offset}.")
-
-    checked_filters = []
-    for item in filters or []:
-        op = str(item.get("op", "")).lower()
-        if op not in DATA_FILTER_OPS:
-            raise ValueError(
-                f"Unknown filter operator {item.get('op')!r}. "
-                f"Use one of: {', '.join(DATA_FILTER_OPS)}."
-            )
-        if op in DATA_LIST_OPS and not isinstance(item.get("value"), list):
-            raise ValueError(f"Filter operator {op!r} takes a list of values.")
-        if not item.get("metric"):
-            raise ValueError("Each filter needs a metric name.")
-        checked_filters.append({"metric": item["metric"], "op": op, "value": item.get("value")})
+    _check_paging(limit, offset)
+    checked_filters = _check_filters(filters, DATA_FILTER_OPS)
 
     checked_having = []
     for item in having or []:
@@ -217,14 +246,7 @@ def _build_metric_query(
             raise ValueError(f"Having value must be a number, got {item.get('value')!r}.") from e
         checked_having.append({"field": field, "op": op, "value": number})
 
-    checked_sort = None
-    if sort:
-        order = str(sort.get("order") or "asc").lower()
-        if order not in ("asc", "desc"):
-            raise ValueError(f"Sort order must be 'asc' or 'desc'. Got {sort.get('order')!r}.")
-        if not sort.get("field"):
-            raise ValueError("Sort needs a field.")
-        checked_sort = {"field": sort["field"], "order": order}
+    checked_sort = _check_sort(sort)
 
     body: dict[str, Any] = {
         "metric": str(metric).strip(),
@@ -4519,6 +4541,131 @@ class AgentStudioProject:
             **cohort,
         )
         return {**table, "summary": summary}
+
+    def search_conversations(
+        self,
+        *,
+        from_dt: Optional[str] = None,
+        to_dt: Optional[str] = None,
+        filters: Optional[list[dict]] = None,
+        match_any: bool = False,
+        channel: Optional[list[str]] = None,
+        client_env: Optional[list[str]] = None,
+        fields: Optional[list[str]] = None,
+        sort: Optional[dict] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict:
+        """Search this project's conversations by metric values, cohort and window.
+
+        Args:
+            from_dt: Inclusive lower bound on start time, ``YYYY-MM-DD`` or ISO 8601.
+            to_dt: Exclusive upper bound. A bare date includes the whole of that day.
+            filters: Conversation filters, each ``{"metric", "op", "value"}``. The
+                metric may also be ``conversation_id`` or ``CUSTOM_SCORE_<id>``.
+            match_any: Match conversations that satisfy any filter instead of all.
+            channel: Restrict to these channels.
+            client_env: Restrict to these environments.
+            fields: Metric keys to include per conversation; ``None`` returns all.
+            sort: ``{"field", "order"}``; field is ``started_at``, ``duration`` or
+                ``conversation_id``.
+            limit: Conversations per page, 1 to 100.
+            offset: Conversations to skip, up to 1000.
+
+        Returns:
+            dict: ``{"conversations": [...], "total", "limit", "offset"}`` from the Data API.
+
+        Raises:
+            ValueError: If any argument is outside what the Data API accepts.
+        """
+        _check_choices("Channel", channel, DATA_CHANNELS)
+        _check_choices("Environment", client_env, DATA_CLIENT_ENVS)
+        _check_paging(limit, offset)
+        body: dict[str, Any] = {"project_id": self.project_id, "limit": limit, "offset": offset}
+        optional = {
+            "from": _window_bound(from_dt) if from_dt else None,
+            "to": _window_bound(to_dt, exclusive_end=True) if to_dt else None,
+            "filters": _check_filters(filters, DATA_CONVERSATION_FILTER_OPS) or None,
+            "filter_operator": "or" if match_any else None,
+            "channel": list(channel) if channel else None,
+            "client_env": list(client_env) if client_env else None,
+            "fields": list(fields) if fields else None,
+            "sort": _check_sort(sort, DATA_CONVERSATION_SORT_FIELDS),
+        }
+        body.update({k: v for k, v in optional.items() if v is not None})
+        return AgentStudioInterface.search_conversations(self.region, body=body)
+
+    def search_transcripts(
+        self,
+        query: str,
+        *,
+        from_dt: Optional[str] = None,
+        to_dt: Optional[str] = None,
+        context_turns: int = 1,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict:
+        """Search this project's transcripts for a phrase.
+
+        The project id is always sent: Personal Access Tokens need it on this
+        route, and account keys accept it as a scope.
+
+        Args:
+            query: Phrase to search for, 3 to 300 characters.
+            from_dt: Inclusive lower bound on start time.
+            to_dt: Exclusive upper bound. A bare date includes the whole of that day.
+            context_turns: Turns of context on each side of a match, 0 to 3.
+            limit: Conversations per page, 1 to 100.
+            offset: Conversations to skip, up to 1000.
+
+        Returns:
+            dict: ``{"results": [...], "total", "limit", "offset"}`` from the Data API.
+
+        Raises:
+            ValueError: If any argument is outside what the Data API accepts.
+        """
+        phrase = (query or "").strip()
+        if not DATA_TRANSCRIPT_QUERY_MIN_CHARS <= len(phrase) <= DATA_TRANSCRIPT_QUERY_MAX_CHARS:
+            raise ValueError(
+                "The search phrase must be "
+                f"{DATA_TRANSCRIPT_QUERY_MIN_CHARS} to {DATA_TRANSCRIPT_QUERY_MAX_CHARS} characters."
+            )
+        if not 0 <= context_turns <= DATA_TRANSCRIPT_MAX_CONTEXT_TURNS:
+            raise ValueError(
+                f"Context turns must be between 0 and {DATA_TRANSCRIPT_MAX_CONTEXT_TURNS}. "
+                f"Got {context_turns}."
+            )
+        _check_paging(limit, offset)
+        params: dict[str, Any] = {
+            "q": phrase,
+            "project_id": self.project_id,
+            "context_turns": context_turns,
+            "limit": limit,
+            "offset": offset,
+        }
+        if from_dt:
+            params["from"] = _window_bound(from_dt)
+        if to_dt:
+            params["to"] = _window_bound(to_dt, exclusive_end=True)
+        return AgentStudioInterface.search_transcripts(self.region, params=params)
+
+    def get_transcript(self, conversation_id: str) -> dict:
+        """Fetch one conversation's transcript, scoped to this project.
+
+        Args:
+            conversation_id: The conversation ID.
+
+        Returns:
+            dict: ``{"conversation_id", "project_id", "turns": [...], "total_turns"}``.
+
+        Raises:
+            ValueError: If the conversation id is empty.
+        """
+        if not conversation_id or not conversation_id.strip():
+            raise ValueError("A conversation ID is required.")
+        return AgentStudioInterface.get_transcript(
+            self.region, conversation_id=conversation_id.strip(), project_id=self.project_id
+        )
 
     def create_custom_metric(self, data: dict) -> dict:
         """Validate and create a new custom metric.

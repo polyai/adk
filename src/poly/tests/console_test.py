@@ -20,9 +20,12 @@ from poly.output.console import (
     print_archived_branches,
     print_available_metrics,
     print_branch_history,
+    print_conversation_search,
     print_experiment_detail,
     print_experiments,
     print_releases_branches,
+    print_transcript,
+    print_transcript_matches,
     resolve_parent_branch_label,
 )
 
@@ -720,3 +723,106 @@ class PrintAggregateTest(unittest.TestCase):
     def test_no_rows(self):
         """An empty window prints a notice and no table."""
         self.assertIn("No data in this window", self._render({"columns": ["avg"], "rows": []}))
+
+
+class PrintConversationSearchTest(unittest.TestCase):
+    """Tests for print_conversation_search, the `conversations search` table."""
+
+    def test_metric_columns_and_pii_warning(self):
+        """Requested fields become columns; missing PII fields produce a warning."""
+        result = {
+            "conversations": [
+                {
+                    "conversation_id": "conv-1",
+                    "started_at": "2026-09-30T10:00:00+00:00",
+                    "duration_seconds": 95,
+                    "metrics": {"poly_score": 4.5, "channel": "CHAT"},
+                }
+            ],
+            "total": 30,
+            "limit": 1,
+            "offset": 0,
+        }
+
+        with patch("poly.output.console.warning") as mock_warning, console.capture() as capture:
+            print_conversation_search(
+                result, fields=["poly_score", "duration", "channel", "call_summary"]
+            )
+        output = capture.get()
+
+        self.assertIn("conv-1", output)
+        self.assertIn("poly_score", output)
+        self.assertIn("4.50", output)
+        self.assertIn("CHAT", output)
+        self.assertEqual(output.lower().count("duration"), 1)
+        self.assertIn("--offset 1", output)
+        self.assertIn("call_summary", mock_warning.call_args[0][0])
+
+
+class PrintTranscriptTest(unittest.TestCase):
+    """Tests for print_transcript_matches and print_transcript."""
+
+    def test_matches_show_context_in_order_with_the_phrase(self):
+        """Matched turns print between their context turns."""
+        result = {
+            "results": [
+                {
+                    "conversation_id": "conv-1",
+                    "project_id": "proj1",
+                    "matched_turns": [
+                        {
+                            "turn_index": 2,
+                            "user_input": "I want to cancel my booking please",
+                            "user_input_datetime": "2026-09-30T10:00:05+00:00",
+                            "agent_response": "Sure, which booking?",
+                            "context": {
+                                "before": [
+                                    {"turn_index": 1, "user_input": "hello", "agent_response": "hi"}
+                                ],
+                                "after": [{"turn_index": 3, "user_input": "the one on friday"}],
+                            },
+                        }
+                    ],
+                }
+            ],
+            "total": 1,
+            "limit": 20,
+            "offset": 0,
+        }
+
+        with console.capture() as capture:
+            print_transcript_matches(result, "cancel my booking")
+        output = capture.get()
+
+        self.assertIn("conv-1", output)
+        self.assertIn("1 match", output)
+        self.assertLess(output.index("hello"), output.index("cancel my booking"))
+        self.assertLess(output.index("cancel my booking"), output.index("the one on friday"))
+
+    def test_transcript_prefers_english_when_asked(self):
+        """--english swaps in the translated text where it exists and falls back otherwise."""
+        transcript = {
+            "conversation_id": "conv-1",
+            "total_turns": 1,
+            "turns": [
+                {
+                    "turn_index": 0,
+                    "user_input": "hola",
+                    "english_user_input": "hello",
+                    "user_input_datetime": "2026-09-30T10:00:00+00:00",
+                    "agent_response": "buenos días",
+                }
+            ],
+        }
+
+        with console.capture() as capture:
+            print_transcript(transcript)
+        original = capture.get()
+        with console.capture() as capture:
+            print_transcript(transcript, english=True)
+        english = capture.get()
+
+        self.assertIn("hola", original)
+        self.assertIn("hello", english)
+        self.assertIn("buenos días", english)
+        self.assertIn("1 turns", english)

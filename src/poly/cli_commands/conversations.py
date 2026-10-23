@@ -3,13 +3,26 @@
 Copyright PolyAI Limited
 """
 
+import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Optional
 
+import requests
+
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
-from poly.cli_commands.shared import load_project
+from poly.cli_commands.shared import (
+    add_cohort_arguments,
+    add_window_arguments,
+    describe_data_api_error,
+    filter_flags_to_filters,
+    load_project,
+    sort_flag_to_sort,
+)
+from poly.constants import DATA_CONVERSATION_SORT_FIELDS, DATA_MAX_LIMIT, DATA_MAX_OFFSET
 from poly.handlers.interface import AgentStudioInterface
 from poly.output.json_output import json_print
+
+SEARCH_DEFAULT_FIELDS = ["poly_score", "duration", "channel"]
 
 
 class ConversationsCommand(BaseCommand):
@@ -32,6 +45,7 @@ class ConversationsCommand(BaseCommand):
                 "  poly conversations list\n"
                 "  poly conversations get <conversation_id>\n"
                 "  poly conversations get-audio <conversation_id> -o recording.wav\n"
+                "  poly conversations search --filter poly_score lt 3 --env live\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -65,12 +79,86 @@ class ConversationsCommand(BaseCommand):
             help="Number of conversations to skip. Defaults to 0.",
         )
 
+        search_parser = conversations_subparsers.add_parser(
+            "search",
+            parents=[parents.path, parents.json, parents.verbose],
+            help="Find conversations by metric values, channel, environment and time.",
+            description=(
+                "Search the project's conversations through the Data API, filtering on\n"
+                "metric values (names from `poly metrics available`), channel, environment\n"
+                "and start time. Each row carries the metric fields you ask for with\n"
+                "--field. Free-text fields such as call_summary are returned only when the\n"
+                "API key has PII read permission.\n\n"
+                "Examples:\n"
+                "  poly conversations search --from 2026-09-01 --to 2026-09-30\n"
+                "  poly conversations search --filter poly_score lt 3 --env live\n"
+                "  poly conversations search --filter handoff eq true --field handoff_reason\n"
+                "  poly conversations search --filter conversation_id in id1,id2 --field call_summary\n"
+                "  poly conversations search --sort duration:desc --limit 5 --json\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        add_window_arguments(search_parser, default_help="Defaults to no lower bound.")
+        search_parser.add_argument(
+            "--filter",
+            action="append",
+            nargs=3,
+            metavar=("METRIC", "OP", "VALUE"),
+            default=None,
+            help=(
+                "Only conversations where METRIC OP VALUE. OP is one of eq, gt, gte, lt, lte,\n"
+                "in, ex, contains, not_contains, exists (in/ex take a comma-separated list).\n"
+                "METRIC may also be conversation_id or CUSTOM_SCORE_<id>. Repeatable."
+            ),
+        )
+        search_parser.add_argument(
+            "--any",
+            action="store_true",
+            default=False,
+            help="Match conversations that satisfy any filter instead of all.",
+        )
+        add_cohort_arguments(search_parser, deployments=False)
+        search_parser.add_argument(
+            "--field",
+            action="append",
+            default=None,
+            metavar="METRIC",
+            help=(
+                "Metric field to show per conversation. Repeatable. Defaults to "
+                f"{', '.join(SEARCH_DEFAULT_FIELDS)}."
+            ),
+        )
+        search_parser.add_argument(
+            "--sort",
+            type=str,
+            default=None,
+            metavar="FIELD[:asc|desc]",
+            help=(
+                f"Sort by one of {', '.join(DATA_CONVERSATION_SORT_FIELDS)}. "
+                "Defaults to started_at:desc."
+            ),
+        )
+        search_parser.add_argument(
+            "--limit",
+            type=int,
+            default=20,
+            help=f"Conversations per page, 1 to {DATA_MAX_LIMIT}.",
+        )
+        search_parser.add_argument(
+            "--offset",
+            type=int,
+            default=0,
+            help=f"Conversations to skip, up to {DATA_MAX_OFFSET}.",
+        )
+
         conv_get_parser = conversations_subparsers.add_parser(
             "get",
             parents=[parents.path, parents.json, parents.verbose],
             help="Get details for a specific conversation.",
             description=(
-                "Get detailed information for a conversation including turns.\n\n"
+                "Get detailed information for a conversation including turns.\n"
+                "For the full transcript with per-turn timestamps, use\n"
+                "`poly transcripts get <conversation_id>`.\n\n"
                 "Examples:\n"
                 "  poly conversations get <conversation_id>\n"
             ),
@@ -129,6 +217,8 @@ class ConversationsCommand(BaseCommand):
                 args.offset,
                 output_json=args.json,
             )
+        elif args.conversations_subcommand == "search":
+            cls.conversations_search(args.path, args, output_json=args.json)
         elif args.conversations_subcommand == "get":
             cls.conversations_get(
                 args.path,
@@ -180,6 +270,62 @@ class ConversationsCommand(BaseCommand):
                 return
             with paged_output():
                 print_conversations(conversations, url_builder=project.get_conversation_url)
+
+    @classmethod
+    def conversations_search(
+        cls, base_path: str, args: Namespace, output_json: bool = False
+    ) -> None:
+        """Search conversations through the Data API and print them with metric columns.
+
+        Args:
+            base_path: Base path for the project.
+            args: Parsed ``search`` flags.
+            output_json: If True, emit machine-readable JSON.
+        """
+        from poly.output.console import info, paged_output, print_conversation_search
+
+        fields = args.field or list(SEARCH_DEFAULT_FIELDS)
+        project = load_project(base_path, output_json=output_json)
+        try:
+            result = project.search_conversations(
+                from_dt=args.from_dt,
+                to_dt=args.to_dt,
+                filters=filter_flags_to_filters(args.filter),
+                match_any=args.any,
+                channel=args.channel,
+                client_env=args.env,
+                fields=fields,
+                sort=sort_flag_to_sort(args.sort),
+                limit=args.limit,
+                offset=args.offset,
+            )
+        except ValueError as e:
+            cls._fail(str(e), output_json)
+        except requests.HTTPError as e:
+            cls._fail(describe_data_api_error(e), output_json)
+
+        if output_json:
+            json_print(result)
+            return
+        conversations = result.get("conversations") or []
+        if not conversations:
+            info("No conversations match.")
+            return
+        with paged_output():
+            print_conversation_search(
+                result, fields=fields, url_builder=project.get_conversation_url
+            )
+
+    @staticmethod
+    def _fail(message: str, output_json: bool) -> None:
+        """Report an error in the requested format and exit."""
+        from poly.output.console import error
+
+        if output_json:
+            json_print({"success": False, "error": message})
+        else:
+            error(message)
+        sys.exit(1)
 
     @classmethod
     def conversations_get(
