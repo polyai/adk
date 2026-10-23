@@ -127,6 +127,6 @@ For `oauth2`, the input object has this shape (replace the placeholders):
 
 `oauth2` also accepts the optional `auth_header_name` and `token_prefix` fields from Studio's advanced OAuth settings. Their saved values are shown in full; Enter keeps them, and `-` clears them.
 
-For `oauth2_client_credentials`, use `client_id`, `client_secret`, `token_url`, and optionally `client_auth` (`client_secret_basic` by default, or `client_secret_post`). The command also supports basic auth, API keys, and JWT client assertions. For JWT signing keys, use `--private-key-file path/to/key.pem` or the `private_key` field on stdin.
+The command supports `basic`, `apiKey`, and `oauth2`. Configuring `jwt_client_assertion` and `oauth2_client_credentials` is not supported yet.
 
 You can select an integration by name or ID. `--env` accepts `sandbox`, `pre-release`, or `live`. Each write replaces the selected environment's credentials and preserves other environments and secret metadata. Credentials are shared across project branches and take effect directly in Studio; this command does not require a later push. Secret values are not printed or saved to project files.

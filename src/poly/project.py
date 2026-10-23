@@ -88,23 +88,10 @@ INTEGRATION_CREDENTIAL_FIELDS = {
         ("auth_header_name", False, ""),
         ("token_prefix", False, ""),
     ],
-    "jwt_client_assertion": [
-        ("client_id", False, None),
-        ("token_url", False, None),
-        ("private_key", True, None),
-        ("key_id", False, None),
-        ("algorithm", False, "RS384"),
-    ],
-    "oauth2_client_credentials": [
-        ("client_id", False, None),
-        ("client_secret", True, None),
-        ("token_url", False, None),
-        ("client_auth", False, "client_secret_basic"),
-    ],
 }
 
 
-def _build_api_integration_credentials(auth_type: str, values: dict, base_url: str) -> dict:
+def _build_api_integration_credentials(auth_type: str, values: dict) -> dict:
     """Validate input and serialize the same credential shape as Studio."""
     if auth_type not in INTEGRATION_CREDENTIAL_FIELDS:
         raise ValueError("Unsupported integration authentication type.")
@@ -122,16 +109,12 @@ def _build_api_integration_credentials(auth_type: str, values: dict, base_url: s
     choices = {
         "location": {"header", "query_param"},
         "credentials_location": {"header", "body"},
-        "algorithm": {"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"},
-        "client_auth": {"client_secret_basic", "client_secret_post"},
     }
     for field_name, options in choices.items():
         if field_name in result and result[field_name] not in options:
             raise ValueError(
                 f"Credential field '{field_name}' must be one of {', '.join(sorted(options))}."
             )
-    if auth_type in {"jwt_client_assertion", "oauth2_client_credentials"}:
-        return {"base_url": base_url, "auth": {"type": auth_type, "config": result}}
     if auth_type == "oauth2":
         result["grant_type"] = "client_credentials"
         # Studio also writes the legacy aliases consumed by older runtimes.
@@ -226,9 +209,9 @@ class AgentStudioProject:
         return self._api_handler
 
     @staticmethod
-    def build_api_integration_credentials(auth_type: str, values: dict, base_url: str) -> dict:
+    def build_api_integration_credentials(auth_type: str, values: dict) -> dict:
         """Validate credential fields using the configured authentication type."""
-        return _build_api_integration_credentials(auth_type, values, base_url)
+        return _build_api_integration_credentials(auth_type, values)
 
     def get_api_integration(self, name: str, environment: str) -> ApiIntegration:
         """Resolve an integration on this branch and validate its environment config."""
@@ -243,7 +226,10 @@ class AgentStudioProject:
         integration = matches[0]
         config = getattr(integration.environments, environment.replace("-", "_"))
         if config.auth_type not in INTEGRATION_CREDENTIAL_FIELDS:
-            raise ValueError("Configure an authentication type before setting credentials.")
+            raise ValueError(
+                f"Authentication type '{config.auth_type}' is not supported by "
+                "`poly api-integrations configure`. Supported types: basic, apiKey, oauth2."
+            )
         if not config.base_url:
             raise ValueError("Configure a base URL before setting credentials.")
         return integration
@@ -257,14 +243,7 @@ class AgentStudioProject:
         saved = self.api_handler.get_api_integration_credentials(
             token, integration.resource_id, environment
         )
-        if config.auth_type in {"jwt_client_assertion", "oauth2_client_credentials"}:
-            auth = saved.get("auth")
-            if not isinstance(auth, dict) or auth.get("type") != config.auth_type:
-                return {}
-            saved = auth.get("config")
-            if not isinstance(saved, dict):
-                raise ValueError("Stored credentials have an unexpected format; no changes made.")
-        elif saved.get("type") != ("api_key" if config.auth_type == "apiKey" else config.auth_type):
+        if saved.get("type") != ("api_key" if config.auth_type == "apiKey" else config.auth_type):
             return {}
         aliases = {
             "client_id": "clientId",
@@ -287,9 +266,7 @@ class AgentStudioProject:
         """Replace credentials for one environment directly, across project branches."""
         integration = self.get_api_integration(name, environment)
         config = getattr(integration.environments, environment.replace("-", "_"))
-        credentials = self.build_api_integration_credentials(
-            config.auth_type, values, config.base_url
-        )
+        credentials = self.build_api_integration_credentials(config.auth_type, values)
         self.api_handler.set_api_integration_credentials(
             token, integration.resource_id, environment, credentials
         )
