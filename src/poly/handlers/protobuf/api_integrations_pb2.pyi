@@ -71,8 +71,15 @@ class ApiIntegrationConfig(_message.Message):
     def __init__(self, base_url: _Optional[str] = ..., auth_type: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationOperation(_message.Message):
-    __slots__ = ("id", "name", "method", "resource", "created_at", "created_by", "updated_at", "updated_by", "headers", "description")
+    __slots__ = ("id", "name", "method", "resource", "created_at", "created_by", "updated_at", "updated_by", "headers", "description", "request_query_schema", "request_body_schema", "response_schemas", "schema_source")
     class HeadersEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    class ResponseSchemasEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
@@ -89,6 +96,10 @@ class ApiIntegrationOperation(_message.Message):
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
     HEADERS_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_QUERY_SCHEMA_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_BODY_SCHEMA_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_SCHEMAS_FIELD_NUMBER: _ClassVar[int]
+    SCHEMA_SOURCE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     method: str
@@ -99,9 +110,26 @@ class ApiIntegrationOperation(_message.Message):
     updated_by: str
     headers: _containers.ScalarMap[str, str]
     description: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., headers: _Optional[_Mapping[str, str]] = ..., description: _Optional[str] = ...) -> None: ...
+    request_query_schema: str
+    request_body_schema: str
+    response_schemas: _containers.ScalarMap[str, str]
+    schema_source: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., headers: _Optional[_Mapping[str, str]] = ..., description: _Optional[str] = ..., request_query_schema: _Optional[str] = ..., request_body_schema: _Optional[str] = ..., response_schemas: _Optional[_Mapping[str, str]] = ..., schema_source: _Optional[str] = ...) -> None: ...
 
 class OperationHeaders(_message.Message):
+    __slots__ = ("entries",)
+    class EntriesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    ENTRIES_FIELD_NUMBER: _ClassVar[int]
+    entries: _containers.ScalarMap[str, str]
+    def __init__(self, entries: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class OperationResponseSchemas(_message.Message):
     __slots__ = ("entries",)
     class EntriesEntry(_message.Message):
         __slots__ = ("key", "value")
@@ -159,8 +187,15 @@ class ApiIntegrationConfig_Update(_message.Message):
     def __init__(self, id: _Optional[str] = ..., environment: _Optional[str] = ..., base_url: _Optional[str] = ..., auth_type: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationOperation_Create(_message.Message):
-    __slots__ = ("name", "method", "resource", "integration_id", "id", "headers", "description")
+    __slots__ = ("name", "method", "resource", "integration_id", "id", "headers", "description", "request_query_schema", "request_body_schema", "response_schemas", "schema_source")
     class HeadersEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    class ResponseSchemasEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
@@ -174,6 +209,10 @@ class ApiIntegrationOperation_Create(_message.Message):
     ID_FIELD_NUMBER: _ClassVar[int]
     HEADERS_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_QUERY_SCHEMA_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_BODY_SCHEMA_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_SCHEMAS_FIELD_NUMBER: _ClassVar[int]
+    SCHEMA_SOURCE_FIELD_NUMBER: _ClassVar[int]
     name: str
     method: str
     resource: str
@@ -181,10 +220,14 @@ class ApiIntegrationOperation_Create(_message.Message):
     id: str
     headers: _containers.ScalarMap[str, str]
     description: str
-    def __init__(self, name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., integration_id: _Optional[str] = ..., id: _Optional[str] = ..., headers: _Optional[_Mapping[str, str]] = ..., description: _Optional[str] = ...) -> None: ...
+    request_query_schema: str
+    request_body_schema: str
+    response_schemas: _containers.ScalarMap[str, str]
+    schema_source: str
+    def __init__(self, name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., integration_id: _Optional[str] = ..., id: _Optional[str] = ..., headers: _Optional[_Mapping[str, str]] = ..., description: _Optional[str] = ..., request_query_schema: _Optional[str] = ..., request_body_schema: _Optional[str] = ..., response_schemas: _Optional[_Mapping[str, str]] = ..., schema_source: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationOperation_Update(_message.Message):
-    __slots__ = ("id", "name", "method", "resource", "integration_id", "integration_name", "old_name", "headers", "description")
+    __slots__ = ("id", "name", "method", "resource", "integration_id", "integration_name", "old_name", "headers", "description", "request_query_schema", "request_body_schema", "response_schemas", "schema_source")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     METHOD_FIELD_NUMBER: _ClassVar[int]
@@ -194,6 +237,10 @@ class ApiIntegrationOperation_Update(_message.Message):
     OLD_NAME_FIELD_NUMBER: _ClassVar[int]
     HEADERS_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_QUERY_SCHEMA_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_BODY_SCHEMA_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_SCHEMAS_FIELD_NUMBER: _ClassVar[int]
+    SCHEMA_SOURCE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     method: str
@@ -203,7 +250,11 @@ class ApiIntegrationOperation_Update(_message.Message):
     old_name: str
     headers: OperationHeaders
     description: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., integration_id: _Optional[str] = ..., integration_name: _Optional[str] = ..., old_name: _Optional[str] = ..., headers: _Optional[_Union[OperationHeaders, _Mapping]] = ..., description: _Optional[str] = ...) -> None: ...
+    request_query_schema: str
+    request_body_schema: str
+    response_schemas: OperationResponseSchemas
+    schema_source: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., method: _Optional[str] = ..., resource: _Optional[str] = ..., integration_id: _Optional[str] = ..., integration_name: _Optional[str] = ..., old_name: _Optional[str] = ..., headers: _Optional[_Union[OperationHeaders, _Mapping]] = ..., description: _Optional[str] = ..., request_query_schema: _Optional[str] = ..., request_body_schema: _Optional[str] = ..., response_schemas: _Optional[_Union[OperationResponseSchemas, _Mapping]] = ..., schema_source: _Optional[str] = ...) -> None: ...
 
 class ApiIntegrationOperation_Delete(_message.Message):
     __slots__ = ("id", "integration_id", "integration_name", "operation_name")
