@@ -43,6 +43,8 @@ from poly.resources import (
     FunctionStep,
     MCPServer,
     MultiResourceYamlResource,
+    OutboundCampaign,
+    OutboundCampaignFunction,
     Pronunciation,
     Resource,
     ResourceMap,
@@ -613,9 +615,10 @@ class AgentStudioProject:
         # Deal with empty flow folders
         # -------
 
-        flow_folder = os.path.join(self.root_path, "flows")
-        if os.path.exists(flow_folder):
-            self._delete_empty_folders(flow_folder)
+        for folder in ("flows", "outbound_campaigns"):
+            folder_path = os.path.join(self.root_path, folder)
+            if os.path.exists(folder_path):
+                self._delete_empty_folders(folder_path)
 
         # Save the updated project configuration
         self.resources = incoming_resources
@@ -1644,6 +1647,14 @@ class AgentStudioProject:
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
         prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
+        prepush.group_outbound_campaign_changes(
+            state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            post_push_deleted_resources,
+            current_resources=self.resources,
+        )
         prepush.fix_orphaned_variables(
             state,
             new_resources,
@@ -2448,6 +2459,7 @@ class AgentStudioProject:
                     issubclass(resource_type, MultiResourceYamlResource)
                     or resource_type == Topic
                     or resource_type == ChildTopic
+                    or resource_type == OutboundCampaign
                 ):
                     resource = self.read_local_resource(
                         ResourceMapping(
@@ -2503,6 +2515,8 @@ class AgentStudioProject:
                         resource_id = flow_id
                     elif resource_type == Document:
                         resource_id = os.path.basename(file_path).upper()
+                    elif resource_type == OutboundCampaignFunction:
+                        resource_id = OutboundCampaignFunction.id_from_path(file_path)
                     elif parent_resource:
                         resource_id = parent_resource.resource_id
                     else:

@@ -1528,6 +1528,181 @@
         "last_discovered_at": "2026-10-01T09:30:00Z",
         "last_discovered_tool_count": 4
       }
+    },
+    "outbound_campaigns": {
+      "CMPGN-TEST0001": {
+        "resource_id": "CMPGN-TEST0001",
+        "name": "Appointment reminders",
+        "description": "Reminds patients of their appointment.",
+        "settings": {
+          "startDate": null,
+          "endDate": null,
+          "fromNumber": "+15550100",
+          "smsFromNumber": "+15550101",
+          "defaultVariantId": "VARIANT-spanish",
+          "country": "US",
+          "useCase": "transactional",
+          "dailyContactLimit": 3,
+          "voiceDispatchLimits": {
+            "maxConcurrent": 5,
+            "perHour": null,
+            "perDay": null
+          },
+          "smsDispatchLimits": null,
+          "defaultTimezone": "America/New_York",
+          "contactWindow": {
+            "daysOfWeek": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday"
+            ],
+            "startTime": "09:00",
+            "endTime": "17:00"
+          }
+        },
+        "nodes": [
+          {
+            "id": "trigger-1",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "label": "Import contacts",
+            "data": {
+              "type": "trigger",
+              "function": {
+                "name": "map_contacts",
+                "description": "Maps CSV rows to contacts."
+              },
+              "routes": [
+                {
+                  "targetNodeId": "call-1"
+                }
+              ],
+              "sourceType": "csv",
+              "ingestInterval": "daily"
+            }
+          },
+          {
+            "id": "call-1",
+            "position": {
+              "x": 0.0,
+              "y": 200.0
+            },
+            "label": "Reminder call",
+            "data": {
+              "type": "call",
+              "flowName": "test_flow",
+              "function": {
+                "name": "call_args",
+                "description": "Passes the appointment to the call."
+              },
+              "greeting": "Hi, this is a reminder about your appointment.",
+              "voicemailEnabled": true,
+              "voicemailScript": "Please call us back.",
+              "voicemailWhen": "final_retry",
+              "maxAttempts": 2,
+              "backoff": 1,
+              "backoffUnit": "hours",
+              "routes": [
+                {
+                  "targetNodeId": "sms-1",
+                  "outcome": "no_answer"
+                }
+              ],
+              "defaultRoute": "end-1"
+            }
+          },
+          {
+            "id": "sms-1",
+            "position": {
+              "x": 200.0,
+              "y": 200.0
+            },
+            "data": {
+              "type": "sms",
+              "function": {
+                "name": "sms_args",
+                "description": "Fills in the reminder text."
+              },
+              "messageTemplate": "Hi {{first_name}}, reply YES to confirm.",
+              "replyTimeoutValue": 1,
+              "replyTimeoutUnit": "days",
+              "routes": [],
+              "defaultRoute": "condition-1"
+            }
+          },
+          {
+            "id": "condition-1",
+            "position": {
+              "x": 200.0,
+              "y": 400.0
+            },
+            "data": {
+              "type": "conditional",
+              "function": {
+                "name": "check_reply",
+                "description": "Branches on the reply."
+              },
+              "branches": [
+                {
+                  "id": "b-1",
+                  "variable": "confirmed",
+                  "targetNodeId": "end-1"
+                }
+              ],
+              "defaultTargetNodeId": "wait-1"
+            }
+          },
+          {
+            "id": "wait-1",
+            "position": {
+              "x": 400.0,
+              "y": 400.0
+            },
+            "data": {
+              "type": "wait",
+              "amount": 1,
+              "unit": "days",
+              "targetNodeId": "end-1"
+            }
+          },
+          {
+            "id": "end-1",
+            "position": {
+              "x": 0.0,
+              "y": 600.0
+            },
+            "data": {
+              "type": "end",
+              "exitReason": "completed",
+              "writebackEnabled": false
+            }
+          }
+        ],
+        "function_code": {
+          "condition-1": "def check_reply(outbound_contact: OutboundContact, outbound_campaign: OutboundCampaign):\n    if outbound_contact.metadata.get(\"confirmed\"):\n        return {\"branch\": \"confirmed\"}\n    return {\"branch\": None}\n",
+          "trigger-1": "def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):\n    return {\"contacts\": [\n        {\n            \"external_id\": row[\"id\"],\n            \"phone\": row[\"phone\"],\n            \"first_name\": row[\"first_name\"],\n            \"last_name\": row[\"last_name\"],\n            \"consent_given\": True,\n            \"consent_at\": row[\"consent_at\"],\n        }\n        for row in contacts\n    ]}\n"
+        }
+      }
+    },
+    "outbound_campaign_functions": {
+      "appointment_reminders/trigger-1": {
+        "resource_id": "appointment_reminders/trigger-1",
+        "name": "trigger-1",
+        "campaign_folder": "appointment_reminders",
+        "node_id": "trigger-1",
+        "code": "def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):\n    return {\"contacts\": [\n        {\n            \"external_id\": row[\"id\"],\n            \"phone\": row[\"phone\"],\n            \"first_name\": row[\"first_name\"],\n            \"last_name\": row[\"last_name\"],\n            \"consent_given\": True,\n            \"consent_at\": row[\"consent_at\"],\n        }\n        for row in contacts\n    ]}\n"
+      },
+      "appointment_reminders/condition-1": {
+        "resource_id": "appointment_reminders/condition-1",
+        "name": "condition-1",
+        "campaign_folder": "appointment_reminders",
+        "node_id": "condition-1",
+        "code": "def check_reply(outbound_contact: OutboundContact, outbound_campaign: OutboundCampaign):\n    if outbound_contact.metadata.get(\"confirmed\"):\n        return {\"branch\": \"confirmed\"}\n    return {\"branch\": None}\n"
+      }
     }
   },
   "file_structure_info": {},
