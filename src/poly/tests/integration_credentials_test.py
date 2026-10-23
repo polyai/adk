@@ -7,6 +7,7 @@ import json
 import unittest
 from argparse import Namespace
 from io import StringIO
+from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, call, patch
 
 import requests
@@ -21,6 +22,7 @@ from poly.handlers.integration_credentials import IntegrationCredentialsHandler
 from poly.handlers.sdk import SourcererAPIError
 from poly.project import AgentStudioProject
 from poly.resources.api_integration import ApiIntegration
+from poly.utils import apikey_session
 
 build_credentials = AgentStudioProject.build_api_integration_credentials
 
@@ -199,7 +201,7 @@ class CredentialStorageTest(unittest.TestCase):
 class ApiIntegrationsCommandTest(unittest.TestCase):
     def setUp(self):
         self.args = Namespace(path="/project", integration="crm", env="sandbox", stdin=True,
-                              json=True, private_key_file=None, token_env="TEST_STUDIO_TOKEN")
+                              json=True, private_key_file=None)
         self.project = AgentStudioProject(region="euw-1", account_id="account", project_id="project",
                                           root_path="/project", resources={}, last_updated=None,
                                           branch_id="main", _api_handler=MagicMock())
@@ -274,19 +276,20 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
             _prompt_credentials("oauth2", {"client_id": "abc", "client_secret": "saved",
                                            "access_token_url": "https://example.com/token"}, None)
 
-    @patch.dict("os.environ", {"TEST_STUDIO_TOKEN": "explicit-token"})
-    @patch("poly.cli_commands.api_integrations.apikey_session.load")
-    def test_explicit_token_overrides_cached_session(self, load):
-        self.assertEqual(_studio_token("euw-1", "TEST_STUDIO_TOKEN", False), "explicit-token")
-        load.assert_not_called()
+    @patch("poly.cli_commands.api_integrations._signin")
+    def test_reuses_session_saved_by_apikey(self, signin):
+        with TemporaryDirectory() as root, patch.object(apikey_session, "SESSION_FILE_PATH", f"{root}/session"):
+            apikey_session.save("euw-1", "shared-token")
+            self.assertEqual(_studio_token("euw-1", False), "shared-token")
+        signin.assert_not_called()
 
     @patch.dict("os.environ", {}, clear=True)
     @patch("poly.cli_commands.api_integrations._signin")
     @patch("poly.cli_commands.api_integrations.apikey_session.load")
     def test_unexpired_studio_session_does_not_prompt_for_login(self, load, signin):
         load.return_value.token = "cached-token"
-        self.assertEqual(_studio_token("euw-1", "TEST_STUDIO_TOKEN", True), "cached-token")
-        load.assert_called_once_with("studio:euw-1")
+        self.assertEqual(_studio_token("euw-1", True), "cached-token")
+        load.assert_called_once_with("euw-1")
         signin.assert_not_called()
 
     @patch.dict("os.environ", {}, clear=True)
@@ -294,17 +297,17 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
     @patch("poly.cli_commands.api_integrations.apikey_session.load", return_value=None)
     @patch("poly.cli_commands.api_integrations._signin", return_value="new-token")
     def test_missing_or_expired_session_signs_in_and_saves(self, signin, load, save):
-        self.assertEqual(_studio_token("euw-1", "TEST_STUDIO_TOKEN", True), "new-token")
+        self.assertEqual(_studio_token("euw-1", True), "new-token")
         signin.assert_called_once_with("euw-1")
-        save.assert_called_once_with("studio:euw-1", "new-token")
+        save.assert_called_once_with("euw-1", "new-token")
 
     @patch.dict("os.environ", {}, clear=True)
     @patch("poly.cli_commands.api_integrations._signin")
     @patch("poly.cli_commands.api_integrations.apikey_session.load", return_value=None)
     def test_noninteractive_run_does_not_start_browser_login(self, load, signin):
-        with self.assertRaisesRegex(ValueError, "TEST_STUDIO_TOKEN"):
-            _studio_token("us-1", "TEST_STUDIO_TOKEN", False)
-        load.assert_called_once_with("studio:us-1")
+        with self.assertRaisesRegex(ValueError, "poly apikey --region us-1"):
+            _studio_token("us-1", False)
+        load.assert_called_once_with("us-1")
         signin.assert_not_called()
 
     def test_project_reads_legacy_and_nested_oauth_defaults(self):
@@ -347,8 +350,9 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         setter = self.project._api_handler.set_api_integration_credentials
         stdin = StringIO('{"username":"user","password":"secret"}')
         stdout = StringIO()
-        with patch.dict("os.environ", {"TEST_STUDIO_TOKEN": "token"}), \
+        with patch("poly.cli_commands.api_integrations.apikey_session.load") as session, \
                 patch("sys.stdin", stdin), patch("sys.stdout", stdout):
+            session.return_value.token = "token"
             ApiIntegrationsCommand.run(self.args)
         signin.assert_not_called()
         self.assertEqual(setter.call_args.args[1:3], ("integration", "sandbox"))

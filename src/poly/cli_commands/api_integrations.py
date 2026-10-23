@@ -4,7 +4,6 @@ Copyright PolyAI Limited
 """
 
 import json
-import os
 import sys
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 from pathlib import Path
@@ -18,19 +17,17 @@ from poly.project import INTEGRATION_CREDENTIAL_FIELDS as FIELDS
 from poly.utils import apikey_session
 
 
-def _studio_token(region: str, token_env: str, interactive: bool) -> str:
-    """Reuse an unexpired regional Studio session, keeping it separate from API-key login."""
-    if token := os.environ.get(token_env):
-        return token
-    session_key = f"studio:{region}"
-    if session := apikey_session.load(session_key):
+def _studio_token(region: str, interactive: bool) -> str:
+    """Reuse the regional browser session shared with ``poly apikey``."""
+    if session := apikey_session.load(region):
         return session.token
     if not interactive:
         raise ValueError(
-            f"Sign in interactively first or set {token_env} to a Studio access token."
+            f"No unexpired sign-in for {region}. Run `poly apikey --region {region}` first, "
+            "or configure this integration interactively."
         )
     token = _signin(region)
-    apikey_session.save(session_key, token)
+    apikey_session.save(region, token)
     return token
 
 
@@ -115,11 +112,6 @@ class ApiIntegrationsCommand(BaseCommand):
         setter.add_argument("--env", required=True, choices=["sandbox", "pre-release", "live"])
         setter.add_argument("--stdin", action="store_true", help="Read a JSON object from stdin.")
         setter.add_argument("--private-key-file", help="Read the JWT signing key from a PEM file.")
-        setter.add_argument(
-            "--token-env",
-            default="POLY_STUDIO_ACCESS_TOKEN",
-            help="Environment variable containing a Studio access token; otherwise sign in.",
-        )
 
     @classmethod
     def run(cls, args: Namespace) -> None:
@@ -142,7 +134,7 @@ class ApiIntegrationsCommand(BaseCommand):
         else:
             from poly.output.console import info
 
-            token = _studio_token(project.region, args.token_env, interactive=True)
+            token = _studio_token(project.region, interactive=True)
             existing = project.get_api_integration_credential_defaults(
                 args.integration, args.env, token
             )
@@ -161,7 +153,7 @@ class ApiIntegrationsCommand(BaseCommand):
                 raise ValueError("Could not read the private key file.") from None
         project.build_api_integration_credentials(config.auth_type, values, config.base_url)
         if args.stdin:
-            token = _studio_token(project.region, args.token_env, interactive=False)
+            token = _studio_token(project.region, interactive=False)
         project.configure_api_integration(args.integration, args.env, values, token)
         result = {
             "success": True,

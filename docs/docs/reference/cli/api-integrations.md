@@ -30,7 +30,7 @@ Scope [read:contacts] (Enter to keep, - to clear):
    body
 ~~~
 
-The command uses `POLY_STUDIO_ACCESS_TOKEN` when set, otherwise it reuses the regional Studio session saved from a previous run. It prompts for sign-in only when there is no unexpired session. Sessions are stored in the user's private ADK session file and kept separate from API-key login sessions. Your user needs permission to read and write secrets. Non-interactive use requires `--stdin` and either an explicit token or an unexpired cached session; stdin supplies a complete replacement for the selected environment.
+The command reuses the regional browser sign-in cached by `poly apikey`. If no unexpired session exists, interactive configuration opens browser sign-in and saves the session for later runs. Your user needs permission to read and write secrets. Non-interactive use requires `--stdin` and an unexpired cached session; run `poly apikey --region <region>` beforehand if needed. Stdin supplies a complete replacement for the selected environment.
 
 The command supports basic authentication, API keys, OAuth client credentials, and JWT client assertions. For `oauth2`, stdin accepts `client_id`, `client_secret`, `access_token_url`, optional `scope`, and optional `credentials_location` (`header` or `body`). For `oauth2_client_credentials`, use `client_id`, `client_secret`, `token_url`, and optional `client_auth` (`client_secret_basic` or `client_secret_post`).
 
@@ -45,7 +45,6 @@ Only the selected environment's credentials are replaced. Other environments and
 | `--env` | Required: `sandbox`, `pre-release`, or `live`. |
 | `--stdin` | Read a credentials JSON object from stdin. |
 | `--private-key-file` | Read the JWT signing key from a PEM file. |
-| `--token-env` | Environment variable holding the Studio access token; defaults to `POLY_STUDIO_ACCESS_TOKEN`. |
 
 !!! warning "Credentials update immediately"
     Credentials are shared across project branches and take effect directly, including in `live`. No later push is needed.
