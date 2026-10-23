@@ -11,54 +11,31 @@ The PolyAI ADK fits naturally into a local developer workflow and can be used al
 
 The ADK is especially useful when paired with tools that help developers inspect, edit, generate, and review local project files efficiently.
 
-## Recommended tooling
+## Integrating with your workflow
 
-There are two well-supported paths for working with the ADK. They are not mutually exclusive — many developers use both.
+The ADK works alongside the editors, coding agents and version control you already use. Use whichever fit how you work; they combine freely.
 
-### PolyAI ADK extension for VS Code and Cursor
+### VS Code and Cursor extension
 
-The **PolyAI ADK extension** brings ADK-aware editing into **VS Code** and **Cursor**. It is the recommended path if you prefer an IDE-first workflow.
+The **PolyAI ADK extension** brings resource-aware editing, validation and `poly` commands into **VS Code** and **Cursor**. See [VS Code and Cursor extension](./editor-extension.md) to install it.
 
-The extension helps with:
+### Coding agents
 
-- navigating and editing flows, functions, topics, entities, and agent settings with resource-aware tooling
-- catching common mistakes while you edit, before you push
-- driving `poly` commands without leaving the editor
-- pairing with your IDE's built-in AI features (Cursor's agent, VS Code Copilot, etc.) to generate and update project files
+The ADK ships **agent skills** that teach a coding agent the `poly` workflow: project structure, branching, testing, conversation review and real-time configuration. They work with many agents, including **Claude Code**, **Cursor**, **Codex** and others, and load on demand as you work. The skills live in the ADK repo's [`skills/`](https://github.com/polyai/adk/tree/main/skills){ target="_blank" rel="noopener" } folder.
 
-#### Install the extension
+[`poly setup`](../reference/cli/setup.md) installs them into the coding agents it finds on your machine:
 
-The extension is published on **Open VSX**, so it works in both VS Code and Cursor.
+~~~bash
+poly setup               # full onboarding
+poly setup --skip-auth   # just add the skills on an already-configured machine
+~~~
 
-1. Open the Extensions view in VS Code or Cursor.
-2. Search for `PolyAI ADK` and install it, or install it directly from the [Open VSX listing](https://open-vsx.org/extension/PolyAI/adk-extension){ target="_blank" rel="noopener" }.
-3. Open a project that has been pulled down with `poly pull`.
-
-Once installed, the extension auto-detects local ADK projects and exposes resource-aware navigation, validation, and commands.
-
-### Claude Code
-
-**Claude Code** is a good alternative when you want an agentic CLI workflow — useful for generating a project from a brief, applying patterns across many files, or running longer build tasks end-to-end.
-
-The repository includes a `.claude/` directory with project-specific instructions and examples.
-
-Claude Code is particularly useful for:
+Coding agents are particularly useful for:
 
 - generating project resources from structured requirements
 - updating flows and functions at scale
 - applying patterns reused across previous projects
 - speeding up repetitive implementation work
-
-#### Installing the ADK skills
-
-[`poly setup`](../reference/cli/setup.md) installs the ADK's agent skills into coding agents detected on your machine — Claude Code, Cursor, Codex, and others:
-
-~~~bash
-poly setup            # full onboarding
-poly setup --skip-auth   # just add the skills on an already-configured machine
-~~~
-
-The skills teach the agent the `poly` workflow — project structure, branching, testing, conversation review, and real-time configuration — and load on demand as you work.
 
 For a coding tool without skill support, generate a documentation file and pass it as context instead:
 
@@ -68,9 +45,13 @@ poly docs --all --output rules.md
 
 Reference `rules.md` in your session prompt. This gives the coding tool accurate knowledge of ADK resource types, constraints, and conventions.
 
-!!! tip "Use both where useful"
+### Integrating Git with the ADK
 
-    The IDE extension and Claude Code cover different modes of work. You can edit in VS Code or Cursor day-to-day and still reach for Claude Code when you want an agent to generate or refactor a large slice of the project on your behalf.
+Keep your projects in a git repository, where every pull request is tested and pushed to an Agent Studio branch, merging deploys it to Agent Studio, and changes made in Agent Studio come back into git. The ADK repo template sets this up on GitHub; see [Deploying from GitHub](./deploying-from-github.md).
+
+!!! tip "Combine them"
+
+    Edit in VS Code or Cursor day to day, hand larger changes to a coding agent, and let the git workflow test and deploy both.
 
 ## Other local tools
 
@@ -116,25 +97,25 @@ Tooling slots into the standard [CLI workflow](../reference/cli.md): pull or ini
 
 <div class="grid cards" markdown>
 
--   **Agent settings reference**
+-   **VS Code and Cursor extension**
 
     ---
 
-    Configure the persona and rules that define agent behavior.
-    [Open agent settings](../reference/resources/agent_settings.md)
+    Install the extension and edit projects with resource-aware tooling.
+    [Open the extension page](./editor-extension.md)
 
--   **Flows reference**
-
-    ---
-
-    Build conversation flows with prompts, transitions, and entities.
-    [Open flows reference](../reference/resources/flows.md)
-
--   **Functions reference**
+-   **Deploying from GitHub**
 
     ---
 
-    Write Python functions the agent calls at runtime.
-    [Open functions reference](../reference/resources/functions.md)
+    Keep projects in a GitHub repo that tests and deploys every change.
+    [Open deploying from GitHub](./deploying-from-github.md)
+
+-   **CLI reference**
+
+    ---
+
+    Every `poly` command and its options.
+    [Open the CLI reference](../reference/cli.md)
 
 </div>

@@ -48,7 +48,11 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
@@ -173,6 +177,8 @@ nav:
 
   - Tooling:
     - Overview: tooling/tooling.md
+    - VS Code and Cursor extension: tooling/editor-extension.md
+    - Deploying from GitHub: tooling/deploying-from-github.md
 
   - Community:
       - Discord: community/discord.md
