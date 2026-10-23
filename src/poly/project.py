@@ -7,6 +7,7 @@ import base64
 import copy
 import json
 import logging
+import math
 import os
 import shutil
 import uuid
@@ -87,6 +88,8 @@ INTEGRATION_CREDENTIAL_FIELDS = {
         ("credentials_location", False, "header"),
         ("auth_header_name", False, ""),
         ("token_prefix", False, ""),
+        ("override_expiration", False, "false"),
+        ("expiration_seconds", False, ""),
     ],
     "jwt_client_assertion": [
         ("client_id", False, None),
@@ -94,12 +97,6 @@ INTEGRATION_CREDENTIAL_FIELDS = {
         ("private_key", True, None),
         ("key_id", False, None),
         ("algorithm", False, "RS384"),
-    ],
-    "oauth2_client_credentials": [
-        ("client_id", False, None),
-        ("client_secret", True, None),
-        ("token_url", False, None),
-        ("client_auth", False, "client_secret_basic"),
     ],
 }
 
@@ -113,24 +110,42 @@ def _build_api_integration_credentials(auth_type: str, values: dict, base_url: s
     allowed = {field_name for field_name, _, _ in INTEGRATION_CREDENTIAL_FIELDS[auth_type]}
     if set(values) - allowed:
         raise ValueError("Credentials contain unsupported fields for the configured auth type.")
+    values = dict(values)
+    if auth_type == "oauth2":
+        override = values.get("override_expiration", "false")
+        if isinstance(override, bool):
+            override = str(override).lower()
+        if not isinstance(override, str) or override not in {"true", "false"}:
+            raise ValueError("Override expiration must be true or false.")
+        values["override_expiration"] = override
+        seconds = values.get("expiration_seconds", "")
+        if seconds != "":
+            try:
+                valid_seconds = not isinstance(seconds, bool) and math.isfinite(float(seconds))
+            except (ValueError, TypeError):
+                valid_seconds = False
+            if not valid_seconds:
+                raise ValueError("Expiration seconds must be a finite number.")
+            values["expiration_seconds"] = str(seconds)
     result = {}
     for field_name, _, default in INTEGRATION_CREDENTIAL_FIELDS[auth_type]:
         value = values.get(field_name, default)
-        if not isinstance(value, str) or (not value and default != ""):
+        if not isinstance(value, str) or (not value.strip() and default != ""):
             raise ValueError(f"Credential field '{field_name}' must be a non-empty string.")
+        if auth_type == "basic":
+            value = value.strip()
         result[field_name] = value
     choices = {
         "location": {"header", "query_param"},
         "credentials_location": {"header", "body"},
         "algorithm": {"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"},
-        "client_auth": {"client_secret_basic", "client_secret_post"},
     }
     for field_name, options in choices.items():
         if field_name in result and result[field_name] not in options:
             raise ValueError(
                 f"Credential field '{field_name}' must be one of {', '.join(sorted(options))}."
             )
-    if auth_type in {"jwt_client_assertion", "oauth2_client_credentials"}:
+    if auth_type == "jwt_client_assertion":
         return {"base_url": base_url, "auth": {"type": auth_type, "config": result}}
     if auth_type == "oauth2":
         result["grant_type"] = "client_credentials"
@@ -143,8 +158,17 @@ def _build_api_integration_credentials(auth_type: str, values: dict, base_url: s
             ("grant_type", "grantType"),
             ("auth_header_name", "authHeaderName"),
             ("token_prefix", "tokenPrefix"),
+            ("override_expiration", "overrideExpiration"),
+            ("expiration_seconds", "expirationSeconds"),
         ):
             result[camel] = result[snake]
+        for field_name in (
+            "auth_header_name",
+            "token_prefix",
+            "override_expiration",
+            "expiration_seconds",
+        ):
+            del result[field_name]
     return {"type": "api_key" if auth_type == "apiKey" else auth_type, **result}
 
 
@@ -243,7 +267,11 @@ class AgentStudioProject:
         integration = matches[0]
         config = getattr(integration.environments, environment.replace("-", "_"))
         if config.auth_type not in INTEGRATION_CREDENTIAL_FIELDS:
-            raise ValueError("Configure an authentication type before setting credentials.")
+            raise ValueError(
+                f"Authentication type '{config.auth_type}' is not supported by "
+                "`poly api-integrations configure`. "
+                "Supported types: basic, apiKey, oauth2, jwt_client_assertion."
+            )
         if not config.base_url:
             raise ValueError("Configure a base URL before setting credentials.")
         return integration
@@ -257,7 +285,7 @@ class AgentStudioProject:
         saved = self.api_handler.get_api_integration_credentials(
             token, integration.resource_id, environment
         )
-        if config.auth_type in {"jwt_client_assertion", "oauth2_client_credentials"}:
+        if config.auth_type == "jwt_client_assertion":
             auth = saved.get("auth")
             if not isinstance(auth, dict) or auth.get("type") != config.auth_type:
                 return {}
@@ -273,6 +301,8 @@ class AgentStudioProject:
             "credentials_location": "credentialsLocation",
             "auth_header_name": "authHeaderName",
             "token_prefix": "tokenPrefix",
+            "override_expiration": "overrideExpiration",
+            "expiration_seconds": "expirationSeconds",
         }
         result = {}
         for field_name, _, _ in INTEGRATION_CREDENTIAL_FIELDS[config.auth_type]:

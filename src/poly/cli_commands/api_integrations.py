@@ -14,6 +14,7 @@ from poly.cli_commands.shared import load_project
 from poly.output.console import success
 from poly.output.json_output import json_print
 from poly.project import INTEGRATION_CREDENTIAL_FIELDS as FIELDS
+from poly.project import AgentStudioProject
 from poly.utils import apikey_session
 
 
@@ -47,12 +48,11 @@ def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | 
         "token_prefix": "Token prefix",
         "key_id": "Key ID",
         "private_key": "Private key",
-        "client_auth": "Client authentication",
+        "expiration_seconds": "Expiration seconds",
     }
     choices = {
         "credentials_location": ["header", "body"],
         "location": ["header", "query_param"],
-        "client_auth": ["client_secret_basic", "client_secret_post"],
         "algorithm": ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
     }
     values = {}
@@ -63,7 +63,16 @@ def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | 
         if field == "private_key" and not saved:
             raise ValueError("Use --private-key-file for an interactive JWT signing key.")
         label = labels.get(field, field.replace("_", " ").capitalize())
-        if field in choices:
+        if field == "override_expiration":
+            override = questionary.confirm(
+                "Override token expiration?", default=saved == "true"
+            ).ask()
+            if override is None:
+                raise KeyboardInterrupt
+            value = str(override).lower()
+        elif field == "expiration_seconds" and values.get("override_expiration") != "true":
+            value = saved or ""
+        elif field in choices:
             selected = saved if saved in choices[field] else default
             value = questionary.select(f"{label}:", choices=choices[field], default=selected).ask()
             if value is None:
@@ -74,8 +83,18 @@ def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | 
                 if saved
                 else f"{label} (optional, Enter to skip): "
             )
-            entered = input(prompt)
-            value = "" if entered == "-" else entered or saved or ""
+            while True:
+                entered = input(prompt)
+                value = "" if entered == "-" else entered or saved or ""
+                if field != "expiration_seconds":
+                    break
+                try:
+                    AgentStudioProject.build_api_integration_credentials(
+                        auth_type, {**values, field: value}, ""
+                    )
+                    break
+                except ValueError as exc:
+                    warning(str(exc))
         else:
             # Short saved values stay fully masked; never put real defaults in editable input.
             masked = "******" + saved[-3:] if saved and len(saved) > 3 else "******"

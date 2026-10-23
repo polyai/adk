@@ -28,6 +28,12 @@ build_credentials = AgentStudioProject.build_api_integration_credentials
 
 
 class CredentialSerializationTest(unittest.TestCase):
+    def setUp(self):
+        confirm = patch("questionary.confirm")
+        self.confirm = confirm.start()
+        self.confirm.return_value.ask.return_value = False
+        self.addCleanup(confirm.stop)
+
     def test_supported_auth_types_match_studio_shapes(self):
         cases = [
             ("basic", {"username": "user", "password": "secret"}, "basic"),
@@ -37,14 +43,11 @@ class CredentialSerializationTest(unittest.TestCase):
             ("jwt_client_assertion", {"client_id": "client", "private_key": "private",
                                       "token_url": "https://example.com/token", "key_id": "key"},
              "jwt_client_assertion"),
-            ("oauth2_client_credentials", {"client_id": "client", "client_secret": "secret",
-                                          "token_url": "https://example.com/token"},
-             "oauth2_client_credentials"),
         ]
         for auth, values, stored_type in cases:
             with self.subTest(auth=auth):
                 result = build_credentials(auth, values, "https://example.com")
-                if auth in {"jwt_client_assertion", "oauth2_client_credentials"}:
+                if auth == "jwt_client_assertion":
                     self.assertEqual(result["base_url"], "https://example.com")
                     self.assertEqual(result["auth"]["type"], stored_type)
                     self.assertEqual(result["auth"]["config"]["client_id"], "client")
@@ -66,6 +69,35 @@ class CredentialSerializationTest(unittest.TestCase):
     def test_invalid_location_is_rejected(self):
         with self.assertRaises(ValueError):
             build_credentials("apiKey", {"key": "X-Key", "value": "secret", "location": "invalid"}, "")
+
+    def test_expiration_fields_match_frontend_serialization(self):
+        for override, seconds, expected_seconds in [(True, 3600, "3600"), (False, "", ""), ("true", "120", "120")]:
+            with self.subTest(override=override, seconds=seconds):
+                result = build_credentials("oauth2", {
+                    "client_id": "client", "client_secret": "secret",
+                    "access_token_url": "https://example.com/token",
+                    "override_expiration": override, "expiration_seconds": seconds,
+                }, "https://example.com")
+                self.assertEqual(result["overrideExpiration"], str(override).lower())
+                self.assertEqual(result["expirationSeconds"], expected_seconds)
+                self.assertNotIn("override_expiration", result)
+                self.assertNotIn("expiration_seconds", result)
+
+    def test_invalid_expiration_values_are_rejected(self):
+        values = {"client_id": "client", "client_secret": "secret",
+                  "access_token_url": "https://example.com/token"}
+        for invalid in [{"override_expiration": "yes"}, {"override_expiration": []},
+                        {"expiration_seconds": "invalid"}, {"expiration_seconds": float("inf")},
+                        {"expiration_seconds": True}]:
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                build_credentials("oauth2", {**values, **invalid}, "https://example.com")
+
+    def test_required_fields_reject_whitespace_and_basic_auth_is_trimmed(self):
+        with self.assertRaises(ValueError):
+            build_credentials("oauth2", {"client_id": " ", "client_secret": "secret",
+                                         "access_token_url": "https://example.com/token"}, "")
+        result = build_credentials("basic", {"username": " user ", "password": " secret "}, "")
+        self.assertEqual(result, {"type": "basic", "username": "user", "password": "secret"})
 
     def test_oauth_header_and_prefix_match_studio_storage(self):
         for prefix in ["Token", ""]:
@@ -224,6 +256,10 @@ class CredentialStorageTest(unittest.TestCase):
 
 class ApiIntegrationsCommandTest(unittest.TestCase):
     def setUp(self):
+        confirm = patch("questionary.confirm")
+        self.confirm = confirm.start()
+        self.confirm.return_value.ask.return_value = False
+        self.addCleanup(confirm.stop)
         self.args = Namespace(path="/project", integration="crm", env="sandbox", stdin=True,
                               json=True, private_key_file=None)
         self.project = AgentStudioProject(region="euw-1", account_id="account", project_id="project",
@@ -243,6 +279,50 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         self.assertEqual(args.api_integrations_subcommand, "configure")
         self.assertEqual(args.integration, "crm")
         self.assertEqual(args.env, "sandbox")
+
+    def test_proxy_client_credentials_are_rejected_before_secret_access(self):
+        self.projection["apiIntegrations"]["apiIntegrations"]["entities"]["integration"]["environments"]["sandbox"]["authType"] = "oauth2_client_credentials"
+        self.project._api_handler.get_api_integrations.return_value = ApiIntegration.from_projection(self.projection)
+        with self.assertRaisesRegex(ValueError, "not supported.*configure"):
+            self.project.configure_api_integration("crm", "sandbox", {}, "token")
+        self.project._api_handler.get_api_integration_credentials.assert_not_called()
+        self.project._api_handler.set_api_integration_credentials.assert_not_called()
+
+    def test_prompt_preserves_expiration_when_override_is_disabled(self):
+        saved = {"client_id": "abc", "client_secret": "saved",
+                 "access_token_url": "https://example.com/token", "override_expiration": "true",
+                 "expiration_seconds": "3600"}
+        with patch("builtins.input", return_value=""), patch("questionary.select") as select:
+            select.return_value.ask.return_value = "header"
+            result = _prompt_credentials("oauth2", saved, None)
+        self.confirm.assert_called_once_with("Override token expiration?", default=True)
+        self.assertEqual(result["override_expiration"], "false")
+        self.assertEqual(result["expiration_seconds"], "3600")
+
+    @patch("poly.output.console.warning")
+    def test_expiration_prompt_retries_invalid_duration_and_keeps_saved_value(self, warning):
+        self.confirm.return_value.ask.return_value = True
+        saved = {"client_id": "abc", "client_secret": "saved",
+                 "access_token_url": "https://example.com/token", "expiration_seconds": "3600"}
+        with patch("builtins.input", side_effect=["", "", "", "", "", "", "invalid", ""]) as read, \
+                patch("questionary.select") as select:
+            select.return_value.ask.return_value = "header"
+            result = _prompt_credentials("oauth2", saved, None)
+        self.assertEqual(result["expiration_seconds"], "3600")
+        self.assertEqual(read.call_args.args[0], "Expiration seconds [3600] (Enter to keep, - to clear): ")
+        warning.assert_called_once_with("Expiration seconds must be a finite number.")
+
+    def test_jwt_configuration_preserves_frontend_envelope(self):
+        self.projection["apiIntegrations"]["apiIntegrations"]["entities"]["integration"]["environments"]["sandbox"]["authType"] = "jwt_client_assertion"
+        self.project._api_handler.get_api_integrations.return_value = ApiIntegration.from_projection(self.projection)
+        self.project.configure_api_integration("crm", "sandbox", {
+            "client_id": "abc", "token_url": "https://example.com/token",
+            "private_key": "PEM key", "key_id": "key", "algorithm": "RS384"}, "token")
+        payload = self.project._api_handler.set_api_integration_credentials.call_args.args[3]
+        self.assertEqual(payload, {"base_url": "https://example.com", "auth": {
+            "type": "jwt_client_assertion", "config": {
+                "client_id": "abc", "token_url": "https://example.com/token", "private_key": "PEM key",
+                "key_id": "key", "algorithm": "RS384"}}})
 
     @patch("questionary.select")
     @patch("builtins.input", side_effect=["", "", "", "", "", ""])
@@ -339,19 +419,27 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
     def test_project_reads_legacy_and_nested_oauth_defaults(self):
         for auth_type, saved in [
             ("oauth2", {"type": "oauth2", "clientId": "abc", "clientSecret": "saved",
-                        "accessTokenUrl": "https://example.com/token", "authHeaderName": "X-Auth", "tokenPrefix": "Token"}),
-            ("oauth2_client_credentials", {"auth": {"type": "oauth2_client_credentials",
-                                          "config": {"client_id": "abc", "client_secret": "saved"}}}),
+                        "accessTokenUrl": "https://example.com/token", "authHeaderName": "X-Auth", "tokenPrefix": "Token",
+                        "overrideExpiration": "true", "expirationSeconds": "3600"}),
+            ("jwt_client_assertion", {"auth": {"type": "jwt_client_assertion",
+                                      "config": {"client_id": "abc", "private_key": "saved-key",
+                                                 "key_id": "key", "token_url": "https://example.com/token",
+                                                 "algorithm": "RS384"}}}),
         ]:
             self.projection["apiIntegrations"]["apiIntegrations"]["entities"]["integration"]["environments"]["sandbox"]["authType"] = auth_type
             self.project._api_handler.get_api_integrations.return_value = ApiIntegration.from_projection(self.projection)
             self.project._api_handler.get_api_integration_credentials.return_value = saved
             values = self.project.get_api_integration_credential_defaults("crm", "sandbox", "token")
             self.assertEqual(values["client_id"], "abc")
-            self.assertEqual(values["client_secret"], "saved")
+            if auth_type == "jwt_client_assertion":
+                self.assertEqual(values["private_key"], "saved-key")
+                self.assertEqual(values["key_id"], "key")
             if auth_type == "oauth2":
+                self.assertEqual(values["client_secret"], "saved")
                 self.assertEqual(values["auth_header_name"], "X-Auth")
                 self.assertEqual(values["token_prefix"], "Token")
+                self.assertEqual(values["override_expiration"], "true")
+                self.assertEqual(values["expiration_seconds"], "3600")
 
     def test_changed_auth_type_does_not_reuse_incompatible_defaults(self):
         self.project._api_handler.get_api_integrations.return_value = ApiIntegration.from_projection(self.projection)

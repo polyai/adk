@@ -30,11 +30,15 @@ Scope [read:contacts] (Enter to keep, - to clear):
    body
 Auth header name [Authorization] (Enter to keep, - to clear):
 Token prefix [Bearer] (Enter to keep, - to clear):
+? Override token expiration? Yes
+Expiration seconds [3600] (Enter to keep, - to clear):
 ~~~
 
 The command reuses the regional browser sign-in cached by `poly apikey`. If no unexpired session exists, interactive configuration opens browser sign-in and saves the session for later runs. Your user needs permission to read and write secrets. Non-interactive use requires `--stdin` and an unexpired cached session; run `poly apikey --region <region>` beforehand if needed. Stdin supplies a complete replacement for the selected environment.
 
-The command supports basic authentication, API keys, OAuth client credentials, and JWT client assertions. For `oauth2`, stdin accepts `client_id`, `client_secret`, `access_token_url`, optional `scope`, optional `credentials_location` (`header` or `body`), and the optional advanced fields `auth_header_name` and `token_prefix`. Saved advanced values are shown in full; Enter keeps them, and `-` clears them. For `oauth2_client_credentials`, use `client_id`, `client_secret`, `token_url`, and optional `client_auth` (`client_secret_basic` or `client_secret_post`).
+The command supports `basic`, `apiKey`, `oauth2`, and `jwt_client_assertion`. Configuring `oauth2_client_credentials` is not supported yet. For `oauth2`, stdin accepts `client_id`, `client_secret`, `access_token_url`, optional `scope`, optional `credentials_location` (`header` or `body`), and the optional advanced fields `auth_header_name` and `token_prefix`. Saved advanced values are shown in full; Enter keeps them, and `-` clears them. OAuth also supports `override_expiration` (a boolean) and optional numeric `expiration_seconds`, matching Studio's expiration controls. Disabling the override preserves the saved duration.
+
+JWT client assertions accept `client_id`, `token_url`, `private_key`, `key_id`, and optional `algorithm` (default `RS384`). Their stored credential envelope includes the configured API base URL, matching Studio.
 
 Only the selected environment's credentials are replaced. Other environments and existing secret metadata are preserved. Secret values are never printed or written to project files.
 
