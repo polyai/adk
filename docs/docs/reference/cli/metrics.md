@@ -94,7 +94,7 @@ The table has one row per bucket and group: a `bucket` column when `--interval` 
 | `--env` | Restrict to an environment: `test`, `sandbox`, `pre-release` (Staging), `live`, `scenarios`. Repeatable. |
 | `--deployment`, `--variant` | Restrict to deployment or variant IDs. Repeatable. |
 | `--sort FIELD[:asc\|desc]` | Secondary sort on a `--by` dimension or an aggregation. |
-| `--limit`, `--offset` | Rows per page (1 to 100, default 20) and rows to skip (up to 1000). |
+| `--limit`, `--offset` | Rows per page (1 to 100, default 20) and rows to skip (up to 1000). Checked locally before the request. |
 
 `--json` output shape:
 
@@ -109,7 +109,7 @@ The table has one row per bucket and group: a `bucket` column when `--interval` 
 
 ## `poly metrics score`
 
-Poly Score for the project: a one-line headline (conversation-weighted average and total count over the window) above the bucketed table. Shortcut for `poly metrics query poly_score --agg avg --agg conversation_count`, defaulting to the last 7 days bucketed daily.
+Poly Score for the project: a one-line headline (average and conversation count over the whole window) above the bucketed table. Shortcut for `poly metrics query poly_score --agg avg --agg conversation_count`, defaulting to the last 7 days bucketed daily. The headline comes from a separate unbucketed request, so it covers the full window whatever `--limit` and `--offset` leave in the table.
 
 Examples:
 
@@ -137,7 +137,13 @@ poly metrics score --json
   "rows": [["2026-09-28T00:00:00Z", 4.35, 290]],
   "limit": 20,
   "offset": 0,
-  "summary": { "average": 4.3, "conversations": 2012, "text": "Poly Score from 2026-09-28 to 2026-10-04: 4.3 average over 2,012 conversations." }
+  "summary": {
+    "average": 4.3,
+    "conversations": 2012,
+    "from_datetime": "2026-09-28T00:00:00",
+    "to_datetime": "2026-10-05T00:00:00",
+    "text": "Poly Score from 2026-09-28 to 2026-10-04: 4.3 average over 2,012 conversations."
+  }
 }
 ~~~
 

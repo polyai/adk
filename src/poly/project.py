@@ -12,7 +12,7 @@ import shutil
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from functools import cached_property
 from pathlib import PurePath
@@ -23,6 +23,18 @@ from google.protobuf.message import Message
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
 from poly.call.session import CallSession
+from poly.constants import (
+    DATA_AGGS,
+    DATA_CHANNELS,
+    DATA_CLIENT_ENVS,
+    DATA_FILTER_OPS,
+    DATA_GROUP_BY,
+    DATA_HAVING_OPS,
+    DATA_INTERVALS,
+    DATA_LIST_OPS,
+    DATA_MAX_LIMIT,
+    DATA_MAX_OFFSET,
+)
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
@@ -106,6 +118,142 @@ class DeploymentMode(Enum):
 def _non_empty_types(resources: ResourceMap) -> ResourceMap:
     """Return resources without the types that have none."""
     return {resource_type: typed for resource_type, typed in resources.items() if typed}
+
+
+POLY_SCORE_METRIC = "poly_score"
+POLY_SCORE_DEFAULT_DAYS = 7
+
+
+def _window_bound(value: str, *, exclusive_end: bool = False) -> str:
+    """Normalise a ``from``/``to`` bound into an ISO 8601 string for the Data API.
+
+    Accepts a date (``2026-09-01``) or a datetime (``2026-09-01T09:30``, with or
+    without an offset). A bare date for an exclusive end bound rolls to the next
+    midnight so ``to="2026-09-30"`` includes the whole of the 30th.
+
+    Raises:
+        ValueError: If the value is not a date or datetime.
+    """
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as e:
+        raise ValueError(f"Invalid date {value!r}. Use YYYY-MM-DD or an ISO 8601 datetime.") from e
+    if exclusive_end and len(text) == 10:
+        parsed = parsed + timedelta(days=1)
+    return parsed.isoformat()
+
+
+def _check_choices(name: str, values: Optional[list[str]], allowed: list[str]) -> None:
+    """Raise ``ValueError`` if any of ``values`` is not in ``allowed``."""
+    for value in values or []:
+        if value not in allowed:
+            raise ValueError(f"{name} must be one of: {', '.join(allowed)}. Got {value!r}.")
+
+
+def _build_metric_query(
+    metric: str,
+    aggs: Optional[list[str]],
+    *,
+    from_dt: Optional[str],
+    to_dt: Optional[str],
+    interval: Optional[str],
+    timezone: Optional[str],
+    group_by: Optional[list[str]],
+    channel: Optional[list[str]],
+    client_env: Optional[list[str]],
+    deployment_id: Optional[list[str]],
+    variant_id: Optional[list[str]],
+    filters: Optional[list[dict]],
+    match_any: bool,
+    having: Optional[list[dict]],
+    sort: Optional[dict],
+    limit: int,
+    offset: int,
+) -> dict:
+    """Validate the arguments of :meth:`AgentStudioProject.query_metric` and build the body.
+
+    Raises:
+        ValueError: On anything the Data API would reject.
+    """
+    if not metric or not str(metric).strip():
+        raise ValueError("A metric name is required. See `poly metrics available`.")
+    aggs = list(aggs) if aggs else ["avg", "conversation_count"]
+    _check_choices("Aggregation", aggs, DATA_AGGS)
+    if interval is not None and interval not in DATA_INTERVALS:
+        raise ValueError(f"Interval must be one of: {', '.join(DATA_INTERVALS)}. Got {interval!r}.")
+    _check_choices("Group-by dimension", group_by, DATA_GROUP_BY)
+    _check_choices("Channel", channel, DATA_CHANNELS)
+    _check_choices("Environment", client_env, DATA_CLIENT_ENVS)
+    if not 1 <= limit <= DATA_MAX_LIMIT:
+        raise ValueError(f"Limit must be between 1 and {DATA_MAX_LIMIT}. Got {limit}.")
+    if not 0 <= offset <= DATA_MAX_OFFSET:
+        raise ValueError(f"Offset must be between 0 and {DATA_MAX_OFFSET}. Got {offset}.")
+
+    checked_filters = []
+    for item in filters or []:
+        op = str(item.get("op", "")).lower()
+        if op not in DATA_FILTER_OPS:
+            raise ValueError(
+                f"Unknown filter operator {item.get('op')!r}. "
+                f"Use one of: {', '.join(DATA_FILTER_OPS)}."
+            )
+        if op in DATA_LIST_OPS and not isinstance(item.get("value"), list):
+            raise ValueError(f"Filter operator {op!r} takes a list of values.")
+        if not item.get("metric"):
+            raise ValueError("Each filter needs a metric name.")
+        checked_filters.append({"metric": item["metric"], "op": op, "value": item.get("value")})
+
+    checked_having = []
+    for item in having or []:
+        field = item.get("field")
+        if field not in DATA_AGGS:
+            raise ValueError(f"Having field must be one of: {', '.join(DATA_AGGS)}. Got {field!r}.")
+        op = str(item.get("op", "")).lower()
+        if op not in DATA_HAVING_OPS:
+            raise ValueError(
+                f"Having operator must be one of: {', '.join(DATA_HAVING_OPS)}. Got {op!r}."
+            )
+        try:
+            number = float(item.get("value"))
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Having value must be a number, got {item.get('value')!r}.") from e
+        checked_having.append({"field": field, "op": op, "value": number})
+
+    checked_sort = None
+    if sort:
+        order = str(sort.get("order") or "asc").lower()
+        if order not in ("asc", "desc"):
+            raise ValueError(f"Sort order must be 'asc' or 'desc'. Got {sort.get('order')!r}.")
+        if not sort.get("field"):
+            raise ValueError("Sort needs a field.")
+        checked_sort = {"field": sort["field"], "order": order}
+
+    body: dict[str, Any] = {
+        "metric": str(metric).strip(),
+        "aggs": aggs,
+        "limit": limit,
+        "offset": offset,
+    }
+    optional = {
+        "from_datetime": _window_bound(from_dt) if from_dt else None,
+        "to_datetime": _window_bound(to_dt, exclusive_end=True) if to_dt else None,
+        "interval": interval,
+        "timezone": timezone,
+        "group_by": list(group_by) if group_by else None,
+        "channel": list(channel) if channel else None,
+        "client_env": list(client_env) if client_env else None,
+        "deployment_id": list(deployment_id) if deployment_id else None,
+        "variant_id": list(variant_id) if variant_id else None,
+        "filters": checked_filters or None,
+        "filter_operator": "or" if match_any else None,
+        "having": checked_having or None,
+        "sort": checked_sort,
+    }
+    body.update({k: v for k, v in optional.items() if v is not None})
+    return body
 
 
 @dataclass
@@ -4257,11 +4405,6 @@ class AgentStudioProject:
             self.region, self.account_id, self.project_id
         )
 
-    # ------------------------------------------------------------------
-    # Data API reads (metric values, conversation search, transcripts).
-    # Thin wrappers so commands never talk to the API handler directly.
-    # ------------------------------------------------------------------
-
     def get_available_metrics(self) -> dict:
         """List every metric the project can query, built-in metrics included.
 
@@ -4270,60 +4413,154 @@ class AgentStudioProject:
         """
         return AgentStudioInterface.get_available_metrics(self.region, project_id=self.project_id)
 
-    def query_metric(self, body: dict) -> dict:
+    def query_metric(
+        self,
+        metric: str,
+        aggs: Optional[list[str]] = None,
+        *,
+        from_dt: Optional[str] = None,
+        to_dt: Optional[str] = None,
+        interval: Optional[str] = None,
+        timezone: Optional[str] = None,
+        group_by: Optional[list[str]] = None,
+        channel: Optional[list[str]] = None,
+        client_env: Optional[list[str]] = None,
+        deployment_id: Optional[list[str]] = None,
+        variant_id: Optional[list[str]] = None,
+        filters: Optional[list[dict]] = None,
+        match_any: bool = False,
+        having: Optional[list[dict]] = None,
+        sort: Optional[dict] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict:
         """Aggregate one metric over a window for this project.
 
         Args:
-            body: Aggregate request body. ``project_id`` is set to this project.
+            metric: Metric name from :meth:`get_available_metrics` (case-insensitive).
+            aggs: Aggregations to compute; defaults to ``avg`` and ``conversation_count``.
+            from_dt: Inclusive start, ``YYYY-MM-DD`` or an ISO 8601 datetime.
+            to_dt: Exclusive end. A bare date includes the whole of that day.
+            interval: Time bucket (``hourly``, ``daily``, ``weekly``, ``monthly``), or
+                ``None`` for one total.
+            timezone: IANA timezone for hourly and daily buckets.
+            group_by: Dimensions to group by.
+            channel: Restrict to these channels.
+            client_env: Restrict to these environments.
+            deployment_id: Restrict to these deployment IDs.
+            variant_id: Restrict to these variant IDs.
+            filters: Conversation filters, each ``{"metric", "op", "value"}``.
+            match_any: Match conversations that satisfy any filter instead of all.
+            having: Bucket thresholds, each ``{"field", "op", "value"}``.
+            sort: Secondary sort, ``{"field", "order"}``.
+            limit: Rows per page, 1 to 100.
+            offset: Rows to skip, up to 1000.
 
         Returns:
             dict: Columns, rows and paging from the Data API.
+
+        Raises:
+            ValueError: If any argument is outside what the Data API accepts.
         """
+        body = _build_metric_query(
+            metric,
+            aggs,
+            from_dt=from_dt,
+            to_dt=to_dt,
+            interval=interval,
+            timezone=timezone,
+            group_by=group_by,
+            channel=channel,
+            client_env=client_env,
+            deployment_id=deployment_id,
+            variant_id=variant_id,
+            filters=filters,
+            match_any=match_any,
+            having=having,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
         return AgentStudioInterface.query_metric(
             self.region, body={**body, "project_id": self.project_id}
         )
 
-    def search_conversations(self, body: dict) -> dict:
-        """Search this project's conversations by metric filters and window.
+    def get_poly_score(
+        self,
+        *,
+        from_dt: Optional[str] = None,
+        to_dt: Optional[str] = None,
+        interval: Optional[str] = "daily",
+        timezone: Optional[str] = None,
+        group_by: Optional[list[str]] = None,
+        channel: Optional[list[str]] = None,
+        client_env: Optional[list[str]] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict:
+        """Poly Score for this project: an overall summary plus a bucketed table.
+
+        The summary comes from its own unbucketed, ungrouped query, so it covers
+        the whole window whatever ``limit`` and ``offset`` leave in the table.
+        With neither bound given, the window is the last
+        ``POLY_SCORE_DEFAULT_DAYS`` days.
 
         Args:
-            body: Search request body. ``project_id`` is set to this project.
+            from_dt: Inclusive start, as for :meth:`query_metric`.
+            to_dt: Exclusive end, as for :meth:`query_metric`.
+            interval: Time bucket for the table; defaults to ``daily``.
+            timezone: IANA timezone for hourly and daily buckets.
+            group_by: Dimensions to group the table by.
+            channel: Restrict to these channels.
+            client_env: Restrict to these environments.
+            limit: Table rows per page.
+            offset: Table rows to skip.
 
         Returns:
-            dict: Matching conversations and total from the Data API.
+            dict: The bucketed table (``columns``, ``rows``, ``limit``, ``offset``) plus
+            ``summary``: ``{"average", "conversations", "from_datetime", "to_datetime"}``.
+
+        Raises:
+            ValueError: If any argument is outside what the Data API accepts.
         """
-        return AgentStudioInterface.search_conversations(
-            self.region, body={**body, "project_id": self.project_id}
+        if from_dt is None and to_dt is None:
+            now = datetime.now(UTC).replace(microsecond=0)
+            from_dt = (now - timedelta(days=POLY_SCORE_DEFAULT_DAYS)).isoformat()
+            to_dt = now.isoformat()
+        cohort = {
+            "from_dt": from_dt,
+            "to_dt": to_dt,
+            "channel": channel,
+            "client_env": client_env,
+        }
+        aggs = ["avg", "conversation_count"]
+
+        overall = self.query_metric(POLY_SCORE_METRIC, aggs, limit=1, **cohort)
+        columns = overall.get("columns") or []
+        rows = overall.get("rows") or []
+        summary: dict[str, Any] = {
+            "average": None,
+            "conversations": 0,
+            "from_datetime": _window_bound(from_dt) if from_dt else None,
+            "to_datetime": _window_bound(to_dt, exclusive_end=True) if to_dt else None,
+        }
+        if rows:
+            row = dict(zip(columns, rows[0]))
+            average = row.get("avg")
+            summary["average"] = round(float(average), 2) if average is not None else None
+            summary["conversations"] = int(row.get("conversation_count") or 0)
+
+        table = self.query_metric(
+            POLY_SCORE_METRIC,
+            aggs,
+            interval=interval,
+            timezone=timezone,
+            group_by=group_by,
+            limit=limit,
+            offset=offset,
+            **cohort,
         )
-
-    def search_transcripts(self, params: dict) -> dict:
-        """Search this project's transcripts for a phrase.
-
-        The project id is always sent: Personal Access Tokens need it on this
-        route, and account keys accept it as a scope.
-
-        Args:
-            params: Query parameters. ``project_id`` is set to this project.
-
-        Returns:
-            dict: Matching turns with context from the Data API.
-        """
-        return AgentStudioInterface.search_transcripts(
-            self.region, params={**params, "project_id": self.project_id}
-        )
-
-    def get_transcript(self, conversation_id: str) -> dict:
-        """Fetch one conversation's transcript.
-
-        Args:
-            conversation_id: The conversation ID.
-
-        Returns:
-            dict: The transcript turns from the Data API.
-        """
-        return AgentStudioInterface.get_transcript(
-            self.region, conversation_id=conversation_id, project_id=self.project_id
-        )
+        return {**table, "summary": summary}
 
     def create_custom_metric(self, data: dict) -> dict:
         """Validate and create a new custom metric.
