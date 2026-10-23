@@ -22,6 +22,8 @@ from io import StringIO
 from typing import TYPE_CHECKING, Callable, Optional, Union
 
 import ruamel.yaml as yaml
+from ruamel.yaml.nodes import ScalarNode
+from ruamel.yaml.resolver import VersionedResolver
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,33 @@ _yaml_dumper.width = 100
 
 _yaml_loader = yaml.YAML(typ="safe")
 _yaml_loader.preserve_quotes = False
+
+# ruamel emits YAML 1.2, which dropped sexagesimal integers, the yes/no/on/off
+# booleans and implicit timestamps. It therefore sees no reason to quote strings
+# like "19:00", "yes" or "2026-09-25" and writes them as bare scalars. Readers on
+# YAML 1.1 -- PyYAML, and the Go, Java and Ruby libraries -- take those back as
+# 1140, True and a date object, so the value silently changes meaning once it
+# leaves the ADK. Ask ruamel's own 1.1 resolver which plain scalars would be
+# retyped rather than reimplementing its rules, and quote exactly those; all
+# other output is byte-identical.
+_resolver_1_1 = VersionedResolver(version=(1, 1))
+
+
+def _retyped_by_a_yaml_1_1_reader(value: str) -> bool:
+    try:
+        tag = _resolver_1_1.resolve(ScalarNode, value, (True, False))
+    except Exception:  # pragma: no cover - resolver should not raise on a str
+        return True
+    return tag != "tag:yaml.org,2002:str"
+
+
+def _represent_str_yaml_1_1_safe(representer, data: str):
+    """Represent a str, quoting it when a YAML 1.1 reader would retype it."""
+    style = "'" if _retyped_by_a_yaml_1_1_reader(data) else None
+    return representer.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+_yaml_dumper.representer.add_representer(str, _represent_str_yaml_1_1_safe)
 
 
 def resource_to_dict(obj) -> dict:
@@ -153,7 +182,7 @@ def same_yaml_data(a, b) -> bool:
     """
     try:
         return a == b and json.dumps(a, default=str) == json.dumps(b, default=str)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
 
 
