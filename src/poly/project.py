@@ -1074,10 +1074,8 @@ class AgentStudioProject:
                     local_file_path = incoming_resource.get_path(self.root_path)
                 try:
                     # Normalise the local resource to ensure formatting differences don't cause unnecessary merge conflicts
-                    incoming_resource_mapping = self._make_resource_mapping(incoming_resource)
-                    local_resource = self.read_local_resource(
-                        resource=incoming_resource_mapping,
-                        resource_mappings=incoming_resource_mappings,
+                    local_resource, local_file_path = self._read_pulled_resource_locally(
+                        incoming_resource, original_resource, incoming_resource_mappings
                     )
                     local_content = local_resource.to_pretty(
                         resource_name=incoming_resource.name,
@@ -1128,7 +1126,7 @@ class AgentStudioProject:
                     original_content, local_content, incoming_content
                 )
 
-                if merged_contents == local_content:
+                if merged_contents == local_content and local_file_path == file_path:
                     continue
 
                 if resource_utils.contains_merge_conflict(merged_contents):
@@ -1179,6 +1177,31 @@ class AgentStudioProject:
                 resource_type.delete_resource(resource.get_path(self.root_path))
 
         return files_with_conflicts
+
+    def _read_pulled_resource_locally(
+        self,
+        incoming_resource: Resource,
+        original_resource: Optional[Resource],
+        resource_mappings: list[ResourceMapping],
+    ) -> tuple[Resource, str]:
+        incoming_path = incoming_resource.get_path(self.root_path)
+        try:
+            resource = self.read_local_resource(
+                resource=self._make_resource_mapping(incoming_resource),
+                resource_mappings=resource_mappings,
+            )
+            return resource, incoming_path
+        except FileNotFoundError:
+            if original_resource is None:
+                raise
+            original_path = original_resource.get_path(self.root_path)
+            if original_path == incoming_path:
+                raise
+        resource = self.read_local_resource(
+            resource=self._make_resource_mapping(original_resource),
+            resource_mappings=resource_mappings,
+        )
+        return resource, original_path
 
     def _stage_commands(
         self,
