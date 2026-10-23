@@ -244,6 +244,37 @@ class AgentStudioProject:
             raise ValueError("Configure a base URL before setting credentials.")
         return integration
 
+    def get_api_integration_credential_defaults(
+        self, name: str, environment: str, token: str
+    ) -> dict:
+        """Read reusable fields only when saved credentials match the configured auth type."""
+        integration = self.get_api_integration(name, environment)
+        config = getattr(integration.environments, environment.replace("-", "_"))
+        saved = self.api_handler.get_api_integration_credentials(
+            token, integration.resource_id, environment
+        )
+        if config.auth_type in {"jwt_client_assertion", "oauth2_client_credentials"}:
+            auth = saved.get("auth")
+            if not isinstance(auth, dict) or auth.get("type") != config.auth_type:
+                return {}
+            saved = auth.get("config")
+            if not isinstance(saved, dict):
+                raise ValueError("Stored credentials have an unexpected format; no changes made.")
+        elif saved.get("type") != ("api_key" if config.auth_type == "apiKey" else config.auth_type):
+            return {}
+        aliases = {
+            "client_id": "clientId",
+            "client_secret": "clientSecret",
+            "access_token_url": "accessTokenUrl",
+            "credentials_location": "credentialsLocation",
+        }
+        result = {}
+        for field_name, _, _ in INTEGRATION_CREDENTIAL_FIELDS[config.auth_type]:
+            value = saved.get(field_name, saved.get(aliases.get(field_name)))
+            if isinstance(value, str) and value:
+                result[field_name] = value
+        return result
+
     def configure_api_integration(
         self, name: str, environment: str, values: dict, token: str
     ) -> None:

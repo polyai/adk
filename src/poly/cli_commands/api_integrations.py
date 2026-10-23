@@ -18,6 +18,59 @@ from poly.output.json_output import json_print
 from poly.project import INTEGRATION_CREDENTIAL_FIELDS as FIELDS
 
 
+def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | None) -> dict:
+    """Prompt with masked saved values, required-field retries, and constrained choices."""
+    import questionary
+
+    from poly.output.console import warning
+
+    labels = {
+        "client_id": "Client ID",
+        "client_secret": "Client Secret",
+        "access_token_url": "Token URL",
+        "token_url": "Token URL",
+        "credentials_location": "Credentials location",
+        "key_id": "Key ID",
+        "private_key": "Private key",
+        "client_auth": "Client authentication",
+    }
+    choices = {
+        "credentials_location": ["header", "body"],
+        "location": ["header", "query_param"],
+        "client_auth": ["client_secret_basic", "client_secret_post"],
+        "algorithm": ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
+    }
+    values = {}
+    for field, hidden, default in FIELDS[auth_type]:
+        if field == "private_key" and private_key_file:
+            continue
+        saved = existing.get(field)
+        if field == "private_key" and not saved:
+            raise ValueError("Use --private-key-file for an interactive JWT signing key.")
+        label = labels.get(field, field.replace("_", " ").capitalize())
+        if field in choices:
+            selected = saved if saved in choices[field] else default
+            value = questionary.select(f"{label}:", choices=choices[field], default=selected).ask()
+            if value is None:
+                raise KeyboardInterrupt
+        elif field == "scope":
+            value = input("Scope (optional, Enter to skip): ")
+        else:
+            # Short saved values stay fully masked; never put real defaults in editable input.
+            masked = "******" + saved[-3:] if saved and len(saved) > 3 else "******"
+            if field in {"access_token_url", "token_url", "private_key"}:
+                masked = "****"
+            prompt = f"{label}" + (f" [{masked}]" if saved else "") + ": "
+            while True:
+                entered = getpass.getpass(prompt) if hidden else input(prompt)
+                value = entered or saved or default
+                if isinstance(value, str) and value.strip():
+                    break
+                warning(f"{label} is required.")
+        values[field] = value
+    return values
+
+
 class ApiIntegrationsCommand(BaseCommand):
     """Manage credentials for existing API integrations."""
 
@@ -68,19 +121,16 @@ class ApiIntegrationsCommand(BaseCommand):
             if not isinstance(values, dict):
                 raise ValueError("Credentials must be a JSON object.")
         else:
-            values = {}
-            for field, hidden, default in FIELDS[config.auth_type]:
-                if field == "private_key" and args.private_key_file:
-                    continue
-                if field == "private_key":
-                    raise ValueError("Use --private-key-file for an interactive JWT signing key.")
-                prompt = (
-                    f"{field} ({args.env})"
-                    + (f" [{default}]" if default is not None else "")
-                    + ": "
-                )
-                value = getpass.getpass(prompt) if hidden else input(prompt)
-                values[field] = value if value else default
+            from poly.output.console import info
+
+            token = token or _signin(project.region)
+            existing = project.get_api_integration_credential_defaults(
+                args.integration, args.env, token
+            )
+            info(
+                f"Configure credentials for {integration.name} ({args.env}); updates apply directly."
+            )
+            values = _prompt_credentials(config.auth_type, existing, args.private_key_file)
         if args.private_key_file:
             if "private_key" in values:
                 raise ValueError(

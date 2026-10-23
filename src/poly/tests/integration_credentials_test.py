@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import requests
 
 from poly.cli import AgentStudioCLI
-from poly.cli_commands.api_integrations import ApiIntegrationsCommand
+from poly.cli_commands.api_integrations import ApiIntegrationsCommand, _prompt_credentials
 from poly.handlers.integration_credentials import IntegrationCredentialsHandler
 from poly.handlers.sdk import SourcererAPIError
 from poly.project import AgentStudioProject
@@ -68,6 +68,30 @@ class CredentialStorageTest(unittest.TestCase):
             "euw-1", "token", "account", "project", "integration", environment,
             {"type": "basic", "username": "user", "password": "new-secret"},
         )
+
+    @patch.object(IntegrationCredentialsHandler, "_request")
+    def test_read_defaults_uses_selected_environment_and_legacy_spelling(self, request):
+        for key in ["pre_release", "pre-release"]:
+            request.return_value = [{
+                "display_name": "api-integration-project-integration", "value_type": "key-value",
+                "secret_value": {key: json.dumps({"type": "oauth2", "client_secret": "saved"}),
+                                 "live": json.dumps({"client_secret": "other-env"})},
+            }]
+            values = IntegrationCredentialsHandler.get_credentials(
+                "euw-1", "token", "account", "project", "integration", "pre-release")
+            self.assertEqual(values, {"type": "oauth2", "client_secret": "saved"})
+
+    @patch.object(IntegrationCredentialsHandler, "_request")
+    def test_malformed_saved_json_is_redacted(self, request):
+        request.return_value = [{
+            "display_name": "api-integration-project-integration", "value_type": "key-value",
+            "secret_value": {"sandbox": "saved-secret-not-json"},
+        }]
+        with self.assertRaises(ValueError) as caught:
+            IntegrationCredentialsHandler.get_credentials(
+                "euw-1", "token", "account", "project", "integration", "sandbox")
+        self.assertNotIn("saved-secret", str(caught.exception))
+        self.assertTrue(caught.exception.__suppress_context__)
 
     @patch.object(IntegrationCredentialsHandler, "_request")
     def test_create_does_not_return_plaintext(self, request):
@@ -189,6 +213,76 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         self.assertEqual(args.api_integrations_subcommand, "configure")
         self.assertEqual(args.integration, "crm")
         self.assertEqual(args.env, "sandbox")
+
+    @patch("questionary.select")
+    @patch("poly.cli_commands.api_integrations.getpass.getpass", return_value="")
+    @patch("builtins.input", side_effect=["", "", ""])
+    def test_prompt_reuses_masked_defaults_and_picks_location(self, read, hidden, select):
+        select.return_value.ask.return_value = "body"
+        saved = {"client_id": "saved-client-ABC", "client_secret": "saved-secret-DEF",
+                 "access_token_url": "https://example.com/token", "scope": "old-scope",
+                 "credentials_location": "header"}
+        result = _prompt_credentials("oauth2", saved, None)
+        self.assertEqual(result["client_id"], saved["client_id"])
+        self.assertEqual(result["client_secret"], saved["client_secret"])
+        self.assertEqual(result["access_token_url"], saved["access_token_url"])
+        self.assertEqual(result["scope"], "")
+        self.assertEqual(result["credentials_location"], "body")
+        self.assertEqual(read.call_args_list[0].args[0], "Client ID [******ABC]: ")
+        hidden.assert_called_once_with("Client Secret [******DEF]: ")
+        self.assertEqual(read.call_args_list[1].args[0], "Token URL [****]: ")
+        select.assert_called_once_with("Credentials location:", choices=["header", "body"],
+                                       default="header")
+
+    @patch("poly.output.console.warning")
+    @patch("questionary.select")
+    @patch("poly.cli_commands.api_integrations.getpass.getpass", side_effect=["", "secret"])
+    @patch("builtins.input", side_effect=["", "abc", "", "https://example.com/token", ""])
+    def test_prompt_retries_required_fields_without_saved_values(self, read, hidden, select, warn):
+        select.return_value.ask.return_value = "header"
+        result = _prompt_credentials("oauth2", {}, None)
+        self.assertEqual(result["client_id"], "abc")
+        self.assertEqual(result["client_secret"], "secret")
+        self.assertEqual(warn.call_count, 3)
+        self.assertEqual(read.call_count, 5)
+        self.assertEqual(hidden.call_count, 2)
+
+    @patch("poly.cli_commands.api_integrations.getpass.getpass", return_value="")
+    @patch("builtins.input", return_value="")
+    def test_short_saved_values_stay_fully_masked(self, read, hidden):
+        result = _prompt_credentials("basic", {"username": "abc", "password": "xyz"}, None)
+        self.assertEqual(result["password"], "xyz")
+        read.assert_called_once_with("Username [******]: ")
+        hidden.assert_called_once_with("Password [******]: ")
+
+    @patch("questionary.select")
+    @patch("poly.cli_commands.api_integrations.getpass.getpass", return_value="")
+    @patch("builtins.input", return_value="")
+    def test_cancelled_picker_aborts_configuration(self, read, hidden, select):
+        select.return_value.ask.return_value = None
+        with self.assertRaises(KeyboardInterrupt):
+            _prompt_credentials("oauth2", {"client_id": "abc", "client_secret": "saved",
+                                           "access_token_url": "https://example.com/token"}, None)
+
+    def test_project_reads_legacy_and_nested_oauth_defaults(self):
+        for auth_type, saved in [
+            ("oauth2", {"type": "oauth2", "clientId": "abc", "clientSecret": "saved",
+                        "accessTokenUrl": "https://example.com/token"}),
+            ("oauth2_client_credentials", {"auth": {"type": "oauth2_client_credentials",
+                                          "config": {"client_id": "abc", "client_secret": "saved"}}}),
+        ]:
+            self.projection["apiIntegrations"]["apiIntegrations"]["entities"]["integration"]["environments"]["sandbox"]["authType"] = auth_type
+            self.project._api_handler.get_api_integrations.return_value = ApiIntegration.from_projection(self.projection)
+            self.project._api_handler.get_api_integration_credentials.return_value = saved
+            values = self.project.get_api_integration_credential_defaults("crm", "sandbox", "token")
+            self.assertEqual(values["client_id"], "abc")
+            self.assertEqual(values["client_secret"], "saved")
+
+    def test_changed_auth_type_does_not_reuse_incompatible_defaults(self):
+        self.project._api_handler.get_api_integrations.return_value = ApiIntegration.from_projection(self.projection)
+        self.project._api_handler.get_api_integration_credentials.return_value = {
+            "type": "oauth2", "password": "do-not-reuse"}
+        self.assertEqual(self.project.get_api_integration_credential_defaults("crm", "sandbox", "token"), {})
 
     def test_invalid_environment_does_not_fetch_or_write(self):
         with self.assertRaises(ValueError):

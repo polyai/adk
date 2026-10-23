@@ -18,7 +18,19 @@ poly api-integrations configure crm --env sandbox
 your-secret-provider | poly api-integrations configure crm --env sandbox --stdin --json
 ~~~
 
-Interactive mode prompts for the configured authentication type's fields and hides secret input. It signs in to Studio unless `POLY_STUDIO_ACCESS_TOKEN` contains a Studio access token. Your user needs permission to read and write secrets. Non-interactive use requires both a token and `--stdin`.
+Interactive mode loads saved credentials and displays masked defaults. Press Enter to keep a saved required value, or enter a replacement. Required fields are prompted again when neither a new value nor a saved value exists. Secret input is hidden. Credentials location is selected from `header` and `body` using the arrow keys; Enter on the optional scope skips it.
+
+~~~text
+Client ID [******ABC]:
+Client Secret [******DEF]:
+Token URL [****]:
+Scope (optional, Enter to skip):
+? Credentials location: (Use arrow keys)
+ » header
+   body
+~~~
+
+The command signs in to Studio unless `POLY_STUDIO_ACCESS_TOKEN` contains a Studio access token. Your user needs permission to read and write secrets. Non-interactive use requires both a token and `--stdin`, and stdin continues to supply a complete replacement for the selected environment.
 
 The command supports basic authentication, API keys, OAuth client credentials, and JWT client assertions. For `oauth2`, stdin accepts `client_id`, `client_secret`, `access_token_url`, optional `scope`, and optional `credentials_location` (`header` or `body`). For `oauth2_client_credentials`, use `client_id`, `client_secret`, `token_url`, and optional `client_auth` (`client_secret_basic` or `client_secret_post`).
 

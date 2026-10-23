@@ -26,19 +26,14 @@ class IntegrationCredentialsHandler:
         )
 
     @classmethod
-    def set_credentials(
+    def _get_secret(
         cls,
         region: str,
         token: str,
         account_id: str,
         project_id: str,
         integration_id: str,
-        environment: str,
-        credentials: dict,
-    ) -> None:
-        """Replace one environment, preserving the secret's other values and metadata."""
-        if environment not in {"sandbox", "pre-release", "live"}:
-            raise ValueError("Environment must be sandbox, pre-release or live.")
+    ) -> dict | None:
         name = f"api-integration-{project_id}-{integration_id}"
         secrets = cls._request(region, token, account_id, "GET", params={"name": name})
         if not isinstance(secrets, list) or len(secrets) > 1:
@@ -53,6 +48,53 @@ class IntegrationCredentialsHandler:
             raise ValueError(
                 "Existing integration secret has an unexpected format; no changes made."
             )
+        return existing
+
+    @classmethod
+    def get_credentials(
+        cls,
+        region: str,
+        token: str,
+        account_id: str,
+        project_id: str,
+        integration_id: str,
+        environment: str,
+    ) -> dict:
+        """Read the selected environment's stored credential object without logging it."""
+        existing = cls._get_secret(region, token, account_id, project_id, integration_id)
+        if existing is None:
+            return {}
+        values = existing["secret_value"]
+        storage_key = "pre_release" if environment == "pre-release" else environment
+        raw = values.get(storage_key, values.get(environment))
+        if raw is None:
+            return {}
+        try:
+            credentials = json.loads(raw)
+        except (ValueError, TypeError):
+            raise ValueError(
+                "Stored credentials have an unexpected format; no changes made."
+            ) from None
+        if not isinstance(credentials, dict):
+            raise ValueError("Stored credentials have an unexpected format; no changes made.")
+        return credentials
+
+    @classmethod
+    def set_credentials(
+        cls,
+        region: str,
+        token: str,
+        account_id: str,
+        project_id: str,
+        integration_id: str,
+        environment: str,
+        credentials: dict,
+    ) -> None:
+        """Replace one environment, preserving the secret's other values and metadata."""
+        if environment not in {"sandbox", "pre-release", "live"}:
+            raise ValueError("Environment must be sandbox, pre-release or live.")
+        name = f"api-integration-{project_id}-{integration_id}"
+        existing = cls._get_secret(region, token, account_id, project_id, integration_id)
         values = dict(existing["secret_value"]) if existing else {}
         storage_key = "pre_release" if environment == "pre-release" else environment
         if storage_key == "pre_release":
