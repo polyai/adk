@@ -1539,7 +1539,7 @@
           "endDate": null,
           "fromNumber": "+15550100",
           "smsFromNumber": "+15550101",
-          "defaultVariantId": null,
+          "defaultVariantId": "VARIANT-spanish",
           "country": "US",
           "useCase": "transactional",
           "dailyContactLimit": 3,
@@ -1681,7 +1681,11 @@
               "writebackEnabled": false
             }
           }
-        ]
+        ],
+        "function_code": {
+          "condition-1": "def check_reply(outbound_contact: OutboundContact, outbound_campaign: OutboundCampaign):\n    if outbound_contact.metadata.get(\"confirmed\"):\n        return {\"branch\": \"confirmed\"}\n    return {\"branch\": None}\n",
+          "trigger-1": "def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):\n    return {\"contacts\": [\n        {\n            \"external_id\": row[\"id\"],\n            \"phone\": row[\"phone\"],\n            \"first_name\": row[\"first_name\"],\n            \"last_name\": row[\"last_name\"],\n            \"consent_given\": True,\n            \"consent_at\": row[\"consent_at\"],\n        }\n        for row in contacts\n    ]}\n"
+        }
       }
     },
     "outbound_campaign_functions": {

@@ -5,7 +5,7 @@ settings:
   endDate:
   fromNumber: '+15550100'
   smsFromNumber: '+15550101'
-  defaultVariantId:
+  defaultVariant: spanish
   country: US
   useCase: transactional
   dailyContactLimit: 3

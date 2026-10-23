@@ -288,72 +288,34 @@ def group_outbound_campaign_changes(
     post_push_deleted_resources: ResourceMap,
     current_resources: ResourceMap,
 ) -> None:
-    """Turn campaign file changes into campaign, settings and node changes, in place.
+    """Finish the campaign changes the sub-resource diff staged, in place.
 
-    Function-file changes mark their campaign as updated, a renamed campaign folder keeps its
-    id, and campaign edits are split into settings and per-node commands.
+    A renamed folder keeps its campaign id, an edited `.py` file updates its node (the file has
+    no command of its own), and node deletes wait until the nodes routing to them are updated.
     """
-    _attach_campaign_function_code(state)
-    _attach_campaign_function_code(current_resources)
-    _pair_renamed_campaigns(state, new_resources, updated_resources, deleted_resources)
-
-    touched_folders = {
-        function.campaign_folder
-        for changes in (new_resources, updated_resources, deleted_resources)
-        for function in changes.pop(OutboundCampaignFunction, {}).values()
-        if isinstance(function, OutboundCampaignFunction)
-    }
-    new_campaigns = new_resources.get(OutboundCampaign, {})
-    for campaign_id, campaign in state.get(OutboundCampaign, {}).items():
-        if campaign.folder in touched_folders and campaign_id not in new_campaigns:
-            updated_resources.setdefault(OutboundCampaign, {}).setdefault(campaign_id, campaign)
-
-    def stage(changes: ResourceMap, resource: Resource) -> None:
-        changes.setdefault(type(resource), {})[resource.resource_id] = resource
-
-    for campaign in new_campaigns.values():
-        stage(new_resources, campaign.settings_change())
-        for node in campaign.node_changes(None)[0]:
-            stage(new_resources, node)
-
-    original_campaigns = current_resources.get(OutboundCampaign, {})
-    for campaign_id, campaign in list(updated_resources.get(OutboundCampaign, {}).items()):
-        original = original_campaigns.get(campaign_id)
-        created, changed, removed = campaign.node_changes(original)
-        for node in created:
-            stage(new_resources, node)
-        for node in changed:
-            stage(updated_resources, node)
-        for node in removed:
-            stage(post_push_deleted_resources, node)
-        if original is None or campaign.settings != original.settings:
-            stage(updated_resources, campaign.settings_change())
-        if original is not None and (campaign.name, campaign.description) == (
-            original.name,
-            original.description,
-        ):
-            updated_resources[OutboundCampaign].pop(campaign_id)
-
-    for changes in (new_resources, updated_resources, post_push_deleted_resources):
-        for resource_type in (OutboundCampaign, OutboundCampaignSettings, OutboundCampaignNode):
-            if resource_type in changes and not changes[resource_type]:
-                changes.pop(resource_type)
+    pair_renamed_campaigns(state, new_resources, updated_resources, deleted_resources)
+    _stage_function_file_changes(
+        state, new_resources, updated_resources, deleted_resources, current_resources
+    )
+    removed_nodes = deleted_resources.pop(OutboundCampaignNode, {})
+    if removed_nodes:
+        post_push_deleted_resources.setdefault(OutboundCampaignNode, {}).update(removed_nodes)
 
 
-def _attach_campaign_function_code(resources: ResourceMap) -> None:
-    code_by_folder: dict[str, dict[str, str]] = {}
-    for function in resources.get(OutboundCampaignFunction, {}).values():
-        code_by_folder.setdefault(function.campaign_folder, {})[function.node_id] = function.code
-    for campaign in resources.get(OutboundCampaign, {}).values():
-        campaign.function_code = code_by_folder.get(campaign.folder, {})
-
-
-def _pair_renamed_campaigns(
+def pair_renamed_campaigns(
     state: ResourceMap,
     new_resources: ResourceMap,
     updated_resources: ResourceMap,
     deleted_resources: ResourceMap,
 ) -> None:
+    """Push a renamed campaign folder as an update of the saved campaign, keeping its id.
+
+    The folder name comes from the campaign name, so a rename reads as a delete and a create,
+    which would replace a live campaign with a new one. A new campaign sharing node ids with
+    exactly one deleted campaign (and no other new one) takes that campaign's id and becomes an
+    update, with its settings and nodes re-diffed against the saved campaign. Anything ambiguous
+    stays a delete and a create.
+    """
     new_campaigns = new_resources.get(OutboundCampaign, {})
     deleted_campaigns = deleted_resources.get(OutboundCampaign, {})
     if not new_campaigns or not deleted_campaigns:
@@ -367,12 +329,9 @@ def _pair_renamed_campaigns(
     new_node_ids = {
         campaign_id: node_ids(campaign) for campaign_id, campaign in new_campaigns.items()
     }
-    old_node_ids = {
-        campaign_id: node_ids(campaign) for campaign_id, campaign in deleted_campaigns.items()
-    }
     matches = {
-        old_id: [new_id for new_id, new_ids in new_node_ids.items() if new_ids & old_ids]
-        for old_id, old_ids in old_node_ids.items()
+        old_id: [new_id for new_id, ids in new_node_ids.items() if ids & node_ids(campaign)]
+        for old_id, campaign in deleted_campaigns.items()
     }
     for old_id, new_ids in matches.items():
         if len(new_ids) != 1:
@@ -381,16 +340,74 @@ def _pair_renamed_campaigns(
         if sum(new_id in candidates for candidates in matches.values()) != 1:
             continue
         campaign = new_campaigns.pop(new_id)
-        deleted_campaigns.pop(old_id)
+        saved_campaign = deleted_campaigns.pop(old_id)
+
+        for changes in (new_resources, updated_resources, deleted_resources):
+            for sub_type in _CAMPAIGN_SUBRESOURCE_TYPES:
+                for sub_id in list(changes.get(sub_type, {})):
+                    if sub_id == new_id or sub_id.startswith(f"{new_id}:"):
+                        changes[sub_type].pop(sub_id)
+
         campaign.resource_id = old_id
         updated_resources.setdefault(OutboundCampaign, {})[old_id] = campaign
+        _stage(
+            (new_resources, updated_resources, deleted_resources),
+            campaign.get_new_updated_deleted_subresources(old_resource=saved_campaign),
+        )
         state_campaigns = state.setdefault(OutboundCampaign, {})
         state_campaigns.pop(new_id, None)
         state_campaigns[old_id] = campaign
 
-    for changes in (new_resources, deleted_resources):
-        if OutboundCampaign in changes and not changes[OutboundCampaign]:
-            changes.pop(OutboundCampaign)
+    _prune_empty(
+        (new_resources, updated_resources, deleted_resources),
+        (OutboundCampaign, *_CAMPAIGN_SUBRESOURCE_TYPES),
+    )
+
+
+def _stage_function_file_changes(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+    current_resources: ResourceMap,
+) -> None:
+    touched_folders = {
+        function.campaign_folder
+        for changes in (new_resources, updated_resources, deleted_resources)
+        for function in changes.pop(OutboundCampaignFunction, {}).values()
+        if isinstance(function, OutboundCampaignFunction)
+    }
+    staged = set(new_resources.get(OutboundCampaign, {})) | set(
+        updated_resources.get(OutboundCampaign, {})
+    )
+    saved_campaigns = current_resources.get(OutboundCampaign, {})
+    for campaign_id, campaign in state.get(OutboundCampaign, {}).items():
+        if campaign.folder not in touched_folders or campaign_id in staged:
+            continue
+        if campaign_id in saved_campaigns:
+            _stage(
+                (new_resources, updated_resources, deleted_resources),
+                campaign.get_new_updated_deleted_subresources(saved_campaigns[campaign_id]),
+            )
+
+
+def _stage(
+    changes: tuple[ResourceMap, ResourceMap, ResourceMap],
+    sub_changes: tuple[list[Resource], list[Resource], list[Resource]],
+) -> None:
+    for resource_map, sub_resources in zip(changes, sub_changes):
+        for sub_resource in sub_resources:
+            resource_map.setdefault(type(sub_resource), {})[sub_resource.resource_id] = sub_resource
+
+
+def _prune_empty(changes: tuple[ResourceMap, ...], resource_types: tuple[type, ...]) -> None:
+    for resource_map in changes:
+        for resource_type in resource_types:
+            if resource_type in resource_map and not resource_map[resource_type]:
+                resource_map.pop(resource_type)
+
+
+_CAMPAIGN_SUBRESOURCE_TYPES = (OutboundCampaignSettings, OutboundCampaignNode)
 
 
 def push_asr_settings_by_section(
