@@ -94,3 +94,41 @@ response = conv.api.salesforce.update_contact(
 ## Testing with mocked responses
 
 A conversation that branches on an operation's response (e.g. slot negotiation, availability checks) needs that response to be deterministic to test reliably. Test cases can mock an operation's response per test — see [Tests: API mocks](tests.md#api-mocks).
+
+## Set credentials from the CLI
+
+Push the integration definition first, including its base URL and auth type for the target environment. Then run this from the local project:
+
+```bash
+poly api-integrations configure api_name --env sandbox
+```
+
+The command shows saved values in brackets, masking client IDs and secrets and displaying the full token URL; Enter keeps a saved required value. Newly typed values are visible. Missing required fields are prompted again, and credentials location uses an arrow-key picker. Scope shows its saved value; Enter keeps it, or skips it when unset. Enter `-` to clear a saved scope. The command reuses the regional browser session shared with `poly apikey`. It prompts for browser sign-in and caches the session only when no unexpired session exists. Your Studio user needs permission to read and write secrets; the ADK API key is also needed to look up the integration.
+
+For automation, sign in first with `poly apikey --region <region>` to populate the shared session cache, then pipe a JSON object with `--stdin`:
+
+```bash
+your-secret-provider | poly api-integrations configure api_name --env sandbox --stdin --json
+```
+
+For `oauth2`, the input object has this shape (replace the placeholders):
+
+```json
+{
+  "client_id": "<client-id>",
+  "client_secret": "<client-secret>",
+  "access_token_url": "https://example.com/oauth/token",
+  "scope": "",
+  "credentials_location": "header",
+  "auth_header_name": "Authorization",
+  "token_prefix": "Bearer",
+  "override_expiration": true,
+  "expiration_seconds": 3600
+}
+```
+
+`oauth2` also accepts the optional `auth_header_name` and `token_prefix` fields from Studio's advanced OAuth settings. Their saved values are shown in full; Enter keeps them, and `-` clears them.
+
+The command supports `basic`, `apiKey`, `oauth2`, and `jwt_client_assertion`. Configuring `oauth2_client_credentials` is not supported yet. OAuth also accepts `override_expiration` and `expiration_seconds`, matching Studio's expiration controls. For JWT signing keys, use `--private-key-file path/to/key.pem` or the `private_key` field on stdin.
+
+You can select an integration by name or ID. `--env` accepts `sandbox`, `pre-release`, or `live`. Each write replaces the selected environment's credentials and preserves other environments and secret metadata. Credentials are shared across project branches and take effect directly in Studio; this command does not require a later push. Secret values are not printed or saved to project files.
