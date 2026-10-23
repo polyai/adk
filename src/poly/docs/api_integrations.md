@@ -119,9 +119,13 @@ For `oauth2`, the input object has this shape (replace the placeholders):
   "client_secret": "<client-secret>",
   "access_token_url": "https://example.com/oauth/token",
   "scope": "",
-  "credentials_location": "header"
+  "credentials_location": "header",
+  "auth_header_name": "Authorization",
+  "token_prefix": "Bearer"
 }
 ```
+
+`oauth2` also accepts the optional `auth_header_name` and `token_prefix` fields from Studio's advanced OAuth settings. Their saved values are shown in full; Enter keeps them, and `-` clears them.
 
 For `oauth2_client_credentials`, use `client_id`, `client_secret`, `token_url`, and optionally `client_auth` (`client_secret_basic` by default, or `client_secret_post`). The command also supports basic auth, API keys, and JWT client assertions. For JWT signing keys, use `--private-key-file path/to/key.pem` or the `private_key` field on stdin.
 

@@ -67,6 +67,30 @@ class CredentialSerializationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_credentials("apiKey", {"key": "X-Key", "value": "secret", "location": "invalid"}, "")
 
+    def test_oauth_header_and_prefix_match_studio_storage(self):
+        for prefix in ["Token", ""]:
+            result = build_credentials("oauth2", {
+                "client_id": "client", "client_secret": "secret",
+                "access_token_url": "https://example.com/token",
+                "auth_header_name": "X-Auth", "token_prefix": prefix,
+            }, "https://example.com")
+            self.assertEqual(result["authHeaderName"], "X-Auth")
+            self.assertEqual(result["tokenPrefix"], prefix)
+
+    @patch("questionary.select")
+    @patch("builtins.input", side_effect=["", "", "", "", "X-New", "-"])
+    def test_optional_oauth_settings_can_be_changed_and_cleared(self, read, select):
+        select.return_value.ask.return_value = "header"
+        result = _prompt_credentials("oauth2", {
+            "client_id": "client", "client_secret": "secret",
+            "access_token_url": "https://example.com/token",
+            "auth_header_name": "X-Old", "token_prefix": "Token",
+        }, None)
+        self.assertEqual(result["auth_header_name"], "X-New")
+        self.assertEqual(result["token_prefix"], "")
+        self.assertEqual(read.call_args_list[4].args[0], "Auth header name [X-Old] (Enter to keep, - to clear): ")
+        self.assertEqual(read.call_args_list[5].args[0], "Token prefix [Token] (Enter to keep, - to clear): ")
+
 
 class CredentialStorageTest(unittest.TestCase):
     def set_credentials(self, environment="sandbox"):
@@ -221,18 +245,20 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         self.assertEqual(args.env, "sandbox")
 
     @patch("questionary.select")
-    @patch("builtins.input", side_effect=["", "", "", ""])
+    @patch("builtins.input", side_effect=["", "", "", "", "", ""])
     def test_prompt_reuses_masked_defaults_and_picks_location(self, read, select):
         select.return_value.ask.return_value = "body"
         saved = {"client_id": "saved-client-ABC", "client_secret": "saved-secret-DEF",
                  "access_token_url": "https://example.com/token", "scope": "old-scope",
-                 "credentials_location": "header"}
+                 "credentials_location": "header", "auth_header_name": "X-Auth", "token_prefix": "Token"}
         result = _prompt_credentials("oauth2", saved, None)
         self.assertEqual(result["client_id"], saved["client_id"])
         self.assertEqual(result["client_secret"], saved["client_secret"])
         self.assertEqual(result["access_token_url"], saved["access_token_url"])
         self.assertEqual(result["scope"], "old-scope")
         self.assertEqual(result["credentials_location"], "body")
+        self.assertEqual(result["auth_header_name"], "X-Auth")
+        self.assertEqual(result["token_prefix"], "Token")
         self.assertEqual(read.call_args_list[0].args[0], "Client ID [******ABC]: ")
         self.assertEqual(read.call_args_list[1].args[0], "Client Secret [******DEF]: ")
         self.assertEqual(read.call_args_list[2].args[0], "Token URL [https://example.com/token]: ")
@@ -242,7 +268,7 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
 
     @patch("poly.output.console.warning")
     @patch("questionary.select")
-    @patch("builtins.input", side_effect=["", "abc", "", "secret", "", "https://example.com/token", ""])
+    @patch("builtins.input", side_effect=["", "abc", "", "secret", "", "https://example.com/token", "", "", ""])
     def test_prompt_retries_required_fields_without_saved_values(self, read, select, warn):
         select.return_value.ask.return_value = "header"
         result = _prompt_credentials("oauth2", {}, None)
@@ -250,7 +276,7 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         self.assertEqual(result["client_secret"], "secret")
         self.assertEqual(result["scope"], "")
         self.assertEqual(warn.call_count, 3)
-        self.assertEqual(read.call_count, 7)
+        self.assertEqual(read.call_count, 9)
 
     @patch("questionary.select")
     def test_saved_scope_can_be_replaced_or_cleared(self, select):
@@ -258,7 +284,7 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
         saved = {"client_id": "abc", "client_secret": "saved",
                  "access_token_url": "https://example.com/token", "scope": "old-scope"}
         for entered, expected in [("new-scope", "new-scope"), ("-", "")]:
-            with self.subTest(entered=entered), patch("builtins.input", side_effect=["", "", "", entered]):
+            with self.subTest(entered=entered), patch("builtins.input", side_effect=["", "", "", entered, "", ""]):
                 result = _prompt_credentials("oauth2", saved, None)
                 self.assertEqual(result["scope"], expected)
 
@@ -313,7 +339,7 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
     def test_project_reads_legacy_and_nested_oauth_defaults(self):
         for auth_type, saved in [
             ("oauth2", {"type": "oauth2", "clientId": "abc", "clientSecret": "saved",
-                        "accessTokenUrl": "https://example.com/token"}),
+                        "accessTokenUrl": "https://example.com/token", "authHeaderName": "X-Auth", "tokenPrefix": "Token"}),
             ("oauth2_client_credentials", {"auth": {"type": "oauth2_client_credentials",
                                           "config": {"client_id": "abc", "client_secret": "saved"}}}),
         ]:
@@ -323,6 +349,9 @@ class ApiIntegrationsCommandTest(unittest.TestCase):
             values = self.project.get_api_integration_credential_defaults("crm", "sandbox", "token")
             self.assertEqual(values["client_id"], "abc")
             self.assertEqual(values["client_secret"], "saved")
+            if auth_type == "oauth2":
+                self.assertEqual(values["auth_header_name"], "X-Auth")
+                self.assertEqual(values["token_prefix"], "Token")
 
     def test_changed_auth_type_does_not_reuse_incompatible_defaults(self):
         self.project._api_handler.get_api_integrations.return_value = ApiIntegration.from_projection(self.projection)

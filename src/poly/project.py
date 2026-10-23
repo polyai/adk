@@ -85,6 +85,8 @@ INTEGRATION_CREDENTIAL_FIELDS = {
         ("access_token_url", False, None),
         ("scope", False, ""),
         ("credentials_location", False, "header"),
+        ("auth_header_name", False, ""),
+        ("token_prefix", False, ""),
     ],
     "jwt_client_assertion": [
         ("client_id", False, None),
@@ -139,6 +141,8 @@ def _build_api_integration_credentials(auth_type: str, values: dict, base_url: s
             ("access_token_url", "accessTokenUrl"),
             ("credentials_location", "credentialsLocation"),
             ("grant_type", "grantType"),
+            ("auth_header_name", "authHeaderName"),
+            ("token_prefix", "tokenPrefix"),
         ):
             result[camel] = result[snake]
     return {"type": "api_key" if auth_type == "apiKey" else auth_type, **result}
@@ -267,6 +271,8 @@ class AgentStudioProject:
             "client_secret": "clientSecret",
             "access_token_url": "accessTokenUrl",
             "credentials_location": "credentialsLocation",
+            "auth_header_name": "authHeaderName",
+            "token_prefix": "tokenPrefix",
         }
         result = {}
         for field_name, _, _ in INTEGRATION_CREDENTIAL_FIELDS[config.auth_type]:

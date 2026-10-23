@@ -43,6 +43,8 @@ def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | 
         "access_token_url": "Token URL",
         "token_url": "Token URL",
         "credentials_location": "Credentials location",
+        "auth_header_name": "Auth header name",
+        "token_prefix": "Token prefix",
         "key_id": "Key ID",
         "private_key": "Private key",
         "client_auth": "Client authentication",
@@ -66,11 +68,11 @@ def _prompt_credentials(auth_type: str, existing: dict, private_key_file: str | 
             value = questionary.select(f"{label}:", choices=choices[field], default=selected).ask()
             if value is None:
                 raise KeyboardInterrupt
-        elif field == "scope":
+        elif default == "":
             prompt = (
-                f"Scope [{saved}] (Enter to keep, - to clear): "
+                f"{label} [{saved}] (Enter to keep, - to clear): "
                 if saved
-                else "Scope (optional, Enter to skip): "
+                else f"{label} (optional, Enter to skip): "
             )
             entered = input(prompt)
             value = "" if entered == "-" else entered or saved or ""
