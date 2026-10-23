@@ -15,7 +15,7 @@ It gives you a Git-like workflow for synchronizing project configuration between
 - Build and edit Agent Studio projects locally using standard tooling
 - Synchronize project configuration with Agent Studio using `poly push` and `poly pull`
 - Branch, validate, and review changes before deployment
-- Edit and navigate projects in **VS Code** or **Cursor** with the [PolyAI ADK extension](../tooling/editor-extension.md), or pair the ADK with [AI coding agents](../tooling/tooling.md#claude-code) such as **Claude Code**
+- Edit and navigate projects in **VS Code** or **Cursor** with the [PolyAI ADK extension](../tooling/editor-extension.md), or pair the ADK with [AI coding agents](../tooling/tooling.md#coding-agents) such as **Claude Code**
 - Collaborate across multiple developers on the same project
 
 ## Why it exists

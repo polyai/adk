@@ -12,7 +12,7 @@ Your local filesystem becomes your primary editing surface. You can:
 - edit agent resources directly
 - review changes with Git-style workflows
 - validate changes before pushing
-- work in **VS Code** or **Cursor** with the [PolyAI ADK extension](../tooling/editor-extension.md), or pair the ADK with [AI coding agents](../tooling/tooling.md#claude-code) such as **Claude Code**
+- work in **VS Code** or **Cursor** with the [PolyAI ADK extension](../tooling/editor-extension.md), or pair the ADK with [AI coding agents](../tooling/tooling.md#coding-agents) such as **Claude Code**
 - test and iterate before merging in Agent Studio
 
 ## What a local project contains
