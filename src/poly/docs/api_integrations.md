@@ -94,3 +94,35 @@ response = conv.api.salesforce.update_contact(
 ## Testing with mocked responses
 
 A conversation that branches on an operation's response (e.g. slot negotiation, availability checks) needs that response to be deterministic to test reliably. Test cases can mock an operation's response per test — see [Tests: API mocks](tests.md#api-mocks).
+
+## Set credentials from the CLI
+
+Push the integration definition first, including its base URL and auth type for the target environment. Then run this from the local project:
+
+```bash
+poly api-integrations configure salesforce --env sandbox
+```
+
+The command prompts for the fields required by the configured auth type, hiding secret input. It signs in to Studio unless `POLY_STUDIO_ACCESS_TOKEN` contains a Studio access token. Your Studio user needs permission to read and write secrets; the ADK API key is also needed to look up the integration.
+
+For automation, supply a Studio access token through `POLY_STUDIO_ACCESS_TOKEN` (or choose another variable with `--token-env`) and pipe a JSON object with `--stdin`:
+
+```bash
+your-secret-provider | poly api-integrations configure salesforce --env sandbox --stdin --json
+```
+
+For `oauth2`, the input object has this shape (replace the placeholders):
+
+```json
+{
+  "client_id": "<client-id>",
+  "client_secret": "<client-secret>",
+  "access_token_url": "https://example.com/oauth/token",
+  "scope": "",
+  "credentials_location": "header"
+}
+```
+
+For `oauth2_client_credentials`, use `client_id`, `client_secret`, `token_url`, and optionally `client_auth` (`client_secret_basic` by default, or `client_secret_post`). The command also supports basic auth, API keys, and JWT client assertions. For JWT signing keys, use `--private-key-file path/to/key.pem` or the `private_key` field on stdin.
+
+You can select an integration by name or ID. `--env` accepts `sandbox`, `pre-release`, or `live`. Each write replaces the selected environment's credentials and preserves other environments and secret metadata. Credentials are shared across project branches and take effect directly in Studio; this command does not require a later push. Secret values are not printed or saved to project files.

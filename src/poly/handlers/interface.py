@@ -50,6 +50,26 @@ class AgentStudioInterface:
     project_id: Optional[str] = None
     sync_client: Optional[SyncClientHandler] = None
 
+    def get_api_integrations(self) -> dict[str, ApiIntegration]:
+        """Fetch API integration definitions on the current branch."""
+        return ApiIntegration.from_projection(self.sync_client.pull_projection())
+
+    def set_api_integration_credentials(
+        self, token: str, integration_id: str, environment: str, credentials: dict
+    ) -> None:
+        """Write credentials to the account secret store."""
+        from poly.handlers.integration_credentials import IntegrationCredentialsHandler
+
+        IntegrationCredentialsHandler.set_credentials(
+            self.region,
+            token,
+            self.account_id,
+            self.project_id,
+            integration_id,
+            environment,
+            credentials,
+        )
+
     @staticmethod
     def _extract_error_code(e: Exception) -> Optional[str]:
         """Extract the error_code field from an API error response body.

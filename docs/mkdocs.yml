@@ -141,6 +141,7 @@ nav:
           - deployments: reference/cli/deployments.md
           - metrics: reference/cli/metrics.md
           - rtc: reference/cli/rtc.md
+          - api-integrations: reference/cli/api-integrations.md
           - audio-cache: reference/cli/audio-cache.md
           - docs: reference/cli/docs.md
           - studio: reference/cli/studio.md

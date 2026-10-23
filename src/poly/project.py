@@ -34,6 +34,7 @@ from poly.migration_utils import (
     run_migrations,
 )
 from poly.resources import (
+    ApiIntegration,
     BaseFlowStep,
     ChildTopic,
     Document,
@@ -72,6 +73,75 @@ MAX_TEST_RUN_NAME_LENGTH = 120
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
+
+
+# Field, hidden input, default. Names match the Studio credential contract.
+INTEGRATION_CREDENTIAL_FIELDS = {
+    "basic": [("username", False, None), ("password", True, None)],
+    "apiKey": [("key", False, None), ("value", True, None), ("location", False, "header")],
+    "oauth2": [
+        ("client_id", False, None),
+        ("client_secret", True, None),
+        ("access_token_url", False, None),
+        ("scope", False, ""),
+        ("credentials_location", False, "header"),
+    ],
+    "jwt_client_assertion": [
+        ("client_id", False, None),
+        ("token_url", False, None),
+        ("private_key", True, None),
+        ("key_id", False, None),
+        ("algorithm", False, "RS384"),
+    ],
+    "oauth2_client_credentials": [
+        ("client_id", False, None),
+        ("client_secret", True, None),
+        ("token_url", False, None),
+        ("client_auth", False, "client_secret_basic"),
+    ],
+}
+
+
+def _build_api_integration_credentials(auth_type: str, values: dict, base_url: str) -> dict:
+    """Validate input and serialize the same credential shape as Studio."""
+    if auth_type not in INTEGRATION_CREDENTIAL_FIELDS:
+        raise ValueError("Unsupported integration authentication type.")
+    if not isinstance(values, dict):
+        raise ValueError("Credentials must be a JSON object.")
+    allowed = {field_name for field_name, _, _ in INTEGRATION_CREDENTIAL_FIELDS[auth_type]}
+    if set(values) - allowed:
+        raise ValueError("Credentials contain unsupported fields for the configured auth type.")
+    result = {}
+    for field_name, _, default in INTEGRATION_CREDENTIAL_FIELDS[auth_type]:
+        value = values.get(field_name, default)
+        if not isinstance(value, str) or (not value and default != ""):
+            raise ValueError(f"Credential field '{field_name}' must be a non-empty string.")
+        result[field_name] = value
+    choices = {
+        "location": {"header", "query_param"},
+        "credentials_location": {"header", "body"},
+        "algorithm": {"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"},
+        "client_auth": {"client_secret_basic", "client_secret_post"},
+    }
+    for field_name, options in choices.items():
+        if field_name in result and result[field_name] not in options:
+            raise ValueError(
+                f"Credential field '{field_name}' must be one of {', '.join(sorted(options))}."
+            )
+    if auth_type in {"jwt_client_assertion", "oauth2_client_credentials"}:
+        return {"base_url": base_url, "auth": {"type": auth_type, "config": result}}
+    if auth_type == "oauth2":
+        result["grant_type"] = "client_credentials"
+        # Studio also writes the legacy aliases consumed by older runtimes.
+        for snake, camel in (
+            ("client_id", "clientId"),
+            ("client_secret", "clientSecret"),
+            ("access_token_url", "accessTokenUrl"),
+            ("credentials_location", "credentialsLocation"),
+            ("grant_type", "grantType"),
+        ):
+            result[camel] = result[snake]
+    return {"type": "api_key" if auth_type == "apiKey" else auth_type, **result}
 
 
 @dataclass
@@ -150,6 +220,42 @@ class AgentStudioProject:
         if self.branch_id:
             self.save_config()  # To save branch if it changed (e.g. deleted in remote)
         return self._api_handler
+
+    @staticmethod
+    def build_api_integration_credentials(auth_type: str, values: dict, base_url: str) -> dict:
+        """Validate credential fields using the configured authentication type."""
+        return _build_api_integration_credentials(auth_type, values, base_url)
+
+    def get_api_integration(self, name: str, environment: str) -> ApiIntegration:
+        """Resolve an integration on this branch and validate its environment config."""
+        if environment not in {"sandbox", "pre-release", "live"}:
+            raise ValueError("Environment must be sandbox, pre-release or live.")
+        integrations = self.api_handler.get_api_integrations()
+        matches = [item for item in integrations.values() if name in {item.name, item.resource_id}]
+        if len(matches) != 1:
+            raise ValueError(
+                "Integration not found uniquely on this branch. Push its definition first."
+            )
+        integration = matches[0]
+        config = getattr(integration.environments, environment.replace("-", "_"))
+        if config.auth_type not in INTEGRATION_CREDENTIAL_FIELDS:
+            raise ValueError("Configure an authentication type before setting credentials.")
+        if not config.base_url:
+            raise ValueError("Configure a base URL before setting credentials.")
+        return integration
+
+    def configure_api_integration(
+        self, name: str, environment: str, values: dict, token: str
+    ) -> None:
+        """Replace credentials for one environment directly, across project branches."""
+        integration = self.get_api_integration(name, environment)
+        config = getattr(integration.environments, environment.replace("-", "_"))
+        credentials = self.build_api_integration_credentials(
+            config.auth_type, values, config.base_url
+        )
+        self.api_handler.set_api_integration_credentials(
+            token, integration.resource_id, environment, credentials
+        )
 
     def build_project_config(self) -> dict:
         """Build the project configuration dictionary"""

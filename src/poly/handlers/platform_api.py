@@ -128,6 +128,7 @@ class PlatformAPIHandler:
         files: ty.Optional[dict] = None,
         response_format: str = "json",
         use_jupiter_api: bool = False,
+        sensitive: bool = False,
     ) -> dict:
         """Make a request to the Platform API.
 
@@ -144,6 +145,7 @@ class PlatformAPIHandler:
             response_format (str): How to parse the response. "json" (default)
                 or "yaml".
             use_jupiter_api (bool): Whether to use the Jupiter API.
+            sensitive (bool): Suppress payload logs and redact errors for secret requests.
 
         Returns:
             dict: The parsed response.
@@ -166,29 +168,49 @@ class PlatformAPIHandler:
         logger.info(f"Making {method} request to {url}")
 
         # Use requests.request() to handle all HTTP methods uniformly
-        api_response = requests.request(
-            method=method,
-            url=url,
-            headers=headers,
-            params=params,
-            allow_redirects=False,
-            files=files,
-            data=json.dumps(data) if data and not files else None,
-        )
-
-        logger.debug(
-            f"Request/response url={url!r} body={data!r}"
-            f" status_code={api_response.status_code!r} response={api_response.text!r}"
-        )
-
         try:
-            api_response.raise_for_status()
-        except requests.HTTPError:
-            logger.debug(
-                f"Error in request status_code={api_response.status_code!r}"
-                f" response={api_response.text!r}"
+            api_response = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                allow_redirects=False,
+                files=files,
+                data=json.dumps(data) if data and not files else None,
+                **({"timeout": 30} if sensitive else {}),
             )
+        except requests.RequestException:
+            if sensitive:
+                from poly.handlers.sdk import SourcererAPIError
+
+                raise SourcererAPIError(
+                    "Credentials request failed; check your connection."
+                ) from None
             raise
+
+        if sensitive:
+            if not 200 <= api_response.status_code < 300:
+                from poly.handlers.sdk import SourcererAPIError
+
+                raise SourcererAPIError(
+                    f"Credentials request failed (HTTP {api_response.status_code}). "
+                    "Check your Studio access token and secrets permissions."
+                ) from None
+            if method != "GET":
+                return {}  # Secret write responses may echo plaintext values.
+        else:
+            logger.debug(
+                f"Request/response url={url!r} body={data!r}"
+                f" status_code={api_response.status_code!r} response={api_response.text!r}"
+            )
+            try:
+                api_response.raise_for_status()
+            except requests.HTTPError:
+                logger.debug(
+                    f"Error in request status_code={api_response.status_code!r}"
+                    f" response={api_response.text!r}"
+                )
+                raise
 
         if api_response.status_code == 204:
             logger.info(f"Request to {url} successful (no content)")
@@ -204,7 +226,9 @@ class PlatformAPIHandler:
 
         try:
             parsed = api_response.json()
-        except json.JSONDecodeError as e:
+        except ValueError as e:
+            if sensitive:
+                raise ValueError("Studio returned an invalid secrets response.") from None
             raise ValueError(f"Failed to parse JSON response: {e}")
 
         logger.info(f"Request to {url} successful")

@@ -11,6 +11,7 @@ from argparse import ArgumentParser
 
 import argcomplete
 
+from poly.cli_commands.api_integrations import ApiIntegrationsCommand
 from poly.cli_commands.apikey import ApiKeyCommand
 from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.auth import LoginCommand
@@ -53,6 +54,7 @@ from poly.output.json_output import json_print
 logger = logging.getLogger(__name__)
 
 COMMANDS = [
+    ApiIntegrationsCommand,
     InitCommand,
     SetupCommand,
     LoginCommand,
