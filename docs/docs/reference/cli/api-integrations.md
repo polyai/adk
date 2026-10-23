@@ -14,8 +14,8 @@ Configure credentials for an existing integration in one environment. Push its b
 Examples:
 
 ~~~bash
-poly api-integrations configure crm --env sandbox
-your-secret-provider | poly api-integrations configure crm --env sandbox --stdin --json
+poly api-integrations configure api_name --env sandbox
+your-secret-provider | poly api-integrations configure api_name --env sandbox --stdin --json
 ~~~
 
 Interactive mode loads saved credentials and displays defaults in brackets. Client IDs and secrets are masked; the saved token URL is shown in full. Press Enter to keep a saved required value, or enter a replacement. Required fields are prompted again when neither a new value nor a saved value exists. Newly typed values are visible. Credentials location is selected from `header` and `body` using the arrow keys. The saved scope is shown in full; Enter keeps it, and `-` clears it. With no saved scope, Enter skips it.
@@ -38,7 +38,7 @@ Only the selected environment's credentials are replaced. Other environments and
 
 | Argument | Description |
 |---|---|
-| `integration` | Integration name or ID on the current branch. |
+| `api_name` | API integration name or ID on the current branch. |
 
 | Flag | Description |
 |---|---|
@@ -54,7 +54,7 @@ Only the selected environment's credentials are replaced. Other environments and
 ~~~json
 {
   "success": true,
-  "integration": "crm",
+  "integration": "api_name",
   "environment": "sandbox",
   "auth_type": "oauth2"
 }

@@ -100,7 +100,7 @@ A conversation that branches on an operation's response (e.g. slot negotiation, 
 Push the integration definition first, including its base URL and auth type for the target environment. Then run this from the local project:
 
 ```bash
-poly api-integrations configure salesforce --env sandbox
+poly api-integrations configure api_name --env sandbox
 ```
 
 The command shows saved values in brackets, masking client IDs and secrets and displaying the full token URL; Enter keeps a saved required value. Newly typed values are visible. Missing required fields are prompted again, and credentials location uses an arrow-key picker. Scope shows its saved value; Enter keeps it, or skips it when unset. Enter `-` to clear a saved scope. The command reuses the regional browser session shared with `poly apikey`. It prompts for browser sign-in and caches the session only when no unexpired session exists. Your Studio user needs permission to read and write secrets; the ADK API key is also needed to look up the integration.
@@ -108,7 +108,7 @@ The command shows saved values in brackets, masking client IDs and secrets and d
 For automation, sign in first with `poly apikey --region <region>` to populate the shared session cache, then pipe a JSON object with `--stdin`:
 
 ```bash
-your-secret-provider | poly api-integrations configure salesforce --env sandbox --stdin --json
+your-secret-provider | poly api-integrations configure api_name --env sandbox --stdin --json
 ```
 
 For `oauth2`, the input object has this shape (replace the placeholders):
