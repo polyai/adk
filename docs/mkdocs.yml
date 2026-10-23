@@ -177,6 +177,7 @@ nav:
 
   - Tooling:
     - Overview: tooling/tooling.md
+    - VS Code and Cursor extension: tooling/editor-extension.md
     - Deploying from GitHub: tooling/deploying-from-github.md
 
   - Community:

@@ -17,24 +17,7 @@ There are two well-supported paths for working with the ADK. They are not mutual
 
 ### PolyAI ADK extension for VS Code and Cursor
 
-The **PolyAI ADK extension** brings ADK-aware editing into **VS Code** and **Cursor**. It is the recommended path if you prefer an IDE-first workflow.
-
-The extension helps with:
-
-- navigating and editing flows, functions, topics, entities, and agent settings with resource-aware tooling
-- catching common mistakes while you edit, before you push
-- driving `poly` commands without leaving the editor
-- pairing with your IDE's built-in AI features (Cursor's agent, VS Code Copilot, etc.) to generate and update project files
-
-#### Install the extension
-
-The extension is published on **Open VSX**, so it works in both VS Code and Cursor.
-
-1. Open the Extensions view in VS Code or Cursor.
-2. Search for `PolyAI ADK` and install it, or install it directly from the [Open VSX listing](https://open-vsx.org/extension/PolyAI/adk-extension){ target="_blank" rel="noopener" }.
-3. Open a project that has been pulled down with `poly pull`.
-
-Once installed, the extension auto-detects local ADK projects and exposes resource-aware navigation, validation, and commands.
+The **PolyAI ADK extension** brings resource-aware editing, validation and `poly` commands into **VS Code** and **Cursor**. It is the recommended path if you prefer an IDE-first workflow. See [VS Code and Cursor extension](./editor-extension.md) to install it.
 
 ### Claude Code
 
@@ -118,25 +101,25 @@ To keep projects in a GitHub repo that tests and deploys every change, see [depl
 
 <div class="grid cards" markdown>
 
--   **Agent settings reference**
+-   **VS Code and Cursor extension**
 
     ---
 
-    Configure the persona and rules that define agent behavior.
-    [Open agent settings](../reference/resources/agent_settings.md)
+    Install the extension and edit projects with resource-aware tooling.
+    [Open the extension page](./editor-extension.md)
 
--   **Flows reference**
-
-    ---
-
-    Build conversation flows with prompts, transitions, and entities.
-    [Open flows reference](../reference/resources/flows.md)
-
--   **Functions reference**
+-   **Deploying from GitHub**
 
     ---
 
-    Write Python functions the agent calls at runtime.
-    [Open functions reference](../reference/resources/functions.md)
+    Keep projects in a GitHub repo that tests and deploys every change.
+    [Open deploying from GitHub](./deploying-from-github.md)
+
+-   **CLI reference**
+
+    ---
+
+    Every `poly` command and its options.
+    [Open the CLI reference](../reference/cli.md)
 
 </div>
