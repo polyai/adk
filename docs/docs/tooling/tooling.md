@@ -108,6 +108,8 @@ The ADK also fits well with standard local development tooling such as:
 
 Tooling slots into the standard [CLI workflow](../reference/cli.md): pull or init, edit with your tool of choice, validate, push, and review in Agent Studio.
 
+To keep projects in a GitHub repo that tests and deploys every change, see [deploying from GitHub](./deploying-from-github.md).
+
 !!! tip "Tooling should reduce friction, not reduce scrutiny"
 
     Faster editing and generation are valuable, but project review, validation, and testing still matter.

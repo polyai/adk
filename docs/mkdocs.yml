@@ -173,6 +173,7 @@ nav:
 
   - Tooling:
     - Overview: tooling/tooling.md
+    - Deploying from GitHub: tooling/deploying-from-github.md
 
   - Community:
       - Discord: community/discord.md
