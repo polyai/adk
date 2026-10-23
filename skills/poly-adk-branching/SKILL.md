@@ -28,6 +28,8 @@ poly branch list                   # all branches (--archived for soft-deleted o
 poly branch current                # current branch + its parent
 poly branch create <name>          # create + switch; branches from main's latest state
 poly branch switch <name>          # requires a clean tree (--force discards local changes)
+poly branch switch <name> --keep-files  # track <name> without touching files; next push sends them there
+poly branch switch <name> --create --from main --keep-files  # same, creating <name> from main if missing
 poly branch rename <new-name>
 poly branch delete [<name>]        # main cannot be deleted
 poly branch restore <branch_id>    # un-archive; IDs from poly branch list --archived

@@ -2631,6 +2631,9 @@ class AgentStudioProject:
         format: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
         on_save: Callable[[int, int], None] | None = None,
+        keep_files: bool = False,
+        create: bool = False,
+        source_branch_name: Optional[str] = None,
     ) -> tuple[bool, dict[str, Any]]:
         """Switch to a different branch in the project.
 
@@ -2642,28 +2645,47 @@ class AgentStudioProject:
                 If provided, the projection will be used instead of fetching it from the API.
             on_save: Optional callback invoked with (current, total)
                 during the resource save loop.
+            keep_files (bool): If True, track the branch without touching the project files,
+                so the next push sends the current working copy to it.
+            create (bool): If True, create the branch when it doesn't exist, from the
+                current branch or source_branch_name, as create_branch does.
+            source_branch_name (str): The branch to create from. Requires create.
 
         Returns:
             bool: True if the switch was successful, False otherwise
             dict[str, Any]: The projection data
+
+        Raises:
+            ValueError: If the options conflict, there are uncommitted changes without force
+                or keep_files, or the branch doesn't exist and can't be created.
         """
-        if self.get_diffs() and not force:
+        if keep_files and (force or format):
+            raise ValueError("--keep-files cannot be combined with --force or --format.")
+        if source_branch_name is not None and not create:
+            raise ValueError("--from requires --create.")
+        if not keep_files and not force and self.get_diffs():
             raise ValueError(
-                "Cannot switch branches with uncommitted changes. Use --force to switch and discard changes."
+                "Cannot switch branches with uncommitted changes. Use --force to switch and discard changes, or --keep-files to switch and keep them."
             )
 
         branches = self.api_handler.get_branches()
-        if branch_name not in branches:
-            raise ValueError(f"Branch {branch_name} does not exist.")
-        branch_id = branches[branch_name]["branchId"]
-        success = self.api_handler.switch_branch(branch_id)
-        projection = {}
-        if success:
+        if branch_name in branches:
+            branch_id = branches[branch_name]["branchId"]
+            if not self.api_handler.switch_branch(branch_id):
+                return False, {}
             self.branch_id = branch_id
+        elif create:
+            self.create_branch(branch_name, source_branch_name=source_branch_name)
+        else:
+            raise ValueError(f"Branch {branch_name} does not exist.")
+
+        if keep_files:
+            _, projection = self.load_project(projection_json=projection_json)
+        else:
             _, projection = self.pull_project(
                 force=True, format=format, projection_json=projection_json, on_save=on_save
             )
-        return success, projection
+        return True, projection
 
     def get_current_branch(self) -> Optional[str]:
         """Get the current branch name.

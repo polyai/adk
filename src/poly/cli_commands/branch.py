@@ -272,6 +272,31 @@ class BranchCommand(BaseCommand):
             help="Force switch to a different branch and discard changes.",
         )
         branch_switch_parser.add_argument(
+            "--keep-files",
+            action="store_true",
+            help=(
+                "Switch without pulling: keep the project files as they are, so the next "
+                "'poly push' sends them to this branch."
+            ),
+        )
+        branch_switch_parser.add_argument(
+            "--create",
+            "-c",
+            action="store_true",
+            help=(
+                "Create the branch if it doesn't exist, from the current branch "
+                "(or --from), as 'poly branch create' does."
+            ),
+        )
+        branch_switch_parser.add_argument(
+            "--from",
+            type=str,
+            default=None,
+            dest="source_branch",
+            metavar="BRANCH",
+            help="With --create, create a missing branch from this branch.",
+        ).completer = cls._branch_name_completer
+        branch_switch_parser.add_argument(
             "--from-projection",
             type=str,
             metavar="JSON|-",
@@ -524,6 +549,9 @@ class BranchCommand(BaseCommand):
                 args.json,
                 output_json_projection=args.output_json_projection,
                 from_projection=args.from_projection,
+                keep_files=args.keep_files,
+                create=args.create,
+                source_branch=args.source_branch,
             )
 
         elif args.branch_subcommand == "current":
@@ -706,6 +734,9 @@ class BranchCommand(BaseCommand):
         output_json: bool = False,
         output_json_projection: bool = False,
         from_projection: str = None,
+        keep_files: bool = False,
+        create: bool = False,
+        source_branch: str = None,
     ) -> None:
         """Switch to a different branch in the Agent Studio project."""
         import questionary
@@ -767,18 +798,29 @@ class BranchCommand(BaseCommand):
                 def on_save(current: int, total: int) -> None:
                     status.update(f"[info]Saving resources ({current}/{total})...[/info]")
 
-            switch_ok, projection = project.switch_branch(
-                branch_name,
-                force=force,
-                format=format,
-                projection_json=projection_json,
-                on_save=on_save,
-            )
+            try:
+                created = create and branch_name not in project.get_branches()[1]
+                switch_ok, projection = project.switch_branch(
+                    branch_name,
+                    force=force,
+                    format=format,
+                    projection_json=projection_json,
+                    on_save=on_save,
+                    keep_files=keep_files,
+                    create=create,
+                    source_branch_name=source_branch,
+                )
+            except ValueError as e:
+                if output_json or output_json_projection:
+                    json_print({"success": False, "error": str(e)})
+                    sys.exit(1)
+                raise
 
         if output_json or output_json_projection:
             json_output = {
                 "success": switch_ok,
                 "branch_name": branch_name,
+                "created": created,
             }
             if output_json_projection:
                 json_output["projection"] = projection
@@ -788,7 +830,12 @@ class BranchCommand(BaseCommand):
             return
 
         if switch_ok:
-            success(f"Switched to branch '{branch_name}'.")
+            if created:
+                success(f"Created branch '{branch_name}' and switched to it.")
+            else:
+                success(f"Switched to branch '{branch_name}'.")
+            if keep_files:
+                plain(f"Kept local files. Run 'poly push' to send them to '{branch_name}'.")
         else:
             error(f"Failed to switch to branch '{branch_name}'.")
             sys.exit(1)

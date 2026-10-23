@@ -122,7 +122,13 @@ Examples:
 poly branch switch my-feature
 poly branch switch my-feature --force
 poly branch switch my-feature --format
+poly branch switch my-feature --keep-files
+poly branch switch "$(git branch --show-current)" --create --from main --keep-files
 ~~~
+
+By default, switching replaces your project files with the target branch's state, and refuses if you have uncommitted changes. `--keep-files` switches without touching your files, so the next `poly push` sends your working copy to the target branch. `--create` creates the branch if it doesn't exist, sourced the same way as [`poly branch create`](#poly-branch-create): from your current branch, or from the branch given with `--from`.
+
+Together, they keep a project in a git repo on the Agent Studio branch matching the git branch: after `git switch`, the last example tracks the branch of the same name, creating it from `main` if needed, without overwriting what git checked out.
 
 | Argument | Description |
 |---|---|
@@ -132,13 +138,18 @@ poly branch switch my-feature --format
 |---|---|
 | `--force`, `-f` | Switch even if there are uncommitted local changes, discarding them. |
 | `--format` | Format the project after switching. |
+| `--keep-files` | Switch without pulling the branch's state into your project files. Can't be combined with `--force` or `--format`. |
+| `--create`, `-c` | Create the branch if it doesn't exist. |
+| `--from BRANCH` | With `--create`, create a missing branch from this branch instead of the current one. |
 | `--output-json-projection` | Include the full post-switch projection in the `--json` output. |
 
 `--json` output shape:
 
 ~~~json
-{ "success": true, "branch_name": "my-feature" }
+{ "success": true, "branch_name": "my-feature", "created": false }
 ~~~
+
+`"created"` is `true` when `--create` made a new branch.
 
 With `--output-json-projection`, a `"projection"` key containing the full project projection is added.
 

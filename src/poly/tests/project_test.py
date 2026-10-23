@@ -4330,6 +4330,103 @@ class FetchProjectTest(unittest.TestCase):
         self.assertEqual(project.branch_id, "staging-id")
 
 
+class SwitchBranchTest(unittest.TestCase):
+    """Tests for switch_branch, including keeping local files and creating missing branches."""
+
+    BRANCHES = {
+        "main": {"branchId": "main", "parentBranchId": None},
+        "feature-a": {"branchId": "id-a", "parentBranchId": "main"},
+    }
+
+    def setUp(self):
+        self.mock_api = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        patch.object(AgentStudioProject, "save_config").start()
+        self.mock_get_diffs = patch.object(
+            AgentStudioProject, "get_diffs", return_value={"topics/a.yaml": "changed"}
+        ).start()
+        self.mock_pull = patch.object(
+            AgentStudioProject, "pull_project", return_value=([], {"pulled": True})
+        ).start()
+
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.project.branch_id = "main"
+        self.project._deployment_mode = DeploymentMode.RELEASES_BRANCHES
+        self.mock_api.get_branches.return_value = deepcopy(self.BRANCHES)
+        self.mock_api.switch_branch.return_value = True
+        self.mock_api.create_branch.return_value = "id-new"
+        self.mock_api.pull_resources.return_value = (
+            deepcopy(self.project.resources),
+            [],
+            {"fetched": True},
+        )
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_switch_with_local_changes_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "uncommitted changes"):
+            self.project.switch_branch("feature-a")
+
+        self.mock_api.switch_branch.assert_not_called()
+
+    def test_keep_files_switches_with_local_changes_and_does_not_pull(self):
+        self.mock_api.branch_id = "id-a"
+
+        ok, projection = self.project.switch_branch("feature-a", keep_files=True)
+
+        self.assertTrue(ok)
+        self.assertEqual(projection, {"fetched": True})
+        self.assertEqual(self.project.branch_id, "id-a")
+        self.mock_api.switch_branch.assert_called_once_with("id-a")
+        self.mock_pull.assert_not_called()
+
+    def test_missing_branch_without_create_raises(self):
+        with self.assertRaisesRegex(ValueError, "does not exist"):
+            self.project.switch_branch("feature-b", keep_files=True)
+
+        self.mock_api.create_branch.assert_not_called()
+
+    def test_create_makes_missing_branch_from_current_branch(self):
+        self.mock_api.branch_id = "id-new"
+
+        ok, _ = self.project.switch_branch("feature-b", create=True, keep_files=True)
+
+        self.assertTrue(ok)
+        self.mock_api.create_branch.assert_called_once_with("feature-b", "main")
+        self.mock_api.switch_branch.assert_not_called()
+        self.assertEqual(self.project.branch_id, "id-new")
+        self.mock_pull.assert_not_called()
+
+    def test_create_from_source_branch(self):
+        self.mock_api.branch_id = "id-new"
+
+        self.project.switch_branch(
+            "feature-b", create=True, keep_files=True, source_branch_name="feature-a"
+        )
+
+        self.mock_api.create_branch.assert_called_once_with("feature-b", "id-a")
+
+    def test_create_switches_to_existing_branch_without_creating(self):
+        self.mock_get_diffs.return_value = {}
+
+        ok, projection = self.project.switch_branch("feature-a", create=True)
+
+        self.assertTrue(ok)
+        self.assertEqual(projection, {"pulled": True})
+        self.mock_api.create_branch.assert_not_called()
+        self.mock_api.switch_branch.assert_called_once_with("id-a")
+
+    def test_keep_files_cannot_be_combined_with_force(self):
+        with self.assertRaisesRegex(ValueError, "--keep-files cannot be combined"):
+            self.project.switch_branch("feature-a", keep_files=True, force=True)
+
+    def test_from_requires_create(self):
+        with self.assertRaisesRegex(ValueError, "--from requires --create"):
+            self.project.switch_branch("feature-a", source_branch_name="main")
+
+
 class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
     """Tests that _update_pulled_resources and _update_multi_resource_yaml_resources
     delete local resources when their entire resource type is absent from incoming."""
