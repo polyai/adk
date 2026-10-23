@@ -288,6 +288,11 @@ def group_outbound_campaign_changes(
     post_push_deleted_resources: ResourceMap,
     current_resources: ResourceMap,
 ) -> None:
+    """Turn campaign file changes into campaign, settings and node changes, in place.
+
+    Function-file changes mark their campaign as updated, a renamed campaign folder keeps its
+    id, and campaign edits are split into settings and per-node commands.
+    """
     _attach_campaign_function_code(state)
     _attach_campaign_function_code(current_resources)
     _pair_renamed_campaigns(state, new_resources, updated_resources, deleted_resources)
