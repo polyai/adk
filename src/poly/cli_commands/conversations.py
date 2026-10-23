@@ -5,7 +5,7 @@ Copyright PolyAI Limited
 
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
-from typing import Any, Optional
+from typing import Optional
 
 import requests
 
@@ -14,16 +14,15 @@ from poly.cli_commands.shared import (
     add_cohort_arguments,
     add_window_arguments,
     describe_data_api_error,
+    filter_flags_to_filters,
     load_project,
-    parse_datetime_flag,
-    parse_filter_flags,
-    parse_sort_flag,
+    sort_flag_to_sort,
 )
+from poly.constants import DATA_CONVERSATION_SORT_FIELDS, DATA_MAX_LIMIT, DATA_MAX_OFFSET
 from poly.handlers.interface import AgentStudioInterface
 from poly.output.json_output import json_print
 
 SEARCH_DEFAULT_FIELDS = ["poly_score", "duration", "channel"]
-SEARCH_SORT_FIELDS = ["started_at", "duration", "conversation_id"]
 
 
 class ConversationsCommand(BaseCommand):
@@ -134,13 +133,22 @@ class ConversationsCommand(BaseCommand):
             type=str,
             default=None,
             metavar="FIELD[:asc|desc]",
-            help=(f"Sort by one of {', '.join(SEARCH_SORT_FIELDS)}. Defaults to started_at:desc."),
+            help=(
+                f"Sort by one of {', '.join(DATA_CONVERSATION_SORT_FIELDS)}. "
+                "Defaults to started_at:desc."
+            ),
         )
         search_parser.add_argument(
-            "--limit", type=int, default=20, help="Conversations per page, 1 to 100."
+            "--limit",
+            type=int,
+            default=20,
+            help=f"Conversations per page, 1 to {DATA_MAX_LIMIT}.",
         )
         search_parser.add_argument(
-            "--offset", type=int, default=0, help="Conversations to skip, up to 1000."
+            "--offset",
+            type=int,
+            default=0,
+            help=f"Conversations to skip, up to {DATA_MAX_OFFSET}.",
         )
 
         conv_get_parser = conversations_subparsers.add_parser(
@@ -276,14 +284,23 @@ class ConversationsCommand(BaseCommand):
         """
         from poly.output.console import info, paged_output, print_conversation_search
 
-        try:
-            body = cls._build_search_body(args)
-        except ValueError as e:
-            cls._fail(str(e), output_json)
-
+        fields = args.field or list(SEARCH_DEFAULT_FIELDS)
         project = load_project(base_path, output_json=output_json)
         try:
-            result = project.search_conversations(body)
+            result = project.search_conversations(
+                from_dt=args.from_dt,
+                to_dt=args.to_dt,
+                filters=filter_flags_to_filters(args.filter),
+                match_any=args.any,
+                channel=args.channel,
+                client_env=args.env,
+                fields=fields,
+                sort=sort_flag_to_sort(args.sort),
+                limit=args.limit,
+                offset=args.offset,
+            )
+        except ValueError as e:
+            cls._fail(str(e), output_json)
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e), output_json)
 
@@ -296,38 +313,8 @@ class ConversationsCommand(BaseCommand):
             return
         with paged_output():
             print_conversation_search(
-                result, fields=body["fields"], url_builder=project.get_conversation_url
+                result, fields=fields, url_builder=project.get_conversation_url
             )
-
-    @classmethod
-    def _build_search_body(cls, args: Namespace) -> dict[str, Any]:
-        """Translate parsed ``search`` flags into a Data API request body.
-
-        Raises:
-            ValueError: On a malformed date, filter or sort flag.
-        """
-        sort = parse_sort_flag(args.sort)
-        if sort and sort["field"] not in SEARCH_SORT_FIELDS:
-            raise ValueError(f"--sort field must be one of: {', '.join(SEARCH_SORT_FIELDS)}.")
-        body: dict[str, Any] = {
-            "fields": args.field or list(SEARCH_DEFAULT_FIELDS),
-            "limit": args.limit,
-            "offset": args.offset,
-        }
-        optional = {
-            "from_datetime": parse_datetime_flag(args.from_dt) if args.from_dt else None,
-            "to_datetime": parse_datetime_flag(args.to_dt, exclusive_end=True)
-            if args.to_dt
-            else None,
-            "filters": parse_filter_flags(args.filter) or None,
-            "channel": args.channel,
-            "client_env": args.env,
-            "sort": sort,
-        }
-        if args.any:
-            optional["filter_operator"] = "or"
-        body.update({k: v for k, v in optional.items() if v is not None})
-        return body
 
     @staticmethod
     def _fail(message: str, output_json: bool) -> None:

@@ -7946,6 +7946,110 @@ class ProjectGetPolyScoreTest(unittest.TestCase):
         self.assertEqual(result["summary"]["conversations"], 0)
 
 
+class ProjectSearchConversationsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.search_conversations validation and request building."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api = patch("poly.project.AgentStudioInterface.search_conversations").start()
+        self.mock_api.return_value = {"conversations": [], "total": 0}
+        self.addCleanup(patch.stopall)
+
+    def test_scopes_to_the_project_and_normalises_the_window(self):
+        """The project id is always sent and a bare --to date includes the whole day."""
+        self.project.search_conversations(
+            from_dt="2026-09-01",
+            to_dt="2026-09-30",
+            filters=[{"metric": "call_summary", "op": "CONTAINS", "value": "refund"}],
+            sort={"field": "duration", "order": "DESC"},
+        )
+
+        self.assertEqual(self.mock_api.call_args.args[0], "us-1")
+        self.assertEqual(
+            self.mock_api.call_args.kwargs["body"],
+            {
+                "project_id": "test_project",
+                "limit": 20,
+                "offset": 0,
+                "from": "2026-09-01T00:00:00",
+                "to": "2026-10-01T00:00:00",
+                "filters": [{"metric": "call_summary", "op": "contains", "value": "refund"}],
+                "sort": {"field": "duration", "order": "desc"},
+            },
+        )
+
+    def test_rejects_what_the_data_api_would_reject(self):
+        """Operators, sort fields, cohorts and paging are checked locally."""
+        cases = [
+            ({"filters": [{"metric": "a", "op": "like", "value": "b"}]}, "like"),
+            ({"filters": [{"metric": "a", "op": "in", "value": "b"}]}, "list"),
+            ({"sort": {"field": "poly_score", "order": "asc"}}, "started_at"),
+            ({"sort": {"field": "duration", "order": "sideways"}}, "Sort order"),
+            ({"channel": ["FAX"]}, "Channel"),
+            ({"client_env": ["prod"]}, "Environment"),
+            ({"limit": 101}, "Limit"),
+            ({"offset": -1}, "Offset"),
+            ({"from_dt": "last week"}, "YYYY-MM-DD"),
+        ]
+        for kwargs, fragment in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.search_conversations(**kwargs)
+                self.assertIn(fragment, str(ctx.exception))
+        self.mock_api.assert_not_called()
+
+
+class ProjectSearchTranscriptsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.search_transcripts and get_transcript."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_search = patch("poly.project.AgentStudioInterface.search_transcripts").start()
+        self.mock_get = patch("poly.project.AgentStudioInterface.get_transcript").start()
+        self.addCleanup(patch.stopall)
+
+    def test_search_params_always_carry_the_project(self):
+        """The phrase is trimmed and the project id sent, as PATs require it."""
+        self.project.search_transcripts("  cancel my booking ", to_dt="2026-09-30", context_turns=2)
+
+        self.assertEqual(
+            self.mock_search.call_args.kwargs["params"],
+            {
+                "q": "cancel my booking",
+                "project_id": "test_project",
+                "context_turns": 2,
+                "limit": 20,
+                "offset": 0,
+                "to": "2026-10-01T00:00:00",
+            },
+        )
+
+    def test_search_rejects_bad_phrase_context_and_paging(self):
+        """Length, context and paging bounds are checked before any request."""
+        cases = [
+            ({"query": "hi"}, "3 to 300"),
+            ({"query": "x" * 301}, "3 to 300"),
+            ({"query": "refund", "context_turns": 4}, "Context"),
+            ({"query": "refund", "limit": 0}, "Limit"),
+        ]
+        for kwargs, fragment in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.search_transcripts(**kwargs)
+                self.assertIn(fragment, str(ctx.exception))
+        self.mock_search.assert_not_called()
+
+    def test_get_transcript_passes_ids(self):
+        """Transcript fetches carry the conversation and project ids."""
+        self.project.get_transcript(" conv-1 ")
+
+        self.mock_get.assert_called_once_with(
+            "us-1", conversation_id="conv-1", project_id="test_project"
+        )
+        with self.assertRaises(ValueError):
+            self.project.get_transcript("  ")
+
+
 class ProjectCreateCustomMetricTest(unittest.TestCase):
     """Tests for AgentStudioProject.create_custom_metric validation and orchestration."""
 

@@ -1906,3 +1906,18 @@ class AgentStudioInterface:
     def query_metric(region: str, body: dict) -> dict:
         """Aggregate one metric over a window; see ``PlatformAPIHandler.query_metric``."""
         return PlatformAPIHandler.query_metric(region, body)
+
+    @staticmethod
+    def search_conversations(region: str, body: dict) -> dict:
+        """Search conversations by metric filters; see ``PlatformAPIHandler``."""
+        return PlatformAPIHandler.search_conversations(region, body)
+
+    @staticmethod
+    def search_transcripts(region: str, params: dict) -> dict:
+        """Full-text transcript search; see ``PlatformAPIHandler.search_transcripts``."""
+        return PlatformAPIHandler.search_transcripts(region, params)
+
+    @staticmethod
+    def get_transcript(region: str, conversation_id: str, project_id: Optional[str] = None) -> dict:
+        """Fetch one conversation's full transcript."""
+        return PlatformAPIHandler.get_transcript(region, conversation_id, project_id)
