@@ -102,6 +102,16 @@ poly pull --format    # format all three sides before merging
 
     If a file is missing locally but present in the tracked state, `poly pull` treats that as an intentional deletion and does not restore it. Files that are new on the remote are written directly, since there is no local version to merge against.
 
+## Syncing with the parent branch
+
+When the parent branch has moved on, bring its changes into your branch without merging back:
+
+```bash
+poly branch sync
+```
+
+Conflicts are resolved the same way as for a merge, with `--interactive` or `--resolutions` — see [`poly branch sync`](../reference/cli/branch.md#poly-branch-sync).
+
 ## Merging changes
 
 Once the branch is reviewed, merge it into its parent:
