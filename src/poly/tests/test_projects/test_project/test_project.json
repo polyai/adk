@@ -1186,7 +1186,12 @@
             "resource_id": "",
             "name": "get_confirmation_status",
             "method": "GET",
-            "resource": "/bookings/{booking_id}/confirmation-status"
+            "resource": "/bookings/{booking_id}/confirmation-status",
+            "description": "Check whether a booking is confirmed",
+            "headers": {
+              "Accept": "application/json",
+              "X-Api-Version": "2"
+            }
           }
         ]
       }

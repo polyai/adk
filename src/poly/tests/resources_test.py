@@ -6688,6 +6688,133 @@ class ApiIntegrationTest(unittest.TestCase):
         self.assertEqual(deleted_ops[0].name, "delete")
         self.assertEqual(deleted_ops[0].integration_id, "int-1")
 
+    def test_api_integration_operation_description_and_headers_from_projection(self):
+        """from_projection reads each operation's description and headers."""
+        projection = {
+            "apiIntegrations": {
+                "apiIntegrations": {
+                    "entities": {
+                        "int-1": {
+                            "name": "crm",
+                            "operations": {
+                                "op-1": {
+                                    "id": "op-1",
+                                    "name": "get_contact",
+                                    "method": "GET",
+                                    "resource": "/contacts/{id}",
+                                    "description": "Get a contact by ID",
+                                    "headers": {"Accept": "application/json"},
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        }
+
+        operation = ApiIntegration.from_projection(projection)["int-1"].operations[0]
+
+        self.assertEqual(operation.description, "Get a contact by ID")
+        self.assertEqual(operation.headers, {"Accept": "application/json"})
+
+    def test_api_integration_operation_yaml_omits_empty_description_and_headers(self):
+        """Operations without a description or headers keep the existing YAML shape."""
+        operation = ApiIntegrationOperation(name="get", method="GET", resource="/x")
+
+        self.assertEqual(
+            operation.to_yaml_dict(), {"name": "get", "method": "GET", "resource": "/x"}
+        )
+
+    def test_api_integration_operation_yaml_round_trips_description_and_headers(self):
+        """Description and headers survive a YAML round trip, with headers sorted by name."""
+        operation = ApiIntegrationOperation(
+            name="get",
+            method="GET",
+            resource="/x",
+            description="Get a thing",
+            headers={"X-Tenant": "acme", "Accept": "application/json"},
+        )
+
+        yaml_dict = operation.to_yaml_dict()
+        self.assertEqual(list(yaml_dict), ["name", "description", "method", "resource", "headers"])
+        self.assertEqual(list(yaml_dict["headers"]), ["Accept", "X-Tenant"])
+
+        read_back = ApiIntegrationOperation.from_dict(yaml_dict)
+        self.assertEqual(read_back.description, "Get a thing")
+        self.assertEqual(read_back.headers, {"Accept": "application/json", "X-Tenant": "acme"})
+
+    def test_api_integration_operation_protos_carry_description_and_headers(self):
+        """Create and update protos send the operation's description and headers."""
+        operation = ApiIntegrationOperation(
+            resource_id="op-1",
+            name="get",
+            method="GET",
+            resource="/x",
+            description="Get a thing",
+            headers={"Accept": "application/json"},
+            integration_id="int-1",
+        )
+
+        create = operation.build_create_proto()
+        self.assertEqual(create.description, "Get a thing")
+        self.assertEqual(dict(create.headers), {"Accept": "application/json"})
+
+        update = operation.build_update_proto()
+        self.assertEqual(update.description, "Get a thing")
+        self.assertEqual(dict(update.headers.entries), {"Accept": "application/json"})
+
+    def test_api_integration_operation_update_proto_clears_removed_headers(self):
+        """An operation with no headers sends an empty headers message, which clears them."""
+        operation = ApiIntegrationOperation(
+            resource_id="op-1", name="get", method="GET", resource="/x", integration_id="int-1"
+        )
+
+        update = operation.build_update_proto()
+
+        self.assertTrue(update.HasField("headers"))
+        self.assertEqual(dict(update.headers.entries), {})
+
+    def test_api_integration_operation_description_or_header_change_is_an_update(self):
+        """Changing only an operation's description or headers pushes it as an update."""
+        old_integration = ApiIntegration(
+            resource_id="int-1",
+            name="API",
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id="op-1",
+                    name="get",
+                    method="GET",
+                    resource="/a",
+                    description="Old",
+                    headers={"Accept": "application/json"},
+                ),
+            ],
+        )
+        changes = {
+            "description": {"description": "New", "headers": {"Accept": "application/json"}},
+            "headers": {"description": "Old", "headers": {"Accept": "text/plain"}},
+            "headers removed": {"description": "Old", "headers": {}},
+        }
+        for change, fields in changes.items():
+            with self.subTest(change=change):
+                current = ApiIntegration(
+                    resource_id="int-1",
+                    name="API",
+                    operations=[
+                        ApiIntegrationOperation(name="get", method="GET", resource="/a", **fields)
+                    ],
+                )
+
+                new_ops, updated_ops, deleted_ops = current.get_new_updated_deleted_subresources(
+                    old_integration
+                )
+
+                self.assertEqual((new_ops, deleted_ops), ([], []))
+                self.assertEqual(len(updated_ops), 1)
+                self.assertEqual(updated_ops[0].resource_id, "op-1")
+                self.assertEqual(updated_ops[0].description, fields["description"])
+                self.assertEqual(updated_ops[0].headers, fields["headers"])
+
     def test_api_integration_discover_resources(self):
         """discover_resources returns [] when no file; returns paths for each integration in the list."""
         import tempfile
@@ -7965,6 +8092,49 @@ class TestApiIntegrationValidate(unittest.TestCase):
                     )
                 )
                 integration.validate()
+
+    def test_operation_with_valid_description_and_headers_does_not_raise(self):
+        """Header names may use any token character, and values may contain a tab."""
+        operation = ApiIntegrationOperation(
+            name="get",
+            method="GET",
+            resource="/x",
+            description="d" * 1000,
+            headers={"X-Api_Key~1": "a\tb", "Accept": "application/json"},
+        )
+        self._make_integration(operations=[operation]).validate()
+
+    def test_operation_with_invalid_description_or_headers_raises_value_error(self):
+        """Validation rejects what Agent Studio refuses when an operation is saved."""
+        cases = {
+            "description too long": ({"description": "d" * 1001}, "longer than 1000"),
+            "dotted name": ({"headers": {"X.Tenant": "a"}}, "can't contain spaces, dots"),
+            "name with a space": ({"headers": {"X Tenant": "a"}}, "can't contain spaces, dots"),
+            "authorization": ({"headers": {"Authorization": "a"}}, "environment config"),
+            "host": ({"headers": {"host": "a"}}, "environment config"),
+            "duplicate name": (
+                {"headers": {"Accept": "a", "accept": "b"}},
+                "duplicate header 'accept'",
+            ),
+            "number value": ({"headers": {"X-Version": 2}}, "must be a string"),
+            "line break": ({"headers": {"X-Tenant": "a\nb"}}, "line breaks"),
+            "non-ASCII": ({"headers": {"X-Tenant": "café"}}, "non-ASCII"),
+            "leading space": ({"headers": {"X-Tenant": " a"}}, "start or end with a space"),
+            "value too long": ({"headers": {"X-Tenant": "a" * 4097}}, "longer than 4096"),
+            "too many": (
+                {"headers": {f"X-Header-{i}": "a" for i in range(51)}},
+                "at most 50 headers",
+            ),
+            "not a mapping": ({"headers": ["Accept"]}, "must be a mapping"),
+        }
+        for case, (fields, message) in cases.items():
+            with self.subTest(case=case):
+                operation = ApiIntegrationOperation(
+                    name="get", method="GET", resource="/x", **fields
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    self._make_integration(operations=[operation]).validate()
+                self.assertIn(message, str(ctx.exception))
 
     def test_environment_with_invalid_base_url_raises_value_error(self):
         """Validation rejects an environment whose base_url is not a valid URL."""
