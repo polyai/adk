@@ -209,7 +209,6 @@ class BranchCommand(BaseCommand):
                 "  poly branch delete\n"
                 "  poly branch restore archived-branch\n"
                 "  poly branch tag\n"
-                "  poly branch tag --env sandbox\n"
                 "  poly branch untag\n"
             ),
             formatter_class=GroupedRawTextHelpFormatter,
@@ -449,16 +448,7 @@ class BranchCommand(BaseCommand):
         branch_tag_parser = branch_subparsers.add_parser(
             "tag",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
-            help="Tag the current branch and deploy it to an environment. Tagging 'main' branch is not supported.",
-        )
-        branch_tag_parser.add_argument(
-            "--env",
-            "--environment",
-            type=str,
-            choices=["staging", "sandbox"],
-            default="staging",
-            dest="environment",
-            help="Environment to deploy the tagged branch to. Defaults to staging.",
+            help="Tag the current branch and deploy to staging environment. Tagging 'main' branch is not supported.",
         )
         branch_tag_parser.set_defaults(branch_subcommand="tag")
 
@@ -467,15 +457,6 @@ class BranchCommand(BaseCommand):
             "untag",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
             help="Remove a tag from the current branch. Untagging 'main' branch is not supported.",
-        )
-        branch_untag_parser.add_argument(
-            "--env",
-            "--environment",
-            type=str,
-            choices=["staging", "sandbox"],
-            default="staging",
-            dest="environment",
-            help="Environment tag to remove from the branch. Defaults to staging.",
         )
         branch_untag_parser.set_defaults(branch_subcommand="untag")
 
@@ -610,10 +591,10 @@ class BranchCommand(BaseCommand):
             cls.branch_restore(args.path, args.branch_id, args.json)
 
         elif args.branch_subcommand == "tag":
-            cls.branch_tag(args.path, args.json, args.environment)
+            cls.branch_tag(args.path, args.json)
 
         elif args.branch_subcommand == "untag":
-            cls.branch_untag(args.path, args.json, args.environment)
+            cls.branch_untag(args.path, args.json)
 
         elif args.branch_subcommand == "diff":
             cls.branch_diff(args.path, args.branch_name, getattr(args, "files", None), args.json)
@@ -1927,24 +1908,22 @@ class BranchCommand(BaseCommand):
         cls,
         base_path: str,
         output_json: bool = False,
-        environment: str = "staging",
     ) -> None:
-        """Tag the current branch, deploying it to the given environment."""
+        """Tag the current branch with a new tag."""
         from poly.cli_commands.shared import require_deployment_simplification
         from poly.output.console import error, success
 
         project = load_project(base_path, output_json=output_json)
         require_deployment_simplification(project, output_json=output_json)
 
-        tagged = project.tag_branch(environment=environment)
+        tagged = project.tag_branch()
 
         if output_json:
             json_print({"success": tagged})
         else:
             if tagged:
                 success(
-                    f"Current branch '{project.get_current_branch()}' tagged and deployed to "
-                    f"{environment}."
+                    f"Current branch '{project.get_current_branch()}' tagged and deployed to staging."
                 )
             else:
                 error("Failed to tag the current branch.")
@@ -1954,7 +1933,6 @@ class BranchCommand(BaseCommand):
         cls,
         base_path: str,
         output_json: bool = False,
-        environment: str = "staging",
     ) -> None:
         """Remove a tag from the current branch."""
         from poly.cli_commands.shared import require_deployment_simplification
@@ -1963,15 +1941,14 @@ class BranchCommand(BaseCommand):
         project = load_project(base_path, output_json=output_json)
         require_deployment_simplification(project, output_json=output_json)
 
-        untagged = project.untag_branch(environment=environment)
+        untagged = project.untag_branch()
 
         if output_json:
             json_print({"success": untagged})
         else:
             if untagged:
                 success(
-                    f"{environment.capitalize()} tag removed from current branch "
-                    f"'{project.get_current_branch()}'."
+                    f"Staging tag removed from current branch '{project.get_current_branch()}'."
                 )
             else:
                 error("Failed to remove tag from the current branch.")

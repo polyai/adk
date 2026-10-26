@@ -960,12 +960,11 @@ class SourcererSDK:
                 error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
-    def tag_branch(self, branch_id: str, tag: str = "staging") -> dict[str, Any]:
-        """Tag a branch, deploying it to the given environment.
+    def tag_branch(self, branch_id: str) -> dict[str, Any]:
+        """Tag a branch for staging
 
         Args:
             branch_id: The ID of the branch to tag.
-            tag: The environment to tag the branch for ("staging" or "sandbox").
 
         Returns:
             A dictionary containing the updated branch information.
@@ -975,7 +974,7 @@ class SourcererSDK:
         """
         try:
             url = f"{self._get_branches_url()}/{branch_id}/tag"
-            payload = {"tag": tag}
+            payload = {"tag": "staging"}
             response = self.session.put(url, json=payload)
             response.raise_for_status()
             return response.json()
@@ -990,12 +989,11 @@ class SourcererSDK:
                 error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
-    def untag_branch(self, branch_id: str, tag: str = "staging") -> dict[str, Any]:
-        """Remove a tag from a branch.
+    def untag_branch(self, branch_id: str) -> dict[str, Any]:
+        """Untag a branch for staging
 
         Args:
             branch_id: The ID of the branch to untag.
-            tag: The environment tag to remove ("staging" or "sandbox").
 
         Returns:
             A dictionary containing the updated branch information.
@@ -1006,7 +1004,7 @@ class SourcererSDK:
 
         try:
             url = f"{self._get_branches_url()}/{branch_id}/tag"
-            response = self.session.delete(url, json={"tag": tag})
+            response = self.session.delete(url)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:

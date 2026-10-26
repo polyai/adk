@@ -338,52 +338,6 @@ On conflict or error, `"conflicts"` and/or `"errors"` arrays are added and the p
 
 If the parent and the branch changed the same fields, the command prints the conflict table and exits non-zero. Resolve the conflicts the same way as for [`poly branch merge`](#conflicts): `"ours"` keeps the parent's value and `"theirs"` keeps the branch's.
 
-## `poly branch tag`
-
-Tag the current branch, deploying it to an environment. Tagging `main` is not supported.
-
-Examples:
-
-~~~bash
-poly branch tag
-poly branch tag --env sandbox
-~~~
-
-| Flag | Description |
-|---|---|
-| `--env`, `--environment` | Environment to deploy the tagged branch to. Choices: `staging`, `sandbox`. Defaults to `staging`. |
-
-`--json` output shape:
-
-~~~json
-{ "success": true }
-~~~
-
-## `poly branch untag`
-
-Remove a tag from the current branch. Untagging `main` is not supported.
-
-Examples:
-
-~~~bash
-poly branch untag
-poly branch untag --env sandbox
-~~~
-
-| Flag | Description |
-|---|---|
-| `--env`, `--environment` | Environment tag to remove from the branch. Choices: `staging`, `sandbox`. Defaults to `staging`. |
-
-`--json` output shape:
-
-~~~json
-{ "success": true }
-~~~
-
-!!! info "Requires simplified deployments"
-
-    `poly branch sync`, `tag`, and `untag` are only available on projects with simplified deployments enabled; they exit with an error otherwise.
-
 ## `poly branch diff`
 
 Show changes made on a branch since it was created — its own local-vs-remote analogue is [`poly diff`](./diff.md).

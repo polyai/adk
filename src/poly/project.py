@@ -4377,22 +4377,14 @@ class AgentStudioProject:
 
         return self.api_handler.restore_branch(branch_id)
 
-    _BRANCH_TAG_ENVIRONMENTS = ("staging", "sandbox")
-
-    def tag_branch(self, branch_name: str = None, environment: str = "staging") -> bool:
-        """Tag the current branch, deploying it to the given environment.
+    def tag_branch(self, branch_name: str = None) -> bool:
+        """Tag the current branch with a new tag.
 
         Args:
             branch_name (str): The name of the branch to tag. If None, tags the current branch.
-            environment (str): The environment to tag the branch for, "staging" or "sandbox".
         Returns:
             bool: True if the tagging was successful, False otherwise.
         """
-        if environment not in self._BRANCH_TAG_ENVIRONMENTS:
-            raise ValueError(
-                f"Environment must be one of {self._BRANCH_TAG_ENVIRONMENTS}, got '{environment}'."
-            )
-
         branches = self.api_handler.get_branches()
         if branch_name is None:
             branch_id = self.branch_id
@@ -4409,23 +4401,17 @@ class AgentStudioProject:
         if branch_id == "main":
             raise ValueError("Tagging 'main' branch is not supported.")
 
-        success = self.api_handler.tag_branch(branch_id, tag=environment)
+        success = self.api_handler.tag_branch(branch_id)
         return success
 
-    def untag_branch(self, branch_name: str = None, environment: str = "staging") -> bool:
+    def untag_branch(self, branch_name: str = None) -> bool:
         """Remove a tag from a branch.
 
         Args:
             branch_name (str): The name of the branch to untag. If None, untags the current branch.
-            environment (str): The environment tag to remove, "staging" or "sandbox".
         Returns:
             bool: True if the untagging was successful, False otherwise.
         """
-        if environment not in self._BRANCH_TAG_ENVIRONMENTS:
-            raise ValueError(
-                f"Environment must be one of {self._BRANCH_TAG_ENVIRONMENTS}, got '{environment}'."
-            )
-
         branches = self.api_handler.get_branches()
         if branch_name is None:
             branch_id = self.branch_id
@@ -4442,7 +4428,7 @@ class AgentStudioProject:
         if branch_id == "main":
             raise ValueError("Untagging 'main' branch is not supported.")
 
-        success = self.api_handler.untag_branch(branch_id, tag=environment)
+        success = self.api_handler.untag_branch(branch_id)
         return success
 
     def get_project_info(self) -> dict[str, Any]:

@@ -5636,40 +5636,16 @@ class BranchTaggingTest(unittest.TestCase):
         self.mock_api.branch_id = branch_id
 
     def test_tags_current_branch_by_default(self):
-        """With no branch name the current branch's id is tagged for staging."""
+        """With no branch name the current branch's id is tagged."""
         self.assertTrue(self.project.tag_branch())
 
-        self.mock_api.tag_branch.assert_called_once_with("branch-a", tag="staging")
+        self.mock_api.tag_branch.assert_called_once_with("branch-a")
 
     def test_untags_current_branch_by_default(self):
-        """With no branch name the current branch's id is untagged for staging."""
+        """With no branch name the current branch's id is untagged."""
         self.assertTrue(self.project.untag_branch())
 
-        self.mock_api.untag_branch.assert_called_once_with("branch-a", tag="staging")
-
-    def test_tags_current_branch_for_sandbox(self):
-        """Passing environment="sandbox" tags the branch for sandbox instead."""
-        self.assertTrue(self.project.tag_branch(environment="sandbox"))
-
-        self.mock_api.tag_branch.assert_called_once_with("branch-a", tag="sandbox")
-
-    def test_untags_current_branch_for_sandbox(self):
-        """Passing environment="sandbox" untags the branch for sandbox instead."""
-        self.assertTrue(self.project.untag_branch(environment="sandbox"))
-
-        self.mock_api.untag_branch.assert_called_once_with("branch-a", tag="sandbox")
-
-    def test_rejects_unknown_environment(self):
-        """An environment outside staging/sandbox is refused before any API call."""
-        for method in (self.project.tag_branch, self.project.untag_branch):
-            with self.subTest(method=method.__name__):
-                with self.assertRaises(ValueError) as ctx:
-                    method(environment="live")
-
-                self.assertIn("live", str(ctx.exception))
-
-        self.mock_api.tag_branch.assert_not_called()
-        self.mock_api.untag_branch.assert_not_called()
+        self.mock_api.untag_branch.assert_called_once_with("branch-a")
 
     def test_named_branch_is_resolved_to_its_id(self):
         """An explicit branch name is resolved to the branch id before the API call."""
@@ -5677,7 +5653,7 @@ class BranchTaggingTest(unittest.TestCase):
 
         self.project.tag_branch("feature-a")
 
-        self.mock_api.tag_branch.assert_called_once_with("branch-a", tag="staging")
+        self.mock_api.tag_branch.assert_called_once_with("branch-a")
 
     def test_rejects_unknown_branch_name(self):
         """A name that is not in the branch list is refused before any API call."""
