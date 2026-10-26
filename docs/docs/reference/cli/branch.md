@@ -340,18 +340,13 @@ If the parent and the branch changed the same fields, the command prints the con
 
 ## `poly branch tag`
 
-Tag the current branch, deploying it to an environment. Tagging `main` is not supported.
+Tag the current branch, deploying it to staging. Tagging `main` is not supported.
 
 Examples:
 
 ~~~bash
 poly branch tag
-poly branch tag --env sandbox
 ~~~
-
-| Flag | Description |
-|---|---|
-| `--env`, `--environment` | Environment to deploy the tagged branch to. Choices: `staging`, `sandbox`. Defaults to `staging`. |
 
 `--json` output shape:
 
@@ -361,18 +356,13 @@ poly branch tag --env sandbox
 
 ## `poly branch untag`
 
-Remove a tag from the current branch. Untagging `main` is not supported.
+Remove the staging tag from the current branch. Untagging `main` is not supported.
 
 Examples:
 
 ~~~bash
 poly branch untag
-poly branch untag --env sandbox
 ~~~
-
-| Flag | Description |
-|---|---|
-| `--env`, `--environment` | Environment tag to remove from the branch. Choices: `staging`, `sandbox`. Defaults to `staging`. |
 
 `--json` output shape:
 

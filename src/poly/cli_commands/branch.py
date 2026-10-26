@@ -209,7 +209,6 @@ class BranchCommand(BaseCommand):
                 "  poly branch delete\n"
                 "  poly branch restore archived-branch\n"
                 "  poly branch tag\n"
-                "  poly branch tag --env sandbox\n"
                 "  poly branch untag\n"
             ),
             formatter_class=GroupedRawTextHelpFormatter,
@@ -455,7 +454,6 @@ class BranchCommand(BaseCommand):
             "--env",
             "--environment",
             type=str,
-            choices=["staging", "sandbox"],
             default="staging",
             dest="environment",
             help="Environment to deploy the tagged branch to. Defaults to staging.",
@@ -472,7 +470,6 @@ class BranchCommand(BaseCommand):
             "--env",
             "--environment",
             type=str,
-            choices=["staging", "sandbox"],
             default="staging",
             dest="environment",
             help="Environment tag to remove from the branch. Defaults to staging.",
