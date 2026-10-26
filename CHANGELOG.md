@@ -1,6 +1,69 @@
 # CHANGELOG
 
 
+## v0.73.2 (2026-10-26)
+
+### Bug Fixes
+
+- Name the parent branch, not main, when resolving merge and sync conflicts
+  ([#380](https://github.com/polyai/adk/pull/380),
+  [`b94722a`](https://github.com/polyai/adk/commit/b94722a10493c54081a79fe2ebed6a8a8c9b33c6))
+
+## Summary
+
+When `poly branch merge -i` or `poly branch sync -i` hits a conflict, the prompt now names the
+  parent branch instead of calling that side "main". For a branch made from another branch, the
+  parent is that other branch, not `main`.
+
+## Motivation
+
+The interactive resolver offered "Use main" for the `ours` side of every conflict, and the conflict
+  header labelled that side's value "Main". That side is the branch you merge into or sync from. It
+  is `main` only for a branch made from `main`. Syncing a sub-branch with its parent showed "Use
+  main" while the value was the parent's, so the prompt pointed at the wrong branch.
+
+## Changes
+
+- The resolution menu says "Use parent — <name>", next to the existing "Use branch — <name>". - The
+  conflict header labels the parent's value "Parent (<name>)", in both the side-by-side and the
+  field-by-field views. - `poly branch merge` passes the parent's name it already looks up. `poly
+  branch sync` looks it up the same way, only when there are conflicts to resolve, so a sync without
+  conflicts makes no extra call. The lookup is now one helper used by both. - The CLI reference's
+  interactive section says "pick the parent branch" instead of "pick `main`". - Tests for the menu
+  (merge on a sub-branch and on a branch from `main`, sync on a sub-branch), for the header in both
+  views, and that a sync without conflicts skips the lookup.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly branch sync -i`) - [x] Tested against
+  a live Agent Studio project: a branch made from another branch, where both changed the same
+  function, synced with `poly branch sync -i`. Before, the menu offered "Use main"; now it offers
+  "Use parent" with the parent branch's name. The prompt was cancelled each time, so nothing was
+  resolved.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+Before (main):
+
+``` $ poly branch sync -i ? Select resolution (Use arrow keys) » Use main Use branch —
+  scratch-adk-sync-child Use original (base) Edit manually ```
+
+After:
+
+``` $ poly branch sync -i ? Select resolution (Use arrow keys) » Use parent —
+  scratch-adk-sync-parent Use branch — scratch-adk-sync-child Use original (base) Edit manually ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
 ## v0.73.1 (2026-10-23)
 
 ### Bug Fixes
