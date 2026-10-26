@@ -272,10 +272,12 @@ If every conflict is auto-mergeable and you want to accept it, re-run with `--in
 Interactive mode walks through each conflict and asks how to resolve it. For every conflict you can:
 
 - accept the auto-merge (when available)
-- pick the parent branch (`ours`): `main`, unless you branched from another branch
+- pick the parent branch (`ours`): the branch you are merging into, shown as `Use parent — <name>`
 - pick the branch (`theirs`)
 - pick `base` (revert to the original value)
 - open the value in `$EDITOR`/`$VISUAL` for free-form editing
+
+The conflict header labels each side with its branch name — `Parent (<name>)` for the branch being merged into, `Branch (<name>)` for the branch being merged. For a branch made from `main`, the parent is `main`; for a sub-branch, it is the branch it was created from.
 
 After every conflict is answered, the merge is re-attempted automatically.
 
@@ -336,7 +338,7 @@ The checkout must have no unpushed changes. If the sync has no conflicts, it com
 
 On conflict or error, `"conflicts"` and/or `"errors"` arrays are added and the process exits non-zero.
 
-If the parent and the branch changed the same fields, the command prints the conflict table and exits non-zero. Resolve the conflicts the same way as for [`poly branch merge`](#conflicts): `"ours"` keeps the parent's value and `"theirs"` keeps the branch's.
+If the parent and the branch changed the same fields, the command prints the conflict table and exits non-zero. Resolve the conflicts the same way as for [`poly branch merge`](#conflicts): `"ours"` keeps the parent's value and `"theirs"` keeps the branch's. The interactive prompt labels the parent side as `Use parent — <name>`, where `<name>` is the actual parent branch name.
 
 ## `poly branch diff`
 
