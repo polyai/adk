@@ -1839,31 +1839,33 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
-    def tag_branch(self, branch_id: str) -> bool:
-        """Tag the current branch with a specific tag name.
+    def tag_branch(self, branch_id: str, tag: str = "staging") -> bool:
+        """Tag a branch, deploying it to the given environment.
 
         Args:
             branch_id (str): The ID of the branch to tag.
+            tag (str): The environment to tag the branch for ("staging" or "sandbox").
 
         Returns:
             bool: True if the branch was tagged successfully, False otherwise.
         """
         try:
-            return self.sync_client.tag_branch(branch_id)
+            return self.sync_client.tag_branch(branch_id, tag=tag)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
-    def untag_branch(self, branch_id: str) -> bool:
-        """Remove a specific tag from the current branch.
+    def untag_branch(self, branch_id: str, tag: str = "staging") -> bool:
+        """Remove a tag from a branch.
 
         Args:
             branch_id (str): The ID of the branch to untag.
+            tag (str): The environment tag to remove ("staging" or "sandbox").
 
         Returns:
             bool: True if the branch was untagged successfully, False otherwise.
         """
         try:
-            return self.sync_client.untag_branch(branch_id)
+            return self.sync_client.untag_branch(branch_id, tag=tag)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 

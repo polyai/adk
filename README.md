@@ -184,7 +184,9 @@ Projects using simplified deployments can also stage a branch:
 
 ```bash
 poly branch tag                        # tag the current branch, deploying it to staging
-poly branch untag                      # remove the tag
+poly branch tag --env sandbox          # tag the current branch, deploying it to sandbox
+poly branch untag                      # remove the staging tag
+poly branch untag --env sandbox        # remove the sandbox tag
 ```
 
 `poly branch sync`, `tag`, and `untag` are only available on projects with simplified deployments

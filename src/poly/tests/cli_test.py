@@ -4619,16 +4619,32 @@ class BranchTagTest(unittest.TestCase):
         """A successful tag names the branch that was staged."""
         BranchCommand.branch_tag(TEST_DIR)
 
-        self.proj.tag_branch.assert_called_once_with()
+        self.proj.tag_branch.assert_called_once_with(environment="staging")
         self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("poly.output.console.success")
+    def test_tag_sandbox_passes_environment_through(self, mock_success):
+        """Passing --env sandbox tags the branch for the sandbox environment."""
+        BranchCommand.branch_tag(TEST_DIR, environment="sandbox")
+
+        self.proj.tag_branch.assert_called_once_with(environment="sandbox")
+        self.assertIn("sandbox", mock_success.call_args[0][0])
 
     @patch("poly.output.console.success")
     def test_untag_success_reports_branch_name(self, mock_success):
         """A successful untag names the branch whose tag was removed."""
         BranchCommand.branch_untag(TEST_DIR)
 
-        self.proj.untag_branch.assert_called_once_with()
+        self.proj.untag_branch.assert_called_once_with(environment="staging")
         self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("poly.output.console.success")
+    def test_untag_sandbox_passes_environment_through(self, mock_success):
+        """Passing --env sandbox removes the sandbox tag."""
+        BranchCommand.branch_untag(TEST_DIR, environment="sandbox")
+
+        self.proj.untag_branch.assert_called_once_with(environment="sandbox")
+        self.assertIn("Sandbox", mock_success.call_args[0][0])
 
     @patch("poly.output.console.error")
     def test_tag_failure_is_reported(self, mock_error):

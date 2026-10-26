@@ -490,40 +490,42 @@ class SyncClientHandler:
         logger.info(f"Successfully restored branch ID:'{branch_id}'")
         return True
 
-    def tag_branch(self, branch_id: str) -> bool:
-        """Tag a branch with staging tag
+    def tag_branch(self, branch_id: str, tag: str = "staging") -> bool:
+        """Tag a branch, deploying it to the given environment.
 
         Args:
             branch_id (str): The ID of the branch to tag.
+            tag (str): The environment to tag the branch for ("staging" or "sandbox").
         Returns:
             bool: True if the tagging was successful, False otherwise.
         """
-        logger.info(f"Tagging branch ID:'{branch_id}' with staging tag")
+        logger.info(f"Tagging branch ID:'{branch_id}' with '{tag}' tag")
 
         try:
-            self.sdk.tag_branch(branch_id)
+            self.sdk.tag_branch(branch_id, tag=tag)
         except SourcererAPIError as e:
             logger.error(f"Failed to tag branch ID:'{branch_id}': {e}")
             return False
 
-        logger.info(f"Successfully tagged branch ID:'{branch_id}' with staging tag")
+        logger.info(f"Successfully tagged branch ID:'{branch_id}' with '{tag}' tag")
         return True
 
-    def untag_branch(self, branch_id: str) -> bool:
-        """Remove staging tag from a branch
+    def untag_branch(self, branch_id: str, tag: str = "staging") -> bool:
+        """Remove a tag from a branch.
 
         Args:
             branch_id (str): The ID of the branch to untag.
+            tag (str): The environment tag to remove ("staging" or "sandbox").
         Returns:
             bool: True if the untagging was successful, False otherwise.
         """
-        logger.info(f"Removing staging tag from branch ID:'{branch_id}'")
+        logger.info(f"Removing '{tag}' tag from branch ID:'{branch_id}'")
 
         try:
-            self.sdk.untag_branch(branch_id)
+            self.sdk.untag_branch(branch_id, tag=tag)
         except SourcererAPIError as e:
-            logger.error(f"Failed to remove staging tag from branch ID:'{branch_id}': {e}")
+            logger.error(f"Failed to remove '{tag}' tag from branch ID:'{branch_id}': {e}")
             return False
 
-        logger.info(f"Successfully removed staging tag from branch ID:'{branch_id}'")
+        logger.info(f"Successfully removed '{tag}' tag from branch ID:'{branch_id}'")
         return True

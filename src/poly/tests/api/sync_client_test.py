@@ -181,7 +181,16 @@ class TagBranch(unittest.TestCase):
         result = handler.tag_branch("branch-1")
 
         self.assertTrue(result)
-        handler._sdk.tag_branch.assert_called_once_with("branch-1")
+        handler._sdk.tag_branch.assert_called_once_with("branch-1", tag="staging")
+
+    def test_successful_tag_for_sandbox_returns_true(self):
+        """A tag call for the sandbox environment is forwarded to the SDK."""
+        handler = build_handler()
+
+        result = handler.tag_branch("branch-1", tag="sandbox")
+
+        self.assertTrue(result)
+        handler._sdk.tag_branch.assert_called_once_with("branch-1", tag="sandbox")
 
     def test_api_error_returns_false(self):
         """A SourcererAPIError during tagging returns False rather than propagating."""
@@ -203,7 +212,16 @@ class UntagBranch(unittest.TestCase):
         result = handler.untag_branch("branch-1")
 
         self.assertTrue(result)
-        handler._sdk.untag_branch.assert_called_once_with("branch-1")
+        handler._sdk.untag_branch.assert_called_once_with("branch-1", tag="staging")
+
+    def test_successful_untag_for_sandbox_returns_true(self):
+        """An untag call for the sandbox environment is forwarded to the SDK."""
+        handler = build_handler()
+
+        result = handler.untag_branch("branch-1", tag="sandbox")
+
+        self.assertTrue(result)
+        handler._sdk.untag_branch.assert_called_once_with("branch-1", tag="sandbox")
 
     def test_api_error_returns_false(self):
         """A SourcererAPIError during untagging returns False rather than propagating."""
