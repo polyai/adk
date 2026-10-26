@@ -970,6 +970,15 @@ class BranchSwitchInteractiveTest(unittest.TestCase):
         self.assertIn("No branches found", mock_plain.call_args[0][0])
 
 
+# One field that both the parent and the branch changed.
+_GREETING_CONFLICT = {
+    "path": ["topics", "greeting", "content"],
+    "baseValue": "Hello",
+    "oursValue": "Hello from the parent",
+    "theirsValue": "Hello from the branch",
+}
+
+
 class BranchMergeTest(unittest.TestCase):
     """Tests for BranchCommand.branch_merge's deploy confirmation and success messaging."""
 
@@ -1069,6 +1078,24 @@ class BranchMergeTest(unittest.TestCase):
         mock_confirm.assert_not_called()
         self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
         self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
+
+    @patch("questionary.select")
+    def test_conflict_prompt_names_the_parent_branch(self, mock_select):
+        """The conflict menu offers the branch's parent, which for a sub-branch is its release."""
+        mock_select.return_value.ask.return_value = None
+        self.proj.merge_branch.return_value = (False, [_GREETING_CONFLICT], [])
+
+        for branch, parent in [("feature-a-child", "Release 1"), ("feature-a", "main")]:
+            with self.subTest(branch=branch):
+                self._set_current_branch(branch)
+
+                with self.assertRaises(SystemExit):
+                    BranchCommand.branch_merge(
+                        TEST_DIR, message="ship it", interactive=True, force=True
+                    )
+
+                choices = [c["name"] for c in mock_select.call_args.kwargs["choices"]]
+                self.assertIn(f"Use parent — {parent}", choices)
 
 
 class BranchSyncTest(unittest.TestCase):
@@ -1196,6 +1223,31 @@ class BranchSyncTest(unittest.TestCase):
 
         self.proj.sync_branch.assert_called_once_with(conflict_resolutions=resolutions)
         mock_success.assert_called_once()
+
+    @patch("questionary.select")
+    def test_conflict_prompt_names_the_parent_branch(self, mock_select):
+        """Syncing a sub-branch offers its release as the parent side, not main."""
+        mock_select.return_value.ask.return_value = None
+        self.proj.get_current_branch.return_value = "feature-a-child"
+        self.proj.get_branches.return_value = (
+            "feature-a-child",
+            dict(BranchMergeTest.BRANCH_TREE),
+        )
+        self.proj.sync_branch.return_value = (False, [_GREETING_CONFLICT], [])
+
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_sync(TEST_DIR, interactive=True)
+
+        choices = [c["name"] for c in mock_select.call_args.kwargs["choices"]]
+        self.assertIn("Use parent — Release 1", choices)
+
+    @patch("poly.output.console.success")
+    def test_sync_without_conflicts_does_not_look_up_the_parent(self, mock_success):
+        """Only the conflict prompt needs the parent's name, so a clean sync skips the lookup."""
+        BranchCommand.branch_sync(TEST_DIR)
+
+        mock_success.assert_called_once()
+        self.proj.get_branches.assert_not_called()
 
 
 class BranchMergeConflictHelpersTest(unittest.TestCase):

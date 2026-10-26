@@ -544,10 +544,14 @@ def _merge_leaf_diffs(
 
 
 def _merge_field_diff_rows(
-    rows: Table, main: dict[str, Any], branch: dict[str, Any], branch_label: str
+    rows: Table,
+    parent: dict[str, Any],
+    branch: dict[str, Any],
+    parent_label: str,
+    branch_label: str,
 ) -> None:
     """Add one row per differing field instead of dumping both whole resources."""
-    diffs = _merge_leaf_diffs(main, branch)
+    diffs = _merge_leaf_diffs(parent, branch)
 
     if not diffs:
         rows.add_row("", "")
@@ -561,10 +565,13 @@ def _merge_field_diff_rows(
         return
 
     shown = diffs[:_MERGE_MAX_DIFF_ROWS]
-    for field, main_value, branch_value in shown:
+    for field, parent_value, branch_value in shown:
         rows.add_row("", "")
         rows.add_row("Field differs", Text(field or "(whole value)", style="bright_cyan"))
-        rows.add_row("Main", _merge_preview_cell("" if main_value is None else str(main_value)))
+        rows.add_row(
+            f"Parent ({parent_label})",
+            _merge_preview_cell("" if parent_value is None else str(parent_value)),
+        )
         rows.add_row(
             f"Branch ({branch_label})",
             _merge_preview_cell("" if branch_value is None else str(branch_value)),
@@ -589,7 +596,8 @@ def print_merge_conflict_interactive_header(
     base_value: Any,
     branch_label: str,
     branch_value: Any,
-    main_value: Any,
+    parent_label: str,
+    parent_value: Any,
     existing_resolution: dict[str, Any] | None = None,
 ) -> None:
     """Rich panel for one interactive merge conflict (metadata + optional three-way preview)."""
@@ -633,16 +641,16 @@ def print_merge_conflict_interactive_header(
             style="dim",
         )
         body = Group(rows, Text(""), note)
-    elif isinstance(main_value, dict) and isinstance(branch_value, dict):
+    elif isinstance(parent_value, dict) and isinstance(branch_value, dict):
         # A whole resource conflicted (both sides created it, so there is no base
         # to diff against field by field). Printing both dicts buries the one
         # field that actually differs, so show the differing fields instead.
-        _merge_field_diff_rows(rows, main_value, branch_value, branch_label)
+        _merge_field_diff_rows(rows, parent_value, branch_value, parent_label, branch_label)
         body = rows
     else:
         rows.add_row("", "")
-        # Same order as the CLI resolution menu: main, branch, original (then edit only in the menu).
-        rows.add_row("Main", _merge_preview_cell(str(main_value)))
+        # Same order as the CLI resolution menu: parent, branch, original (edit is menu-only).
+        rows.add_row(f"Parent ({parent_label})", _merge_preview_cell(str(parent_value)))
         rows.add_row(f"Branch ({branch_label})", _merge_preview_cell(str(branch_value)))
         rows.add_row("Original (base)", _merge_preview_cell(str(base_value)))
         body = rows
