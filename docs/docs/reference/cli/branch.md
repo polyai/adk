@@ -272,7 +272,7 @@ If every conflict is auto-mergeable and you want to accept it, re-run with `--in
 Interactive mode walks through each conflict and asks how to resolve it. For every conflict you can:
 
 - accept the auto-merge (when available)
-- pick `main` (`ours`)
+- pick the parent branch (`ours`): `main`, unless you branched from another branch
 - pick the branch (`theirs`)
 - pick `base` (revert to the original value)
 - open the value in `$EDITOR`/`$VISUAL` for free-form editing

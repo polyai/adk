@@ -110,6 +110,19 @@ def _auto_merge_resolution(path: list[str], merged_value: str) -> dict[str, Any]
     return {"path": path, "value": merged_value, "strategy": "theirs"}
 
 
+def _parent_branch_name(branches: dict[str, dict[str, Any]], branch_name: Optional[str]) -> str:
+    """Name of the branch that ``branch_name`` merges into and syncs from.
+
+    That is ``main`` unless the branch was made from another branch. A parent that is
+    not in ``branches`` (as returned by ``get_branches()``) also gives ``main``.
+    """
+    parent_branch_id = branches.get(branch_name, {}).get("parentBranchId") or None
+    return next(
+        (name for name, meta in branches.items() if meta.get("branchId") == parent_branch_id),
+        "main",
+    )
+
+
 def _build_branch_name_lookup(project: Any, archived: list[dict[str, Any]]) -> dict[str, str]:
     """Map branch ids to branch names, for displaying archived branches' parents.
 
@@ -1008,8 +1021,13 @@ class BranchCommand(BaseCommand):
         conflicts: list[dict[str, Any]],
         existing_resolutions: dict[str, dict[str, Any]],
         branch_display_name: str = "",
+        parent_display_name: str = "main",
     ) -> list[dict[str, Any]]:
-        """Resolve merge conflicts with questionary; expects API conflicts optionally enriched."""
+        """Resolve merge or sync conflicts with questionary (API conflicts, optionally enriched).
+
+        ``parent_display_name`` names the other side (``ours``): the branch merged into or
+        synced from, which is ``main`` unless the branch was made from another branch.
+        """
         import questionary
 
         from poly.output.console import (
@@ -1022,6 +1040,7 @@ class BranchCommand(BaseCommand):
         resolutions: list[dict[str, Any]] = []
         index_in_resource: dict[str, int] = {}
         branch_label = branch_display_name or "current branch"
+        parent_label = parent_display_name or "main"
 
         def _is_heavy_content(c: dict[str, Any]) -> bool:
             # Whole-resource conflicts are rendered as a field-level diff, which
@@ -1063,7 +1082,8 @@ class BranchCommand(BaseCommand):
                 base_value=conflict.get("baseValue", ""),
                 branch_label=branch_label,
                 branch_value=conflict.get("theirsValue", ""),
-                main_value=conflict.get("oursValue", ""),
+                parent_label=parent_label,
+                parent_value=conflict.get("oursValue", ""),
                 existing_resolution=existing_resolution,
             )
 
@@ -1082,7 +1102,7 @@ class BranchCommand(BaseCommand):
                 choices.append({"name": "Accept auto-merge", "value": "merged"})
             choices.extend(
                 [
-                    {"name": "Use main", "value": "ours"},
+                    {"name": f"Use parent — {parent_label}", "value": "ours"},
                     {"name": f"Use branch — {branch_label}", "value": "theirs"},
                     {"name": "Use original (base)", "value": "base"},
                 ]
@@ -1214,12 +1234,7 @@ class BranchCommand(BaseCommand):
         project = load_project(base_path, output_json=output_json)
 
         current_branch_name, branches = project.get_branches()
-        current_branch_meta = branches.get(current_branch_name, {})
-        parent_branch_id = current_branch_meta.get("parentBranchId") or None
-        parent_branch_name = next(
-            (name for name, meta in branches.items() if meta.get("branchId") == parent_branch_id),
-            "main",
-        )
+        parent_branch_name = _parent_branch_name(branches, current_branch_name)
 
         if parent_branch_name == "main" and (
             message is None or (isinstance(message, str) and not message.strip())
@@ -1316,7 +1331,7 @@ class BranchCommand(BaseCommand):
         }
         while True:
             resolutions = cls._merge_interactively(
-                enriched, existing_resolutions, current_branch_name
+                enriched, existing_resolutions, current_branch_name, parent_branch_name
             )
             if not resolutions:
                 warning("No resolutions provided. Exiting.")
@@ -1640,8 +1655,13 @@ class BranchCommand(BaseCommand):
         existing_resolutions = {
             os.sep.join(r["path"]): r for r in (file_resolutions or []) if "path" in r
         }
+        # Only the prompt needs the parent's name, so a sync without conflicts skips the lookup.
+        _, branches = project.get_branches()
+        parent_branch_name = _parent_branch_name(branches, branch_name)
         while True:
-            resolutions = cls._merge_interactively(enriched, existing_resolutions, branch_name)
+            resolutions = cls._merge_interactively(
+                enriched, existing_resolutions, branch_name, parent_branch_name
+            )
             if not resolutions:
                 warning("No resolutions provided. Exiting.")
                 sys.exit(1)
