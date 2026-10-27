@@ -2186,6 +2186,26 @@ class PushProjectTest(unittest.TestCase):
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
+    def test_push_project_function_with_blank_lines_after_docstring_has_no_changes(self):
+        """A function written to disk and read back unchanged is not pushed as an update."""
+        root = _copy_test_project(self)
+        project_data = deepcopy(PROJECT_DATA)
+        function_data = project_data["resources"]["functions"]["FUNCTION-test_function"]
+        function_data["code"] = '"""Global helpers."""\n\n\n' + function_data["code"]
+        project = AgentStudioProject.from_dict(project_data, root)
+        function = project.resources[Function]["FUNCTION-test_function"]
+        function.save(
+            root,
+            resource_name=function.name,
+            resource_mappings=project._make_resource_mappings(project.resources),
+        )
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+        self.mock_api_handler.queue_resources.assert_not_called()
+
     def test_push_project_merge_conflict(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_pull.return_value = (["functions/test_function.py"], {})
