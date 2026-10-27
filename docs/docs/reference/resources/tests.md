@@ -49,15 +49,15 @@ test_suite/
 
 The directory is optional. Create it only when you have test cases to define.
 
-!!! info "Filename must match the test name"
+!!! info "The filename follows the test name"
 
-    The filename (without `.yaml`) must match the normalized form of the `name` field: lowercased, with punctuation replaced by underscores. `Greeting flow test` becomes `greeting_flow_test.yaml`. `poly push` rejects mismatched names.
+    A test case is filed under the normalized form of its `name` field: lowercased, with punctuation replaced by underscores. `Greeting flow test` becomes `greeting_flow_test.yaml`. If the filename doesn't match, the name wins: `poly push` pushes it as if it were filed under its name, then moves the file there. If that file is already taken, or two files would move to the same one, the push is refused and names each file. A test case moved this way keeps its id.
 
 ## What a test case contains
 
 | Field | Required | Description |
 |---|---|---|
-| `name` | Yes | Human-readable test name. Must match the filename when normalized. |
+| `name` | Yes | Human-readable test name. Decides the filename when normalized. |
 | `scenario` | Yes | Natural-language description of what the simulated user does. Drives the simulator turn-by-turn. |
 | `channel` | Yes | `voice` or `webchat`. |
 | `language` | Yes | BCP 47 language tag (e.g. `en-GB`). Must be a configured language in the project. |
@@ -282,7 +282,7 @@ prompt_assertions:
 - `api_mocks`: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `respond.status` must be a valid HTTP status code (100–599); `respond.body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation
 - each `function_call_assertions[*].name` must match a global function under `functions/` or a flow function under `flows/<flow>/functions/`
 - each argument's `value_type` must be one of `string`, `integer`, `number`, `boolean`
-- the filename must match the normalized `name`
+- no two test cases may have names that normalize to the same filename
 
 Validation runs automatically as part of `poly push`.
 

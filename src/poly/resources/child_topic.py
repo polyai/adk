@@ -205,8 +205,6 @@ class ChildTopic(Topic):
         # then; validate() still rejects it, because variant_id is left unset.
         variant_name = variant_name or variant_folder
 
-        # Delegates to Topic.read_local_resource, which performs the same
-        # filename-vs-name match check.
         return super().read_local_resource(
             file_path,
             resource_id=resource_id,

@@ -193,7 +193,7 @@ Each function call assertion has:
 ## Naming and filenames
 
 - The `name` field is the canonical test name and can contain spaces and mixed case.
-- The filename must match the cleaned version of `name` — a mismatch raises a validation error on `pull` or `push`.
+- The filename follows the cleaned version of `name`. If they don't match, the name wins: `poly push` pushes it as if it were filed under its name, then moves the file there. If that file is already taken, or two files would move to the same one, the push is refused and names each file.
 
 ## Validation
 

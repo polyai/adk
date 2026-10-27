@@ -8117,5 +8117,244 @@ class PullRemoteRenameTest(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
 
 
+class PushNameFiledPathTest(unittest.TestCase):
+    """Pushing a test case or topic whose file name doesn't match its name.
+
+    The name wins: the resource is pushed as if it were at the file its name gives, keeping
+    the id of the resource saved there, and the file is moved there once pushed.
+    """
+
+    PROJECTION = {
+        "knowledgeBase": {
+            "topics": {
+                "ids": ["TOPIC-1"],
+                "entities": {
+                    "TOPIC-1": {
+                        "id": "TOPIC-1",
+                        "name": "Opening hours",
+                        "actions": "",
+                        "content": "Open 9 to 5",
+                    }
+                },
+            },
+            "uninstantiatedTopics": {"ids": [], "entities": {}},
+        },
+        "testing": {
+            "testCases": {
+                "ids": ["TEST-1"],
+                "entities": {
+                    "TEST-1": {
+                        "id": "TEST-1",
+                        "name": "Greets caller",
+                        "scenario": "Say hello",
+                        "language": "en-GB",
+                        "channel": "chat.polyai",
+                    }
+                },
+            }
+        },
+    }
+
+    def setUp(self):
+        patch.object(AgentStudioProject, "save_config").start()
+        patch.object(AgentStudioInterface, "send_queued_commands", return_value=True).start()
+        self.addCleanup(patch.stopall)
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.project = AgentStudioProject(
+            region="us-1",
+            account_id="account",
+            project_id="project",
+            root_path=self.root,
+            resources={},
+            last_updated=datetime.now(),
+            branch_id="main",
+            file_structure_info={},
+        )
+        self.project.pull_project(projection_json=self.PROJECTION)
+        self.queue_resources = patch.object(
+            self.project.api_handler,
+            "queue_resources",
+            wraps=self.project.api_handler.queue_resources,
+        ).start()
+
+    def _path(self, *parts: str) -> str:
+        return os.path.join(self.root, *parts)
+
+    def _read(self, *parts: str) -> str:
+        with open(self._path(*parts), encoding="utf-8") as file:
+            return file.read()
+
+    def _write(self, contents: str, *parts: str) -> None:
+        with open(self._path(*parts), "w", encoding="utf-8") as file:
+            file.write(contents)
+
+    def _push(self, dry_run: bool = False) -> tuple[bool, str]:
+        success, message, _ = self.project.push_project(
+            projection_json=self.PROJECTION,
+            parent_projection_json={},
+            dry_run=dry_run,
+            skip_validation=True,
+        )
+        return success, message
+
+    def _staged(self, kind: str, resource_type: type) -> dict:
+        return self.queue_resources.call_args.kwargs[f"{kind}_resources"].get(resource_type, {})
+
+    def test_renamed_in_place_keeps_its_id_and_moves_to_its_name(self):
+        """A reworded name in an unmoved file renames the case and moves its file."""
+        old_path = os.path.join("test_suite", "greets_caller.yaml")
+        self._write(self._read(old_path).replace("Greets caller", "Welcomes caller"), old_path)
+
+        success, message = self._push()
+
+        self.assertTrue(success, message)
+        self.assertEqual(list(self._staged("updated", TestCase)), ["TEST-1"])
+        self.assertEqual(self._staged("new", TestCase), {})
+        self.assertEqual(self._staged("deleted", TestCase), {})
+        new_path = os.path.join("test_suite", "welcomes_caller.yaml")
+        self.assertEqual(self.project.moved_files, [(old_path, new_path)])
+        self.assertIn(f"{old_path} moved to {new_path} to match its name.", message)
+        self.assertEqual(os.listdir(self._path("test_suite")), ["welcomes_caller.yaml"])
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_test_case_moved_off_its_file_keeps_its_id(self):
+        """A case written under a paraphrased file name takes the id of the file it names.
+
+        The scenario changes too, so this isn't the scenario pairing of a rename.
+        """
+        old_path = os.path.join("test_suite", "greets_caller.yaml")
+        contents = self._read(old_path).replace("Say hello", "Say hello twice")
+        os.remove(self._path(old_path))
+        misfiled_path = os.path.join("test_suite", "caller_greeting.yaml")
+        self._write(contents, misfiled_path)
+
+        success, message = self._push()
+
+        self.assertTrue(success, message)
+        self.assertEqual(list(self._staged("updated", TestCase)), ["TEST-1"])
+        self.assertEqual(self._staged("new", TestCase), {})
+        self.assertEqual(self._staged("deleted", TestCase), {})
+        self.assertEqual(self.project.moved_files, [(misfiled_path, old_path)])
+        self.assertEqual(os.listdir(self._path("test_suite")), ["greets_caller.yaml"])
+        self.assertIn("Say hello twice", self._read(old_path))
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_topic_moved_off_its_file_keeps_its_id(self):
+        """A topic written under a paraphrased file name is an update, not a delete and create."""
+        old_path = os.path.join("topics", "opening_hours.yaml")
+        contents = self._read(old_path).replace("Open 9 to 5", "Open 8 to 6")
+        os.remove(self._path(old_path))
+        misfiled_path = os.path.join("topics", "hours.yaml")
+        self._write(contents, misfiled_path)
+
+        success, message = self._push()
+
+        self.assertTrue(success, message)
+        self.assertEqual(list(self._staged("updated", Topic)), ["TOPIC-1"])
+        self.assertEqual(self._staged("new", Topic), {})
+        self.assertEqual(self._staged("deleted", Topic), {})
+        self.assertEqual(self.project.moved_files, [(misfiled_path, old_path)])
+        self.assertEqual(os.listdir(self._path("topics")), ["opening_hours.yaml"])
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_topic_renamed_in_place_keeps_its_id(self):
+        """A reworded topic name renames the topic and moves its file."""
+        old_path = os.path.join("topics", "opening_hours.yaml")
+        self._write(self._read(old_path).replace("Opening hours", "Hours of business"), old_path)
+
+        success, message = self._push()
+
+        self.assertTrue(success, message)
+        self.assertEqual(list(self._staged("updated", Topic)), ["TOPIC-1"])
+        self.assertEqual(self._staged("new", Topic), {})
+        self.assertEqual(os.listdir(self._path("topics")), ["hours_of_business.yaml"])
+        self.assertEqual(self.project.resources[Topic]["TOPIC-1"].name, "Hours of business")
+
+    def test_new_test_case_under_another_name_is_created_and_moved(self):
+        """A new case keeps the name as written and gets the file it names."""
+        misfiled_path = os.path.join("test_suite", "check_goodbye.yaml")
+        self._write(
+            "name: Says goodbye\nscenario: Say bye\nchannel: voice\nlanguage: en-GB\n",
+            misfiled_path,
+        )
+
+        success, message = self._push()
+
+        self.assertTrue(success, message)
+        created = list(self._staged("new", TestCase).values())
+        self.assertEqual([case.name for case in created], ["Says goodbye"])
+        self.assertEqual(
+            sorted(os.listdir(self._path("test_suite"))),
+            ["greets_caller.yaml", "says_goodbye.yaml"],
+        )
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_correctly_filed_resource_is_left_alone(self):
+        """An edit to a file that matches its name moves nothing."""
+        path = os.path.join("test_suite", "greets_caller.yaml")
+        self._write(self._read(path).replace("Say hello", "Say hello twice"), path)
+
+        success, message = self._push()
+
+        self.assertTrue(success, message)
+        self.assertEqual(list(self._staged("updated", TestCase)), ["TEST-1"])
+        self.assertEqual(self.project.moved_files, [])
+        self.assertEqual(message, "Resources pushed successfully.")
+        self.assertEqual(os.listdir(self._path("test_suite")), ["greets_caller.yaml"])
+
+    def test_dry_run_reports_the_move_without_moving(self):
+        """A dry run says where the file would go and leaves it where it is."""
+        old_path = os.path.join("topics", "opening_hours.yaml")
+        self._write(self._read(old_path).replace("Opening hours", "Hours of business"), old_path)
+
+        success, message = self._push(dry_run=True)
+
+        self.assertTrue(success, message)
+        self.assertIn(
+            f"{old_path} would move to {os.path.join('topics', 'hours_of_business.yaml')}",
+            message,
+        )
+        self.assertEqual(os.listdir(self._path("topics")), ["opening_hours.yaml"])
+
+    def test_name_taken_by_another_file_is_refused(self):
+        """A name whose file already exists is a clash the author resolves; nothing is sent."""
+        copy_path = os.path.join("test_suite", "greets_caller_copy.yaml")
+        self._write(self._read("test_suite", "greets_caller.yaml"), copy_path)
+
+        success, message = self._push()
+
+        self.assertFalse(success)
+        self.assertIn(
+            f"- {copy_path}: its name puts it at "
+            f"{os.path.join('test_suite', 'greets_caller.yaml')}, which already exists",
+            message,
+        )
+        self.queue_resources.assert_not_called()
+        self.assertEqual(self.project.moved_files, [])
+        self.assertEqual(
+            sorted(os.listdir(self._path("test_suite"))),
+            ["greets_caller.yaml", "greets_caller_copy.yaml"],
+        )
+
+    def test_two_files_naming_the_same_file_are_refused(self):
+        """Two files whose names give the same file name both are listed."""
+        os.remove(self._path("topics", "opening_hours.yaml"))
+        first = os.path.join("topics", "hours.yaml")
+        second = os.path.join("topics", "open_times.yaml")
+        for path in (first, second):
+            self._write("name: Opening hours\nactions: ''\ncontent: Open\n", path)
+
+        success, message = self._push()
+
+        self.assertFalse(success)
+        self.assertIn(
+            f"- {first}, {second}: their names all put them at "
+            f"{os.path.join('topics', 'opening_hours.yaml')}",
+            message,
+        )
+        self.queue_resources.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

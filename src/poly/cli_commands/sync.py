@@ -435,6 +435,9 @@ class PushCommand(BaseCommand):
                 "success": push_ok,
                 "message": output,
                 "dry_run": dry_run,
+                "moved_files": [
+                    {"from": old_path, "to": new_path} for old_path, new_path in project.moved_files
+                ],
             }
             if new_branch_name:
                 json_output["switched_to"] = new_branch_name
@@ -466,6 +469,9 @@ class PushCommand(BaseCommand):
             warning(f"Created and switched to new branch '{new_branch_name}'.")
         if push_ok:
             success(f"Pushed {project.account_id}/{project.project_id} to Agent Studio.")
+            verb = "Would move" if dry_run else "Moved"
+            for old_path, new_path in project.moved_files:
+                info(f"{verb} {old_path} to {new_path} to match its name.")
         else:
             error(f"Failed to push {project.account_id}/{project.project_id} to Agent Studio.")
             plain(output)

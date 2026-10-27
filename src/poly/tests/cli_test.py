@@ -2339,6 +2339,40 @@ class PushStdinProjectionGuardTest(unittest.TestCase):
         )
 
 
+class PushMovedFilesOutputTest(unittest.TestCase):
+    """Tests for `poly push` reporting the files it moved to match their names."""
+
+    MOVE = (os.path.join("topics", "hours.yaml"), os.path.join("topics", "opening_hours.yaml"))
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.sync.load_project").start()
+        self.project = MagicMock()
+        self.project.account_id = "test_account"
+        self.project.project_id = "test_project"
+        self.project.branch_id = "main"
+        self.project.moved_files = [self.MOVE]
+        self.project.push_project.return_value = (True, "Resources pushed successfully.", [])
+        self.mock_load.return_value = self.project
+        self.addCleanup(patch.stopall)
+
+    @patch("poly.cli_commands.sync.json_print")
+    def test_json_lists_each_move(self, mock_json_print):
+        PushCommand.push(TEST_DIR, output_json=True)
+
+        self.assertEqual(
+            mock_json_print.call_args[0][0]["moved_files"],
+            [{"from": self.MOVE[0], "to": self.MOVE[1]}],
+        )
+
+    @patch("poly.output.console.info")
+    def test_human_output_says_each_move(self, mock_info):
+        PushCommand.push(TEST_DIR)
+
+        mock_info.assert_called_with(
+            f"Moved {self.MOVE[0]} to {self.MOVE[1]} to match its name."
+        )
+
+
 class PrintDeploymentsTest(unittest.TestCase):
     """Tests for the print_deployments CLI method."""
 

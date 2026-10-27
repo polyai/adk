@@ -73,6 +73,30 @@ MAX_TEST_RUN_NAME_LENGTH = 120
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
 
+# Resources filed as <folder>/<clean_name(name)>.yaml. The name is the source of truth: one
+# under another file name is pushed as if it were at that path, then moved there.
+NAME_FILED_RESOURCE_TYPES = (Topic, TestCase)
+
+
+def name_filed_path(file_path: str, name: Any) -> str:
+    """Return the path a name-filed resource at file_path belongs at, given its name.
+
+    The folder is kept as it is, and only the file name follows the name. Names that
+    give no file name (not text, or nothing left once cleaned) stay where they are.
+    """
+    clean = resource_utils.clean_name(name) if isinstance(name, str) else ""
+    if not clean:
+        return file_path
+    return os.path.join(os.path.dirname(file_path), f"{clean}.yaml")
+
+
+def _is_free_for(filed_path: str, file_path: str) -> bool:
+    """Return whether file_path can move to filed_path without replacing another file.
+
+    On a case-insensitive file system the two can name the same file.
+    """
+    return not os.path.exists(filed_path) or os.path.samefile(filed_path, file_path)
+
 
 @dataclass
 class ResourceChangeSet:
@@ -127,6 +151,9 @@ class AgentStudioProject:
     # So they aren't considered locally deleted when pushing/pulling
     # before they are saved.
     _not_loaded_resources: list[ResourceType] = field(default_factory=list)
+
+    # (from, to) relative paths of the files the last push moved to match their names
+    moved_files: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def all_resources(self) -> list[Resource]:
@@ -1300,7 +1327,12 @@ class AgentStudioProject:
                 - Boolean indicating success.
                 - String message.
                 - List of commands serialized to protobuf.
+
+        A test case or topic filed under a file name other than the one its name gives is
+        pushed as if it were at that path, and moved there once pushed. moved_files lists
+        each move (relative paths), and the message adds a line for each.
         """
+        self.moved_files = []
 
         if not dry_run:
             # If force, load latest version of the project
@@ -1364,6 +1396,8 @@ class AgentStudioProject:
 
         # 2. Read all new/kept resources from disk
         new_state: ResourceMap = {}
+        # (file, the file its name puts it at) for each name-filed resource under another name
+        moves: list[tuple[str, str]] = []
 
         new_file_paths = {rm.file_path for rm in new_resource_mappings}
         for resource_mapping in local_resource_mappings:
@@ -1394,6 +1428,19 @@ class AgentStudioProject:
             new_state.setdefault(resource_mapping.resource_type, {})[
                 resource_mapping.resource_id
             ] = local_resource
+            if isinstance(local_resource, NAME_FILED_RESOURCE_TYPES):
+                filed_path = name_filed_path(resource_mapping.file_path, local_resource.name)
+                if filed_path != resource_mapping.file_path:
+                    moves.append((resource_mapping.file_path, filed_path))
+
+        # 2.1 Refuse moves that would replace another file: which resource wins is the
+        # author's call
+        if clashes := self._find_move_clashes(moves):
+            return False, "Files can't be moved to match their names:\n" + clashes, []
+        self.moved_files = [
+            (os.path.relpath(old, self.root_path), os.path.relpath(new, self.root_path))
+            for old, new in moves
+        ]
 
         # 3. Work out kept resources that have changed
         new_resources: ResourceMap = {}
@@ -1435,7 +1482,9 @@ class AgentStudioProject:
         deleted_resources.update(subresource_changes.deleted)
 
         if not (updated_resources or new_resources or deleted_resources):
-            return False, "No changes detected", []
+            if not dry_run:
+                self._move_files(moves)
+            return False, self._with_moves("No changes detected", dry_run), []
 
         # 4. Validate all resources with new state
         if not skip_validation:
@@ -1469,13 +1518,61 @@ class AgentStudioProject:
             return False, f"Failed to push resources: \n-{errors_names}", commands
 
         if dry_run:
-            return True, "Dry run completed. No changes were pushed.", commands
+            return (
+                True,
+                self._with_moves("Dry run completed. No changes were pushed.", dry_run),
+                commands,
+            )
         else:
             self.resources = new_state
             self.file_structure_info = self.compute_file_structure_info(self.resources)
             self.save_config()
+            # Moved only once pushed: the saved file info now points at the new paths
+            self._move_files(moves)
 
-        return True, "Resources pushed successfully.", commands
+        return True, self._with_moves("Resources pushed successfully.", dry_run), commands
+
+    def _find_move_clashes(self, moves: list[tuple[str, str]]) -> str:
+        """Describe each move that would replace another file, one per line.
+
+        A move clashes when its file is already taken, or when several files move to it.
+        """
+        files_by_target: dict[str, list[str]] = {}
+        for old_path, new_path in moves:
+            files_by_target.setdefault(new_path, []).append(old_path)
+
+        def rel(path: str) -> str:
+            return os.path.relpath(path, self.root_path)
+
+        clashes = []
+        for new_path, old_paths in files_by_target.items():
+            taken = [old_path for old_path in old_paths if not _is_free_for(new_path, old_path)]
+            if taken:
+                clashes.extend(
+                    f"- {rel(old_path)}: its name puts it at {rel(new_path)}, which already exists"
+                    for old_path in taken
+                )
+            elif len(old_paths) > 1:
+                files = ", ".join(sorted(rel(old_path) for old_path in old_paths))
+                clashes.append(f"- {files}: their names all put them at {rel(new_path)}")
+        if clashes:
+            clashes.append("Rename the resources so each name gives a different file.")
+        return "\n".join(clashes)
+
+    @staticmethod
+    def _move_files(moves: list[tuple[str, str]]) -> None:
+        """Move each file to the path its name puts it at."""
+        for old_path, new_path in moves:
+            os.replace(old_path, new_path)
+
+    def _with_moves(self, message: str, dry_run: bool) -> str:
+        """Add a line to message for each file moved, or on a dry run to be moved."""
+        verb = "would move" if dry_run else "moved"
+        lines = [
+            f"{old_path} {verb} to {new_path} to match its name."
+            for old_path, new_path in self.moved_files
+        ]
+        return "\n".join([message, *lines])
 
     @staticmethod
     def _assign_flow_positions(
@@ -2443,11 +2540,13 @@ class AgentStudioProject:
                 if resource_type == FlowConfig:
                     resource_name = flow_name
 
-                # Resource name in file path is cleaned, so we need to get the original name
+                # Resource name in file path is cleaned, so we need to get the original name.
+                # An unknown test case's name is needed to match it to its saved file below.
                 if (
                     issubclass(resource_type, MultiResourceYamlResource)
                     or resource_type == Topic
                     or resource_type == ChildTopic
+                    or (resource_type == TestCase and file_path not in known_files)
                 ):
                     resource = self.read_local_resource(
                         ResourceMapping(
@@ -2462,9 +2561,22 @@ class AgentStudioProject:
                     )
                     resource_name = resource.name
 
-                if file_path in known_files:
+                # The name decides where a name-filed resource belongs. One moved off its
+                # saved file to another stem is matched to that file, keeping its id.
+                known_path = filed_path = file_path
+                if issubclass(resource_type, NAME_FILED_RESOURCE_TYPES):
+                    filed_path = name_filed_path(file_path, resource_name)
+                    if (
+                        file_path not in known_files
+                        and filed_path in known_files
+                        and _is_free_for(filed_path, file_path)
+                    ):
+                        known_path = filed_path
+                        discovered_files.add(filed_path)
+
+                if known_path in known_files:
                     resource_info = self.file_structure_info.get(
-                        os.path.relpath(file_path, self.root_path)
+                        os.path.relpath(known_path, self.root_path)
                     )
                     if not resource_info:
                         raise ValueError(f"Resource info not found for {file_path}")
@@ -2484,7 +2596,7 @@ class AgentStudioProject:
                 else:
                     # Compute new resource ID, adopting the parent branch's id on a
                     # file path match so the ids never diverge from the parent's.
-                    parent_resource = parent_lookup.get(file_path)
+                    parent_resource = parent_lookup.get(filed_path)
 
                     if resource_type in (FlowStep, FunctionStep):
                         if parent_resource:

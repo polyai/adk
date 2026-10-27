@@ -50,7 +50,7 @@ actions: |-
 
 - The `name` field in the YAML is the canonical topic name and can contain spaces, punctuation, and mixed case (e.g. `"Opening Hours & Locations"`).
 - The filename is cleaned to lowercase snake_case (e.g. `opening_hours_locations.yaml`).
-- The filename must match the cleaned version of `name` — a mismatch raises a validation error on `pull` or `push`.
+- The filename follows the cleaned version of `name`. If they don't match, the name wins: `poly push` pushes it as if it were filed under its name, then moves the file there. If that file is already taken, or two files would move to the same one, the push is refused and names each file.
 
 ## Example queries
 - Maximum **20 queries**.

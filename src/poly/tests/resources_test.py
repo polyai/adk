@@ -2062,21 +2062,19 @@ example_queries:
             child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
         self.assertIn("not inside a known variant folder", str(cm.exception))
 
-    def test_file_name_not_matching_topic_name_raises(self):
-        """The file name must match the cleaned name declared inside the YAML."""
+    def test_file_name_not_matching_topic_name_keeps_the_name(self):
+        """The name inside the YAML wins over the file name; push moves the file to match."""
         with mock_read_from_file(self.CHILD_TOPIC_YAML):
-            with self.assertRaises(ValueError) as cm:
-                ChildTopic.read_local_resource(
-                    file_path=os.path.join("child_topics", "Spanish", "wrong_name.yaml"),
-                    resource_id="TOPIC-es-1",
-                    resource_name="wrong_name",
-                    resource_mappings=CHILD_TOPIC_MAPPINGS,
-                )
+            child_topic = ChildTopic.read_local_resource(
+                file_path=os.path.join("child_topics", "Spanish", "wrong_name.yaml"),
+                resource_id="TOPIC-es-1",
+                resource_name="wrong_name",
+                resource_mappings=CHILD_TOPIC_MAPPINGS,
+            )
 
-        self.assertIn(
-            "Topic name 'Opening Hours' in file wrong_name.yaml does not match "
-            "expected filename: opening_hours.yaml",
-            str(cm.exception),
+        self.assertEqual(child_topic.name, "Opening Hours")
+        self.assertEqual(
+            child_topic.file_path, os.path.join("child_topics", "spanish", "opening_hours.yaml")
         )
 
     def test_fully_resolved_child_topic_is_valid(self):
@@ -9218,18 +9216,19 @@ class TestCaseTests(unittest.TestCase):
         self.assertIs(call.to_yaml_dict()["is_asserted"], False)
         self.assertFalse(call.to_proto().is_asserted)
 
-    def test_read_local_resource_filename_mismatch_raises(self):
+    def test_read_local_resource_filename_mismatch_keeps_the_name(self):
+        """The name is never rewritten from the file name; push moves the file to match."""
         file_path = os.path.join("test_suite", "greeting_flow_test.yaml")
         with mock_read_from_file(
-            {file_path: "name: Wrong name\nscenario: Test\nchannel: voice\nlanguage: en-GB\n"}
+            {file_path: "name: Other name\nscenario: Test\nchannel: voice\nlanguage: en-GB\n"}
         ):
-            with self.assertRaises(ValueError) as cm:
-                TestCase.read_local_resource(
-                    file_path=file_path,
-                    resource_id="TEST-greeting_flow",
-                    resource_name="Wrong name",
-                )
-        self.assertIn("does not match expected filename", str(cm.exception))
+            test_case = TestCase.read_local_resource(
+                file_path=file_path,
+                resource_id="TEST-greeting_flow",
+                resource_name="greeting_flow_test",
+            )
+        self.assertEqual(test_case.name, "Other name")
+        self.assertEqual(test_case.file_path, os.path.join("test_suite", "other_name.yaml"))
 
     def test_validate(self):
         test_case = self._sample_test_case()

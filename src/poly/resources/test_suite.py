@@ -1015,25 +1015,6 @@ class TestCase(YamlResource):
         return yaml_dict
 
     @classmethod
-    def read_local_resource(
-        cls, file_path: str, resource_id: str, resource_name: str, **kwargs
-    ) -> "TestCase":
-        """Read a local YAML resource, validating name against filename."""
-        test_case: TestCase = super().read_local_resource(
-            file_path, resource_id=resource_id, resource_name=resource_name, **kwargs
-        )
-
-        file_name = os.path.splitext(os.path.basename(file_path))[0]
-        expected_file_name = utils.clean_name(test_case.name)
-
-        if file_name != expected_file_name:
-            raise ValueError(
-                f"Test case name '{test_case.name}' in file {file_name}.yaml does not match "
-                f"expected filename: {expected_file_name}.yaml"
-            )
-        return test_case
-
-    @classmethod
     def discover_resources(cls, base_path: str) -> list[str]:
         """Discover resources of this type in the given base path."""
         tests_path = os.path.join(base_path, "test_suite")

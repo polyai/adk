@@ -20,6 +20,8 @@ poly push --format
 poly push --include-rtc --rtc-env live
 ~~~
 
+A test case or topic is filed under its cleaned `name`. One under another filename is pushed as if it were at that file, keeping the id of the test case or topic saved there, and is moved there once pushed. Each move is reported. A dry run reports the move without making it. If the file a name gives is already taken, or two files would move to the same one, the push is refused and nothing is sent.
+
 | Flag | Description |
 |---|---|
 | `--force`, `-f` | Force push the project, overwriting remote changes. |
@@ -39,8 +41,11 @@ poly push --include-rtc --rtc-env live
 {
   "success": true,
   "message": "...",
-  "dry_run": false
+  "dry_run": false,
+  "moved_files": [{"from": "topics/hours.yaml", "to": "topics/opening_hours.yaml"}]
 }
 ~~~
+
+`"moved_files"` lists the files moved to match their names, or on a dry run the files that would be moved. It is empty when nothing moved.
 
 `"switched_to"` and `"new_branch_id"` are added if pushing from `main` created and switched to a new branch. `"rtc"` is added when `--include-rtc` is passed, containing the result of the RTC push.

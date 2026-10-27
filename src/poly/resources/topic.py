@@ -165,25 +165,6 @@ class Topic(YamlResource):
         )
 
     @classmethod
-    def read_local_resource(
-        cls, file_path: str, resource_id: str, resource_name: str, **kwargs
-    ) -> "Topic":
-        """Read a local YAML resource, validating name against filename."""
-        topic: Topic = super().read_local_resource(
-            file_path, resource_id=resource_id, resource_name=resource_name, **kwargs
-        )
-
-        file_name = os.path.splitext(os.path.basename(file_path))[0]
-        expected_file_name = utils.clean_name(topic.name)
-
-        if file_name != expected_file_name:
-            raise ValueError(
-                f"Topic name '{topic.name}' in file {file_name}.yaml does not match "
-                f"expected filename: {expected_file_name}.yaml"
-            )
-        return topic
-
-    @classmethod
     def to_pretty_dict(
         cls, d: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
