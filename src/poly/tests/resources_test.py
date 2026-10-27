@@ -64,6 +64,7 @@ from poly.resources.flows import (
     parse_reasoning_effort,
 )
 from poly.resources.function import (
+    FUNCTION_HEADER,
     Function,
     FunctionDelayResponse,
     FunctionLatencyControl,
@@ -191,6 +192,35 @@ class FunctionTests(unittest.TestCase):
         pretty_code = function_with_docstring.to_pretty(resource_mappings=[])
         expected_code = '"""This is a docstring."""\n\n' + TEST_CODE_PRETTY
         self.assertEqual(pretty_code, expected_code)
+
+    def test_blank_lines_after_docstring_survive_round_trip(self):
+        for body in ("def test_code(conv: Conversation):\n    pass\n", TEST_CODE):
+            for newlines in (1, 2, 3, 4):
+                with self.subTest(body=body[:6], newlines=newlines):
+                    code = '"""This is a docstring."""' + "\n" * newlines + body
+                    pretty = Function.make_pretty(code, resource_mappings=[])
+                    self.assertIn(FUNCTION_HEADER, pretty)
+                    self.assertEqual(Function.from_pretty(pretty, resource_mappings=[]), code)
+
+    def test_leading_blank_lines_are_dropped_so_code_round_trips(self):
+        function = Function(
+            resource_id="123",
+            name="test_code",
+            code="\n\ndef test_code(conv: Conversation):\n    pass\n",
+        )
+
+        self.assertEqual(function.code, "def test_code(conv: Conversation):\n    pass\n")
+        pretty = function.to_pretty(resource_mappings=[])
+        self.assertEqual(Function.from_pretty(pretty, resource_mappings=[]), function.raw)
+
+    def test_to_pretty_keeps_header_one_line_after_docstring(self):
+        code = '"""This is a docstring."""\n\ndef test_code(conv: Conversation):\n    pass\n'
+        self.assertEqual(
+            Function.make_pretty(code, resource_mappings=[]),
+            '"""This is a docstring."""\n'
+            + FUNCTION_HEADER
+            + "\ndef test_code(conv: Conversation):\n    pass\n",
+        )
 
     def test_to_pretty_convert_flow_import(self):
         function_code = """import random

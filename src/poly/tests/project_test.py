@@ -21,7 +21,7 @@ from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
-from poly.project import AgentStudioProject, DeploymentMode
+from poly.project import STATUS_FILE, AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
     AttributeKind,
@@ -2186,6 +2186,26 @@ class PushProjectTest(unittest.TestCase):
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
+    def test_push_project_function_with_blank_lines_after_docstring_has_no_changes(self):
+        """A function written to disk and read back unchanged is not pushed as an update."""
+        root = _copy_test_project(self)
+        project_data = deepcopy(PROJECT_DATA)
+        function_data = project_data["resources"]["functions"]["FUNCTION-test_function"]
+        function_data["code"] = '"""Global helpers."""\n\n\n' + function_data["code"]
+        project = AgentStudioProject.from_dict(project_data, root)
+        function = project.resources[Function]["FUNCTION-test_function"]
+        function.save(
+            root,
+            resource_name=function.name,
+            resource_mappings=project._make_resource_mappings(project.resources),
+        )
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+        self.mock_api_handler.queue_resources.assert_not_called()
+
     def test_push_project_merge_conflict(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_pull.return_value = (["functions/test_function.py"], {})
@@ -2716,6 +2736,53 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.clear_command_queue.assert_called_once()
 
 
+class StatusFileWritesTest(unittest.TestCase):
+    """When reading the api_handler property and pushing write the status file."""
+
+    def setUp(self):
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        self.root = _copy_test_project(self)
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        self.api_handler = MagicMock(branch_id=self.project.branch_id)
+        self.api_handler.queue_resources.return_value = []
+        self.project._api_handler = self.api_handler
+        self.status_file = os.path.join(self.root, STATUS_FILE)
+
+    def _status_file_state(self) -> tuple[int, bytes]:
+        with open(self.status_file, "rb") as f:
+            return os.stat(self.status_file).st_mtime_ns, f.read()
+
+    def test_dry_run_push_leaves_the_status_file_untouched(self):
+        self.project.save_config()
+        before = self._status_file_state()
+        topic_file = os.path.join(self.root, "topics", "topic_1.yaml")
+        with open(topic_file, encoding="utf-8") as f:
+            contents = f.read()
+        with open(topic_file, "w", encoding="utf-8") as f:
+            f.write(contents.replace("uses global functions.", "edited locally.", 1))
+
+        success, message, _ = self.project.push_project(dry_run=True, parent_projection_json={})
+
+        self.assertTrue(success, message)
+        self.api_handler.queue_resources.assert_called_once()
+        self.assertEqual(self._status_file_state(), before)
+
+    def test_api_handler_saves_only_when_the_branch_changes(self):
+        save_config = patch.object(AgentStudioProject, "save_config").start()
+
+        self.project.api_handler
+        save_config.assert_not_called()
+
+        self.api_handler.branch_id = "BRANCH-new"
+        self.project.api_handler
+        self.project.api_handler
+
+        self.assertEqual(self.project.branch_id, "BRANCH-new")
+        save_config.assert_called_once()
+
+
 class StageSetDefaultCommandsTest(unittest.TestCase):
     """Tests for the set-default commands _stage_commands emits for handoffs and variants."""
 
@@ -2731,7 +2798,7 @@ class StageSetDefaultCommandsTest(unittest.TestCase):
         self.queued_commands = []
         self.api_handler.sync_client.queue_command.side_effect = self.queued_commands.append
 
-        # Reading the api_handler property saves the project config as a side effect,
+        # Reading the api_handler property saves the project config when the branch changes,
         # which would write _gen/.agent_studio_config into the fixture project
         patch.object(AgentStudioProject, "save_config").start()
         self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
@@ -4699,14 +4766,103 @@ class MultiResourcePullMergeTest(unittest.TestCase):
         self.assertEqual(self._sms_merge_calls(), [])
 
     def test_locally_deleted_file_stays_deleted_when_remote_is_unchanged(self):
-        """With no local entries to normalise, the raw file text (empty) is merged instead."""
         os.remove(self.sms_file)
 
         conflicts = self._pull(self._incoming())
 
         self.assertEqual(conflicts, [])
         self.assertFalse(os.path.exists(self.sms_file))
-        self.assertEqual(len(self._sms_merge_calls()), 1)
+        self.assertEqual(self._sms_merge_calls(), [])
+
+    def test_unchanged_projection_leaves_local_edits_untouched(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+        tree = _read_tree(self.root)
+
+        conflicts = self._pull(self._incoming())
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(_read_tree(self.root), tree)
+        self.merge_spy.assert_not_called()
+
+    def test_unchanged_projection_without_empty_types_is_not_merged(self):
+        """A projection leaves out types with no resources; the status file loads them empty."""
+        project_data = deepcopy(PROJECT_DATA)
+        del project_data["resources"]["variant_attributes"]
+        self.project = AgentStudioProject.from_dict(project_data, self.root)
+        self.assertIn(VariantAttribute, self.project._not_loaded_resources)
+        incoming = {
+            resource_type: resources
+            for resource_type, resources in self._incoming().items()
+            if resources
+        }
+        tree = _read_tree(self.root)
+
+        conflicts = self._pull(incoming)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(_read_tree(self.root), tree)
+        self.merge_spy.assert_not_called()
+
+
+class PushReconcileTest(unittest.TestCase):
+    """A plain push merges the latest projection into a real copy of the test project first."""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_api_handler.queue_resources = MagicMock(return_value=[])
+        self.mock_api_handler.send_queued_commands = MagicMock(return_value=True)
+        patch.object(AgentStudioProject, "save_config").start()
+        patch.object(AgentStudioProject, "_fetch_parent_resources", return_value={}).start()
+        patch("poly.utils.save_imports").start()
+        patch("poly.utils.export_decorators").start()
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+
+        self.root = _copy_test_project(self)
+        self._edit_local("topics/topic_1.yaml", "uses global functions.", "edited locally.")
+        self._edit_local("config/sms_templates.yaml", "a test template", "edited locally")
+
+    def _edit_local(self, rel_path: str, old: str, new: str) -> None:
+        path = os.path.join(self.root, rel_path)
+        with open(path, encoding="utf-8") as f:
+            contents = f.read()
+        self.assertIn(old, contents)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(contents.replace(old, new, 1))
+
+    def _push(self, incoming: dict, force: bool = False) -> dict:
+        """Push with Agent Studio serving incoming, and return what was queued."""
+        self.mock_api_handler.pull_resources.return_value = (incoming, [], {})
+        self.mock_api_handler.queue_resources.reset_mock()
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        success, message, _ = project.push_project(force=force)
+        self.assertTrue(success, message)
+        return self.mock_api_handler.queue_resources.call_args.kwargs
+
+    def test_unchanged_projection_queues_the_same_batch_as_no_merge(self):
+        incoming = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root).resources
+        tree = _read_tree(self.root)
+
+        merged = self._push(deepcopy(incoming))
+
+        self.assertEqual(_read_tree(self.root), tree)
+        self.assertEqual(merged, self._push(deepcopy(incoming), force=True))
+        self.assertEqual(set(merged["updated_resources"][Topic]), {"TOPIC-Topic 1"})
+        self.assertEqual(set(merged["updated_resources"][SMSTemplate]), {"SMS_TEMPLATE-123"})
+
+    def test_single_remote_change_is_merged_before_pushing(self):
+        incoming = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root).resources
+        incoming[Topic]["TOPIC-Topic 2"].content = "Edited remotely"
+
+        queued = self._push(incoming)
+
+        with open(os.path.join(self.root, "topics", "topic_2.yaml"), encoding="utf-8") as f:
+            self.assertIn("content: Edited remotely", f.read())
+        self.assertEqual(set(queued["updated_resources"][Topic]), {"TOPIC-Topic 1"})
+        self.assertEqual(set(queued["updated_resources"][SMSTemplate]), {"SMS_TEMPLATE-123"})
 
 
 class TopicTagsSyncTest(unittest.TestCase):
@@ -4944,6 +5100,29 @@ class MigrateFlowStepResourceIdsTest(unittest.TestCase):
 
         flow_steps = status_dict["resources"]["flow_steps"]
         self.assertIn("FLOW-abc_step-1", flow_steps)
+        self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
+
+    def test_null_file_structure_info_still_rekeys(self):
+        """Status files written by older versions can store file_structure_info as null."""
+        from poly.migration_utils import migrate_flow_step_resource_ids
+
+        status_dict = {
+            "resources": {
+                "flow_steps": {
+                    "SMS Flow_step-1": {
+                        "resource_id": "SMS Flow_step-1",
+                        "flow_name": "SMS Flow",
+                        "flow_id": "FLOW-abc",
+                    },
+                },
+            },
+            "file_structure_info": None,
+        }
+
+        migrate_flow_step_resource_ids(status_dict)
+
+        flow_steps = status_dict["resources"]["flow_steps"]
+        self.assertEqual(list(flow_steps), ["FLOW-abc_step-1"])
         self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
 
 
