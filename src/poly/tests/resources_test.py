@@ -26,6 +26,9 @@ from poly.resources.agent_settings import (
 from poly.resources.api_integration import (
     AVAILABLE_AUTH_TYPES,
     AVAILABLE_OPERATIONS,
+    HEADER_VALUE_MAX,
+    MAX_OPERATION_HEADERS,
+    OPERATION_DESCRIPTION_MAX,
     URL_PATTERN,
     ApiIntegration,
     ApiIntegrationConfig,
@@ -6488,6 +6491,13 @@ class HandoffTests(unittest.TestCase):
         self.assertIn("H1", discovered[0])
 
 
+def _operation(**kwargs) -> ApiIntegrationOperation:
+    """An operation with plain defaults; pass fields to override them."""
+    defaults = {"resource_id": "op-1", "name": "get", "method": "GET", "resource": "/a"}
+    defaults.update(kwargs)
+    return ApiIntegrationOperation(**defaults)
+
+
 class ApiIntegrationTest(unittest.TestCase):
     """Tests for ApiIntegration, ApiIntegrationConfig, Environments, ApiIntegrationOperation."""
 
@@ -6750,6 +6760,132 @@ class ApiIntegrationTest(unittest.TestCase):
             self.assertEqual(len(integration.operations), 1)
             self.assertEqual(integration.operations[0].name, "get")
             self.assertEqual(integration.operations[0].method, "GET")
+
+    def test_from_dict_reads_description_and_headers_as_text(self):
+        """A projection operation keeps its description and headers, header values as text."""
+        op = ApiIntegrationOperation.from_dict(
+            {
+                "id": "op-1",
+                "name": "get_ticket",
+                "method": "GET",
+                "resource": "/tickets/{id}",
+                "description": "Look up one ticket",
+                "headers": {"Accept": "application/json", "X-Flag": True, "X-Retries": 3},
+            }
+        )
+        self.assertEqual(op.description, "Look up one ticket")
+        self.assertEqual(
+            op.headers, {"Accept": "application/json", "X-Flag": "true", "X-Retries": "3"}
+        )
+
+    def test_from_dict_without_the_keys_loads_empty_fields(self):
+        """Minimal YAML, an old status file or explicit nulls give an empty description and headers."""
+        for extra in (
+            {},
+            {"description": None, "headers": None},
+            {"description": "", "headers": {}},
+        ):
+            with self.subTest(extra=extra):
+                op = ApiIntegrationOperation.from_dict(
+                    {"name": "get", "method": "GET", "resource": "/x", **extra}
+                )
+                self.assertEqual(op.description, "")
+                self.assertEqual(op.headers, {})
+
+    def test_to_yaml_dict_omits_empty_description_and_headers(self):
+        """An operation without them writes only name, method and resource."""
+        self.assertEqual(
+            _operation().to_yaml_dict(), {"name": "get", "method": "GET", "resource": "/a"}
+        )
+
+    def test_yaml_round_trip_keeps_description_and_headers(self):
+        """to_yaml_dict → dump → load → from_dict gives back the same operation."""
+        op = _operation(description="Look up", headers={"Accept": "application/json"})
+        loaded = ApiIntegrationOperation.from_dict(
+            resource_utils.load_yaml(resource_utils.dump_yaml(op.to_yaml_dict()))
+        )
+        self.assertEqual(loaded.description, "Look up")
+        self.assertEqual(loaded.headers, {"Accept": "application/json"})
+        self.assertTrue(loaded.same_definition(op))
+
+    def test_build_create_proto_carries_description_and_headers(self):
+        """A create sends the description and the bare headers map."""
+        create = _operation(
+            integration_id="int-1", description="Look up", headers={"Accept": "application/json"}
+        ).build_create_proto()
+        self.assertEqual(create.description, "Look up")
+        self.assertEqual(dict(create.headers), {"Accept": "application/json"})
+
+    def test_build_update_proto_sends_description_and_headers(self):
+        """An update sends the description and the headers wrapper."""
+        update = _operation(
+            integration_id="int-1", description="Look up", headers={"Accept": "application/json"}
+        ).build_update_proto()
+        self.assertEqual(update.description, "Look up")
+        self.assertEqual(dict(update.headers.entries), {"Accept": "application/json"})
+
+    def test_build_update_proto_clears_removed_description_and_headers(self):
+        """An operation without them still sends both, so the platform clears what it holds."""
+        update = _operation(integration_id="int-1").build_update_proto()
+        self.assertTrue(update.HasField("description"))
+        self.assertEqual(update.description, "")
+        self.assertTrue(update.HasField("headers"))
+        self.assertEqual(len(update.headers.entries), 0)
+
+    def test_subresources_detect_header_only_and_description_only_changes(self):
+        """A change to just the headers or just the description is an update; no change is nothing."""
+        old = ApiIntegration(
+            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+        )
+
+        same = ApiIntegration(
+            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+        )
+        self.assertEqual(same.get_new_updated_deleted_subresources(old), ([], [], []))
+
+        header_change = ApiIntegration(
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(headers={"Accept": "application/json"})],
+        )
+        _, updated, _ = header_change.get_new_updated_deleted_subresources(old)
+        self.assertEqual([op.headers for op in updated], [{"Accept": "application/json"}])
+
+        description_change = ApiIntegration(
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(description="Fetch", headers={"Accept": "text/plain"})],
+        )
+        _, updated, _ = description_change.get_new_updated_deleted_subresources(old)
+        self.assertEqual([op.description for op in updated], ["Fetch"])
+
+    def test_subresources_carry_every_field_on_new_updated_and_deleted_operations(self):
+        """Creates, name-matched updates and deletes keep description and headers (they used to be copied by hand)."""
+        yaml_op = ApiIntegrationOperation(
+            name="get", method="GET", resource="/a", description="Fetch", headers={"Accept": "a"}
+        )
+        new_ops, _, _ = ApiIntegration(
+            resource_id="int-1", name="API", operations=[yaml_op]
+        ).get_new_updated_deleted_subresources(None)
+        self.assertEqual((new_ops[0].description, new_ops[0].headers), ("Fetch", {"Accept": "a"}))
+        self.assertEqual(new_ops[0].integration_id, "int-1")
+        self.assertTrue(new_ops[0].resource_id)
+
+        old = ApiIntegration(
+            resource_id="int-1",
+            name="API",
+            operations=[
+                _operation(headers={"Accept": "text/plain"}),
+                _operation(resource_id="op-2", name="gone", description="Old", headers={"X": "y"}),
+            ],
+        )
+        _, updated, deleted = ApiIntegration(
+            resource_id="int-1", name="API", operations=[yaml_op]
+        ).get_new_updated_deleted_subresources(old)
+        self.assertEqual(updated[0].resource_id, "op-1")
+        self.assertEqual((updated[0].description, updated[0].headers), ("Fetch", {"Accept": "a"}))
+        self.assertEqual((deleted[0].description, deleted[0].headers), ("Old", {"X": "y"}))
+        self.assertEqual(deleted[0].integration_id, "int-1")
 
 
 class VariableTest(unittest.TestCase):
@@ -8182,6 +8318,104 @@ class TestApiIntegrationValidate(unittest.TestCase):
         )
         with self.assertRaises(ValueError, msg="Operation name cannot be empty."):
             integration.validate()
+
+    def _assert_invalid(self, op: ApiIntegrationOperation, *fragments: str) -> str:
+        """Validation of an integration holding `op` fails, naming every fragment."""
+        integration = self._make_integration(operations=[op])
+        with self.assertRaises(ValueError) as ctx:
+            integration.validate()
+        for fragment in fragments:
+            self.assertIn(fragment, str(ctx.exception))
+        return str(ctx.exception)
+
+    def test_operation_with_description_and_headers_passes(self):
+        """A description at the limit and well-formed headers (tab allowed) are valid."""
+        self._make_integration(
+            operations=[
+                _operation(
+                    description="x" * OPERATION_DESCRIPTION_MAX,
+                    headers={
+                        "Accept": "application/json",
+                        "X-Api-Version": "2024-01-01",
+                        "X-Tab": "a\tb",
+                    },
+                )
+            ]
+        ).validate()
+
+    def test_description_over_limit_raises_value_error(self):
+        """A description longer than the platform's cap is rejected."""
+        self._assert_invalid(
+            _operation(description="x" * (OPERATION_DESCRIPTION_MAX + 1)),
+            f"description is longer than {OPERATION_DESCRIPTION_MAX} characters",
+        )
+
+    def test_invalid_header_name_raises_value_error(self):
+        """Header names with separators or no characters are rejected."""
+        for name in ("Content Type", "X:Header", "Accept.Json", "X/Y", ""):
+            with self.subTest(name=name):
+                self._assert_invalid(
+                    _operation(headers={name: "v"}),
+                    f"header name '{name}' is not a valid HTTP header name",
+                )
+
+    def test_reserved_header_raises_value_error(self):
+        """Authorization and Host, in any case, come from the environment config."""
+        for name in ("Authorization", "host"):
+            with self.subTest(name=name):
+                self._assert_invalid(
+                    _operation(headers={name: "v"}),
+                    f"header '{name}' is set from the environment config",
+                )
+
+    def test_duplicate_header_ignoring_case_raises_value_error(self):
+        """Two spellings of one header name are a duplicate."""
+        self._assert_invalid(
+            _operation(headers={"Accept": "a", "accept": "b"}), "duplicate header 'accept'"
+        )
+
+    def test_header_value_over_limit_raises_value_error(self):
+        """A header value longer than the platform's cap is rejected."""
+        self._assert_invalid(
+            _operation(headers={"X-Long": "v" * (HEADER_VALUE_MAX + 1)}),
+            f"header 'X-Long' value is longer than {HEADER_VALUE_MAX} characters",
+        )
+
+    def test_header_value_with_bad_characters_raises_value_error(self):
+        """Line breaks, control characters, non-ASCII and edge spaces are rejected."""
+        for value in ("line\nbreak", " padded", "padded ", "café", "bell\x07"):
+            with self.subTest(value=value):
+                self._assert_invalid(
+                    _operation(headers={"X-Value": value}),
+                    "header 'X-Value' value cannot contain",
+                )
+
+    def test_too_many_headers_raises_value_error(self):
+        """More headers than the platform accepts are rejected."""
+        headers = {f"X-H{i}": "v" for i in range(MAX_OPERATION_HEADERS + 1)}
+        self._assert_invalid(
+            _operation(headers=headers),
+            f"has {MAX_OPERATION_HEADERS + 1} headers; the limit is {MAX_OPERATION_HEADERS}",
+        )
+
+    def test_headers_not_a_mapping_raises_value_error(self):
+        """A list under `headers` is reported rather than crashing the read."""
+        op = ApiIntegrationOperation.from_dict(
+            {"name": "list_users", "method": "GET", "resource": "/users", "headers": ["Accept"]}
+        )
+        self.assertEqual(op.to_yaml_dict()["headers"], ["Accept"])
+        resource_utils.compute_hash_from_dict(op.to_yaml_dict())  # used to raise here
+        self._assert_invalid(op, "headers must be a mapping")
+
+    def test_multiple_header_errors_are_reported_together(self):
+        """One validate run names every header problem."""
+        message = self._assert_invalid(
+            _operation(headers={"Authorization": "x", "Bad Name": " y"}),
+            "header 'Authorization' is set from",
+            "header name 'Bad Name'",
+            "header 'Bad Name' value cannot contain",
+        )
+        self.assertEqual(message.count("Operation 'get'"), 3)
 
 
 class SafetyFiltersTests(unittest.TestCase):

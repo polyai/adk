@@ -43,6 +43,10 @@ Each operation is one HTTP endpoint. You define:
 - **name**: Operation name; used at runtime as `conv.api.<api_name>.<operation_name>(...)`.
 - **method**: HTTP method (e.g. `GET`, `POST`, `PUT`, `DELETE`).
 - **resource**: Path template (e.g. `/tickets/{id}`). Path variables are exposed as arguments when calling the operation.
+- **description**: Optional note on what the operation does (up to 1000 characters).
+- **headers**: Optional mapping of header name to value, sent on every call to the operation (up to 50). `Authorization` and `Host` come from the environment config and can't be set here.
+
+Both optional fields are omitted from the file when empty, and removing one from the file clears it in Agent Studio on the next push.
 
 ## Usage
 
@@ -74,6 +78,9 @@ api_integrations:
       - name: update_contact
         method: PATCH
         resource: /contacts/{contact_id}
+        description: Change a contact's phone number
+        headers:
+          Content-Type: application/json
 ```
 
 In a function you might call:

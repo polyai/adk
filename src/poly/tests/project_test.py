@@ -8117,5 +8117,167 @@ class PullRemoteRenameTest(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
 
 
+def _api_integration_projection() -> dict:
+    """One integration with two operations, shaped as agent-stream serves the projection."""
+    return {
+        "apiIntegrations": {
+            "apiIntegrations": {
+                "ids": ["INT-1"],
+                "entities": {
+                    "INT-1": {
+                        "id": "INT-1",
+                        "name": "customer_api",
+                        "description": "Bookings",
+                        "environments": {
+                            "sandbox": {"baseUrl": "https://dev-customer.com", "authType": "basic"},
+                            "preRelease": {
+                                "baseUrl": "https://dev-customer.com",
+                                "authType": "basic",
+                            },
+                            "live": {"baseUrl": "https://customer.com", "authType": "apiKey"},
+                        },
+                        "operations": {
+                            "OP-GET": {
+                                "id": "OP-GET",
+                                "name": "get_confirmation_status",
+                                "method": "GET",
+                                "resource": "/bookings/{booking_id}/confirmation-status",
+                                "description": "Confirmation status of a booking",
+                                "headers": {"Accept": "application/json"},
+                            },
+                            "OP-POST": {
+                                "id": "OP-POST",
+                                "name": "create_booking",
+                                "method": "POST",
+                                "resource": "/bookings",
+                                "description": "",
+                                "headers": {},
+                            },
+                        },
+                    }
+                },
+            }
+        }
+    }
+
+
+class ApiIntegrationSyncTest(unittest.TestCase):
+    """Pull, push and diff of an API integration's operations in a real temp project."""
+
+    def setUp(self):
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.project = AgentStudioProject(
+            region="us-1",
+            account_id="account",
+            project_id="project",
+            root_path=self.root,
+            resources={},
+            last_updated=datetime.now(),
+            branch_id="main",
+            file_structure_info={},
+        )
+        conflicts, _ = self.project.pull_project(projection_json=_api_integration_projection())
+        self.assertEqual(conflicts, [])
+        self.path = os.path.join(self.root, "config", "api_integrations.yaml")
+
+    def _yaml(self) -> dict:
+        with open(self.path, encoding="utf-8") as file:
+            return resource_utils.load_yaml(file.read())
+
+    def _write_yaml(self, data: dict) -> None:
+        with open(self.path, "w", encoding="utf-8") as file:
+            file.write(resource_utils.dump_yaml(data))
+
+    def _edit_operations(self, edit) -> None:
+        """Apply `edit(operation_dict)` to every operation in the pulled file and write it back."""
+        data = self._yaml()
+        for operation in data["api_integrations"][0]["operations"]:
+            edit(operation)
+        self._write_yaml(data)
+
+    def _operations(self) -> dict[str, dict]:
+        return {op["name"]: op for op in self._yaml()["api_integrations"][0]["operations"]}
+
+    def _push(self) -> dict[str, list]:
+        """A dry-run push, as {command type: [payload protos]}."""
+        success, message, commands = self.project.push_project(dry_run=True)
+        self.assertTrue(success, message)
+        grouped: dict[str, list] = {}
+        for command in commands:
+            grouped.setdefault(command.type, []).append(getattr(command, command.type))
+        return grouped
+
+    def test_pull_writes_description_and_headers_only_where_set(self):
+        """The pulled file carries both fields on the operation that has them and neither elsewhere."""
+        ops = self._operations()
+        self.assertEqual(
+            ops["get_confirmation_status"]["description"], "Confirmation status of a booking"
+        )
+        self.assertEqual(ops["get_confirmation_status"]["headers"], {"Accept": "application/json"})
+        self.assertNotIn("description", ops["create_booking"])
+        self.assertNotIn("headers", ops["create_booking"])
+
+    def test_pull_then_push_round_trips_with_no_changes(self):
+        """Pushing straight after a pull finds nothing to send."""
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self.project.get_diffs(), {})
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+        self.assertEqual(commands, [])
+
+    def test_header_edit_sends_the_operation_with_all_its_headers(self):
+        """Adding a header sends one operation update carrying the whole header map."""
+
+        def add_version(op):
+            if op["name"] == "get_confirmation_status":
+                op["headers"]["X-Api-Version"] = "2024-01-01"
+
+        self._edit_operations(add_version)
+
+        [update] = self._push()["update_api_integration_operation"]
+        self.assertEqual(update.id, "OP-GET")
+        self.assertEqual(
+            dict(update.headers.entries),
+            {"Accept": "application/json", "X-Api-Version": "2024-01-01"},
+        )
+        self.assertEqual(update.description, "Confirmation status of a booking")
+
+    def test_removing_description_and_headers_sends_a_clearing_update(self):
+        """Deleting both keys sends an empty headers wrapper and an empty description."""
+
+        def drop_both(op):
+            op.pop("description", None)
+            op.pop("headers", None)
+
+        self._edit_operations(drop_both)
+
+        [update] = self._push()["update_api_integration_operation"]
+        self.assertEqual(update.id, "OP-GET")
+        self.assertTrue(update.HasField("headers"))
+        self.assertEqual(len(update.headers.entries), 0)
+        self.assertTrue(update.HasField("description"))
+        self.assertEqual(update.description, "")
+
+    def test_reserved_header_fails_push_validation(self):
+        """A header the platform would refuse stops the push locally."""
+
+        def add_authorization(op):
+            op.setdefault("headers", {})["Authorization"] = "Bearer token"
+
+        self._edit_operations(add_authorization)
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertIn("header 'Authorization' is set from the environment config", message)
+        self.assertEqual(commands, [])
+
+
 if __name__ == "__main__":
     unittest.main()
