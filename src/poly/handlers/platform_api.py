@@ -95,7 +95,7 @@ class PlatformAPIHandler:
         "uk-1": "https://jupiter-api.uk-1.platform.polyai.app",
         "us-1": "https://jupiter-api.us-1.platform.polyai.app",
         "dev": "https://jupiter-api.dev.polyai.app",
-        "staging": "https://jupiter-api.staging.us-1.platform.polyai.app",
+        "staging": "https://jupiter-api.staging.polyai.app",
         "studio": "https://jupiter-api.plg-us-1-prod.polyai.app",
     }
 
