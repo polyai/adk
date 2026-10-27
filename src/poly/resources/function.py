@@ -258,7 +258,9 @@ class Function(Resource):
         self.resource_id = resource_id
         self.name = name
         self.description = description
-        self.code = code
+        # Without leading blank lines is the canonical form: reading a file has always
+        # dropped them.
+        self.code = code.lstrip("\n") if code else code
         self.parameters = [
             FunctionParameters(**p) if isinstance(p, dict) else p for p in (parameters or [])
         ]

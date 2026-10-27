@@ -202,6 +202,17 @@ class FunctionTests(unittest.TestCase):
                     self.assertIn(FUNCTION_HEADER, pretty)
                     self.assertEqual(Function.from_pretty(pretty, resource_mappings=[]), code)
 
+    def test_leading_blank_lines_are_dropped_so_code_round_trips(self):
+        function = Function(
+            resource_id="123",
+            name="test_code",
+            code="\n\ndef test_code(conv: Conversation):\n    pass\n",
+        )
+
+        self.assertEqual(function.code, "def test_code(conv: Conversation):\n    pass\n")
+        pretty = function.to_pretty(resource_mappings=[])
+        self.assertEqual(Function.from_pretty(pretty, resource_mappings=[]), function.raw)
+
     def test_to_pretty_keeps_header_one_line_after_docstring(self):
         code = '"""This is a docstring."""\n\ndef test_code(conv: Conversation):\n    pass\n'
         self.assertEqual(
