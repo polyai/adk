@@ -10,7 +10,7 @@
     "URL": "https://pyyaml.org/"
   },
   {
-    "License": "BSD License",
+    "License": "BSD-2-Clause",
     "Name": "Pygments",
     "URL": "https://pygments.org"
   },
@@ -275,7 +275,7 @@
     "URL": "https://github.com/dateutil/dateutil"
   },
   {
-    "License": "MIT License",
+    "License": "MIT",
     "Name": "python-discovery",
     "URL": "https://github.com/tox-dev/python-discovery"
   },
@@ -330,7 +330,7 @@
     "URL": "https://sourceforge.net/p/ruamel-yaml-clib/code/ci/default/tree/"
   },
   {
-    "License": "MIT License",
+    "License": "MIT",
     "Name": "ruff",
     "URL": "https://docs.astral.sh/ruff"
   },
