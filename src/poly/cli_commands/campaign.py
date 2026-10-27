@@ -496,11 +496,12 @@ class CampaignCommand(BaseCommand):
         contact, previous_run = cls._call(output_json, build_inputs)
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
-        cls._call(output_json, lambda: project.get_campaign(name))
+        campaign = cls._call(output_json, lambda: project.get_campaign(name))
 
         if not output_json and not force:
             if not questionary.confirm(
-                f"Test live campaign '{name}'? This calls and texts {contact.get('phone')}.",
+                f"Test live campaign '{campaign.name}'? "
+                f"This calls and texts {contact.get('phone')}.",
                 default=False,
                 auto_enter=False,
             ).ask():
@@ -519,7 +520,7 @@ class CampaignCommand(BaseCommand):
             ),
         )
         if not output_json:
-            info(f"Started test step {started.get('step_id')} of campaign '{name}'.")
+            info(f"Started test step {started.get('step_id')} of campaign '{campaign.name}'.")
         step = cls._call(
             output_json,
             lambda: project.wait_for_campaign_test_step(name, started["step_id"], timeout=timeout),
@@ -555,10 +556,10 @@ class CampaignCommand(BaseCommand):
         _, prompt, done_message = LIFECYCLE_ACTIONS[action]
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
-        cls._call(output_json, lambda: project.get_campaign(name))
+        campaign = cls._call(output_json, lambda: project.get_campaign(name))
         if not output_json and not force:
             if not questionary.confirm(
-                prompt.format(name=name), default=False, auto_enter=False
+                prompt.format(name=campaign.name), default=False, auto_enter=False
             ).ask():
                 warning("Aborted.")
                 sys.exit(0)
@@ -568,4 +569,4 @@ class CampaignCommand(BaseCommand):
         if output_json:
             json_print({"success": True, "campaign": name, "action": action})
         else:
-            success(done_message.format(name=name))
+            success(done_message.format(name=campaign.name))

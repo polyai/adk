@@ -6722,6 +6722,17 @@ class CampaignCommandTest(unittest.TestCase):
         confirm.assert_not_called()
         self.post.assert_not_called()
 
+    def test_lifecycle_by_folder_name_shows_the_campaign_name(self):
+        """Naming a campaign by its folder still prompts and reports with its real name."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = make_mock_response(200, {"success": True})
+
+        with patch("questionary.confirm") as confirm:
+            confirm.return_value.ask.return_value = True
+            CampaignCommand.campaign_lifecycle(TEST_DIR, "pause", "appointment_reminders")
+
+        self.assertIn(f"'{self.CAMPAIGN}'", confirm.call_args.args[0])
+
     def test_test_on_an_unknown_campaign_fails_before_asking(self):
         """test checks the campaign exists before warning that it will call the contact."""
         with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
