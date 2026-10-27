@@ -1,6 +1,45 @@
 # CHANGELOG
 
 
+## v0.73.4 (2026-10-27)
+
+### Bug Fixes
+
+- Correct staging Jupiter API base URL ([#383](https://github.com/polyai/adk/pull/383),
+  [`56c70c6`](https://github.com/polyai/adk/commit/56c70c67bd58caf8c3a78c50f38d1c9d02974e3a))
+
+## Summary - `jupiter_region_to_base_url["staging"]` in `src/poly/handlers/platform_api.py` pointed
+  to `jupiter-api.staging.us-1.platform.polyai.app`, which 503s during account activation. -
+  Captured a HAR from `studio.staging.poly.ai` (the real platform UI) and confirmed every Jupiter
+  API call — including `/jupiter/v1/authorise` itself (200 OK) — goes to
+  `jupiter-api.staging.polyai.app`, with no `us-1`/`platform` segment. - Independently verified
+  `jupiter-api.staging.polyai.app/jupiter/v1/authorise` returns 401 (healthy, needs auth) — same
+  signature as the working prod region hosts.
+
+## Test plan - [ ] Run `adk login`/activation flow against staging and confirm it hits
+  `jupiter-api.staging.polyai.app` and succeeds
+
+
+## v0.73.3 (2026-10-27)
+
+### Bug Fixes
+
+- Keep the local copy of a resource renamed on the platform
+  ([#378](https://github.com/polyai/adk/pull/378),
+  [`45ac08f`](https://github.com/polyai/adk/commit/45ac08f1f85280d998bef23c133b289e72323159))
+
+When a pull merges local changes, a resource renamed in Agent Studio lost its local file, and the
+  next push deleted it on the platform. The file is now kept under its new name.
+
+### Chores
+
+- **protobuf**: Add outbound campaign messages ([#377](https://github.com/polyai/adk/pull/377),
+  [`673707e`](https://github.com/polyai/adk/commit/673707e9c7a85a527d39515a2950edfd24698d86))
+
+Regenerates the protobuf stubs from the platform's current proto files, adding the outbound campaign
+  and outbound template messages.
+
+
 ## v0.73.2 (2026-10-26)
 
 ### Bug Fixes
