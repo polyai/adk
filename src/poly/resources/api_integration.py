@@ -3,6 +3,8 @@
 Copyright PolyAI Limited
 """
 
+import copy
+import json
 import logging
 import os
 import re
@@ -22,6 +24,7 @@ from poly.handlers.protobuf.api_integrations_pb2 import (
     ApiIntegrationOperation_Update,
     Environments,
     OperationHeaders,
+    OperationResponseSchemas,
 )
 from poly.resources.resource import (
     MultiResourceYamlResource,
@@ -66,6 +69,85 @@ def _is_valid_header_value(value: str) -> bool:
     return value == value.strip() and all(
         0x20 <= ord(char) < 0x7F or char == "\t" for char in value
     )
+
+
+# An operation's request and response schemas are JSON Schema 2020-12, written as YAML
+# mappings in the file and stored as JSON text by the platform. These mirror its rules.
+SCHEMA_SOURCES = {"default", "manual", "observed", "openapi"}
+# A schema written to the YAML without `schema_source` is a hand edit.
+DEFAULT_SCHEMA_SOURCE = "manual"
+JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
+MAX_SCHEMA_BYTES = 65_536
+MAX_SCHEMA_DEPTH = 64
+RESPONSE_KEY_PATTERN = re.compile(r"^([1-5]\d{2}|[1-5]XX|default)$")
+BODYLESS_METHODS = {"GET", "DELETE"}
+
+
+def _stringify_keys(node: object) -> object:
+    """Make every mapping key text: YAML reads `200:` as an int, JSON and hashing need str."""
+    if isinstance(node, dict):
+        return {str(key): _stringify_keys(value) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_stringify_keys(item) for item in node]
+    return node
+
+
+def _parse_schema(value: object) -> object:
+    """A schema as an object: the projection carries JSON text, YAML and status files objects.
+
+    None and "" mean unset. Text that isn't JSON is kept as-is so validate() can report it.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return value
+    return _stringify_keys(value)
+
+
+def _schema_text(schema: object) -> str:
+    """The JSON text sent to the platform, and the text its size limit is measured on."""
+    return json.dumps(schema, separators=(",", ":"), ensure_ascii=False)
+
+
+def _depth(node: object, level: int = 1) -> int:
+    if isinstance(node, dict):
+        children = node.values()
+    elif isinstance(node, list):
+        children = node
+    else:
+        return level
+    return max([level, *(_depth(child, level + 1) for child in children)])
+
+
+def _json_schema_errors(schema: object, where: str) -> list[str]:
+    """Why the platform would refuse `schema`, or [] when it would accept it."""
+    if not isinstance(schema, dict):
+        return [f"{where} must be a JSON Schema object (a YAML mapping)."]
+    dialect = schema.get("$schema")
+    if dialect is not None and dialect not in (JSON_SCHEMA_DIALECT, f"{JSON_SCHEMA_DIALECT}#"):
+        return [f"{where}: $schema must be {JSON_SCHEMA_DIALECT} or omitted."]
+    if _depth(schema) > MAX_SCHEMA_DEPTH:
+        return [f"{where} nests deeper than {MAX_SCHEMA_DEPTH} levels."]
+    try:
+        size = len(_schema_text(schema).encode("utf-8"))
+    except (TypeError, ValueError) as error:
+        return [f"{where} is not valid JSON ({error}); quote dates and other special values."]
+    if size > MAX_SCHEMA_BYTES:
+        return [f"{where} is {size} bytes; the limit is {MAX_SCHEMA_BYTES} bytes."]
+
+    # Imported here so the CLI doesn't pay for jsonschema at startup.
+    from jsonschema import Draft202012Validator
+    from jsonschema.exceptions import SchemaError
+
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as error:
+        path = "/".join(str(part) for part in error.absolute_path) or "the root"
+        return [f"{where} is not a valid JSON Schema at {path}: {error.message}"]
+    return []
 
 
 def _default_config() -> "ApiIntegrationConfig":
@@ -228,6 +310,28 @@ class ApiIntegrationOperation(SubResource):
     )
     description: str = ""
     headers: dict[str, str] = field(default_factory=dict)
+    # None is "no schema"; {} is a real, permissive schema. Response schemas are keyed by
+    # status code ("200"), status class ("4XX") or "default".
+    request_query_schema: Optional[dict] = None
+    request_body_schema: Optional[dict] = None
+    response_schemas: dict[str, dict] = field(default_factory=dict)
+    # Where the schemas came from (default | manual | observed | openapi), an audit label
+    # the platform requires whenever a schema is set. "" when the operation has none.
+    schema_source: str = ""
+
+    @property
+    def has_schemas(self) -> bool:
+        return (
+            self.request_query_schema is not None
+            or self.request_body_schema is not None
+            or bool(self.response_schemas)
+        )
+
+    def _effective_schema_source(self) -> Optional[str]:
+        """The source pushed with the schemas: the YAML's, or the default when it has none."""
+        if not self.has_schemas:
+            return None
+        return self.schema_source or DEFAULT_SCHEMA_SOURCE
 
     def validate(self) -> None:
         """Validate the operation's fields."""
@@ -246,7 +350,7 @@ class ApiIntegrationOperation(SubResource):
             raise ValueError(
                 f"Operation '{self.name}': resource '{self.resource}' is not a valid URL path."
             )
-        errors = self._description_errors() + self._header_errors()
+        errors = self._description_errors() + self._header_errors() + self._schema_errors()
         if errors:
             raise ValueError("; ".join(errors))
 
@@ -297,18 +401,67 @@ class ApiIntegrationOperation(SubResource):
                 )
         return errors
 
+    def _schema_errors(self) -> list[str]:
+        """Every schema problem at once, mirroring what the platform refuses on push."""
+        label = f"Operation '{self.name}': "
+        errors: list[str] = []
+        if self.request_query_schema is not None:
+            errors += [
+                label + message
+                for message in _json_schema_errors(
+                    self.request_query_schema, "request_query_schema"
+                )
+            ]
+        if self.request_body_schema is not None:
+            if self.method in BODYLESS_METHODS:
+                errors.append(
+                    f"{label}{self.method} requests have no body; remove request_body_schema "
+                    "or change the method."
+                )
+            errors += [
+                label + message
+                for message in _json_schema_errors(self.request_body_schema, "request_body_schema")
+            ]
+        if not isinstance(self.response_schemas, dict):
+            errors.append(f"{label}response_schemas must be a mapping of status code to schema.")
+        else:
+            for key, schema in self.response_schemas.items():
+                if not RESPONSE_KEY_PATTERN.fullmatch(key):
+                    errors.append(
+                        f"{label}response_schemas key '{key}' must be a status code ('200'), "
+                        "a status class ('4XX') or 'default'."
+                    )
+                errors += [
+                    label + message
+                    for message in _json_schema_errors(schema, f"response_schemas['{key}']")
+                ]
+        if self.schema_source and self.schema_source not in SCHEMA_SOURCES:
+            errors.append(
+                f"{label}schema_source '{self.schema_source}' invalid, "
+                f"must be one of {sorted(SCHEMA_SOURCES)}."
+            )
+        return errors
+
     @property
     def command_type(self) -> str:
         return "api_integration_operation"
 
     def same_definition(self, other: "ApiIntegrationOperation") -> bool:
-        """Whether both operations describe the same platform state, ids aside."""
+        """Whether both operations describe the same platform state, ids aside.
+
+        Schemas compare as parsed objects, so key order or the platform's JSON formatting
+        never counts as a change, and a YAML that omits `schema_source` matches the default.
+        """
         return (
             self.name == other.name
             and self.method == other.method
             and self.resource == other.resource
             and self.description == other.description
             and self.headers == other.headers
+            and self.request_query_schema == other.request_query_schema
+            and self.request_body_schema == other.request_body_schema
+            and self.response_schemas == other.response_schemas
+            and self._effective_schema_source() == other._effective_schema_source()
         )
 
     def to_yaml_dict(self) -> dict:
@@ -323,7 +476,19 @@ class ApiIntegrationOperation(SubResource):
             # A non-mapping is kept as written so validate() reports it, rather than the
             # hash or the diff crashing first.
             data["headers"] = dict(self.headers) if isinstance(self.headers, dict) else self.headers
+        # Copies, so a schema shared between operations is never written as a YAML alias.
+        if self.request_query_schema is not None:
+            data["request_query_schema"] = copy.deepcopy(self.request_query_schema)
+        if self.request_body_schema is not None:
+            data["request_body_schema"] = copy.deepcopy(self.request_body_schema)
+        if self.response_schemas:
+            data["response_schemas"] = copy.deepcopy(self.response_schemas)
+        if self.has_schemas and self.schema_source:
+            data["schema_source"] = self.schema_source
         return data
+
+    def _response_schema_texts(self) -> dict[str, str]:
+        return {key: _schema_text(schema) for key, schema in self.response_schemas.items()}
 
     def build_create_proto(self) -> ApiIntegrationOperation_Create:
         proto = ApiIntegrationOperation_Create(
@@ -333,15 +498,25 @@ class ApiIntegrationOperation(SubResource):
             resource=self.resource,
             integration_id=self.integration_id,
             headers=self.headers,
+            response_schemas=self._response_schema_texts(),
         )
         if self.description:
             proto.description = self.description
+        if self.request_query_schema is not None:
+            proto.request_query_schema = _schema_text(self.request_query_schema)
+        if self.request_body_schema is not None:
+            proto.request_body_schema = _schema_text(self.request_body_schema)
+        source = self._effective_schema_source()
+        if source:
+            proto.schema_source = source
         return proto
 
     def build_update_proto(self) -> ApiIntegrationOperation_Update:
-        # The YAML is the full desired state, so every field is sent: an empty wrapper or
-        # an empty description clears what the platform holds, where an unsent one keeps it.
-        return ApiIntegrationOperation_Update(
+        # The YAML is the full desired state, so every field is sent: an empty wrapper, an
+        # empty description or an empty schema clears what the platform holds, where an
+        # unsent one keeps it. The source only travels with a schema; the platform refuses
+        # a bare one.
+        proto = ApiIntegrationOperation_Update(
             id=self.resource_id,
             name=self.name,
             method=self.method,
@@ -349,7 +524,18 @@ class ApiIntegrationOperation(SubResource):
             integration_id=self.integration_id,
             description=self.description,
             headers=OperationHeaders(entries=self.headers),
+            request_query_schema=(
+                "" if self.request_query_schema is None else _schema_text(self.request_query_schema)
+            ),
+            request_body_schema=(
+                "" if self.request_body_schema is None else _schema_text(self.request_body_schema)
+            ),
+            response_schemas=OperationResponseSchemas(entries=self._response_schema_texts()),
         )
+        source = self._effective_schema_source()
+        if source:
+            proto.schema_source = source
+        return proto
 
     def build_delete_proto(self) -> ApiIntegrationOperation_Delete:
         return ApiIntegrationOperation_Delete(
@@ -366,14 +552,33 @@ class ApiIntegrationOperation(SubResource):
         if isinstance(headers, dict):
             # map<string, string> on the wire; anything else is left for validate() to report.
             headers = {str(key): utils.header_value(value) for key, value in headers.items()}
-        return cls(
+        response_schemas = data.get("response_schemas") or {}
+        if isinstance(response_schemas, dict):
+            parsed = {str(key): _parse_schema(value) for key, value in response_schemas.items()}
+            response_schemas = {key: schema for key, schema in parsed.items() if schema is not None}
+        # `manual` is the default: the platform labels hand edits with it, and a schema
+        # written without a source is pushed as it. Holding it as "" keeps the hash, the
+        # diff and the file in agreement, so pulled files never carry the label.
+        source = data.get("schema_source")
+        if source is not None and str(source) == DEFAULT_SCHEMA_SOURCE:
+            source = None
+        operation = cls(
             resource_id=data.get("resource_id") or data.get("id", ""),
             name=data.get("name", ""),
             method=data.get("method", "").upper(),
             resource=data.get("resource", ""),
             description=data.get("description") or "",
             headers=headers,
+            request_query_schema=_parse_schema(data.get("request_query_schema")),
+            request_body_schema=_parse_schema(data.get("request_body_schema")),
+            response_schemas=response_schemas,
+            schema_source="" if source is None else str(source),
         )
+        if not operation.has_schemas:
+            # The platform labels every operation, schemas or not; without one the label
+            # is noise in the file.
+            operation.schema_source = ""
+        return operation
 
 
 @register_resource("api_integration")

@@ -60,6 +60,7 @@ from poly.resources import (
     VoiceStylePrompt,
     VoiceVadConfig,
 )
+from poly.resources.api_integration import DEFAULT_SCHEMA_SOURCE
 from poly.resources.flows import (
     ASRBiasing,
     Condition,
@@ -8117,8 +8118,25 @@ class PullRemoteRenameTest(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
 
 
+_STATUS_QUERY = {"type": "object", "properties": {"include_history": {"type": "boolean"}}}
+_BOOKING_BODY = {
+    "type": "object",
+    "required": ["customer_id"],
+    "properties": {
+        "customer_id": {"type": "string"},
+        "notes": {"type": "string", "maxLength": 500},
+    },
+    "additionalProperties": False,
+}
+_BOOKING_CREATED = {"type": "object", "properties": {"booking_id": {"type": "string"}}}
+_BOOKING_ERROR = {"type": "object", "properties": {"error": {"type": "string"}}}
+
+
 def _api_integration_projection() -> dict:
-    """One integration with two operations, shaped as agent-stream serves the projection."""
+    """One integration with two operations, shaped as the platform serves the projection.
+
+    Schemas travel as JSON text, and a request schema that is unset has no key at all.
+    """
     return {
         "apiIntegrations": {
             "apiIntegrations": {
@@ -8144,6 +8162,9 @@ def _api_integration_projection() -> dict:
                                 "resource": "/bookings/{booking_id}/confirmation-status",
                                 "description": "Confirmation status of a booking",
                                 "headers": {"Accept": "application/json"},
+                                "requestQuerySchema": json.dumps(_STATUS_QUERY),
+                                "responseSchemas": {},
+                                "schemaSource": "observed",
                             },
                             "OP-POST": {
                                 "id": "OP-POST",
@@ -8152,6 +8173,22 @@ def _api_integration_projection() -> dict:
                                 "resource": "/bookings",
                                 "description": "",
                                 "headers": {},
+                                "requestBodySchema": json.dumps(_BOOKING_BODY),
+                                "responseSchemas": {
+                                    "201": json.dumps(_BOOKING_CREATED),
+                                    "default": json.dumps(_BOOKING_ERROR),
+                                },
+                                "schemaSource": "openapi",
+                            },
+                            "OP-DELETE": {
+                                "id": "OP-DELETE",
+                                "name": "cancel_booking",
+                                "method": "DELETE",
+                                "resource": "/bookings/{booking_id}",
+                                "description": "",
+                                "headers": {},
+                                "responseSchemas": {"204": "{}"},
+                                "schemaSource": "manual",
                             },
                         },
                     }
@@ -8276,6 +8313,123 @@ class ApiIntegrationSyncTest(unittest.TestCase):
 
         self.assertFalse(success)
         self.assertIn("header 'Authorization' is set from the environment config", message)
+        self.assertEqual(commands, [])
+
+    def test_pull_writes_schemas_as_nested_yaml_with_quoted_status_keys(self):
+        """Schemas land as mappings, status keys quoted, and only where the platform has them."""
+        ops = self._operations()
+        self.assertEqual(ops["create_booking"]["request_body_schema"], _BOOKING_BODY)
+        self.assertEqual(
+            ops["create_booking"]["response_schemas"],
+            {"201": _BOOKING_CREATED, "default": _BOOKING_ERROR},
+        )
+        self.assertEqual(ops["create_booking"]["schema_source"], "openapi")
+        self.assertNotIn("request_query_schema", ops["create_booking"])
+        self.assertEqual(ops["get_confirmation_status"]["request_query_schema"], _STATUS_QUERY)
+        self.assertEqual(ops["get_confirmation_status"]["schema_source"], "observed")
+        self.assertNotIn("request_body_schema", ops["get_confirmation_status"])
+        self.assertNotIn("response_schemas", ops["get_confirmation_status"])
+        # `manual` is the default, so the file doesn't spell it out.
+        self.assertEqual(ops["cancel_booking"]["response_schemas"], {"204": {}})
+        self.assertNotIn("schema_source", ops["cancel_booking"])
+
+        with open(self.path, encoding="utf-8") as file:
+            text = file.read()
+        self.assertIn("'201':", text)
+        self.assertNotIn('"{', text)
+
+    def test_schema_edit_sends_the_new_schema_with_its_source(self):
+        """Changing one keyword sends the operation with its full schema state and source."""
+
+        def tighten_notes(op):
+            if op["name"] == "create_booking":
+                op["request_body_schema"]["properties"]["notes"]["maxLength"] = 200
+
+        self._edit_operations(tighten_notes)
+
+        [update] = self._push()["update_api_integration_operation"]
+        self.assertEqual(update.id, "OP-POST")
+        body = json.loads(update.request_body_schema)
+        self.assertEqual(body["properties"]["notes"]["maxLength"], 200)
+        self.assertEqual(json.loads(update.response_schemas.entries["201"]), _BOOKING_CREATED)
+        self.assertEqual(update.request_query_schema, "")
+        self.assertEqual(update.schema_source, "openapi")
+
+    def test_removing_all_schemas_sends_a_clearing_update_without_a_source(self):
+        """Deleting every schema key sends empty values and leaves the stored source alone."""
+
+        def drop_schemas(op):
+            if op["name"] == "create_booking":
+                for key in ("request_body_schema", "response_schemas", "schema_source"):
+                    op.pop(key, None)
+
+        self._edit_operations(drop_schemas)
+
+        [update] = self._push()["update_api_integration_operation"]
+        self.assertEqual(update.id, "OP-POST")
+        self.assertEqual(update.request_body_schema, "")
+        self.assertTrue(update.HasField("response_schemas"))
+        self.assertEqual(len(update.response_schemas.entries), 0)
+        self.assertFalse(update.HasField("schema_source"))
+
+    def test_new_operation_with_a_schema_and_no_source_creates_with_the_default(self):
+        """A schema written without schema_source is created labelled as a hand edit."""
+        data = self._yaml()
+        data["api_integrations"][0]["operations"].append(
+            {
+                "name": "list_bookings",
+                "method": "GET",
+                "resource": "/bookings",
+                "response_schemas": {"200": {}},
+            }
+        )
+        self._write_yaml(data)
+
+        [create] = self._push()["create_api_integration_operation"]
+        self.assertEqual(create.name, "list_bookings")
+        self.assertEqual(dict(create.response_schemas), {"200": "{}"})
+        self.assertEqual(create.schema_source, DEFAULT_SCHEMA_SOURCE)
+
+    def test_dropping_only_the_source_relabels_with_the_default(self):
+        """Removing schema_source while keeping the schema sends the default label."""
+
+        def drop_source(op):
+            if op["name"] == "get_confirmation_status":
+                op.pop("schema_source")
+
+        self._edit_operations(drop_source)
+
+        [update] = self._push()["update_api_integration_operation"]
+        self.assertEqual(update.id, "OP-GET")
+        self.assertEqual(json.loads(update.request_query_schema), _STATUS_QUERY)
+        self.assertEqual(update.schema_source, DEFAULT_SCHEMA_SOURCE)
+
+    def test_unquoted_status_key_is_read_as_text_and_pushes_nothing(self):
+        """A hand-typed `201:` is an int to YAML; it is read as '201' and is not a change."""
+        with open(self.path, encoding="utf-8") as file:
+            text = file.read()
+        self.assertIn("'201':", text)
+        with open(self.path, "w", encoding="utf-8") as file:
+            file.write(text.replace("'201':", "201:"))
+
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        success, message, _ = self.project.push_project(dry_run=True)
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+
+    def test_body_schema_on_get_fails_push_validation(self):
+        """A body schema the platform would refuse on a GET stops the push locally."""
+
+        def add_body(op):
+            if op["name"] == "get_confirmation_status":
+                op["request_body_schema"] = {"type": "object"}
+
+        self._edit_operations(add_body)
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertIn("GET requests have no body", message)
         self.assertEqual(commands, [])
 
 

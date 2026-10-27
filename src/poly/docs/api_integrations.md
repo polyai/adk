@@ -45,8 +45,14 @@ Each operation is one HTTP endpoint. You define:
 - **resource**: Path template (e.g. `/tickets/{id}`). Path variables are exposed as arguments when calling the operation.
 - **description**: Optional note on what the operation does (up to 1000 characters).
 - **headers**: Optional mapping of header name to value, sent on every call to the operation (up to 50). `Authorization` and `Host` come from the environment config and can't be set here.
+- **request_query_schema**: Optional JSON Schema (2020-12) for the query parameters, written as a YAML mapping.
+- **request_body_schema**: Optional JSON Schema for the request body. Not allowed on `GET` or `DELETE`.
+- **response_schemas**: Optional mapping from a response key to a JSON Schema for that response body. Keys are a status code (`'200'`), a status class (`'4XX'`) or `default`. An unquoted `200:` is read as the text `'200'`, and `poly pull` writes status keys quoted.
+- **schema_source**: Where the schemas came from: `observed`, `openapi` or `default`. Hand-written schemas are `manual`, the default, which the file never spells out: a schema without the key is pushed as `manual`, and `poly pull` omits the key for one.
 
-Both optional fields are omitted from the file when empty, and removing one from the file clears it in Agent Studio on the next push.
+The optional fields are omitted from the file when empty, and removing one from the file clears it in Agent Studio on the next push.
+
+Schemas are nested YAML, not JSON strings, so quote values YAML would otherwise type for you (`type: "null"`, a `pattern` or `const` that looks like a date or number). Each schema must pass the JSON Schema 2020-12 meta-schema, nest at most 64 levels deep and stay under 64 KB as compact JSON.
 
 ## Usage
 
@@ -81,6 +87,25 @@ api_integrations:
         description: Change a contact's phone number
         headers:
           Content-Type: application/json
+        request_body_schema:
+          type: object
+          required: [phone_number]
+          properties:
+            phone_number:
+              type: string
+        response_schemas:
+          '200':
+            type: object
+            properties:
+              id:
+                type: string
+              phone_number:
+                type: string
+          default:
+            type: object
+            properties:
+              error:
+                type: string
 ```
 
 In a function you might call:
