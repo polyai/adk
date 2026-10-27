@@ -1,6 +1,266 @@
 # CHANGELOG
 
 
+## v0.73.2 (2026-10-26)
+
+### Bug Fixes
+
+- Name the parent branch, not main, when resolving merge and sync conflicts
+  ([#380](https://github.com/polyai/adk/pull/380),
+  [`b94722a`](https://github.com/polyai/adk/commit/b94722a10493c54081a79fe2ebed6a8a8c9b33c6))
+
+## Summary
+
+When `poly branch merge -i` or `poly branch sync -i` hits a conflict, the prompt now names the
+  parent branch instead of calling that side "main". For a branch made from another branch, the
+  parent is that other branch, not `main`.
+
+## Motivation
+
+The interactive resolver offered "Use main" for the `ours` side of every conflict, and the conflict
+  header labelled that side's value "Main". That side is the branch you merge into or sync from. It
+  is `main` only for a branch made from `main`. Syncing a sub-branch with its parent showed "Use
+  main" while the value was the parent's, so the prompt pointed at the wrong branch.
+
+## Changes
+
+- The resolution menu says "Use parent — <name>", next to the existing "Use branch — <name>". - The
+  conflict header labels the parent's value "Parent (<name>)", in both the side-by-side and the
+  field-by-field views. - `poly branch merge` passes the parent's name it already looks up. `poly
+  branch sync` looks it up the same way, only when there are conflicts to resolve, so a sync without
+  conflicts makes no extra call. The lookup is now one helper used by both. - The CLI reference's
+  interactive section says "pick the parent branch" instead of "pick `main`". - Tests for the menu
+  (merge on a sub-branch and on a branch from `main`, sync on a sub-branch), for the header in both
+  views, and that a sync without conflicts skips the lookup.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly branch sync -i`) - [x] Tested against
+  a live Agent Studio project: a branch made from another branch, where both changed the same
+  function, synced with `poly branch sync -i`. Before, the menu offered "Use main"; now it offers
+  "Use parent" with the parent branch's name. The prompt was cancelled each time, so nothing was
+  resolved.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+Before (main):
+
+``` $ poly branch sync -i ? Select resolution (Use arrow keys) » Use main Use branch —
+  scratch-adk-sync-child Use original (base) Edit manually ```
+
+After:
+
+``` $ poly branch sync -i ? Select resolution (Use arrow keys) » Use parent —
+  scratch-adk-sync-parent Use branch — scratch-adk-sync-child Use original (base) Edit manually ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+## v0.73.1 (2026-10-23)
+
+### Bug Fixes
+
+- Report conflicts from poly branch sync instead of success
+  ([#374](https://github.com/polyai/adk/pull/374),
+  [`68ad3a0`](https://github.com/polyai/adk/commit/68ad3a0c0317b335956aca895e4eb70d18ade2b7))
+
+## Summary
+
+`poly branch sync` printed "synced successfully" when Agent Studio found conflicts, and nothing had
+  been synced. It now shows the conflicts and exits 1, as `poly branch merge` does.
+
+## Motivation
+
+Agent Studio answers a sync that hits conflicts with a 200 whose body is `{"outcome": "conflicts",
+  "conflicts": [...], "value": ..., "errors": []}`, without `hasConflicts`. A merge with conflicts
+  gets a 400 that has `hasConflicts`. `SyncClientHandler.sync_branch` only checked `hasConflicts`
+  and `errors`, so it read the conflict reply as a successful sync, and the CLI's conflict table,
+  `-i` and `--resolutions` paths never ran.
+
+## Changes
+
+- `SyncClientHandler.sync_branch` also treats `outcome: "conflicts"` as a sync with conflicts. - The
+  `SourcererSDK.sync_branch` docstring describes the reply Agent Studio sends. - Tests for a sync
+  with conflicts and one without. - `poly branch sync` was not in the CLI reference: it now has a
+  section (flags, `--json` shape, conflicts), the branching guide has a short "Syncing with the
+  parent branch" section, and the `poly-adk-branching` skill covers sync conflicts.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly branch sync`) - [x] Tested against a
+  live Agent Studio project: a branch and its parent branch changed the same function. Before, `poly
+  branch sync` on the child printed that it synced and exited 0, while the branch stayed diverged.
+  With this change it shows the conflict and exits 1.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+Before (0.71.0; 0.72.0 has the same code):
+
+``` $ poly branch sync Branch 'scratch-adk-sync-child' synced successfully. ```
+
+After:
+
+``` $ poly branch sync Error: Failed to sync branch 'scratch-adk-sync-child'.
+
+╭─ Merge conflicts ────────────────────────────────────────────────────────────╮ │
+  ╭────────────────────────────────────┬────────────────────┬────────────────╮ │ │ │ Conflict │
+  Status │ In resource │ │ │
+  ├────────────────────────────────────┼────────────────────┼────────────────┤ │ │ │
+  functions/functions/entities/defau │ Needs decision │ 1 conflict │ │ │ │ lt-function/code │ │ │ │
+  │ ╰────────────────────────────────────┴────────────────────┴────────────────╯ │
+  ╰──────────────────────────────────────────────────────────────────────────────╯ Merge conflicts
+  detected. To resolve: - Use 'poly branch sync -i' to resolve conflicts interactively - Use 'poly
+  branch sync --resolutions <file.json>' to provide pre-defined resolutions - Merge manually on
+  Agent Studio ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Documentation
+
+- Add a deploying from github page and split out the editor extension page
+  ([#375](https://github.com/polyai/adk/pull/375),
+  [`9c6b1d4`](https://github.com/polyai/adk/commit/9c6b1d44dd87a5bc1a319559c5d2286c43229e2e))
+
+## Summary
+
+Adds a "Deploying from GitHub" page under Tooling, and moves the VS Code and Cursor extension onto
+  its own Tooling page. It covers the ADK repo template: a GitHub repository that tests ADK projects
+  on every pull request, deploys them to Agent Studio when they merge, and syncs changes made in
+  Agent Studio back into git.
+
+## Motivation
+
+The docs don't mention the template, so the only way to learn how ADK projects work with GitHub is
+  to find the template repo and read its README. This page explains the flow and links to the
+  template's setup guide.
+
+## Changes
+
+- New page `docs/docs/tooling/deploying-from-github.md`: - a sequence diagram and a table of how a
+  change moves through GitHub and Agent Studio; - what's in a repo made from the template; - working
+  on a project, using `poly branch switch "$(git branch --show-current)" --create --from main
+  --keep-files`; - how the sync check and Sync Projects keep Agent Studio and git in step; - merging
+  with a `/poly-merge` comment, for repos without a merge queue, or instead of one; - an outline of
+  setting up a repo, linking to the template's `SETUP.md`; - keeping a repo up to date. -
+  `mkdocs.yml`: adds the page to the Tooling nav, and turns on mermaid diagrams through a
+  `pymdownx.superfences` custom fence, which Material for MkDocs renders natively. No existing page
+  used mermaid, so nothing else changes. - `tooling.md`: - links to the new page from "How tooling
+  fits into the workflow"; - keeps a short extension section linking to the new page; - its
+  next-step cards point at the tooling pages and the CLI reference. - "Recommended tooling" becomes
+  "Integrating with your workflow", with three parts: the VS Code and Cursor extension, coding
+  agents, and Git; - the coding-agents part (was "Claude Code") covers the ADK's agent skills for
+  Claude Code, Cursor, Codex and others, and links to the ADK repo's `skills/` folder; -
+  "Integrating Git with the ADK" says what the template does in one sentence, then links to the new
+  page. - Links to the old `#claude-code` anchor, in `working-locally.md` and `what-is-the-adk.md`,
+  now go to `#coding-agents`. - New page `docs/docs/tooling/editor-extension.md`: the extension's
+  features and install steps, moved from the overview, plus a note that `poly` stays the source of
+  truth. - Links to the extension in `working-locally.md`, `get-started.md`, `walkthrough-video.md`,
+  `what-is-the-adk.md` and `build-an-agent.md` now go to the new page. - `mkdocs.yml`: Tooling nav
+  is Overview, VS Code and Cursor extension, Deploying from GitHub.
+
+The `/poly-merge` section describes
+  [adk-repo-template#23](https://github.com/polyai/adk-repo-template/pull/23), so this should merge
+  after it.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+`mkdocs build --strict` passes.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (no Python changes) - [x] `pytest` passes (no
+  code changes) - [x] No breaking changes to the `poly` CLI interface (or migration path documented)
+  - [x] PR title follows [conventional commits](https://www.conventionalcommits.org/), and its type
+  matches the change (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing
+  changes are reflected in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+
+## v0.73.0 (2026-10-23)
+
+### Features
+
+- Let poly branch switch keep local files and create missing branches
+  ([#372](https://github.com/polyai/adk/pull/372),
+  [`b9ae814`](https://github.com/polyai/adk/commit/b9ae8145cef739ff0193e557e8595bf6ae864b30))
+
+## Summary
+
+Adds `--keep-files`, `--create` and `--from` to `poly branch switch`, so a project's tracked Agent
+  Studio branch can be moved to match a git branch without overwriting the files git just checked
+  out.
+
+## Motivation
+
+When a project lives in a git repo and each git branch maps to an Agent Studio branch of the same
+  name, the two drift apart: the tracked branch lives in the gitignored `_gen/.agent_studio_config`,
+  so `git switch` doesn't move it. No CLI command could line them up without side effects:
+
+- `poly branch switch <name>` pulls the branch's state into the project files. It refuses while
+  there are local changes, and `--force` discards them, so after `git switch` it either refuses or
+  overwrites what git checked out. - `poly branch create <name>` keeps local files, but fails once
+  the branch exists.
+
+Scripts worked around this by calling ADK internals. Now one command does it:
+
+```bash poly branch switch "$(git branch --show-current)" --create --from main --keep-files ```
+
+## Changes
+
+- `poly branch switch --keep-files` tracks the target branch and refreshes the remote state without
+  writing any project files, so `poly status` and `poly push` compare the working copy against that
+  branch. It skips the uncommitted-changes check and can't be combined with `--force` or `--format`.
+  - `poly branch switch --create` / `-c` creates the branch if it doesn't exist, with the same
+  sourcing rules as `poly branch create`: from the current branch, or from `--from BRANCH`. An
+  existing branch is just switched to. - `--from` without `--create` is rejected. - `--json` output
+  gains `"created"`, and validation errors (missing branch, uncommitted changes, conflicting flags)
+  are now reported as `{"success": false, "error": ...}` with exit code 1, instead of as plain text.
+  - The logic and validation live in `AgentStudioProject.switch_branch`, which takes new
+  `keep_files`, `create` and `source_branch_name` arguments. Its return type is unchanged. - Updated
+  the `poly branch` CLI reference, the branches guide and the `poly-adk-branching` skill.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New `SwitchBranchTest` cases in `project_test.py` cover: refusing with local changes, `keep_files`
+  switching without pulling, a missing branch with and without `create`, creating from the current
+  branch and from `--from`, `create` on an existing branch, and the conflicting-flag errors. New
+  `BranchSwitchTest` cases in `cli_test.py` cover argument parsing and forwarding, `"created"` in
+  `--json` output, and `--json` error output. Not yet tried by hand against a live project.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.72.0 (2026-10-20)
 
 ### Features

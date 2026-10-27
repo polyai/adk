@@ -10,7 +10,7 @@ description: >
 metadata:
   author: PolyAI
   license: Apache-2.0
-  version: 0.72.0
+  version: 0.73.2
   requires:
     bins:
       - poly
@@ -28,6 +28,8 @@ poly branch list                   # all branches (--archived for soft-deleted o
 poly branch current                # current branch + its parent
 poly branch create <name>          # create + switch; branches from main's latest state
 poly branch switch <name>          # requires a clean tree (--force discards local changes)
+poly branch switch <name> --keep-files  # track <name> without touching files; next push sends them there
+poly branch switch <name> --create --from main --keep-files  # same, creating <name> from main if missing
 poly branch rename <new-name>
 poly branch delete [<name>]        # main cannot be deleted
 poly branch restore <branch_id>    # un-archive; IDs from poly branch list --archived
@@ -84,6 +86,14 @@ On conflict the command exits non-zero and prints a table per conflicting field:
 ```
 
 `path` matches the conflict table's Path column; `strategy` is `"ours"`, `"theirs"`, or `"base"`; a custom `value` is only honored with `"theirs"`. Workflow: run `poly branch merge --json` once to surface the conflicts, build a resolutions file covering each path, re-run with `--resolutions`. Confirm resolution choices with the user when the right answer isn't obvious — both sides are real work.
+
+## Syncing with the parent branch
+
+```bash
+poly branch sync                        # bring the parent's newer changes into this branch
+```
+
+Needs a checkout with no unpushed changes; a clean sync pulls the updated branch. On conflict it exits non-zero with the same table, and takes the same `--interactive` and `--resolutions` routes as a merge (`"ours"` is the parent, `"theirs"` the branch). As an agent: `poly branch sync --json`, then re-run with `--resolutions`.
 
 ## Sharing changes for review
 

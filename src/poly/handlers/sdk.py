@@ -386,17 +386,17 @@ class SourcererSDK:
         Returns:
             Dictionary containing:
             - If successful:
-                - sequence: The new sequence number after merge (as string)
-                - message: Success message
-                - testRunIds: List of test run IDs that were triggered
-            - If conflicts detected:
-                - hasConflicts: True
+                - sequence: The new sequence number after the sync (as string)
+                - snapshotKey: Key of the snapshot the sync produced
+            - If conflicts detected (Agent Studio answers 200, not 400 as for a merge):
+                - outcome: "conflicts"
                 - conflicts: List of conflict objects, each containing:
                     - path: Path to the conflicted field
                     - baseValue: Original value from base
                     - oursValue: Value from main branch
                     - theirsValue: Value from the branch being merged
                     - type: Type of conflict ("add", "modify", or "delete")
+                - errors: List of error objects
 
         Raises:
             SourcererAPIError: If the API request fails or sequence mismatch occurs
@@ -404,7 +404,7 @@ class SourcererSDK:
         Example:
             # Simple sync without conflicts
             result = sdk.sync_branch()
-            if "hasConflicts" in result and result["hasConflicts"]:
+            if result.get("outcome") == "conflicts":
                 print("Conflicts detected:", result["conflicts"])
             else:
                 print("Sync successful, sequence:", result["sequence"])
