@@ -4946,6 +4946,29 @@ class MigrateFlowStepResourceIdsTest(unittest.TestCase):
         self.assertIn("FLOW-abc_step-1", flow_steps)
         self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
 
+    def test_null_file_structure_info_still_rekeys(self):
+        """Status files written by older versions can store file_structure_info as null."""
+        from poly.migration_utils import migrate_flow_step_resource_ids
+
+        status_dict = {
+            "resources": {
+                "flow_steps": {
+                    "SMS Flow_step-1": {
+                        "resource_id": "SMS Flow_step-1",
+                        "flow_name": "SMS Flow",
+                        "flow_id": "FLOW-abc",
+                    },
+                },
+            },
+            "file_structure_info": None,
+        }
+
+        migrate_flow_step_resource_ids(status_dict)
+
+        flow_steps = status_dict["resources"]["flow_steps"]
+        self.assertEqual(list(flow_steps), ["FLOW-abc_step-1"])
+        self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
+
 
 class MigrateFlowStepSettingsTest(unittest.TestCase):
     """Tests for migrate_flow_step_settings status dict migration."""
