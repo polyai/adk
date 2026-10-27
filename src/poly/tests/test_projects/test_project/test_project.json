@@ -446,7 +446,11 @@
           "Check my email address",
           "Email validation request"
         ],
-        "enabled": true
+        "enabled": true,
+        "tags": [
+          "email",
+          "validation"
+        ]
       }
     },
     "child_topics": {
@@ -1191,8 +1195,35 @@
       "asr_settings": {
         "resource_id": "asr_settings",
         "name": "asr_settings",
-        "barge_in": false,
-        "interaction_style": "balanced"
+        "speech_end_delay_ms": 800,
+        "barge_in": {
+          "enabled": false,
+          "allow_on_first_turn": false,
+          "max_per_call": 5
+        }
+      }
+    },
+    "voice_filler_phrases": {
+      "voice_filler_phrases": {
+        "resource_id": "voice_filler_phrases",
+        "name": "voice_filler_phrases",
+        "enabled": true,
+        "phrases": [
+          "One moment...",
+          "Just a second..."
+        ],
+        "randomize": true,
+        "initial_interval_seconds": 2.5,
+        "interval_seconds": 5
+      }
+    },
+    "voice_background_ambience": {
+      "voice_background_ambience": {
+        "resource_id": "voice_background_ambience",
+        "name": "voice_background_ambience",
+        "preset": "office-ambiance",
+        "enabled": false,
+        "loudness": -50
       }
     },
     "safety_filters": {
@@ -1296,6 +1327,18 @@
                   "assertion_type": "equals"
                 }
               ]
+            },
+            {
+              "name": "test_function_with_parameters",
+              "arguments": [
+                {
+                  "parameter_name": "param1",
+                  "expected_value": "booking",
+                  "value_type": "string",
+                  "assertion_type": "equals"
+                }
+              ],
+              "is_asserted": false
             }
           ]
         },
@@ -1428,6 +1471,62 @@
         "prompt": "Never give medical advice. Offer to transfer the caller to a human instead.",
         "action": "warn",
         "enabled": true
+      }
+    },
+    "mcp_servers": {
+      "MCP-SERVER-ticketing": {
+        "resource_id": "MCP-SERVER-ticketing",
+        "name": "ticketing",
+        "url": "https://mcp.ticketing.example.com/v1",
+        "auth": {
+          "header": "Authorization",
+          "query_param": "",
+          "secret_name": "ticketing_mcp_token",
+          "oauth": null
+        },
+        "timeout": 15,
+        "enabled_functions": [
+          "search_tickets",
+          "create_ticket"
+        ],
+        "last_discovered_at": "2026-08-01T12:00:00Z",
+        "last_discovered_tool_count": 12
+      },
+      "MCP-SERVER-internal": {
+        "resource_id": "MCP-SERVER-internal",
+        "name": "internal-tools",
+        "url": "https://internal.example.com/mcp",
+        "auth": {
+          "header": "",
+          "query_param": "",
+          "secret_name": "",
+          "oauth": {
+            "client_id": "adk-test-client",
+            "client_secret_name": "internal_mcp_oauth_secret",
+            "token_url": "https://internal.example.com/oauth/token",
+            "audience": "mcp-api",
+            "scope": "tools:read tools:write"
+          }
+        },
+        "timeout": null,
+        "enabled_functions": null,
+        "last_discovered_at": null,
+        "last_discovered_tool_count": null
+      },
+      "mcp-1791899588123": {
+        "resource_id": "mcp-1791899588123",
+        "name": "custom:1791899588123",
+        "url": "https://tools.example.com/mcp",
+        "auth": {
+          "header": "",
+          "query_param": "api_key",
+          "secret_name": "tools_api_key",
+          "oauth": null
+        },
+        "timeout": null,
+        "enabled_functions": null,
+        "last_discovered_at": "2026-10-01T09:30:00Z",
+        "last_discovered_tool_count": 4
       }
     }
   },

@@ -4,6 +4,9 @@ site_url: https://polyai.github.io/adk/
 repo_name: polyai/adk
 repo_url: https://github.com/polyai/adk
 
+exclude_docs: |
+  AGENTS.md
+
 theme:
   name: material
   custom_dir: overrides
@@ -45,7 +48,11 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
@@ -151,6 +158,7 @@ nav:
           - Functions: reference/resources/functions.md
           - Flows: reference/resources/flows.md
           - API integrations: reference/resources/api_integrations.md
+          - MCP servers: reference/resources/mcp.md
           - Entities: reference/resources/entities.md
           - Handoffs: reference/resources/handoffs.md
           - SMS templates: reference/resources/sms.md
@@ -169,6 +177,8 @@ nav:
 
   - Tooling:
     - Overview: tooling/tooling.md
+    - VS Code and Cursor extension: tooling/editor-extension.md
+    - Deploying from GitHub: tooling/deploying-from-github.md
 
   - Community:
       - Discord: community/discord.md

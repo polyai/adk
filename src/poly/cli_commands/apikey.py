@@ -5,8 +5,10 @@ the PolyAI APIs and Dialog RSN into your environment, not to set up the ADK itse
 signs a user in - via the GitHub-only Auth0 device flow for the default `studio` region, or
 the standard sign-in page for any other region - creates their PolyAI account if needed,
 provisions (or reuses) an account-scoped API key, and writes ``POLY_API_KEY`` into their
-shell profile - or, on Windows, their user environment. It never prompts. To set up the
-ADK itself, use ``poly setup`` or ``poly login`` instead. See ``poly apikey --help`` or
+shell profile - or, on Windows, their user environment. It never prompts when run by an
+agent (no terminal, or ``--json``); at a terminal it may ask which account to use. It keeps
+the sign-in so a re-run does not sign in again. To set up the ADK itself,
+use ``poly setup`` or ``poly login`` instead. See ``poly apikey --help`` or
 ``docs/docs/reference/cli/apikey.md`` for the full step-by-step behaviour.
 
 Copyright PolyAI Limited
@@ -20,9 +22,12 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
+from poly.cli_commands.auth import authorise_or_explain
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
+from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
-from poly.handlers.interface import REGIONS, AgentStudioInterface
+from poly.handlers.interface import AgentStudioInterface
+from poly.utils import apikey_session
 from poly.utils.api_keys import select_reusable_api_key
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
@@ -36,6 +41,28 @@ ACCOUNT_POLL_ATTEMPTS = 20
 ACCOUNT_POLL_INTERVAL_SECONDS = 1
 ACCOUNT_POLL_TIMEOUT_SECONDS = ACCOUNT_POLL_ATTEMPTS * ACCOUNT_POLL_INTERVAL_SECONDS
 APIKEY_SOURCE = "apikey"
+# Short path that docs.poly.ai redirects to the Dialog RSN 1 first-call page.
+NEXT_STEP_URL = "https://docs.poly.ai/dialog-rsn-1"
+
+
+class MultipleAccountsError(ValueError):
+    """More than one account and no way to choose one without asking.
+
+    Carries the accounts so `--json` can list them for the caller to pick from.
+    """
+
+    def __init__(self, region: str, accounts: list[dict], sign_in_kept: bool = False):
+        self.region = region
+        self.accounts = [_account_summary(a) for a in accounts]
+        listing = ", ".join(f"{a['id']} ({a.get('name') or 'unnamed'})" for a in accounts)
+        message = (
+            f"Multiple accounts found for {region}: {listing}. "
+            "Re-run with --account-id <id> to pick one."
+        )
+        if sign_in_kept:
+            message += " Your sign-in is kept, so the re-run will not ask you to sign in again."
+        super().__init__(message)
+        self.raw_accounts = accounts
 
 
 def _default_key_name(region: str) -> str:
@@ -49,6 +76,34 @@ def _say(output_json: bool, fn: Callable[[str], None], message: str) -> None:
         fn(message)
 
 
+def _account_summary(account: dict) -> dict:
+    """The account fields worth showing someone choosing between accounts."""
+    return {key: account.get(key) for key in ("id", "name", "role", "created_by")}
+
+
+def _pick_account(accounts: list[dict]) -> str:
+    """Ask which account to use, with the same picker `poly project create` uses.
+
+    Raises:
+        ValueError: The picker was cancelled.
+    """
+    import questionary
+
+    choices = [
+        questionary.Choice(title=f"{a.get('name') or 'unnamed'} ({a['id']})", value=a["id"])
+        for a in accounts
+    ]
+    chosen = questionary.select(
+        "Select Account",
+        choices=choices,
+        use_search_filter=True,
+        use_jk_keys=False,
+    ).ask()
+    if not chosen:
+        raise ValueError("No account selected.")
+    return chosen
+
+
 def _fail(exc: Exception, step: str, exit_code: int, *, output_json: bool, verbose: bool) -> None:
     """Print a clean error (or re-raise under --verbose) and exit."""
     if verbose:
@@ -59,13 +114,10 @@ def _fail(exc: Exception, step: str, exit_code: int, *, output_json: bool, verbo
     if output_json:
         from poly.output.json_output import json_print
 
-        json_print(
-            {
-                "success": False,
-                "error": message,
-                "step": step,
-            }
-        )
+        payload = {"success": False, "error": message, "step": step}
+        if isinstance(exc, MultipleAccountsError):
+            payload["accounts"] = exc.accounts
+        json_print(payload)
     else:
         from poly.output.console import error
 
@@ -74,16 +126,22 @@ def _fail(exc: Exception, step: str, exit_code: int, *, output_json: bool, verbo
 
 
 def _resolve_account_id(
-    api: AgentStudioInterface, region: str, jwt_token: str, account_id: str | None
+    api: AgentStudioInterface,
+    region: str,
+    jwt_token: str,
+    account_id: str | None,
+    *,
+    interactive: bool,
 ) -> str:
-    """Return `account_id` unchanged, or poll for the account to appear.
+    """Return `account_id` unchanged, or poll for the account and choose one.
 
-    More than one account without an explicit `--account-id` is an error - silently
-    picking one would be a guess.
+    With more than one account: at a terminal (`interactive`), ask. Otherwise choosing
+    would be a guess, so raise with the list instead.
 
     Raises:
-        ValueError: No account appeared within `ACCOUNT_POLL_TIMEOUT_SECONDS`, or more
-            than one account was found and `account_id` was not given.
+        MultipleAccountsError: Several accounts and not interactive.
+        ValueError: No account appeared within `ACCOUNT_POLL_TIMEOUT_SECONDS`, or the
+            picker was cancelled.
     """
     if account_id is not None:
         return account_id
@@ -92,13 +150,11 @@ def _resolve_account_id(
             region=region, jwt_token=jwt_token, source=APIKEY_SOURCE
         )
         if accounts:
-            if len(accounts) > 1:
-                listing = ", ".join(f"{a['id']} ({a.get('name', 'unnamed')})" for a in accounts)
-                raise ValueError(
-                    f"Multiple accounts found for {region}: {listing}. "
-                    "Re-run with --account-id <id> to pick one."
-                )
-            return accounts[0]["id"]
+            if len(accounts) == 1:
+                return accounts[0]["id"]
+            if interactive:
+                return _pick_account(accounts)
+            raise MultipleAccountsError(region, accounts)
         time.sleep(ACCOUNT_POLL_INTERVAL_SECONDS)
     raise ValueError(
         f"No account appeared after {ACCOUNT_POLL_TIMEOUT_SECONDS}s. Re-run with --account-id <id>."
@@ -197,6 +253,8 @@ def _print_summary(
         plain("Open a new terminal to pick up POLY_API_KEY.")
     else:
         plain(f"Open a new terminal, or run `source {target.path}`, to pick up POLY_API_KEY.")
+    plain("")
+    plain("Next: make your first API call (POLY_API_KEY is already set).")
 
 
 def _print_json(
@@ -223,6 +281,7 @@ def _print_json(
             "profile_path": str(target.path),
             "profile_shell": target.shell,
             "key_active": key_active,
+            "next_step_url": NEXT_STEP_URL,
         }
     )
 
@@ -243,22 +302,24 @@ class ApiKeyCommand(BaseCommand):
             help="Create an account API key and export POLY_API_KEY for the PolyAI APIs.",
             description=(
                 "Sign in, create (or reuse) an account-scoped API key, and export it as"
-                " POLY_API_KEY for use with the PolyAI APIs and Dialog RSN. Non-interactive,"
-                " so an AI coding assistant can run it for you.\n\n"
+                " POLY_API_KEY for use with the PolyAI APIs and Dialog RSN. Never prompts when"
+                " run by an AI coding assistant (no terminal, or --json); at a terminal it"
+                " asks which account to use if you have more than one. The sign-in is kept,"
+                " so a re-run does not sign in again.\n\n"
                 "To set up the ADK itself, use `poly setup` or `poly login` instead - the ADK"
                 " reads its credentials from ~/.poly/credentials.json and does not need"
                 " POLY_API_KEY.\n\n"
                 "Examples:\n"
                 "  poly apikey --region studio\n"
                 "  poly apikey --region studio --account-id acc-123\n"
-                "  poly apikey --region us-1\n"
+                "  poly apikey --region us\n"
                 "  poly apikey --region studio --json\n"
             ),
         )
         apikey_parser.add_argument(
             "--region",
-            type=str,
-            choices=REGIONS,
+            type=region_type,
+            choices=REGION_CHOICES,
             required=True,
             help=(
                 "Region/cluster to create the key for. 'studio' is the self-serve cluster"
@@ -281,8 +342,9 @@ class ApiKeyCommand(BaseCommand):
             default=None,
             help=(
                 "Account ID to scope the key to. Skips polling for a newly created account."
-                " Required when your account has more than one - the command refuses to"
-                " guess which one you mean."
+                " With more than one account and no --account-id, a terminal shows a"
+                " picker; otherwise the command fails listing the accounts so you can"
+                " re-run with one of them."
             ),
         )
         apikey_parser.add_argument(
@@ -290,6 +352,15 @@ class ApiKeyCommand(BaseCommand):
             "-f",
             action="store_true",
             help="Overwrite an existing POLY_API_KEY in your profile if it holds a different value.",
+        )
+        apikey_parser.add_argument(
+            "--no-session-cache",
+            action="store_true",
+            help=(
+                "Sign in fresh and do not keep the sign-in for later runs. By default the"
+                f" sign-in is kept in {apikey_session.SESSION_FILE_PATH} (readable only by"
+                " you) until it expires, so a re-run does not sign in again."
+            ),
         )
 
     @classmethod
@@ -302,6 +373,7 @@ class ApiKeyCommand(BaseCommand):
             force=args.force,
             output_json=args.json,
             verbose=args.verbose,
+            no_session_cache=args.no_session_cache,
         )
 
     @classmethod
@@ -313,6 +385,7 @@ class ApiKeyCommand(BaseCommand):
         force: bool = False,
         output_json: bool = False,
         verbose: bool = False,
+        no_session_cache: bool = False,
     ) -> None:
         """Sign in and provision an account API key for `region`, then export it."""
         import requests
@@ -351,34 +424,76 @@ class ApiKeyCommand(BaseCommand):
                 else:
                     _say(output_json, info, message)
 
-            jwt_token = signin_with_device_flow(
-                auth_details, on_verification_url=on_verification_url
-            )
-            _say(output_json, success, "Authenticated successfully!")
+            def sign_in() -> tuple[str, apikey_session.CachedSession | None]:
+                token = signin_with_device_flow(
+                    auth_details, on_verification_url=on_verification_url
+                )
+                _say(output_json, success, "Authenticated successfully!")
+                if no_session_cache:
+                    return token, None
+                return token, apikey_session.save(region, token)
 
-            step = "authorise"
+            session = None if no_session_cache else apikey_session.load(region)
+            token_reused = session is not None
+            if session is not None:
+                jwt_token = session.token
+                minutes_ago = max(0, int(time.time() - session.saved_at) // 60)
+                _say(
+                    output_json,
+                    info,
+                    f"Reusing your sign-in from {minutes_ago} minutes ago.",
+                )
+            else:
+                jwt_token, session = sign_in()
+
             api = AgentStudioInterface()
-            _say(output_json, info, "Setting up your account...")
-            try:
-                auth_response = api.authorise(region=region, jwt_token=jwt_token)
-            except requests.HTTPError as e:
-                if region != "studio" and e.response is not None and e.response.status_code == 403:
-                    raise ValueError(
-                        f"No account is provisioned for you on {region}. Enterprise accounts"
-                        " are set up by PolyAI - contact your PolyAI representative, or run"
-                        " `poly apikey --region studio` to create a self-serve studio account."
-                    ) from e
-                raise
+            interactive = not output_json and sys.stdin.isatty()
+            while True:
+                try:
+                    step = "authorise"
+                    _say(output_json, info, "Setting up your account...")
+                    auth_response = authorise_or_explain(
+                        api,
+                        region,
+                        jwt_token,
+                        self_serve_hint="run `poly apikey --region studio`",
+                    )
+
+                    step = "account"
+                    try:
+                        resolved_account_id = _resolve_account_id(
+                            api,
+                            region,
+                            jwt_token,
+                            account_id,
+                            interactive=interactive,
+                        )
+                    except MultipleAccountsError as e:
+                        if session is None:
+                            raise
+                        raise MultipleAccountsError(
+                            region, e.raw_accounts, sign_in_kept=True
+                        ) from None
+                    break
+                except requests.HTTPError as e:
+                    # A kept sign-in can be revoked before it expires: drop it and sign
+                    # in once more. A fresh sign-in that is refused is a real error.
+                    unauthorised = e.response is not None and e.response.status_code == 401
+                    if not (token_reused and unauthorised):
+                        raise
+                    apikey_session.clear(region)
+                    token_reused = False
+                    _say(output_json, info, "Your kept sign-in was refused; signing in again.")
+                    step = "signin"
+                    jwt_token, session = sign_in()
+
             # On non-studio regions, `is_first_login` also fires for an existing user
             # who has no admin role on any account yet (enterprise auto-provisioning),
             # not just a genuinely new signup - restrict the signup event to studio,
             # the only region this tracking was asked for.
             is_signup = region == "studio" and bool(
-                (auth_response or {}).get("user", {}).get("is_first_login")
+                ((auth_response or {}).get("user") or {}).get("is_first_login")
             )
-
-            step = "account"
-            resolved_account_id = _resolve_account_id(api, region, jwt_token, account_id)
             if is_signup:
                 from poly.handlers.posthog import capture_event
 

@@ -33,7 +33,7 @@ from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.rtc import RTCCommand
 from poly.cli_commands.setup import SetupCommand
-from poly.cli_commands.shared import get_package_version
+from poly.cli_commands.shared import REGION_CHOICES, get_package_version, region_type
 from poly.cli_commands.sync import (
     DiffCommand,
     FetchCommand,
@@ -48,7 +48,6 @@ from poly.cli_commands.template import TemplateCommand
 from poly.cli_commands.testing import TestingCommand
 from poly.cli_commands.update import UpdateCommand, display_update_message
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
-from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
 
 logger = logging.getLogger(__name__)
@@ -143,8 +142,8 @@ class AgentStudioCLI:
         scope_parent = ArgumentParser(add_help=False)
         scope_parent.add_argument(
             "--region",
-            type=str,
-            choices=REGIONS,
+            type=region_type,
+            choices=REGION_CHOICES,
             default=None,
             help="Region, for headless use without a local project. Requires "
             "--project_id and --branch_id.",

@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Ruff version - match requirements-dev.txt (0.14.2)
+    # Keep in step with the ruff version uv.lock resolves for pyproject.toml's ruff dependency
     rev: v0.14.2
     hooks:
       # Run the linter (with --fix to auto-fix issues locally)

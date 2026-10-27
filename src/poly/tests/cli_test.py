@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -16,8 +17,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
+from rich.console import Console
 
 from poly.cli import AgentStudioCLI
+from poly.cli_commands import testing as testing_cli
 from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.base import (
     BUILDER_API_GROUP,
@@ -48,6 +51,7 @@ from poly.cli_commands.shared import (
     is_newer_version,
     parse_from_projection_json,
     require_deployment_simplification,
+    require_experiments_enabled,
     resolve_project_scope,
 )
 from poly.cli_commands.sync import FormatCommand, PushCommand, RevertCommand
@@ -813,6 +817,71 @@ class BranchCurrentTest(unittest.TestCase):
         mock_json_print.assert_called_once_with({"current_branch": "main", "parent_branch": None})
 
 
+class BranchSwitchTest(unittest.TestCase):
+    """Tests for 'poly branch switch <name>' and its --keep-files / --create / --from flags."""
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.branch.load_project").start()
+        self.proj = MagicMock()
+        self.proj.get_branches.return_value = ("main", {"main": {"branchId": "main"}})
+        self.proj.switch_branch.return_value = (True, {})
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.output.console.plain")
+    @patch("poly.output.console.success")
+    def test_flags_are_parsed_and_forwarded(self, mock_success, mock_plain):
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(
+            ["branch", "switch", "feature-b", "--create", "--from", "main", "--keep-files"]
+        )
+
+        BranchCommand.run(args)
+
+        kwargs = self.proj.switch_branch.call_args.kwargs
+        self.assertEqual(self.proj.switch_branch.call_args[0][0], "feature-b")
+        self.assertTrue(kwargs["keep_files"])
+        self.assertTrue(kwargs["create"])
+        self.assertEqual(kwargs["source_branch_name"], "main")
+        self.assertIn("Created branch 'feature-b'", mock_success.call_args[0][0])
+        self.assertIn("poly push", mock_plain.call_args[0][0])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output_reports_whether_the_branch_was_created(self, mock_json):
+        BranchCommand.branch_switch(
+            TEST_DIR, "feature-b", output_json=True, keep_files=True, create=True
+        )
+
+        mock_json.assert_called_once_with(
+            {"success": True, "branch_name": "feature-b", "created": True}
+        )
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output_reports_an_existing_branch_as_not_created(self, mock_json):
+        self.proj.get_branches.return_value = ("main", {"feature-b": {"branchId": "id-b"}})
+
+        BranchCommand.branch_switch(TEST_DIR, "feature-b", output_json=True, create=True)
+
+        mock_json.assert_called_once_with(
+            {"success": True, "branch_name": "feature-b", "created": False}
+        )
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output_reports_validation_errors(self, mock_json):
+        self.proj.switch_branch.side_effect = ValueError("Branch feature-b does not exist.")
+
+        with self.assertRaises(SystemExit) as exit_ctx:
+            BranchCommand.branch_switch(TEST_DIR, "feature-b", output_json=True)
+
+        self.assertEqual(exit_ctx.exception.code, 1)
+        mock_json.assert_called_once_with(
+            {"success": False, "error": "Branch feature-b does not exist."}
+        )
+
+
 class BranchSwitchInteractiveTest(unittest.TestCase):
     """Tests for BranchCommand.branch_switch's interactive picker (no branch_name given)."""
 
@@ -899,6 +968,15 @@ class BranchSwitchInteractiveTest(unittest.TestCase):
 
         self.proj.switch_branch.assert_not_called()
         self.assertIn("No branches found", mock_plain.call_args[0][0])
+
+
+# One field that both the parent and the branch changed.
+_GREETING_CONFLICT = {
+    "path": ["topics", "greeting", "content"],
+    "baseValue": "Hello",
+    "oursValue": "Hello from the parent",
+    "theirsValue": "Hello from the branch",
+}
 
 
 class BranchMergeTest(unittest.TestCase):
@@ -1000,6 +1078,24 @@ class BranchMergeTest(unittest.TestCase):
         mock_confirm.assert_not_called()
         self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
         self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
+
+    @patch("questionary.select")
+    def test_conflict_prompt_names_the_parent_branch(self, mock_select):
+        """The conflict menu offers the branch's parent, which for a sub-branch is its release."""
+        mock_select.return_value.ask.return_value = None
+        self.proj.merge_branch.return_value = (False, [_GREETING_CONFLICT], [])
+
+        for branch, parent in [("feature-a-child", "Release 1"), ("feature-a", "main")]:
+            with self.subTest(branch=branch):
+                self._set_current_branch(branch)
+
+                with self.assertRaises(SystemExit):
+                    BranchCommand.branch_merge(
+                        TEST_DIR, message="ship it", interactive=True, force=True
+                    )
+
+                choices = [c["name"] for c in mock_select.call_args.kwargs["choices"]]
+                self.assertIn(f"Use parent — {parent}", choices)
 
 
 class BranchSyncTest(unittest.TestCase):
@@ -1127,6 +1223,31 @@ class BranchSyncTest(unittest.TestCase):
 
         self.proj.sync_branch.assert_called_once_with(conflict_resolutions=resolutions)
         mock_success.assert_called_once()
+
+    @patch("questionary.select")
+    def test_conflict_prompt_names_the_parent_branch(self, mock_select):
+        """Syncing a sub-branch offers its release as the parent side, not main."""
+        mock_select.return_value.ask.return_value = None
+        self.proj.get_current_branch.return_value = "feature-a-child"
+        self.proj.get_branches.return_value = (
+            "feature-a-child",
+            dict(BranchMergeTest.BRANCH_TREE),
+        )
+        self.proj.sync_branch.return_value = (False, [_GREETING_CONFLICT], [])
+
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_sync(TEST_DIR, interactive=True)
+
+        choices = [c["name"] for c in mock_select.call_args.kwargs["choices"]]
+        self.assertIn("Use parent — Release 1", choices)
+
+    @patch("poly.output.console.success")
+    def test_sync_without_conflicts_does_not_look_up_the_parent(self, mock_success):
+        """Only the conflict prompt needs the parent's name, so a clean sync skips the lookup."""
+        BranchCommand.branch_sync(TEST_DIR)
+
+        mock_success.assert_called_once()
+        self.proj.get_branches.assert_not_called()
 
 
 class BranchMergeConflictHelpersTest(unittest.TestCase):
@@ -1500,6 +1621,58 @@ class ChatLoopTest(unittest.TestCase):
         self.assertEqual(self.proj.send_message.call_count, 2)
         self.assertEqual(self.proj.send_message.call_args_list[0][0][1], "Hello")
         self.assertEqual(self.proj.send_message.call_args_list[1][0][1], "Goodbye")
+
+    def test_language_returned_by_a_turn_is_sent_on_the_next_turn(self):
+        """A mid-conversation language switch is echoed back so it persists."""
+        self.proj.send_message.side_effect = [
+            {
+                "response": "Por supuesto.",
+                "conversation_ended": False,
+                "metadata": {"asr_lang_code": "es-US", "tts_lang_code": "es-US"},
+            },
+            {"response": "Perfecto.", "conversation_ended": False},
+        ]
+
+        ChatCommand._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Sí, por favor", "Una reserva"],
+        )
+
+        first, second = self.proj.send_message.call_args_list
+        self.assertEqual(first[0][3:], (None, None))
+        self.assertEqual(second[0][3:], ("es-US", "es-US"))
+
+    def test_first_turn_uses_language_from_initial_response(self):
+        """The session's starting language is sent instead of the server-side default."""
+        ChatCommand._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Hello"],
+            initial_response={
+                "response": "Hi",
+                "conversation_ended": False,
+                "metadata": {"asr_lang_code": "en-US", "tts_lang_code": "en-US"},
+            },
+        )
+
+        self.assertEqual(self.proj.send_message.call_args[0][3:], ("en-US", "en-US"))
+
+    def test_cli_language_kept_when_reply_has_no_language(self):
+        """Explicit --input-lang/--output-lang are kept when replies don't carry codes."""
+        ChatCommand._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_lang="fr-FR",
+            output_lang="fr-FR",
+            input_messages=["Bonjour", "Merci"],
+        )
+
+        for call in self.proj.send_message.call_args_list:
+            self.assertEqual(call[0][3:], ("fr-FR", "fr-FR"))
 
     def test_scripted_messages_exits_cleanly_when_exhausted(self):
         """Loop returns restart=False once all scripted messages are consumed."""
@@ -4385,6 +4558,46 @@ class RequireDeploymentSimplificationTest(unittest.TestCase):
         self.assertNotIn("[bold]", mock_json_print.call_args[0][0]["error"])
 
 
+class RequireExperimentsEnabledTest(unittest.TestCase):
+    """Tests for the require_experiments_enabled CLI gate."""
+
+    def setUp(self):
+        self.proj = MagicMock()
+
+    @patch("poly.output.console.error")
+    def test_returns_silently_when_enabled(self, mock_error):
+        """An eligible project passes through without output or exit."""
+        self.proj.experiments_enabled = True
+
+        require_experiments_enabled(self.proj)
+
+        mock_error.assert_not_called()
+
+    @patch("poly.output.console.error")
+    def test_exits_with_error_when_disabled(self, mock_error):
+        """An ineligible project is refused on stderr with exit code 1."""
+        self.proj.experiments_enabled = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            require_experiments_enabled(self.proj)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("top-level branches", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_reports_failure_as_json(self, mock_json_print):
+        """In JSON mode the refusal is a machine-readable payload, not stderr text."""
+        self.proj.experiments_enabled = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            require_experiments_enabled(self.proj, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json_print.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("top-level branches", payload["error"])
+
+
 class BranchTagTest(unittest.TestCase):
     """Tests for BranchCommand.branch_tag and branch_untag."""
 
@@ -5371,6 +5584,12 @@ class GetAvailableVersionsTest(unittest.TestCase):
 class UpgradeCommandTest(unittest.TestCase):
     """Tests for UpdateCommand._upgrade_command across install methods."""
 
+    def setUp(self):
+        """Install without the call extra, so the spec is the bare package name."""
+        patcher = patch.object(UpdateCommand, "_package_spec", return_value="polyai-adk")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_uv_tool_latest_upgrades_in_place(self):
         """Without a target version, a uv tool install is upgraded to the latest."""
         command = UpdateCommand._upgrade_command("uv-tool", None)
@@ -5426,6 +5645,123 @@ class UpgradeCommandTest(unittest.TestCase):
         for method in ("uv-tool", "pipx", "uv-pip", "pip"):
             with self.subTest(method=method):
                 self.assertNotIn("--upgrade", UpdateCommand._upgrade_command(method, "0.52.0"))
+
+
+class PackageSpecTest(unittest.TestCase):
+    """Tests for UpdateCommand._package_spec, which keeps the call extra across updates."""
+
+    def test_voice_deps_installed_keeps_call_extra(self):
+        """When aiortc is importable the call extra is installed, so the spec requests it."""
+        with patch("poly.cli_commands.update.importlib.util.find_spec", return_value=MagicMock()):
+            self.assertEqual(UpdateCommand._package_spec(), "polyai-adk[call]")
+
+    def test_voice_deps_missing_uses_bare_package(self):
+        """Without aiortc the extra was never installed, so the bare package is requested."""
+        with patch("poly.cli_commands.update.importlib.util.find_spec", return_value=None):
+            self.assertEqual(UpdateCommand._package_spec(), "polyai-adk")
+
+
+class UpgradeCommandWithCallExtraTest(unittest.TestCase):
+    """Tests for UpdateCommand._upgrade_command when the call extra is installed."""
+
+    def setUp(self):
+        """Install with the call extra, so the spec carries it."""
+        patcher = patch.object(UpdateCommand, "_package_spec", return_value="polyai-adk[call]")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_uv_tool_latest_upgrades_by_tool_name(self):
+        """'uv tool upgrade' takes the tool name and reapplies the recorded extras itself."""
+        command = UpdateCommand._upgrade_command("uv-tool", None)
+
+        self.assertEqual(command, ["uv", "tool", "upgrade", "polyai-adk"])
+
+    def test_uv_tool_pinned_reinstall_keeps_call_extra(self):
+        """A forced reinstall replaces uv's record of the extras, so the spec must carry it."""
+        command = UpdateCommand._upgrade_command("uv-tool", "0.52.0")
+
+        self.assertEqual(command, ["uv", "tool", "install", "--force", "polyai-adk[call]==0.52.0"])
+
+    def test_pipx_latest_upgrades_by_tool_name(self):
+        """'pipx upgrade' takes the tool name and reapplies the recorded extras itself."""
+        command = UpdateCommand._upgrade_command("pipx", None)
+
+        self.assertEqual(command, ["pipx", "upgrade", "polyai-adk"])
+
+    def test_pipx_pinned_reinstall_keeps_call_extra(self):
+        """A forced pipx reinstall must request the extra again or the voice deps are lost."""
+        command = UpdateCommand._upgrade_command("pipx", "0.52.0")
+
+        self.assertEqual(command, ["pipx", "install", "--force", "polyai-adk[call]==0.52.0"])
+
+    def test_uv_pip_latest_keeps_call_extra(self):
+        """An upgrade in a uv-managed venv also upgrades the voice deps."""
+        command = UpdateCommand._upgrade_command("uv-pip", None)
+
+        self.assertEqual(command, ["uv", "pip", "install", "--upgrade", "polyai-adk[call]"])
+
+    def test_uv_pip_pinned_keeps_call_extra(self):
+        """A pinned install in a uv-managed venv requests the extra at that version."""
+        command = UpdateCommand._upgrade_command("uv-pip", "0.52.0")
+
+        self.assertEqual(command, ["uv", "pip", "install", "polyai-adk[call]==0.52.0"])
+
+    def test_pip_latest_keeps_call_extra(self):
+        """An upgrade via pip also upgrades the voice deps."""
+        command = UpdateCommand._upgrade_command("pip", None)
+
+        self.assertEqual(
+            command, [sys.executable, "-m", "pip", "install", "--upgrade", "polyai-adk[call]"]
+        )
+
+    def test_pip_pinned_keeps_call_extra(self):
+        """A pinned install via pip requests the extra at that version."""
+        command = UpdateCommand._upgrade_command("pip", "0.52.0")
+
+        self.assertEqual(
+            command, [sys.executable, "-m", "pip", "install", "polyai-adk[call]==0.52.0"]
+        )
+
+
+class PerformUpdateFailureTest(unittest.TestCase):
+    """Tests for how UpdateCommand.perform_update reports a failed install."""
+
+    def setUp(self):
+        """Simulate a uv tool install with the call extra whose installer fails."""
+        for name, return_value in (
+            ("_detect_install_method", "uv-tool"),
+            ("_package_spec", "polyai-adk[call]"),
+        ):
+            patcher = patch.object(UpdateCommand, name, return_value=return_value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch(
+            "poly.cli_commands.update.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "uv"),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_error_shows_call_extra_literally(self):
+        """'[call]' in the failed command is printed as text, not swallowed as Rich markup."""
+        stderr = StringIO()
+        test_console = Console(file=stderr, width=200)
+
+        with patch("poly.output.console.err_console", test_console):
+            with self.assertRaises(SystemExit):
+                UpdateCommand.perform_update(output_json=False, target_version="0.52.0")
+
+        self.assertIn("uv tool install --force polyai-adk[call]==0.52.0", stderr.getvalue())
+
+    @patch("poly.cli_commands.update.json_print")
+    def test_json_error_is_not_markup_escaped(self, mock_json_print):
+        """JSON output is not rendered by Rich, so the command appears without escapes."""
+        with self.assertRaises(SystemExit):
+            UpdateCommand.perform_update(output_json=True, target_version="0.52.0")
+
+        payload = mock_json_print.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("uv tool install --force polyai-adk[call]==0.52.0", payload["error"])
 
 
 class CheckVersionExistsTest(unittest.TestCase):
@@ -5734,6 +6070,81 @@ class UpdateSkillsStepTest(unittest.TestCase):
         self.mock_update.return_value = False
 
         self.assertFalse(UpdateCommand.update_skills_step(output_json=False, required=True))
+
+
+class TestRunNameTest(unittest.TestCase):
+    """Tests for ``poly test run --name``."""
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.testing.load_project").start()
+        self.proj = MagicMock()
+        self.proj.resolve_tests.return_value = [MagicMock(resource_id="tc-1")]
+        self.proj.trigger_tests.return_value = {"id": "run-1", "test_case_count": 1}
+        self.mock_load.return_value = self.proj
+        patch("poly.output.console.info").start()
+        patch("poly.output.console.success").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _run(self, *argv: str) -> None:
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(["test", "run", "--dont-poll", *argv])
+        testing_cli.TestingCommand.run(args)
+
+    def test_name_flag_is_forwarded_to_the_trigger(self):
+        """'test run --name <name>' reaches trigger_tests as the run name."""
+        self._run("--name", "Pre-release check · booking flow")
+
+        self.proj.trigger_tests.assert_called_once_with(
+            ["tc-1"], name="Pre-release check · booking flow"
+        )
+
+    def test_run_without_a_name_sends_none(self):
+        """Without --name the platform keeps naming the run itself."""
+        self._run()
+
+        self.proj.trigger_tests.assert_called_once_with(["tc-1"], name=None)
+
+
+class TestRunJsonTest(unittest.TestCase):
+    """Tests for ``poly test run --json``, which returns without polling."""
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.testing.load_project").start()
+        self.proj = MagicMock()
+        self.proj.resolve_tests.return_value = [MagicMock(resource_id="tc-1")]
+        self.proj.trigger_tests.return_value = {"id": "run-1", "status": "pending"}
+        self.mock_load.return_value = self.proj
+        self.json_print = patch("poly.cli_commands.testing.json_print").start()
+        self.poll = patch("poly.output.console.poll_test_run_live").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _run(self, *argv: str) -> dict:
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(["test", "run", "--json", *argv])
+        testing_cli.TestingCommand.run(args)
+        return self.json_print.call_args.args[0]
+
+    def test_returns_the_run_and_the_command_to_check_on_it(self):
+        """--json prints the pending run with a follow-up show command, and never polls."""
+        output = self._run()
+
+        self.assertEqual(output["test_run"]["id"], "run-1")
+        self.assertEqual(output["next_command"], "poly test show run-1 --json")
+        self.poll.assert_not_called()
+
+    def test_next_command_keeps_a_path_outside_the_current_directory(self):
+        """With --path, the follow-up command points at the same project."""
+        output = self._run("--path", "/projects/my agent")
+
+        self.assertEqual(
+            output["next_command"], "poly test show run-1 --path '/projects/my agent' --json"
+        )
 
 
 class StartupUpdateMessageTest(unittest.TestCase):

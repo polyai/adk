@@ -17,6 +17,7 @@ class ChannelType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     VOICE: _ClassVar[ChannelType]
     WEB_CHAT: _ClassVar[ChannelType]
     SMS: _ClassVar[ChannelType]
+    EMAIL: _ClassVar[ChannelType]
 
 class ChannelStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -25,6 +26,7 @@ class ChannelStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
 VOICE: ChannelType
 WEB_CHAT: ChannelType
 SMS: ChannelType
+EMAIL: ChannelType
 NOT_CREATED: ChannelStatus
 CREATED: ChannelStatus
 
@@ -215,15 +217,25 @@ class SmsChannel(_message.Message):
     compliance_keywords: _containers.RepeatedCompositeFieldContainer[SmsComplianceKeyword]
     def __init__(self, config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., status: _Optional[_Union[ChannelStatus, str]] = ..., sender_phone_number: _Optional[str] = ..., channel_behavior_mode: _Optional[str] = ..., behavior_config: _Optional[_Union[SmsBehaviorConfig, _Mapping]] = ..., ending_message: _Optional[str] = ..., error_fallback_message: _Optional[str] = ..., compliance_keywords: _Optional[_Iterable[_Union[SmsComplianceKeyword, _Mapping]]] = ...) -> None: ...
 
+class EmailChannel(_message.Message):
+    __slots__ = ("config", "status")
+    CONFIG_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    config: ChannelConfig
+    status: ChannelStatus
+    def __init__(self, config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., status: _Optional[_Union[ChannelStatus, str]] = ...) -> None: ...
+
 class Channels(_message.Message):
-    __slots__ = ("voice", "web_chat", "sms")
+    __slots__ = ("voice", "web_chat", "sms", "email")
     VOICE_FIELD_NUMBER: _ClassVar[int]
     WEB_CHAT_FIELD_NUMBER: _ClassVar[int]
     SMS_FIELD_NUMBER: _ClassVar[int]
+    EMAIL_FIELD_NUMBER: _ClassVar[int]
     voice: VoiceChannel
     web_chat: WebChatChannel
     sms: SmsChannel
-    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ..., sms: _Optional[_Union[SmsChannel, _Mapping]] = ...) -> None: ...
+    email: EmailChannel
+    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ..., sms: _Optional[_Union[SmsChannel, _Mapping]] = ..., email: _Optional[_Union[EmailChannel, _Mapping]] = ...) -> None: ...
 
 class SmsChannel_UpdateSettings(_message.Message):
     __slots__ = ("sender_phone_number", "channel_behavior_mode", "behavior_config", "ending_message", "error_fallback_message", "compliance_keywords", "enabled")
@@ -242,6 +254,12 @@ class SmsChannel_UpdateSettings(_message.Message):
     compliance_keywords: _containers.RepeatedCompositeFieldContainer[SmsComplianceKeyword]
     enabled: bool
     def __init__(self, sender_phone_number: _Optional[str] = ..., channel_behavior_mode: _Optional[str] = ..., behavior_config: _Optional[_Union[SmsBehaviorConfig, _Mapping]] = ..., ending_message: _Optional[str] = ..., error_fallback_message: _Optional[str] = ..., compliance_keywords: _Optional[_Iterable[_Union[SmsComplianceKeyword, _Mapping]]] = ..., enabled: bool = ...) -> None: ...
+
+class EmailChannel_UpdateSettings(_message.Message):
+    __slots__ = ("enabled",)
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    def __init__(self, enabled: bool = ...) -> None: ...
 
 class Channel_UpdateGreeting(_message.Message):
     __slots__ = ("channel_type", "greeting")

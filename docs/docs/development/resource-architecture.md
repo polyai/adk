@@ -191,7 +191,7 @@ Both channels share the same two files:
 
 | File | Holds |
 |---|---|
-| `configuration.yaml` | Greeting, style prompt, and — voice only — disclaimer messages |
+| `configuration.yaml` | Greeting, style prompt, and — voice only — disclaimer messages, filler phrases and background ambience |
 | `safety_filters.yaml` | Per-channel content filtering |
 
 ~~~yaml
@@ -219,7 +219,7 @@ voice/
 
 **Speech recognition** shapes the transcript before the agent ever sees it:
 
-- `asr_settings.yaml` — turn-taking behavior, including whether the caller can interrupt (`barge_in`) and the overall `interaction_style`
+- `asr_settings.yaml` — turn-taking: how long the caller must be silent before their turn ends (`speech_end_delay_ms`), and whether they can interrupt the agent (`barge_in`)
 - `keyphrase_boosting.yaml` — bias recognition toward terms it would otherwise mishear, each set to `default`, `boosted`, or `maximum`
 - `transcript_corrections.yaml` — regular expressions that rewrite systematic misrecognitions, such as "at gmail dot com" becoming `@gmail.com`
 

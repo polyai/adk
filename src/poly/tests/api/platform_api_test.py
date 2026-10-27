@@ -62,9 +62,7 @@ class JwtAuthedAccountAndKeyCalls(unittest.TestCase):
         """list_account_api_keys_internal() GETs the account's api-keys endpoint."""
         mock_make_request.return_value = [{"key": "sk-1"}]
 
-        result = PlatformAPIHandler.list_account_api_keys_internal(
-            "studio", "jwt-token", "acc-1"
-        )
+        result = PlatformAPIHandler.list_account_api_keys_internal("studio", "jwt-token", "acc-1")
 
         args, kwargs = mock_make_request.call_args
         self.assertEqual(args[0], "studio")
@@ -136,7 +134,7 @@ class GetBaseUrl(unittest.TestCase):
             "uk-1": "https://jupiter-api.uk-1.platform.polyai.app",
             "us-1": "https://jupiter-api.us-1.platform.polyai.app",
             "dev": "https://jupiter-api.dev.polyai.app",
-            "staging": "https://jupiter-api.staging.us-1.platform.polyai.app",
+            "staging": "https://jupiter-api.staging.polyai.app",
             "studio": "https://jupiter-api.plg-us-1-prod.polyai.app",
         }
         for region, url in expected.items():
@@ -252,7 +250,7 @@ class MakeRequest(unittest.TestCase):
 class GetAccessibleRegions(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_accessible_regions."""
 
-    @patch("poly.handlers.platform_api.any_credentials_exist", return_value=True)
+    @patch("poly.utils.credentials.any_credentials_exist", return_value=True)
     @patch("poly.handlers.platform_api.PlatformAPIHandler.get_accounts")
     def test_returns_accessible_regions_in_input_order(self, mock_get_accounts, _mock_creds):
         """Regions returning accounts are kept; exceptions are swallowed; order preserved."""
@@ -272,15 +270,17 @@ class GetAccessibleRegions(unittest.TestCase):
 
         self.assertEqual(result, ["us-1", "euw-1"])
 
-    @patch("poly.handlers.platform_api.any_credentials_exist", return_value=False)
-    @patch(
-        "poly.handlers.platform_api.retrieve_api_key",
-        side_effect=ValueError("No API key configured"),
-    )
-    def test_missing_credentials_raises_value_error(self, _mock_key, _mock_creds):
-        """When no credentials exist, the probe raises a ValueError with setup guidance."""
-        with self.assertRaises(ValueError):
+    @patch("poly.utils.credentials.any_credentials_exist", return_value=False)
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.get_accounts")
+    def test_missing_credentials_raises_value_error(self, mock_get_accounts, _mock_creds):
+        """When no credentials exist, the probe raises a ValueError that points at `poly login`."""
+        with self.assertRaises(ValueError) as ctx:
             PlatformAPIHandler.get_accessible_regions(["studio"])
+
+        self.assertIn("No ADK key found.", str(ctx.exception))
+        self.assertIn("Run `poly login` to sign in.", str(ctx.exception))
+        self.assertNotIn("'studio'", str(ctx.exception))
+        mock_get_accounts.assert_not_called()
 
 
 class GetAccounts(unittest.TestCase):
@@ -314,9 +314,7 @@ class GetAccountsWithKey(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_accounts_with_key."""
 
     @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
-    def test_authenticates_with_the_given_key_not_the_on_disk_credential(
-        self, mock_make_request
-    ):
+    def test_authenticates_with_the_given_key_not_the_on_disk_credential(self, mock_make_request):
         """The explicit key is sent as X-API-KEY, bypassing retrieve_api_key entirely."""
         mock_make_request.return_value = [{"id": "a1", "name": "Active One", "active": True}]
 
@@ -624,6 +622,7 @@ class SynthesizeAudioCache(unittest.TestCase):
         with self.assertRaises(requests.HTTPError):
             PlatformAPIHandler.synthesize_audio_cache("studio", "agent-1", "entry-1", "hi", {})
 
+
 class GetCustomMetrics(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_custom_metrics."""
 
@@ -665,6 +664,39 @@ class CreateCustomMetric(unittest.TestCase):
         call_kwargs = mock_request.call_args
         self.assertEqual(call_kwargs.kwargs["method"], "POST")
         self.assertIn("/custom-metrics", call_kwargs.kwargs["url"])
+
+
+class TriggerTestRun(unittest.TestCase):
+    """Tests for PlatformAPIHandler.trigger_test_run."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_the_select_shape(self, mock_request, _mock_key):
+        """The body uses select, not the legacy testCaseIds that drops other fields."""
+        mock_request.return_value = make_mock_response(200, json_body={"id": "run-1"})
+
+        PlatformAPIHandler.trigger_test_run("studio", "proj1", ["tc-1", "tc-2"], "main")
+
+        call_kwargs = mock_request.call_args.kwargs
+        self.assertEqual(call_kwargs["method"], "POST")
+        self.assertIn("/v1/agents/proj1/testing/test-runs/trigger", call_kwargs["url"])
+        self.assertEqual(
+            json.loads(call_kwargs["data"]),
+            {"branchId": "main", "select": {"mode": "testIds", "testIds": ["tc-1", "tc-2"]}},
+        )
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_includes_the_run_name_when_given(self, mock_request, _mock_key):
+        """A name is sent alongside the selection."""
+        mock_request.return_value = make_mock_response(200, json_body={"id": "run-1"})
+
+        PlatformAPIHandler.trigger_test_run(
+            "studio", "proj1", ["tc-1"], "main", name="Pre-release check · booking flow"
+        )
+
+        body = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(body["name"], "Pre-release check · booking flow")
 
 
 class UpdateCustomMetric(unittest.TestCase):
@@ -733,6 +765,7 @@ class PreviewMetricsImport(unittest.TestCase):
         self.assertEqual(result["would_create"], ["NEW_ONE"])
         self.assertEqual(result["would_skip"], ["EXISTING"])
         self.assertEqual(result["remote_only"], ["REMOTE_ONLY"])
+
 
 class ListFunctions(unittest.TestCase):
     """Tests for PlatformAPIHandler.list_functions."""
@@ -887,6 +920,102 @@ class UserEmailHeader(unittest.TestCase):
                 patch.dict(os.environ, {}, clear=True),
             ):
                 self.assertNotIn("X-PolyAI-Email", send_request())
+
+
+class ExperimentCalls(unittest.TestCase):
+    """Tests for the PlatformAPIHandler experiment endpoints."""
+
+    BASE = "/adk/v1/accounts/acc-1/projects/proj-1/experiments"
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_create_experiment_posts_single_variant_version(self, mock_make_request):
+        """Create sends the name and a one-element versions list for the variant."""
+        PlatformAPIHandler.create_experiment("eu", "acc-1", "proj-1", "v2", "br-v2", 30)
+
+        mock_make_request.assert_called_once_with(
+            "eu",
+            self.BASE,
+            "POST",
+            data={"name": "v2", "versions": [{"branch_id": "br-v2", "traffic_percentage": 30}]},
+        )
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_list_experiments_sends_only_given_params(self, mock_make_request):
+        """Limit and offset are only sent as query params when provided."""
+        PlatformAPIHandler.list_experiments("eu", "acc-1", "proj-1", limit=5, offset=10)
+        PlatformAPIHandler.list_experiments("eu", "acc-1", "proj-1")
+
+        first, second = mock_make_request.call_args_list
+        self.assertEqual(first.kwargs["params"], {"limit": 5, "offset": 10})
+        self.assertEqual(second.kwargs["params"], {})
+        self.assertEqual(first.args, ("eu", self.BASE, "GET"))
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_get_experiment_sends_get_to_experiment_url(self, mock_make_request):
+        """Get hits the single-experiment URL with no body."""
+        mock_make_request.return_value = {"id": "exp-1"}
+
+        result = PlatformAPIHandler.get_experiment("eu", "acc-1", "proj-1", "exp-1")
+
+        mock_make_request.assert_called_once_with("eu", f"{self.BASE}/exp-1", "GET")
+        self.assertEqual(result, {"id": "exp-1"})
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_end_experiment_posts_chosen_branch_to_end_url(self, mock_make_request):
+        """End posts the winning branch ID to the experiment's /end endpoint."""
+        PlatformAPIHandler.end_experiment("eu", "acc-1", "proj-1", "exp-1", "br-v2")
+
+        mock_make_request.assert_called_once_with(
+            "eu", f"{self.BASE}/exp-1/end", "POST", data={"winning_branch_id": "br-v2"}
+        )
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_update_experiment_patches_only_given_fields(self, mock_make_request):
+        """Update omits fields that weren't provided so they stay unchanged."""
+        PlatformAPIHandler.update_experiment("eu", "acc-1", "proj-1", "exp-1", name="renamed")
+        PlatformAPIHandler.update_experiment(
+            "eu", "acc-1", "proj-1", "exp-1", branch_id="br-v2", traffic_percentage=40
+        )
+
+        first, second = mock_make_request.call_args_list
+        self.assertEqual(first.args, ("eu", f"{self.BASE}/exp-1", "PATCH"))
+        self.assertEqual(first.kwargs["data"], {"name": "renamed"})
+        self.assertEqual(
+            second.kwargs["data"],
+            {"versions": [{"branch_id": "br-v2", "traffic_percentage": 40}]},
+        )
+
+    def test_update_experiment_traffic_without_branch_id_raises(self):
+        """The API nests traffic under a versions entry, so branch_id can't be omitted."""
+        with self.assertRaises(ValueError):
+            PlatformAPIHandler.update_experiment(
+                "eu", "acc-1", "proj-1", "exp-1", traffic_percentage=40
+            )
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_list_experiments_converts_camel_case_response(self, mock_make_request):
+        """Sourcerer responds with camelCase; the rest of ADK expects snake_case."""
+        mock_make_request.return_value = {
+            "experiments": [
+                {
+                    "id": "exp-1",
+                    "endedAt": None,
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "versions": [
+                        {"branchId": "br-main", "kind": "control", "trafficPercentage": 70},
+                    ],
+                }
+            ]
+        }
+
+        result = PlatformAPIHandler.list_experiments("eu", "acc-1", "proj-1")
+
+        version = result["experiments"][0]["versions"][0]
+        self.assertEqual(result["experiments"][0]["ended_at"], None)
+        self.assertEqual(result["experiments"][0]["created_at"], "2026-01-01T00:00:00Z")
+        self.assertEqual(version["branch_id"], "br-main")
+        self.assertEqual(version["traffic_percentage"], 70)
+
 
 if __name__ == "__main__":
     unittest.main()

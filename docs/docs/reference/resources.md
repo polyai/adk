@@ -27,6 +27,7 @@ Every resource here follows the same sync process, including [permission-gated v
 | [Topics](./resources/topics.md) | Knowledge base entries — facts and per-subject actions | `topics/` |
 | [Flows](./resources/flows.md) | Multi-step guided conversations, steps, and transitions | `flows/` |
 | [API integrations](./resources/api_integrations.md) | External HTTP APIs callable from functions and flows | `config/api_integrations.yaml` |
+| [MCP servers](./resources/mcp.md) | External tool servers the agent connects to over MCP | `config/mcp.yaml` |
 | [Entities](./resources/entities.md) | Structured values collected from the caller | `config/entities.yaml` |
 | [Functions](./resources/functions.md) | Python for deterministic logic and lifecycle hooks | `functions/` |
 

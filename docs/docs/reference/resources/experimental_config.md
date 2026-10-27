@@ -188,8 +188,8 @@ Example:
 
 The `background_track` object (`name`, `loudness`) plays a looped recording behind the agent's voice for the duration of the call. See `background_track` in the schema for exact fields and ranges.
 
-!!! info "No effect on Raven Omni, and telephony only"
-    `background_track` only applies to the Raven 3.5 voice stack — it has no effect under Raven Omni. It also only plays on real telephony calls, not in the Agent Studio web call testing UI, so it won't be audible when testing there.
+!!! info "Telephony only, and replaced by background ambience"
+    `background_track` plays in both modular and speech-native mode (such as Dialog-RSN-1), but only on real telephony calls: Agent Studio's web call testing doesn't play it. Once the project's [background ambience](./voice_settings.md#background-ambience) has been set, on or off, it takes precedence and `background_track` is ignored.
 
 ### Barge-in
 

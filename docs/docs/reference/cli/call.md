@@ -16,6 +16,14 @@ poly call --variant my-variant
 poly call --no-echo-cancellation
 ~~~
 
+`poly call` needs the audio and WebRTC dependencies from the `call` extra, which the default install leaves out:
+
+~~~bash
+uv tool install "polyai-adk[call]"   # or: pip install "polyai-adk[call]"
+~~~
+
+Without them, `poly call` exits before connecting and prints the install command for how the ADK was installed.
+
 The call connects your local audio to the agent over WebRTC. Speak to talk to the agent; press `Ctrl+C` to hang up. When the call ends, the command prints a link to the conversation in Agent Studio so you can review the transcript, function calls, and audio.
 
 Calling is only available against the current branch's **draft** build, so you must be on a non-main branch. On `main` (or with no branch) the command exits with an error.

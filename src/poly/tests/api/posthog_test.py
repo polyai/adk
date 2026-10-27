@@ -97,13 +97,13 @@ class IsFeatureEnabledTest(unittest.TestCase):
         self.client.feature_enabled.assert_called_once_with(
             "deployment-simplification",
             distinct_id="test-user",
-            groups={"cluster": "studio", "project": "studio/proj-1"},
+            groups={"cluster": "plg-us-1-prod", "project": "plg-us-1-prod/proj-1"},
             group_properties={
-                "cluster": {"cluster": "studio", "env": "prod"},
+                "cluster": {"cluster": "plg-us-1-prod", "env": "plg"},
                 "project": {
                     "project_id": "proj-1",
-                    "cluster": "studio",
-                    "env": "prod",
+                    "cluster": "plg-us-1-prod",
+                    "env": "plg",
                     "account_id": "acct-1",
                 },
             },
@@ -135,6 +135,26 @@ class IsFeatureEnabledTest(unittest.TestCase):
         properties = self.client.feature_enabled.call_args.kwargs["group_properties"]
         self.assertEqual(properties["cluster"]["env"], "staging")
 
+    def test_region_is_mapped_to_cluster_env(self):
+        """Studio is the PLG deployment; unlisted regions are production."""
+        self.client.feature_enabled.return_value = True
+
+        for region, expected_env in (
+            ("dev", "dev"),
+            ("staging", "staging"),
+            ("studio", "plg"),
+            ("us-1", "prod"),
+        ):
+            with self.subTest(region=region):
+                PosthogHandler.is_feature_enabled(region=region, key="some-flag", default=False)
+
+                self.assertEqual(
+                    self.client.feature_enabled.call_args.kwargs["group_properties"]["cluster"][
+                        "env"
+                    ],
+                    expected_env,
+                )
+
     def test_omits_project_group_when_no_project_id(self):
         """Without a project id only the cluster group is sent."""
         self.client.feature_enabled.return_value = True
@@ -142,14 +162,19 @@ class IsFeatureEnabledTest(unittest.TestCase):
         PosthogHandler.is_feature_enabled(region="studio", key="some-flag", default=False)
 
         self.assertEqual(
-            self.client.feature_enabled.call_args.kwargs["groups"], {"cluster": "studio"}
+            self.client.feature_enabled.call_args.kwargs["groups"], {"cluster": "plg-us-1-prod"}
         )
 
     def test_region_is_mapped_to_posthog_cluster(self):
         """Regions with a cluster alias are translated; others pass through unchanged."""
         self.client.feature_enabled.return_value = True
 
-        for region, expected_cluster in (("dev", "apollo"), ("studio", "studio")):
+        for region, expected_cluster in (
+            ("dev", "apollo"),
+            ("staging", "staging"),
+            ("studio", "plg-us-1-prod"),
+            ("us-1", "us-1"),
+        ):
             with self.subTest(region=region):
                 PosthogHandler.is_feature_enabled(region=region, key="some-flag", default=False)
 
@@ -242,6 +267,15 @@ class GetPosthogClientTest(unittest.TestCase):
 
         timeout = mock_posthog_cls.call_args.kwargs["feature_flags_request_timeout_seconds"]
         self.assertEqual(timeout, posthog_module.FEATURE_FLAGS_REQUEST_TIMEOUT_SECONDS)
+
+    def test_client_sends_events_inline_with_a_bounded_timeout(self):
+        """Events are sent in the calling thread, so nothing is left to flush or hang at exit."""
+        with patch("posthog.Posthog") as mock_posthog_cls:
+            get_posthog_client("us-1")
+
+        kwargs = mock_posthog_cls.call_args.kwargs
+        self.assertTrue(kwargs["sync_mode"])
+        self.assertEqual(kwargs["timeout"], posthog_module.CAPTURE_REQUEST_TIMEOUT_SECONDS)
 
 
 class GetUserIdentityTest(unittest.TestCase):

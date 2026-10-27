@@ -122,7 +122,13 @@ Examples:
 poly branch switch my-feature
 poly branch switch my-feature --force
 poly branch switch my-feature --format
+poly branch switch my-feature --keep-files
+poly branch switch "$(git branch --show-current)" --create --from main --keep-files
 ~~~
+
+By default, switching replaces your project files with the target branch's state, and refuses if you have uncommitted changes. `--keep-files` switches without touching your files, so the next `poly push` sends your working copy to the target branch. `--create` creates the branch if it doesn't exist, sourced the same way as [`poly branch create`](#poly-branch-create): from your current branch, or from the branch given with `--from`.
+
+Together, they keep a project in a git repo on the Agent Studio branch matching the git branch: after `git switch`, the last example tracks the branch of the same name, creating it from `main` if needed, without overwriting what git checked out.
 
 | Argument | Description |
 |---|---|
@@ -132,13 +138,18 @@ poly branch switch my-feature --format
 |---|---|
 | `--force`, `-f` | Switch even if there are uncommitted local changes, discarding them. |
 | `--format` | Format the project after switching. |
+| `--keep-files` | Switch without pulling the branch's state into your project files. Can't be combined with `--force` or `--format`. |
+| `--create`, `-c` | Create the branch if it doesn't exist. |
+| `--from BRANCH` | With `--create`, create a missing branch from this branch instead of the current one. |
 | `--output-json-projection` | Include the full post-switch projection in the `--json` output. |
 
 `--json` output shape:
 
 ~~~json
-{ "success": true, "branch_name": "my-feature" }
+{ "success": true, "branch_name": "my-feature", "created": false }
 ~~~
+
+`"created"` is `true` when `--create` made a new branch.
 
 With `--output-json-projection`, a `"projection"` key containing the full project projection is added.
 
@@ -261,7 +272,7 @@ If every conflict is auto-mergeable and you want to accept it, re-run with `--in
 Interactive mode walks through each conflict and asks how to resolve it. For every conflict you can:
 
 - accept the auto-merge (when available)
-- pick `main` (`ours`)
+- pick the parent branch (`ours`): `main`, unless you branched from another branch
 - pick the branch (`theirs`)
 - pick `base` (revert to the original value)
 - open the value in `$EDITOR`/`$VISUAL` for free-form editing
@@ -297,6 +308,35 @@ Run `poly branch merge` once to surface conflicts, then write a resolutions file
 ### Merging through the Agent Studio web UI
 
 Switching to the branch and clicking **Merge** in the Agent Studio UI hits the same platform endpoint as `poly branch merge` — the result is identical either way.
+
+## `poly branch sync`
+
+Bring the latest changes from the current branch's parent (`main`, unless you branched from another branch) into the branch, without merging the branch back.
+
+Examples:
+
+~~~bash
+poly branch sync
+poly branch sync --interactive
+poly branch sync --resolutions resolutions.json
+~~~
+
+The checkout must have no unpushed changes. If the sync has no conflicts, it completes immediately and the CLI pulls the updated branch into your checkout.
+
+| Flag | Description |
+|---|---|
+| `--interactive`, `-i` | Resolve conflicts in an interactive prompt. Set `$EDITOR` or `$VISUAL` for free-form edits during resolution. Cannot be combined with `--json`. |
+| `--resolutions <source>` | Pre-defined resolutions as a JSON file path, inline JSON string, or `-` for stdin. |
+
+`--json` output shape:
+
+~~~json
+{ "success": true }
+~~~
+
+On conflict or error, `"conflicts"` and/or `"errors"` arrays are added and the process exits non-zero.
+
+If the parent and the branch changed the same fields, the command prints the conflict table and exits non-zero. Resolve the conflicts the same way as for [`poly branch merge`](#conflicts): `"ours"` keeps the parent's value and `"theirs"` keeps the branch's.
 
 ## `poly branch diff`
 

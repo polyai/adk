@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import importlib.util
 import json
 import logging
 import math
@@ -17,6 +18,7 @@ from pathlib import Path
 
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import (
+    CALL_EXTRA_SPEC,
     PACKAGE_NAME,
     get_available_versions,
     get_latest_version,
@@ -348,7 +350,23 @@ class UpdateCommand(BaseCommand):
         return "pip"
 
     @staticmethod
-    def _upgrade_command(method: str, target_version: str | None) -> list[str]:
+    def _package_spec() -> str:
+        """Return the requirement to install, keeping the ``call`` extra if it is installed.
+
+        A pinned reinstall (``uv tool install --force``, ``pipx install --force``)
+        replaces the installer's record of which extras were requested, so the extra
+        is detected from whether its dependencies are importable.
+
+        Returns:
+            ``polyai-adk[call]`` if the voice calling dependencies are installed,
+            otherwise ``polyai-adk``.
+        """
+        if importlib.util.find_spec("aiortc") is not None:
+            return CALL_EXTRA_SPEC
+        return PACKAGE_NAME
+
+    @classmethod
+    def _upgrade_command(cls, method: str, target_version: str | None) -> list[str]:
         """Build the install command for an upgradable install method.
 
         Args:
@@ -358,18 +376,21 @@ class UpdateCommand(BaseCommand):
         Returns:
             The command to run.
         """
+        package_spec = cls._package_spec()
         if target_version is None:
+            # 'uv tool upgrade' and 'pipx upgrade' take the tool's name and reapply the
+            # extras from their own install records.
             return {
                 "uv-tool": ["uv", "tool", "upgrade", PACKAGE_NAME],
                 "pipx": ["pipx", "upgrade", PACKAGE_NAME],
-                "uv-pip": ["uv", "pip", "install", "--upgrade", PACKAGE_NAME],
-                "pip": [sys.executable, "-m", "pip", "install", "--upgrade", PACKAGE_NAME],
+                "uv-pip": ["uv", "pip", "install", "--upgrade", package_spec],
+                "pip": [sys.executable, "-m", "pip", "install", "--upgrade", package_spec],
             }[method]
 
         # A pinned spec selects the version outright, so "--upgrade" is dropped: it is
         # redundant, and the "upgrade" subcommands will not move backwards, which would
         # rule out downgrades.
-        spec = f"{PACKAGE_NAME}=={target_version}"
+        spec = f"{package_spec}=={target_version}"
         return {
             "uv-tool": ["uv", "tool", "install", "--force", spec],
             "pipx": ["pipx", "install", "--force", spec],
@@ -404,6 +425,8 @@ class UpdateCommand(BaseCommand):
     @classmethod
     def perform_update(cls, output_json: bool, target_version: str | None = None) -> bool:
         """Perform the update, to ``target_version`` if given, otherwise to the latest."""
+        from rich.markup import escape
+
         from poly.output.console import error
 
         # Defence in depth: update() refuses these up front, but perform_update must
@@ -420,7 +443,7 @@ class UpdateCommand(BaseCommand):
             if output_json:
                 json_print({"success": False, "error": message})
             else:
-                error(message)
+                error(escape(message))
             sys.exit(1)
         return True
 

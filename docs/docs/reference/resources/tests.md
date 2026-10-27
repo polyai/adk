@@ -184,7 +184,7 @@ Each rule has:
 | Field | Description |
 |---|---|
 | `respond.status` | HTTP status code (100–599). |
-| `respond.body` | Optional response body. Keeps its type through to the flow, same rules as `integration_attributes` above — quote dates, and only text, numbers, `true`/`false`, `null`, lists, and nested maps are supported. |
+| `respond.body` | Optional response body. Reaches the flow exactly as written: `2` stays an integer and `2.0` stays a decimal. Quote dates; only text, numbers, `true`/`false`, `null`, lists, and nested maps are supported. A text body is returned as the raw response text. |
 | `respond.headers` | Optional response headers, always sent as text. |
 | `repeat` | Optional. How many times to return this response before moving to the next rule in the list. Omit it to respond once. Set it to `-1` to respond with this rule forever — only valid on the last rule in a list. `0` and other negative values are rejected. |
 

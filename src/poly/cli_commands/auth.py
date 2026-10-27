@@ -7,10 +7,13 @@ import os
 import sys
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 
+import requests
+
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
+from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS
-from poly.handlers.interface import REGIONS, AgentStudioInterface
+from poly.handlers.interface import AgentStudioInterface
 from poly.utils import (
     CREDENTIALS_FILE_PATH,
     save_api_key_credential_file,
@@ -25,12 +28,41 @@ def _select_region() -> str:
         "Select your region:",
         choices=[
             questionary.Choice("Studio", value="studio"),
-            questionary.Choice("US (us-1) — Enterprise", value="us-1"),
-            questionary.Choice("UK (uk-1) — Enterprise", value="uk-1"),
-            questionary.Choice("EU West (euw-1) — Enterprise", value="euw-1"),
+            questionary.Choice("US — Enterprise", value="us-1"),
+            questionary.Choice("UK — Enterprise", value="uk-1"),
+            questionary.Choice("EU West — Enterprise", value="euw-1"),
         ],
         default="studio",
     ).ask()
+
+
+def authorise_or_explain(
+    api: AgentStudioInterface, region: str, jwt_token: str, *, self_serve_hint: str
+) -> dict:
+    """Authorise the signed-in user on ``region``, explaining the one expected failure.
+
+    On an enterprise region (anything but ``studio``) the authorise endpoint only
+    auto-provisions PolyAI staff; anyone else who signs in at that region's Auth0
+    tenant without having been invited into an account gets a 403. Turn that into a
+    ValueError that says what to do, and let every other error propagate.
+
+    Args:
+        api: The platform API interface.
+        region: The region the user signed in to.
+        jwt_token: The JWT from the device flow.
+        self_serve_hint: How to reach the self-serve studio region from this command,
+            e.g. "run `poly apikey --region studio`".
+    """
+    try:
+        return api.authorise(region=region, jwt_token=jwt_token)
+    except requests.HTTPError as e:
+        if region != "studio" and e.response is not None and e.response.status_code == 403:
+            raise ValueError(
+                f"No account is provisioned for you on {region}. Enterprise accounts are"
+                " set up by PolyAI - contact your PolyAI representative, or"
+                f" {self_serve_hint} to create a self-serve studio account."
+            ) from e
+        raise
 
 
 def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
@@ -47,7 +79,16 @@ def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
     api_handler = AgentStudioInterface()
 
     info("Setting up your account...")
-    api_handler.authorise(region=region, jwt_token=jwt_access_token)
+    try:
+        authorise_or_explain(
+            api_handler,
+            region,
+            jwt_access_token,
+            self_serve_hint="run `poly login --region studio`",
+        )
+    except ValueError as e:
+        error(str(e))
+        sys.exit(1)
 
     info("Fetching API key...")
     user_pats = api_handler.get_pats(region=region, jwt_token=jwt_access_token)
@@ -132,13 +173,13 @@ class LoginCommand(BaseCommand):
                 " will be saved to a local credential file for future CLI commands.\n\n"
                 "Examples:\n"
                 "  poly login\n"
-                "  poly login --region us-1\n"
+                "  poly login --region us\n"
             ),
         )
         login_parser.add_argument(
             "--region",
-            type=str,
-            choices=REGIONS,
+            type=region_type,
+            choices=REGION_CHOICES,
             default=None,
             help="Region to log in to. If omitted, you will be prompted to select one.",
         )

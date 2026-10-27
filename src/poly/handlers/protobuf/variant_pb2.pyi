@@ -36,7 +36,7 @@ class AttributeType(_message.Message):
     def __init__(self, kind: _Optional[_Union[AttributeKind, str]] = ..., enum_config: _Optional[_Union[EnumConfig, _Mapping]] = ...) -> None: ...
 
 class Attribute(_message.Message):
-    __slots__ = ("id", "name", "attribute_type", "archived", "references", "created_at", "created_by", "updated_at", "updated_by", "type")
+    __slots__ = ("id", "name", "attribute_type", "archived", "references", "created_at", "created_by", "updated_at", "updated_by", "type", "required")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     ATTRIBUTE_TYPE_FIELD_NUMBER: _ClassVar[int]
@@ -47,6 +47,7 @@ class Attribute(_message.Message):
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
     TYPE_FIELD_NUMBER: _ClassVar[int]
+    REQUIRED_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     attribute_type: str
@@ -57,7 +58,8 @@ class Attribute(_message.Message):
     updated_at: _timestamp_pb2.Timestamp
     updated_by: str
     type: AttributeType
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., attribute_type: _Optional[str] = ..., archived: bool = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., type: _Optional[_Union[AttributeType, _Mapping]] = ...) -> None: ...
+    required: bool
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., attribute_type: _Optional[str] = ..., archived: bool = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., type: _Optional[_Union[AttributeType, _Mapping]] = ..., required: bool = ...) -> None: ...
 
 class Variant(_message.Message):
     __slots__ = ("id", "name", "is_default", "created_at", "created_by", "updated_at", "updated_by")
@@ -194,32 +196,36 @@ class Variant_DeleteVariant(_message.Message):
     def __init__(self, id: _Optional[str] = ...) -> None: ...
 
 class Variant_CreateAttribute(_message.Message):
-    __slots__ = ("id", "name", "references", "variant_values", "type")
+    __slots__ = ("id", "name", "references", "variant_values", "type", "required")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
     VARIANT_VALUES_FIELD_NUMBER: _ClassVar[int]
     TYPE_FIELD_NUMBER: _ClassVar[int]
+    REQUIRED_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     references: AttributeReferences
     variant_values: VariantValues
     type: AttributeType
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., variant_values: _Optional[_Union[VariantValues, _Mapping]] = ..., type: _Optional[_Union[AttributeType, _Mapping]] = ...) -> None: ...
+    required: bool
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., variant_values: _Optional[_Union[VariantValues, _Mapping]] = ..., type: _Optional[_Union[AttributeType, _Mapping]] = ..., required: bool = ...) -> None: ...
 
 class Variant_UpdateAttribute(_message.Message):
-    __slots__ = ("id", "name", "references", "variant_values", "type")
+    __slots__ = ("id", "name", "references", "variant_values", "type", "required")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
     VARIANT_VALUES_FIELD_NUMBER: _ClassVar[int]
     TYPE_FIELD_NUMBER: _ClassVar[int]
+    REQUIRED_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     references: AttributeReferences
     variant_values: VariantValues
     type: AttributeType
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., variant_values: _Optional[_Union[VariantValues, _Mapping]] = ..., type: _Optional[_Union[AttributeType, _Mapping]] = ...) -> None: ...
+    required: bool
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., variant_values: _Optional[_Union[VariantValues, _Mapping]] = ..., type: _Optional[_Union[AttributeType, _Mapping]] = ..., required: bool = ...) -> None: ...
 
 class Variant_DeleteAttribute(_message.Message):
     __slots__ = ("id",)
@@ -266,6 +272,18 @@ class Variant_ImportVariantAttributeValuesForCsv(_message.Message):
     value: str
     typed_value: _struct_pb2.Value
     def __init__(self, variant_id: _Optional[str] = ..., attribute_id: _Optional[str] = ..., value: _Optional[str] = ..., typed_value: _Optional[_Union[_struct_pb2.Value, _Mapping]] = ...) -> None: ...
+
+class Variant_BulkSetAttributeValue(_message.Message):
+    __slots__ = ("attribute_id", "variant_ids", "value", "typed_value")
+    ATTRIBUTE_ID_FIELD_NUMBER: _ClassVar[int]
+    VARIANT_IDS_FIELD_NUMBER: _ClassVar[int]
+    VALUE_FIELD_NUMBER: _ClassVar[int]
+    TYPED_VALUE_FIELD_NUMBER: _ClassVar[int]
+    attribute_id: str
+    variant_ids: _containers.RepeatedScalarFieldContainer[str]
+    value: str
+    typed_value: _struct_pb2.Value
+    def __init__(self, attribute_id: _Optional[str] = ..., variant_ids: _Optional[_Iterable[str]] = ..., value: _Optional[str] = ..., typed_value: _Optional[_Union[_struct_pb2.Value, _Mapping]] = ...) -> None: ...
 
 class Variant_ImportVariants(_message.Message):
     __slots__ = ("variants", "attributes", "variant_attribute_values", "deleted_variant_ids", "deleted_attribute_ids")

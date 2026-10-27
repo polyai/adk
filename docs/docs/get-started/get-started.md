@@ -29,9 +29,17 @@ Confirm it worked:
 poly --help
 ```
 
+!!! tip "Optional — voice calling"
+
+    To call your agent with [`poly call`](../reference/cli/call.md), install the `call` extra instead. It adds the audio and WebRTC dependencies, which are left out of the default install to keep it small:
+
+    ```bash
+    uv tool install "polyai-adk[call]"
+    ```
+
 !!! tip "Optional — install the VS Code / Cursor extension"
 
-    If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../tooling/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.
+    If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../tooling/editor-extension.md) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.
 
 ## Step 2 — Run `poly setup`
 
@@ -53,12 +61,12 @@ You are asked to pick a region when signing in. Choose based on your account typ
 | Region | Account type |
 |---|---|
 | `studio` | Self-serve — signed up at [studio.poly.ai](https://studio.poly.ai) |
-| `us-1`, `euw-1`, `uk-1` | Enterprise — a workspace provisioned by PolyAI |
+| `us`, `eu`, `uk` | Enterprise — a workspace provisioned by PolyAI |
 
 To skip the prompt, pass the region directly:
 
 ```bash
-poly setup --region studio   # or us-1, euw-1, uk-1
+poly setup --region studio   # or us, eu, uk
 ```
 
 If you're not sure which account type you have, your PolyAI contact can confirm.
@@ -74,14 +82,14 @@ To set up credentials without the rest, `poly login` runs the sign-in step on it
 
 ```bash
 poly login
-poly login --region us-1
+poly login --region us
 ```
 
 To sign in to more than one region from the same machine, re-run `poly login` for each — the credential file stores them side by side.
 
 ### Need an API key for the PolyAI APIs or Dialog RSN? — `poly apikey`
 
-`poly apikey --region studio` signs you in, creates an account-scoped API key, and exports `POLY_API_KEY` into your shell profile for use in your own code. It's non-interactive, so an AI coding assistant can run it for you. For setting up the ADK itself, `poly setup`/`poly login` above is the path — the ADK doesn't need `POLY_API_KEY`.
+`poly apikey --region studio` signs you in, creates an account-scoped API key, and exports `POLY_API_KEY` into your shell profile for use in your own code. An AI coding assistant can run it for you with `--json`; at a terminal, if you belong to more than one workspace, it asks which one to use. For setting up the ADK itself, `poly setup`/`poly login` above is the path — the ADK doesn't need `POLY_API_KEY`.
 
 ```bash
 poly apikey --region studio

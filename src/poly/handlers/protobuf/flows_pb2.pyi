@@ -511,7 +511,7 @@ class Flow_DeleteFlow(_message.Message):
     def __init__(self, flow_id: _Optional[str] = ...) -> None: ...
 
 class Flow_ImportFlow(_message.Message):
-    __slots__ = ("flow_id", "steps", "transition_functions", "global_functions", "handoffs", "sms", "attributes", "no_code_steps", "entities")
+    __slots__ = ("flow_id", "steps", "transition_functions", "global_functions", "handoffs", "sms", "attributes", "no_code_steps", "entities", "function_steps")
     FLOW_ID_FIELD_NUMBER: _ClassVar[int]
     STEPS_FIELD_NUMBER: _ClassVar[int]
     TRANSITION_FUNCTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -521,6 +521,7 @@ class Flow_ImportFlow(_message.Message):
     ATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
     NO_CODE_STEPS_FIELD_NUMBER: _ClassVar[int]
     ENTITIES_FIELD_NUMBER: _ClassVar[int]
+    FUNCTION_STEPS_FIELD_NUMBER: _ClassVar[int]
     flow_id: str
     steps: _containers.RepeatedCompositeFieldContainer[ImportFlowStep]
     transition_functions: _containers.RepeatedCompositeFieldContainer[TransitionFunction_CreateTransitionFunction]
@@ -530,7 +531,8 @@ class Flow_ImportFlow(_message.Message):
     attributes: _containers.RepeatedCompositeFieldContainer[_variant_pb2.Variant_CreateAttribute]
     no_code_steps: _containers.RepeatedCompositeFieldContainer[ImportNoCodeStep]
     entities: _containers.RepeatedCompositeFieldContainer[_entities_pb2.Entity_Create]
-    def __init__(self, flow_id: _Optional[str] = ..., steps: _Optional[_Iterable[_Union[ImportFlowStep, _Mapping]]] = ..., transition_functions: _Optional[_Iterable[_Union[TransitionFunction_CreateTransitionFunction, _Mapping]]] = ..., global_functions: _Optional[_Iterable[_Union[_functions_pb2.Function_CreateFunction, _Mapping]]] = ..., handoffs: _Optional[_Iterable[_Union[_handoff_pb2.Handoff_Create, _Mapping]]] = ..., sms: _Optional[_Iterable[_Union[_sms_pb2.SMS_CreateTemplate, _Mapping]]] = ..., attributes: _Optional[_Iterable[_Union[_variant_pb2.Variant_CreateAttribute, _Mapping]]] = ..., no_code_steps: _Optional[_Iterable[_Union[ImportNoCodeStep, _Mapping]]] = ..., entities: _Optional[_Iterable[_Union[_entities_pb2.Entity_Create, _Mapping]]] = ...) -> None: ...
+    function_steps: _containers.RepeatedCompositeFieldContainer[CreateFunctionStep]
+    def __init__(self, flow_id: _Optional[str] = ..., steps: _Optional[_Iterable[_Union[ImportFlowStep, _Mapping]]] = ..., transition_functions: _Optional[_Iterable[_Union[TransitionFunction_CreateTransitionFunction, _Mapping]]] = ..., global_functions: _Optional[_Iterable[_Union[_functions_pb2.Function_CreateFunction, _Mapping]]] = ..., handoffs: _Optional[_Iterable[_Union[_handoff_pb2.Handoff_Create, _Mapping]]] = ..., sms: _Optional[_Iterable[_Union[_sms_pb2.SMS_CreateTemplate, _Mapping]]] = ..., attributes: _Optional[_Iterable[_Union[_variant_pb2.Variant_CreateAttribute, _Mapping]]] = ..., no_code_steps: _Optional[_Iterable[_Union[ImportNoCodeStep, _Mapping]]] = ..., entities: _Optional[_Iterable[_Union[_entities_pb2.Entity_Create, _Mapping]]] = ..., function_steps: _Optional[_Iterable[_Union[CreateFunctionStep, _Mapping]]] = ...) -> None: ...
 
 class Flow_CreateStep(_message.Message):
     __slots__ = ("flow_id", "step")

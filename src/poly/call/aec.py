@@ -12,10 +12,10 @@ import threading
 
 import numpy as np
 
-# Shown if the WebRTC APM can't be loaded (a broken install — it ships with ADK).
+# Shown if the WebRTC APM can't be loaded (it ships with the `call` extra).
 _AEC_UNAVAILABLE_HINT = (
-    "Echo cancellation is unavailable (WebRTC APM failed to load). Reinstall ADK with:\n"
-    "    pip install --force-reinstall polyai-adk"
+    "Echo cancellation is unavailable (WebRTC APM failed to load). Install ADK with the "
+    "`call` extra to restore it."
 )
 
 

@@ -8,11 +8,17 @@ from poly.resources.api_integration import (
     ApiIntegrationEnvironments,
     ApiIntegrationOperation,
 )
-from poly.resources.asr_settings import AsrSettings
+from poly.resources.asr_settings import (
+    AsrSettings,
+    VoiceBargeInConfig,
+    VoiceVadConfig,
+)
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,
+    VoiceBackgroundAmbience,
     VoiceDisclaimerMessage,
+    VoiceFillerPhrases,
     VoiceGreeting,
     VoiceStylePrompt,
 )
@@ -48,6 +54,7 @@ from poly.resources.handoff import (
 )
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage
+from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
@@ -79,7 +86,7 @@ from poly.resources.test_suite import (
     TestCaseAssertion,
     TestCaseTags,
 )
-from poly.resources.topic import Topic
+from poly.resources.topic import Topic, TopicTags
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.translations import Translation
 from poly.resources.variable import Variable

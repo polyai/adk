@@ -3,12 +3,24 @@
 Copyright PolyAI Limited
 """
 
+import os
+import shlex
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 
 from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.output.json_output import json_print
+
+
+def show_run_command(base_path: str, run_id: str, output_json: bool = False) -> str:
+    """Return the `poly test show` command for a run, runnable from the current directory."""
+    command = ["poly", "test", "show", run_id]
+    if os.path.abspath(base_path) != os.getcwd():
+        command += ["--path", base_path]
+    if output_json:
+        command.append("--json")
+    return shlex.join(command)
 
 
 class TestingCommand(BaseCommand):
@@ -41,14 +53,16 @@ class TestingCommand(BaseCommand):
                 "  poly test run\n"
                 "  poly test run --path /path/to/project\n"
                 "  poly test run --files test1.yaml test2.yaml\n"
+                '  poly test run --files "booking_*"\n'
                 "  poly test run --tag smoke\n"
+                '  poly test run --tag smoke --name "Pre-release check · booking flow"\n'
             ),
             formatter_class=RawTextHelpFormatter,
         )
         test_run_parser.add_argument(
             "--files",
             nargs="*",
-            help="List of test files to run.",
+            help="Test files to run: bare names, paths under test_suite/, or quoted globs.",
         )
         test_run_parser.add_argument(
             "--tag",
@@ -57,9 +71,14 @@ class TestingCommand(BaseCommand):
             help="Run tests with the specified tag(s).",
         )
         test_run_parser.add_argument(
+            "--name",
+            type=str,
+            help="Name for the run in Agent Studio. Defaults to the test name or count.",
+        )
+        test_run_parser.add_argument(
             "--dont-poll",
             action="store_true",
-            help="Do not poll for test results.",
+            help="Do not poll for test results. --json never polls.",
         )
         test_run_parser.add_argument(
             "--push",
@@ -130,6 +149,7 @@ class TestingCommand(BaseCommand):
                 args.path,
                 files=args.files,
                 tags=args.tag,
+                name=args.name,
                 dont_poll=args.dont_poll,
                 push=args.push,
                 output_json=args.json,
@@ -156,6 +176,7 @@ class TestingCommand(BaseCommand):
         base_path: str,
         files: list[str],
         tags: list[str] = None,
+        name: str | None = None,
         dont_poll: bool = False,
         push: bool = False,
         output_json: bool = False,
@@ -222,12 +243,14 @@ class TestingCommand(BaseCommand):
         if not output_json:
             info(f"Running tests for {project.account_id}/{project.project_id}...")
 
-        test_info = project.trigger_tests(test_ids)
+        test_info = project.trigger_tests(test_ids, name=name)
         test_run_id = test_info.get("id")
 
         if output_json:
             json_output["test_run"] = test_info
             json_output["success"] = True
+            # --json never polls, so tell the caller how to check on the run.
+            json_output["next_command"] = show_run_command(base_path, test_run_id, True)
             json_print(json_output)
             return
 
@@ -239,7 +262,8 @@ class TestingCommand(BaseCommand):
 
         if dont_poll:
             info(
-                f"Use [bold]poly test show {test_run_id}[/bold] to check the status of the test run."
+                f"Use [bold]{show_run_command(base_path, test_run_id)}[/bold] "
+                "to check the status of the test run."
             )
             return
 

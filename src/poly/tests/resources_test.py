@@ -4,11 +4,13 @@ Copyright PolyAI Limited
 """
 
 import datetime
+import json
 import os
 import shutil
 import tempfile
 import threading
 import unittest
+from typing import Optional
 
 import yaml
 from google.protobuf.json_format import MessageToDict
@@ -30,11 +32,13 @@ from poly.resources.api_integration import (
     ApiIntegrationEnvironments,
     ApiIntegrationOperation,
 )
-from poly.resources.asr_settings import AsrSettings
+from poly.resources.asr_settings import AsrSettings, BargeIn, VoiceBargeInConfig
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,
+    VoiceBackgroundAmbience,
     VoiceDisclaimerMessage,
+    VoiceFillerPhrases,
     VoiceGreeting,
     VoiceStylePrompt,
 )
@@ -67,19 +71,21 @@ from poly.resources.function import (
     FunctionType,
     LatencyControl,
 )
-from poly.resources.guardrails import CustomGuardrail, PlatformGuardrail
+from poly.resources.guardrails import MAX_CUSTOM_GUARDRAILS, CustomGuardrail, PlatformGuardrail
 from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import (
     AdditionalLanguage,
     DefaultLanguage,
 )
+from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     _parse_multi_resource_path,
+    load_resources_from_projection,
 )
 from poly.resources.safety_filters import (
     ChatSafetyFilters,
@@ -105,6 +111,7 @@ from poly.resources.test_suite import (
 from poly.resources.topic import (
     FUNCTION_REGEX,
     Topic,
+    TopicTags,
 )
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.translations import Translation
@@ -7449,9 +7456,7 @@ class PronunciationTests(unittest.TestCase):
 
     def test_save_keeps_cr_in_single_line_field(self):
         """A CR in a single-line field is quoted, not treated as a line break."""
-        pronunciation = Pronunciation(
-            resource_id="pr-0", regex="x", replacement="a\rb", position=0
-        )
+        pronunciation = Pronunciation(resource_id="pr-0", regex="x", replacement="a\rb", position=0)
 
         contents = self._save_to_temp_project([pronunciation], batched=False)
 
@@ -7463,79 +7468,310 @@ class PronunciationTests(unittest.TestCase):
 class AsrSettingsTests(unittest.TestCase):
     """Tests for AsrSettings resource."""
 
-    def test_init_to_yaml_dict_from_yaml_dict_roundtrip(self):
-        """Init from kwargs, to_yaml_dict, from_yaml_dict roundtrip preserves fields."""
-        a = AsrSettings(
-            resource_id="asr-1",
-            name="asr_settings",
-            barge_in=True,
-            interaction_style="swift",
-        )
-        d = a.to_yaml_dict()
-        self.assertTrue(d["barge_in"])
-        self.assertEqual(d["interaction_style"], "swift")
-        a2 = AsrSettings.from_yaml_dict(d, resource_id="asr-1", name="asr_settings")
-        self.assertEqual(a2.barge_in, a.barge_in)
-        self.assertEqual(a2.interaction_style, a.interaction_style)
+    FULL_YAML = {
+        "speech_end_delay_ms": 800,
+        "barge_in": {"enabled": True, "allow_on_first_turn": False, "max_per_call": 5},
+    }
 
-    def test_from_yaml_dict_turbo_maps_to_sonic(self):
-        """turbo interaction_style in YAML is mapped to sonic."""
-        a = AsrSettings.from_yaml_dict(
-            {"barge_in": False, "interaction_style": "turbo"},
-            resource_id="asr-1",
-            name="asr_settings",
-        )
-        self.assertEqual(a.interaction_style, "sonic")
+    def _from_yaml(self, yaml_dict: dict) -> AsrSettings:
+        return AsrSettings.from_yaml_dict(yaml_dict, resource_id="asr_settings", name="asr_settings")
 
-    def test_validate_invalid_interaction_style_raises(self):
-        """validate raises ValueError for invalid interaction_style."""
-        a = AsrSettings(
-            resource_id="asr-1",
-            name="asr_settings",
-            barge_in=False,
-            interaction_style="invalid",
-        )
+    def _changes(self, new: dict, old: Optional[dict]):
+        old_resource = self._from_yaml(old) if old is not None else None
+        return self._from_yaml(new).get_new_updated_deleted_subresources(old_resource=old_resource)
+
+    def test_yaml_roundtrip(self):
+        """Every section survives from_yaml_dict -> to_yaml_dict unchanged."""
+        self.assertEqual(self._from_yaml(self.FULL_YAML).to_yaml_dict(), self.FULL_YAML)
+
+    def test_omitted_sections_stay_omitted(self):
+        """A file with no sections writes back with no sections."""
+        self.assertEqual(self._from_yaml({}).to_yaml_dict(), {})
+
+    def test_status_dict_roundtrip(self):
+        """The status file form rebuilds an equal resource."""
+        asr = self._from_yaml(self.FULL_YAML)
+        self.assertEqual(AsrSettings(**resource_utils.resource_to_dict(asr)), asr)
+
+    def test_bool_barge_in_is_an_error(self):
+        """The old bool shape is rewritten by a migration, so reading one is an error."""
         with self.assertRaises(ValueError) as cm:
-            a.validate()
-        self.assertIn("Invalid interaction_style", str(cm.exception))
+            self._from_yaml({"barge_in": True})
+        self.assertIn("barge_in", str(cm.exception))
 
-    def test_validate_passes_with_valid_style(self):
-        """validate succeeds with valid interaction_style."""
-        a = AsrSettings(
-            resource_id="asr-1",
-            name="asr_settings",
-            barge_in=True,
-            interaction_style="balanced",
-        )
-        a.validate()
+    def test_unknown_section_key_raises(self):
+        """A misspelt key inside a section is an error, not silently dropped."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"barge_in": {"enabled": True, "max_barge_ins": 3}})
+        self.assertIn("max_barge_ins", str(cm.exception))
 
-    def test_read_local_resource(self):
-        """read_local_resource correctly parses asr_settings from YAML file."""
-        yaml_content = "barge_in: true\ninteraction_style: precise\n"
+    def test_section_that_is_not_a_mapping_raises(self):
+        """A section given as a scalar is an error."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"barge_in": "on"})
+        self.assertIn("barge_in", str(cm.exception))
 
-        def exists_asr(path):
-            return "asr_settings.yaml" in str(path) or os.path.exists(path)
+    def test_validate_passes_with_full_settings(self):
+        """The full example validates."""
+        self._from_yaml(self.FULL_YAML).validate()
 
-        def isfile_asr(path):
-            return "asr_settings.yaml" in str(path) or os.path.isfile(path)
+    def test_validate_rejects_out_of_range_values(self):
+        """Values outside Agent Studio's limits are rejected."""
+        cases = {
+            "speech_end_delay_ms": {"speech_end_delay_ms": 150},
+            "max_per_call": {"barge_in": {"enabled": True, "max_per_call": -1}},
+        }
+        for expected, yaml_dict in cases.items():
+            with self.subTest(expected):
+                with self.assertRaises(ValueError) as cm:
+                    self._from_yaml(yaml_dict).validate()
+                self.assertIn(expected, str(cm.exception))
 
+    def test_wrong_field_type_raises_on_read(self):
+        """Field types inside sections are checked when the file is read."""
+        yaml_content = "speech_end_delay_ms: 800\nbarge_in:\n  max_per_call: lots\n"
         with mock_read_from_file(yaml_content):
             with (
-                unittest.mock.patch(
-                    "poly.resources.resource.os.path.exists", side_effect=exists_asr
-                ),
-                unittest.mock.patch(
-                    "poly.resources.resource.os.path.isfile", side_effect=isfile_asr
-                ),
+                unittest.mock.patch("poly.resources.resource.os.path.exists", return_value=True),
+                unittest.mock.patch("poly.resources.resource.os.path.isfile", return_value=True),
             ):
-                result = AsrSettings.read_local_resource(
-                    file_path="voice/speech_recognition/asr_settings.yaml",
-                    resource_id="asr-123",
-                    resource_name="asr_settings",
-                )
-        self.assertEqual(result.resource_id, "asr-123")
-        self.assertTrue(result.barge_in)
-        self.assertEqual(result.interaction_style, "precise")
+                with self.assertRaises(ValueError) as cm:
+                    AsrSettings.read_local_resource(
+                        file_path="voice/speech_recognition/asr_settings.yaml",
+                        resource_id="asr_settings",
+                        resource_name="asr_settings",
+                    )
+        self.assertIn("barge_in.max_per_call", str(cm.exception))
+
+    def test_unchanged_settings_send_nothing(self):
+        """No commands when nothing changed."""
+        self.assertEqual(self._changes(self.FULL_YAML, self.FULL_YAML), ([], [], []))
+
+    def test_each_changed_section_is_updated(self):
+        """A new resource sends one update per section, each through its own command."""
+        new, updated, deleted = self._changes(self.FULL_YAML, None)
+
+        self.assertEqual(new, [])
+        self.assertEqual(deleted, [])
+        self.assertEqual(
+            sorted(sub_resource.update_command_type for sub_resource in updated),
+            ["voice_channel_update_barge_in_config", "voice_channel_update_vad_config"],
+        )
+
+    def test_removed_sections_are_reset(self):
+        """Removing a section resets it on the platform."""
+        _, updated, deleted = self._changes({}, self.FULL_YAML)
+
+        self.assertEqual(updated, [])
+        self.assertEqual(
+            sorted(sub_resource.delete_command_type for sub_resource in deleted),
+            ["voice_channel_reset_barge_in_config", "voice_channel_reset_vad_config"],
+        )
+        for sub_resource in deleted:
+            self.assertEqual(sub_resource.build_delete_proto().ListFields(), [])
+
+    def test_speech_end_delay_is_sent_in_seconds(self):
+        """speech_end_delay_ms is stored as speechEndWindowSeconds."""
+        _, updated, _ = self._changes({"speech_end_delay_ms": 640}, {})
+        proto = updated[0].build_update_proto()
+        self.assertAlmostEqual(proto.vad_config.speech_end_window_seconds, 0.64)
+
+    def test_disabling_barge_in_sends_enabled_false(self):
+        """enabled=False must reach the wire, not be dropped as a proto default."""
+        _, updated, _ = self._changes(
+            {"barge_in": {"enabled": False}}, {"barge_in": {"enabled": True}}
+        )
+
+        self.assertEqual(len(updated), 1)
+        self.assertIsInstance(updated[0], VoiceBargeInConfig)
+        proto = updated[0].build_update_proto()
+        self.assertTrue(proto.HasField("enabled"))
+        self.assertFalse(proto.enabled)
+        self.assertFalse(proto.HasField("max_per_call"))
+
+    def test_removing_max_per_call_resets_before_updating(self):
+        """Barge-in updates merge, so clearing max_per_call takes a reset and an update."""
+        _, updated, deleted = self._changes(
+            {"barge_in": {"enabled": True}}, {"barge_in": {"enabled": True, "max_per_call": 3}}
+        )
+
+        self.assertEqual(
+            [sub_resource.delete_command_type for sub_resource in deleted],
+            ["voice_channel_reset_barge_in_config"],
+        )
+        self.assertEqual(
+            [sub_resource.update_command_type for sub_resource in updated],
+            ["voice_channel_update_barge_in_config"],
+        )
+
+
+class VoiceFillerPhrasesTests(unittest.TestCase):
+    """Tests for the filler_phrases section of voice/configuration.yaml."""
+
+    YAML = {
+        "enabled": True,
+        "phrases": ["One moment..."],
+        "randomize": True,
+        "initial_interval_seconds": 2.5,
+        "interval_seconds": 5,
+    }
+
+    def _from_yaml(self, yaml_dict: dict) -> VoiceFillerPhrases:
+        return VoiceFillerPhrases.from_yaml_dict(
+            yaml_dict, resource_id="voice_filler_phrases", name="voice_filler_phrases"
+        )
+
+    def test_yaml_roundtrip(self):
+        """Every field survives from_yaml_dict -> to_yaml_dict unchanged."""
+        self.assertEqual(self._from_yaml(self.YAML).to_yaml_dict(), self.YAML)
+
+    def test_file_path(self):
+        """The section lives in the voice channel's configuration file."""
+        self.assertEqual(
+            self._from_yaml(self.YAML).file_path,
+            os.path.join("voice", "configuration.yaml", "filler_phrases"),
+        )
+
+    def test_unknown_key_raises(self):
+        """A misspelt key is an error, not silently dropped."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"enabled": True, "phrase": ["Hi"]})
+        self.assertIn("phrase", str(cm.exception))
+
+    def test_validate_rejects_out_of_range_values(self):
+        """Values outside Agent Studio's limits are rejected."""
+        cases = {
+            "initial_interval_seconds": {"initial_interval_seconds": 0.2},
+            "interval_seconds": {"interval_seconds": 0.5},
+            "at least one phrase": {"enabled": True, "phrases": [" "]},
+        }
+        for expected, yaml_dict in cases.items():
+            with self.subTest(expected):
+                with self.assertRaises(ValueError) as cm:
+                    self._from_yaml(yaml_dict).validate()
+                self.assertIn(expected, str(cm.exception))
+
+    def test_new_section_is_pushed_as_an_update(self):
+        """The platform has no create command, so a new section is sent as an update."""
+        filler = self._from_yaml(self.YAML)
+        self.assertEqual(
+            filler.create_command_type, "voice_channel_update_silence_filler_utterances"
+        )
+        proto = filler.build_create_proto().silence_filler_utterances
+        self.assertTrue(proto.enabled)
+        self.assertEqual([utterance.message for utterance in proto.utterances], ["One moment..."])
+        self.assertEqual(proto.initial_interval_seconds, 2.5)
+        self.assertEqual(proto.interval_seconds, 5)
+
+    def test_removed_section_is_reset(self):
+        """Removing the section resets the platform's filler phrases."""
+        filler = self._from_yaml(self.YAML)
+        self.assertEqual(
+            filler.delete_command_type, "voice_channel_reset_silence_filler_utterances"
+        )
+        self.assertEqual(filler.build_delete_proto().ListFields(), [])
+
+    def test_from_projection(self):
+        """silenceFillerUtterances maps to the filler_phrases section."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "silenceFillerUtterances": {
+                        "enabled": True,
+                        "utterances": [{"message": "One moment..."}],
+                        "randomize": True,
+                        "initialIntervalSeconds": 2.5,
+                        "intervalSeconds": 5,
+                    }
+                }
+            }
+        }
+        result = VoiceFillerPhrases.from_projection(projection)
+        self.assertEqual(result["voice_filler_phrases"].to_yaml_dict(), self.YAML)
+
+    def test_unset_in_projection_yields_nothing(self):
+        """No silenceFillerUtterances, or no channel access, pulls no section."""
+        self.assertEqual(VoiceFillerPhrases.from_projection({"channels": {"voice": {}}}), {})
+        self.assertEqual(VoiceFillerPhrases.from_projection({}), {})
+
+
+class VoiceBackgroundAmbienceTests(unittest.TestCase):
+    """Tests for the background_ambience section of voice/configuration.yaml."""
+
+    YAML = {"enabled": True, "preset": "office-ambiance", "loudness": -40}
+
+    def _from_yaml(self, yaml_dict: dict) -> VoiceBackgroundAmbience:
+        return VoiceBackgroundAmbience.from_yaml_dict(
+            yaml_dict, resource_id="voice_background_ambience", name="voice_background_ambience"
+        )
+
+    def test_yaml_roundtrip(self):
+        """Every field survives from_yaml_dict -> to_yaml_dict unchanged."""
+        self.assertEqual(self._from_yaml(self.YAML).to_yaml_dict(), self.YAML)
+
+    def test_file_path(self):
+        """The section lives in the voice channel's configuration file."""
+        self.assertEqual(
+            self._from_yaml(self.YAML).file_path,
+            os.path.join("voice", "configuration.yaml", "background_ambience"),
+        )
+
+    def test_unknown_key_raises(self):
+        """A misspelt key is an error, not silently dropped."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"preset": "office-ambiance", "volume": -40})
+        self.assertIn("volume", str(cm.exception))
+
+    def test_validate_rejects_loudness_out_of_range(self):
+        """Loudness outside Agent Studio's limits is rejected."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"preset": "office-ambiance", "loudness": -10}).validate()
+        self.assertIn("loudness", str(cm.exception))
+
+    def test_validate_requires_preset(self):
+        """A section without a preset is rejected."""
+        with self.assertRaises(ValueError) as cm:
+            self._from_yaml({"enabled": True}).validate()
+        self.assertIn("preset", str(cm.exception))
+
+    def test_validate_warns_on_unknown_preset(self):
+        """An unknown preset warns rather than fails, so newer platform presets still push."""
+        ambience = self._from_yaml({"preset": "rainforest"})
+        with self.assertLogs("poly.resources.channel_settings", level="WARNING"):
+            ambience.validate()
+
+    def test_new_section_is_pushed_as_an_update(self):
+        """The platform has no create command, so a new section is sent as an update."""
+        ambience = self._from_yaml(self.YAML)
+        self.assertEqual(ambience.create_command_type, "voice_channel_update_ambience")
+        proto = ambience.build_create_proto().ambience
+        self.assertTrue(proto.enabled)
+        self.assertEqual(proto.preset, "office-ambiance")
+        self.assertEqual(proto.loudness, -40)
+
+    def test_removing_the_section_cannot_be_pushed(self):
+        """Agent Studio can't clear ambience, so building its delete command raises."""
+        with self.assertRaises(NotImplementedError) as cm:
+            self._from_yaml(self.YAML).build_delete_proto()
+        self.assertIn("enabled: false", str(cm.exception))
+
+    def test_ambience_that_is_off_is_pulled_with_enabled_false(self):
+        """Ambience that exists but is off keeps its preset and loudness in the file."""
+        off = {**self.YAML, "enabled": False}
+        projection = {"channels": {"voice": {"ambience": dict(off)}}}
+        result = VoiceBackgroundAmbience.from_projection(projection)
+        self.assertEqual(result["voice_background_ambience"].to_yaml_dict(), off)
+
+    def test_from_projection(self):
+        """ambience maps to the background_ambience section."""
+        projection = {"channels": {"voice": {"ambience": dict(self.YAML)}}}
+        result = VoiceBackgroundAmbience.from_projection(projection)
+        self.assertEqual(result["voice_background_ambience"].to_yaml_dict(), self.YAML)
+
+    def test_unset_in_projection_yields_nothing(self):
+        """No ambience, or no channel access, pulls no section."""
+        self.assertEqual(VoiceBackgroundAmbience.from_projection({"channels": {"voice": {}}}), {})
+        self.assertEqual(VoiceBackgroundAmbience.from_projection({}), {})
 
 
 class PronunciationReadByIndexTests(unittest.TestCase):
@@ -7989,6 +8225,17 @@ class TestApiIntegrationValidate(unittest.TestCase):
         self.assertIn("must be one of", str(ctx.exception))
         for auth_type in AVAILABLE_AUTH_TYPES:
             self.assertIn(auth_type, str(ctx.exception))
+
+    def test_environment_with_each_available_auth_type_is_valid(self):
+        """Every auth type Agent Studio can configure passes validation."""
+        for auth_type in AVAILABLE_AUTH_TYPES:
+            with self.subTest(auth_type=auth_type):
+                integration = self._make_integration(
+                    environments=ApiIntegrationEnvironments.from_dict(
+                        {"sandbox": {"base_url": "https://sb.example.com", "auth_type": auth_type}}
+                    )
+                )
+                integration.validate()
 
     def test_environment_with_invalid_base_url_raises_value_error(self):
         """Validation rejects an environment whose base_url is not a valid URL."""
@@ -9218,6 +9465,29 @@ class TestCaseTests(unittest.TestCase):
         self.assertEqual(test_case.channel, "chat.polyai")
         self.assertEqual(test_case.language, "en-GB")
         self.assertEqual(test_case.tags.tags, ["booking", "smoke"])
+        calls = {call.name: call for call in test_case.assertions.function_calls}
+        self.assertTrue(calls["test_function"].is_asserted)
+        self.assertFalse(calls["test_function_with_parameters"].is_asserted)
+
+    def test_function_call_assertion_is_asserted_by_default(self):
+        call = self._sample_test_case().assertions.function_calls[0]
+        proto = call.to_proto()
+        self.assertTrue(proto.is_asserted)
+        self.assertTrue(MessageToDict(proto).get("isAsserted"))
+        self.assertNotIn("is_asserted", call.to_yaml_dict())
+
+    def test_unasserted_function_call_round_trips(self):
+        call = FunctionCallAssertion(
+            name="test_function",
+            arguments=[
+                FunctionCallArgumentAssertion(
+                    parameter_name="param1", expected_value="hello", value_type="string"
+                )
+            ],
+            is_asserted=False,
+        )
+        self.assertIs(call.to_yaml_dict()["is_asserted"], False)
+        self.assertFalse(call.to_proto().is_asserted)
 
     def test_read_local_resource_filename_mismatch_raises(self):
         file_path = os.path.join("test_suite", "greeting_flow_test.yaml")
@@ -10002,7 +10272,7 @@ class TestCaseApiMocksTests(unittest.TestCase):
         self.assertEqual(first.respond.status, 200)
         self.assertEqual(dict(first.respond.headers), {"x-trace": "abc"})
         self.assertEqual(
-            MessageToDict(first.respond.body), {"id": 1, "flag": True, "meta": {"a": 1}}
+            first.respond.body.string_value, '{"id": 1, "flag": true, "meta": {"a": 1}}'
         )
         self.assertFalse(first.HasField("repeat"))
 
@@ -10377,13 +10647,79 @@ class TestCaseApiMocksTests(unittest.TestCase):
         self.assertIsNone(response.body)
         self.assertEqual(response.headers, {})
 
-    def test_api_response_from_dict_keeps_ints_as_ints(self):
-        """Mirrors _normalise_attribute: a body pushed through google.protobuf.Value
-        (a double) must not read a pushed int back as a float."""
-        response = ApiResponse.from_dict({"status": 200, "body": {"count": 2}})
+    def test_api_response_body_is_sent_as_text_keeping_int_and_float(self):
+        response = ApiResponse(status=200, body={"party_size": 2, "price": 2.0})
 
-        self.assertEqual(response.body, {"count": 2})
-        self.assertIsInstance(response.body["count"], int)
+        self.assertEqual(response.to_proto().body.string_value, '{"party_size": 2, "price": 2.0}')
+
+    def test_api_response_text_body_from_projection_keeps_int_and_float(self):
+        response = ApiResponse.from_dict(
+            {"status": 200, "body": '{"party_size": 2, "price": 2.0}'}, from_projection=True
+        )
+
+        self.assertEqual(response.body, {"party_size": 2, "price": 2.0})
+        self.assertIs(type(response.body["party_size"]), int)
+        self.assertIs(type(response.body["price"]), float)
+        self.assertFalse(response.legacy_body)
+
+    def test_api_response_from_dict_keeps_a_float_body_value_a_float(self):
+        response = ApiResponse.from_dict({"status": 200, "body": {"price": 2.0}})
+
+        self.assertIs(type(response.body["price"]), float)
+
+    def test_api_response_plain_text_body_stays_text(self):
+        for text in ("OK", '"OK"', "null"):
+            with self.subTest(text=text):
+                response = ApiResponse.from_dict({"body": text}, from_projection=True)
+
+                self.assertEqual(response.body, text)
+                self.assertEqual(response.to_proto().body.string_value, text)
+
+    def test_api_response_equality_tells_int_from_float(self):
+        self.assertNotEqual(ApiResponse(body={"n": 2}), ApiResponse(body={"n": 2.0}))
+        self.assertNotEqual(ApiResponse(body={"n": 1}), ApiResponse(body={"n": True}))
+        self.assertEqual(ApiResponse(body={"a": 1, "b": 2}), ApiResponse(body={"b": 2, "a": 1}))
+
+    def test_subresource_pushed_when_body_changes_from_int_to_float(self):
+        def mocks(body):
+            return self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(body=body))]}}
+            )
+
+        old = self._test_case(api_mocks=mocks({"n": 2}))
+        new = self._test_case(api_mocks=mocks({"n": 2.0}))
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertEqual(len([u for u in updated if isinstance(u, TestCaseApiOperationMock)]), 1)
+
+    def test_legacy_object_body_is_pushed_again_as_text(self):
+        """A body the platform holds as an object lost int vs float; push it again as text."""
+        projection_rule = {"respond": {"status": 200, "body": {"n": 2}}}
+        old_mocks = TestCaseApiMocks.from_dict(
+            {"crm": {"get_customer": [projection_rule]}}, from_projection=True
+        )
+        old = self._test_case(api_mocks=old_mocks)
+        new = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(body={"n": 2}))]}}
+            )
+        )
+
+        self.assertTrue(old_mocks.mocks["crm"]["get_customer"][0].respond.legacy_body)
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertEqual(len([u for u in updated if isinstance(u, TestCaseApiOperationMock)]), 1)
+
+    def test_legacy_body_marker_survives_the_status_file(self):
+        old_mocks = TestCaseApiMocks.from_dict(
+            {"crm": {"get_customer": [{"respond": {"body": {"n": 2}}}]}}, from_projection=True
+        )
+        test_case = self._test_case(api_mocks=old_mocks)
+
+        reloaded = TestCase(**json.loads(json.dumps(resource_utils.resource_to_dict(test_case))))
+
+        self.assertTrue(reloaded.api_mocks.mocks["crm"]["get_customer"][0].respond.legacy_body)
 
     def test_api_mocks_round_trips_through_resource_to_dict(self):
         """TestCaseApiMocks isn't a SubResource, so resource_to_dict wraps its
@@ -11676,6 +12012,43 @@ class CustomGuardrailTests(unittest.TestCase):
         ]
         self.assertIsNone(guardrail.validate(resource_mappings=resource_mappings))
 
+    @staticmethod
+    def _collection_of(count: int) -> dict[str, CustomGuardrail]:
+        """Build a collection of ``count`` distinct, otherwise-valid custom guardrails."""
+        return {
+            f"guardrail_{i}": CustomGuardrail(
+                resource_id=f"CUSTOM_GUARDRAILS-{i}",
+                name=f"guardrail_{i}",
+                prompt="Never give medical advice.",
+                action="warn",
+            )
+            for i in range(count)
+        }
+
+    def test_validate_collection_passes_when_empty(self):
+        """A project with no custom guardrails is valid."""
+        self.assertIsNone(CustomGuardrail.validate_collection({}))
+
+    def test_validate_collection_passes_with_a_few_guardrails(self):
+        """A typical project with a handful of custom guardrails is valid."""
+        self.assertIsNone(CustomGuardrail.validate_collection(self._collection_of(3)))
+
+    def test_validate_collection_passes_at_exactly_the_limit(self):
+        """Exactly MAX_CUSTOM_GUARDRAILS (20) is allowed — the limit is inclusive."""
+        self.assertEqual(MAX_CUSTOM_GUARDRAILS, 20)
+        collection = self._collection_of(MAX_CUSTOM_GUARDRAILS)
+        self.assertIsNone(CustomGuardrail.validate_collection(collection))
+
+    def test_validate_collection_one_over_the_limit_raises_with_count_and_limit(self):
+        """21 custom guardrails is rejected locally, naming both the count and the limit."""
+        collection = self._collection_of(MAX_CUSTOM_GUARDRAILS + 1)
+
+        with self.assertRaises(ValueError) as cm:
+            CustomGuardrail.validate_collection(collection)
+        message = str(cm.exception)
+        self.assertIn("Too many custom guardrails (21)", message)
+        self.assertIn("Maximum of 20 custom guardrails per project", message)
+
     def test_build_create_proto_includes_fields_and_references(self):
         guardrail = CustomGuardrail(
             resource_id="CUSTOM_GUARDRAILS-1",
@@ -12255,6 +12628,215 @@ class TopicFromProjection(unittest.TestCase):
         """An empty projection should return an empty dict."""
         self.assertEqual(Topic.from_projection({}), {})
 
+    def test_parses_tags(self):
+        """Tags on the projection are read onto the topic, and a topic without them has none."""
+        projection = {
+            "knowledgeBase": {
+                "topics": {
+                    "entities": {
+                        "TOPIC-1": {
+                            "name": "Tagged",
+                            "actions": "",
+                            "content": "Tagged content",
+                            "tags": ["billing", "refunds"],
+                        },
+                        "TOPIC-2": {"name": "Untagged", "actions": "", "content": "Untagged"},
+                    }
+                }
+            }
+        }
+
+        topics = Topic.from_projection(projection)
+
+        self.assertEqual(topics["TOPIC-1"].tags, ["billing", "refunds"])
+        self.assertEqual(topics["TOPIC-2"].tags, [])
+
+
+def _topic(tags: list[str] = None) -> Topic:
+    """Return a topic with no references, so only its tags can fail validation."""
+    return Topic(
+        resource_id="TOPIC-1",
+        name="Opening Hours",
+        actions="Tell the user the opening hours.",
+        content="We open at 9am.",
+        example_queries=["When do you open?"],
+        tags=tags,
+    )
+
+
+class TopicTagsTests(unittest.TestCase):
+    """Tests for reading, writing and pushing topic tags."""
+
+    TOPIC_FILE = """name: Opening Hours
+enabled: true
+{tags}actions: Tell the user the opening hours.
+content: We open at 9am.
+example_queries:
+- When do you open?
+"""
+
+    def _read(self, tags_yaml: str = "") -> Topic:
+        with mock_read_from_file(self.TOPIC_FILE.format(tags=tags_yaml)):
+            return Topic.read_local_resource(
+                file_path="topics/opening_hours.yaml",
+                resource_id="TOPIC-1",
+                resource_name="Opening Hours",
+                resource_mappings=[],
+            )
+
+    def test_tags_are_written_after_enabled(self):
+        """Tags sit near the top of the file, above the long actions and content."""
+        raw = _topic(tags=["billing", "refunds"]).raw
+
+        self.assertEqual(raw, self.TOPIC_FILE.format(tags="tags:\n- billing\n- refunds\n"))
+
+    def test_untagged_topic_has_no_tags_key(self):
+        """Untagged topic files are unchanged, so pulling adds no tags: [] anywhere."""
+        raw = _topic().raw
+
+        self.assertEqual(raw, self.TOPIC_FILE.format(tags=""))
+
+    def test_reads_tags_from_file(self):
+        topic = self._read("tags:\n- billing\n")
+
+        self.assertEqual(topic.tags, ["billing"])
+
+    def test_missing_tags_key_means_no_tags(self):
+        topic = self._read()
+
+        self.assertEqual(topic.tags, [])
+
+    def test_empty_tags_value_means_no_tags(self):
+        for tags_yaml in ("tags: []\n", "tags:\n"):
+            with self.subTest(tags_yaml=tags_yaml):
+                self.assertEqual(self._read(tags_yaml).tags, [])
+
+    def test_tags_that_are_not_a_list_fail_to_read(self):
+        """A malformed tags value is an error rather than being silently dropped."""
+        with self.assertRaises(ValueError) as cm:
+            self._read("tags: billing\n")
+
+        self.assertIn("'tags' should be a list of str", str(cm.exception))
+
+    def test_valid_tags_pass_validation(self):
+        """Long tags pass: imported topics can have tags longer than the Agent Studio input allows."""
+        tags = ["billing", "can I send you the directions?"]
+
+        self.assertIsNone(_topic(tags=tags).validate(resource_mappings=[]))
+
+    def test_empty_tag_fails_validation(self):
+        with self.assertRaises(ValueError) as cm:
+            _topic(tags=["billing", " "]).validate(resource_mappings=[])
+
+        self.assertIn("Tags must not be empty", str(cm.exception))
+
+    def test_tags_are_stripped_when_read(self):
+        topic = self._read("tags:\n- ' billing '\n- refunds\n")
+
+        self.assertEqual(topic.tags, ["billing", "refunds"])
+
+    def test_tags_equal_once_stripped_are_duplicates(self):
+        topic = self._read("tags:\n- billing\n- ' billing '\n")
+
+        with self.assertRaises(ValueError) as cm:
+            topic.validate(resource_mappings=[])
+
+        self.assertIn("Duplicate tags: ['billing']", str(cm.exception))
+
+    def test_duplicate_tags_fail_validation(self):
+        """Tags are case-sensitive in Agent Studio, so only exact repeats are duplicates."""
+        _topic(tags=["billing", "Billing"]).validate(resource_mappings=[])
+
+        with self.assertRaises(ValueError) as cm:
+            _topic(tags=["billing", "refunds", "billing"]).validate(resource_mappings=[])
+
+        self.assertIn("Duplicate tags: ['billing']", str(cm.exception))
+
+    def test_create_proto_carries_tags(self):
+        proto = _topic(tags=["billing", "refunds"]).build_create_proto()
+
+        self.assertEqual(list(proto.tags), ["billing", "refunds"])
+
+    def test_new_topic_has_no_tags_subresource(self):
+        """A new topic's tags go out on create_topic, not as a separate command."""
+        self.assertEqual(
+            _topic(tags=["billing"]).get_new_updated_deleted_subresources(old_resource=None),
+            ([], [], []),
+        )
+
+    def test_unchanged_tags_have_no_subresource_change(self):
+        topic = _topic(tags=["billing"])
+
+        self.assertEqual(
+            topic.get_new_updated_deleted_subresources(old_resource=_topic(tags=["billing"])),
+            ([], [], []),
+        )
+
+    def test_changed_tags_are_set_with_set_topic_tags(self):
+        topic = _topic(tags=["refunds", "billing"])
+
+        new, updated, deleted = topic.get_new_updated_deleted_subresources(
+            old_resource=_topic(tags=["billing"])
+        )
+
+        self.assertEqual((new, deleted), ([], []))
+        self.assertEqual(updated, [TopicTags(resource_id="TOPIC-1", name="tags", tags=topic.tags)])
+        self.assertEqual(updated[0].update_command_type, "set_topic_tags")
+        proto = updated[0].build_update_proto()
+        self.assertEqual(proto.id, "TOPIC-1")
+        self.assertEqual(list(proto.tags), ["refunds", "billing"])
+
+    def test_clearing_tags_sets_an_empty_list(self):
+        _, updated, _ = _topic(tags=[]).get_new_updated_deleted_subresources(
+            old_resource=_topic(tags=["billing"])
+        )
+
+        self.assertEqual(updated, [TopicTags(resource_id="TOPIC-1", name="tags", tags=[])])
+
+    def test_topic_tags_are_only_ever_set(self):
+        """Tags are created with their topic and cleared with an empty list."""
+        tags = TopicTags(resource_id="TOPIC-1", name="tags", tags=["billing"])
+
+        self.assertEqual(tags.command_type, "topic_tags")
+        with self.assertRaises(NotImplementedError):
+            tags.build_create_proto()
+        with self.assertRaises(NotImplementedError):
+            tags.build_delete_proto()
+
+    def test_child_topic_file_with_tags_is_rejected(self):
+        """Child topics can't have tags, so a tags key is an error rather than dropped."""
+        yaml_dict = {"name": "Opening Hours", "content": "We open at 10am.", "tags": ["billing"]}
+
+        with self.assertRaises(ValueError) as cm:
+            ChildTopic.from_yaml_dict(yaml_dict, resource_id="TOPIC-child", name="Opening Hours")
+
+        self.assertIn("Child topic 'Opening Hours' has tags", str(cm.exception))
+
+    def test_child_topic_file_with_empty_tags_is_accepted(self):
+        yaml_dict = {"name": "Opening Hours", "content": "We open at 10am.", "tags": []}
+
+        child_topic = ChildTopic.from_yaml_dict(
+            yaml_dict, resource_id="TOPIC-child", name="Opening Hours"
+        )
+
+        self.assertEqual(child_topic.tags, [])
+
+    def test_child_topics_have_no_tags(self):
+        """The platform cannot set tags on a child topic, so child topic files never get them."""
+        child_topic = ChildTopic(
+            resource_id="TOPIC-child",
+            name="Opening Hours",
+            variant_id="VARIANT-1",
+            variant_name="Variant 1",
+            actions="",
+            content="We open at 10am.",
+            example_queries=[],
+        )
+
+        self.assertEqual(child_topic.tags, [])
+        self.assertNotIn("tags", child_topic.to_yaml_dict())
+        self.assertEqual(list(child_topic.build_create_proto().tags), [])
+
 
 class ChildTopicFromProjection(unittest.TestCase):
     """Tests for ChildTopic.from_projection."""
@@ -12513,6 +13095,33 @@ class FlowStepFromProjection(unittest.TestCase):
         self.assertEqual(step.flow_name, "Booking")
         self.assertEqual(step.prompt, "Hello!")
 
+    def test_prompt_whitespace_is_stripped_on_every_path(self):
+        """Surrounding prompt whitespace must not affect equality — YAML reads
+        strip, so projection reads must too."""
+        projection = {
+            "flows": {
+                "flows": {
+                    "entities": {
+                        "FLOW-1": {
+                            "name": "Booking",
+                            "steps": {
+                                "entities": {
+                                    "STEP-A": {
+                                        "name": "greet",
+                                        "type": "default_step",
+                                        "prompt": "  Hello!\n",
+                                        "conditions": [],
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        step = FlowStep.from_projection(projection)["FLOW-1_STEP-A"]
+        self.assertEqual(step.prompt, "Hello!")
+
     def test_skips_function_steps(self):
         """function_step type entries should be excluded from FlowStep parsing."""
         projection = {
@@ -12656,6 +13265,62 @@ class FlowSettingsFromProjectionTest(unittest.TestCase):
         self.assertEqual(settings.to_yaml_dict(), {})
         self.assertEqual(settings.step_id, self.STEP_ID)
         self.assertEqual(settings.flow_id, self.FLOW_ID)
+
+
+class FlowSettingsEqualityTest(unittest.TestCase):
+    """Disabled asr_biasing/dtmf residuals must not affect equality.
+
+    YAML drops disabled sections entirely, so their residual values can never
+    round-trip through disk — a projection read carrying residuals must still
+    compare equal to a disk read of identical content.
+    """
+
+    STEP_ID = "step-1"
+    FLOW_ID = "FLOW-abc"
+
+    def _settings(self, **kwargs) -> FlowSettings:
+        return FlowSettings(step_id=self.STEP_ID, flow_id=self.FLOW_ID, **kwargs)
+
+    def test_disabled_dtmf_residuals_are_normalised(self):
+        with_residuals = self._settings(
+            dtmf=DTMFConfig(
+                is_enabled=False,
+                inter_digit_timeout=3,
+                end_key="",
+                collect_while_agent_speaking=True,
+                is_pii=True,
+                max_digits=1,
+            )
+        )
+        self.assertEqual(with_residuals, self._settings())
+        self.assertEqual(with_residuals.dtmf, DTMFConfig())
+
+    def test_disabled_asr_biasing_residuals_are_normalised(self):
+        with_residuals = self._settings(
+            asr_biasing=ASRBiasing(is_enabled=False, precise_date=True, custom_keywords=["acme"])
+        )
+        self.assertEqual(with_residuals, self._settings())
+        self.assertEqual(with_residuals.asr_biasing, ASRBiasing())
+
+    def test_enabled_sections_still_compare_by_value(self):
+        enabled = self._settings(dtmf=DTMFConfig(is_enabled=True, inter_digit_timeout=3))
+        self.assertNotEqual(enabled, self._settings())
+        self.assertNotEqual(
+            enabled, self._settings(dtmf=DTMFConfig(is_enabled=True, inter_digit_timeout=5))
+        )
+        self.assertEqual(
+            enabled, self._settings(dtmf=DTMFConfig(is_enabled=True, inter_digit_timeout=3))
+        )
+
+    def test_enabling_or_disabling_is_still_a_change(self):
+        self.assertNotEqual(
+            self._settings(dtmf=DTMFConfig(is_enabled=True)),
+            self._settings(dtmf=DTMFConfig(is_enabled=False)),
+        )
+        self.assertNotEqual(
+            self._settings(asr_biasing=ASRBiasing(is_enabled=True)),
+            self._settings(),
+        )
 
 
 class FlowSettingsSerializationTest(unittest.TestCase):
@@ -12873,6 +13538,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
         ]
 
     def test_negative_dtmf_values_are_rejected(self):
+        # Enabled: a disabled section is normalised away before validation.
         for kwargs, expected in [
             ({"max_digits": -1}, "max_digits"),
             ({"inter_digit_timeout": -1}, "inter_digit_timeout"),
@@ -12881,7 +13547,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
                 settings = FlowSettings(
                     step_id="step-1",
                     flow_id="flow-123",
-                    dtmf=DTMFConfig(**kwargs),
+                    dtmf=DTMFConfig(is_enabled=True, **kwargs),
                 )
                 with self.assertRaises(ValueError) as ctx:
                     settings.validate()
@@ -12914,7 +13580,8 @@ class FlowSettingsValidationTest(unittest.TestCase):
 
     def test_flow_step_validate_checks_its_settings(self):
         """Settings are a sub-resource, so nothing else validates them."""
-        step = self._step(dtmf=DTMFConfig(max_digits=-1))
+        # Enabled: a disabled section is normalised away before validation.
+        step = self._step(dtmf=DTMFConfig(is_enabled=True, max_digits=-1))
 
         with self.assertRaises(ValueError) as ctx:
             step.validate(resource_mappings=self._mappings())
@@ -13134,30 +13801,101 @@ class ChannelSettingsFromProjection(unittest.TestCase):
 class AsrSettingsFromProjection(unittest.TestCase):
     """Tests for AsrSettings.from_projection."""
 
-    def test_parses_asr_settings(self):
-        """Verify barge_in and interaction_style are parsed."""
+    def test_parses_every_section(self):
+        """Each turn-taking field maps to its YAML section; filler and ambience are left out."""
         projection = {
             "channels": {
                 "voice": {
-                    "asrSettings": {
-                        "bargeIn": True,
-                        "latencyConfig": {
-                            "interactionStyle": "fast",
-                        },
-                    }
+                    "vadConfig": {"speechEndWindowSeconds": 0.8},
+                    "bargeInConfig": {"enabled": True, "maxPerCall": 5},
+                    "silenceFillerUtterances": {
+                        "enabled": False,
+                        "utterances": [{"message": "One moment..."}],
+                        "randomize": True,
+                        "initialIntervalSeconds": 2.5,
+                        "intervalSeconds": 5,
+                    },
+                    "ambience": {"enabled": True, "preset": "office-ambiance", "loudness": -50},
                 }
             }
         }
-        result = AsrSettings.from_projection(projection)
-        self.assertEqual(list(result), ["asr_settings"])
-        asr = result["asr_settings"]
-        self.assertIsInstance(asr, AsrSettings)
-        self.assertTrue(asr.barge_in)
-        self.assertEqual(asr.interaction_style, "fast")
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertEqual(
+            asr.to_yaml_dict(),
+            {
+                "speech_end_delay_ms": 800,
+                "barge_in": {"enabled": True, "allow_on_first_turn": False, "max_per_call": 5},
+            },
+        )
 
-    def test_empty_projection_yields_no_asr_settings(self):
+    def test_unset_fields_are_omitted(self):
+        """A voice channel with nothing set pulls as an empty file, which pushes nothing."""
+        asr = AsrSettings.from_projection({"channels": {"voice": {}}})["asr_settings"]
+        self.assertEqual(asr.to_yaml_dict(), {})
+
+    def test_speech_end_delay_rounds_to_whole_milliseconds(self):
+        """Float seconds don't leak into speech_end_delay_ms."""
+        projection = {"channels": {"voice": {"vadConfig": {"speechEndWindowSeconds": 0.58}}}}
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertEqual(asr.speech_end_delay_ms, 580)
+
+    def test_no_channel_access_yields_no_asr_settings(self):
         """An empty projection should return an empty dict."""
         self.assertEqual(AsrSettings.from_projection({}), {})
+
+    def test_no_voice_channel_yields_no_asr_settings(self):
+        """Without a voice channel there is nothing to pull."""
+        self.assertEqual(AsrSettings.from_projection({"channels": {}}), {})
+
+    def test_barge_in_config_overrides_legacy_barge_in(self):
+        """bargeInConfig is what runs, so it wins over asrSettings.bargeIn."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "asrSettings": {"bargeIn": True},
+                    "bargeInConfig": {"enabled": False, "allowedFirstTurn": True},
+                }
+            }
+        }
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertEqual(asr.barge_in, BargeIn(enabled=False, allow_on_first_turn=True))
+
+    def test_barge_in_config_without_enabled_is_disabled(self):
+        """The projection omits enabled when it is false, even if bargeIn is true."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "asrSettings": {"bargeIn": True},
+                    "bargeInConfig": {"allowedFirstTurn": True},
+                }
+            }
+        }
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertFalse(asr.barge_in.enabled)
+
+    def test_no_barge_in_config_pulls_no_section(self):
+        """Without bargeInConfig the platform default applies, so nothing is written."""
+        projection = {"channels": {"voice": {"asrSettings": {"bargeIn": True}}}}
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+        self.assertIsNone(asr.barge_in)
+
+    def test_pull_then_push_round_trips(self):
+        """A pulled file, read back unchanged, sends no commands."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "vadConfig": {"speechEndWindowSeconds": 0.8},
+                    "bargeInConfig": {"enabled": True},
+                    "ambience": {"enabled": False, "preset": "office-ambiance", "loudness": -50},
+                }
+            }
+        }
+        pulled = AsrSettings.from_projection(projection)["asr_settings"]
+        read_back = AsrSettings.from_yaml_dict(
+            resource_utils.load_yaml(pulled.raw), resource_id="asr_settings", name="asr_settings"
+        )
+        self.assertEqual(read_back.compute_hash(), pulled.compute_hash())
+        self.assertEqual(read_back.get_new_updated_deleted_subresources(pulled), ([], [], []))
 
 
 class DeterministicConditionIdTests(unittest.TestCase):
@@ -13305,6 +14043,318 @@ class DeterministicParameterIdTests(unittest.TestCase):
         )
 
         self.assertEqual(parameters[0].id, "param-assigned-by-the-platform")
+
+
+MCP_PROJECTION = {
+    "mcpConfig": {
+        "servers": {
+            "ids": ["srv_header", "srv_oauth"],
+            "entities": {
+                "srv_header": {
+                    "id": "srv_header",
+                    "providerId": "ticketing",
+                    "url": "https://mcp.ticketing.example.com/v1",
+                    "auth": {
+                        "header": "Authorization",
+                        "queryParam": "",
+                        "secretName": "ticketing_mcp_token",
+                    },
+                    "timeout": 15,
+                    "enabledFunctions": ["search_tickets", "create_ticket"],
+                    "lastDiscoveredAt": "2026-08-01T12:00:00Z",
+                    "lastDiscoveredToolCount": 12,
+                },
+                "srv_oauth": {
+                    "id": "srv_oauth",
+                    "providerId": "internal-tools",
+                    "url": "https://internal.example.com/mcp",
+                    "auth": {
+                        "header": "",
+                        "queryParam": "",
+                        "secretName": "",
+                        "oauth": {
+                            "clientId": "client",
+                            "clientSecretName": "oauth_secret",
+                            "tokenUrl": "https://internal.example.com/oauth/token",
+                            "audience": "",
+                            "scope": "",
+                        },
+                    },
+                },
+            },
+        },
+        "savedProfiles": {
+            "ids": ["ticketing"],
+            "entities": {
+                "ticketing": {
+                    "providerId": "ticketing",
+                    "url": "https://mcp.ticketing.example.com/v1",
+                    "auth": {
+                        "header": "",
+                        "queryParam": "api_key",
+                        "secretName": "ticketing_mcp_token",
+                    },
+                    "timeout": 15,
+                }
+            },
+        },
+    }
+}
+
+MCP_TEST_PROJECT_DIR = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
+
+
+def _mcp_server(**overrides) -> MCPServer:
+    fields = {
+        "resource_id": "srv_1",
+        "name": "ticketing",
+        "url": "https://mcp.ticketing.example.com/v1",
+        "auth": MCPAuth(header="Authorization", secret_name="ticketing_mcp_token"),
+    }
+    fields.update(overrides)
+    return MCPServer(**fields)
+
+
+class MCPServerTests(unittest.TestCase):
+    """Tests for MCPServer."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+
+    def test_from_projection_reads_every_field(self):
+        """Servers are keyed by platform id and keep the discovery fields."""
+        servers = MCPServer.from_projection(MCP_PROJECTION)
+
+        self.assertEqual(set(servers), {"srv_header", "srv_oauth"})
+        server = servers["srv_header"]
+        self.assertEqual(server.name, "ticketing")
+        self.assertEqual(
+            server.auth, MCPAuth(header="Authorization", secret_name="ticketing_mcp_token")
+        )
+        self.assertEqual(server.timeout, 15)
+        self.assertEqual(server.enabled_functions, ["search_tickets", "create_ticket"])
+        self.assertEqual(server.last_discovered_at, "2026-08-01T12:00:00Z")
+        self.assertEqual(server.last_discovered_tool_count, 12)
+
+    def test_from_projection_without_mcp_config_returns_nothing(self):
+        """A user without read access gets no mcpConfig slice at all."""
+        with self.assertLogs("poly.resources.mcp", level="DEBUG"):
+            self.assertEqual(MCPServer.from_projection({}), {})
+
+    def test_to_yaml_dict_omits_id_discovery_fields_and_empty_auth(self):
+        """Only user config is written, so the id and discovery state stay off disk."""
+        server = MCPServer.from_projection(MCP_PROJECTION)["srv_oauth"]
+
+        self.assertEqual(
+            server.to_yaml_dict(),
+            {
+                "provider_id": "internal-tools",
+                "url": "https://internal.example.com/mcp",
+                "auth": {
+                    "oauth": {
+                        "client_id": "client",
+                        "client_secret_name": "oauth_secret",
+                        "token_url": "https://internal.example.com/oauth/token",
+                    }
+                },
+            },
+        )
+
+    def test_yaml_round_trip_preserves_config(self):
+        """to_yaml_dict then from_yaml_dict gives back the same YAML."""
+        server = MCPServer.from_projection(MCP_PROJECTION)["srv_header"]
+
+        reread = MCPServer.from_yaml_dict(server.to_yaml_dict(), resource_id="srv_header")
+
+        self.assertEqual(reread.to_yaml_dict(), server.to_yaml_dict())
+        self.assertEqual(reread.compute_hash(), server.compute_hash())
+
+    def test_empty_enabled_functions_round_trips_as_an_empty_list(self):
+        """[] disables every tool, unlike an absent key, which enables them all."""
+        none_enabled = _mcp_server(enabled_functions=[])
+        all_enabled = _mcp_server()
+
+        self.assertEqual(none_enabled.to_yaml_dict()["enabled_functions"], [])
+        self.assertNotIn("enabled_functions", all_enabled.to_yaml_dict())
+        self.assertTrue(none_enabled.build_update_proto().server.HasField("enabled_functions"))
+        self.assertFalse(all_enabled.build_update_proto().server.HasField("enabled_functions"))
+
+    def test_from_yaml_dict_takes_discovery_fields_from_known_values(self):
+        """Discovery state comes from the remote resource, not the YAML."""
+        server = MCPServer.from_yaml_dict(
+            {"provider_id": "ticketing", "url": "https://mcp.ticketing.example.com/v1"},
+            resource_id="srv_1",
+            known_last_discovered_at="2026-08-01T12:00:00Z",
+            known_last_discovered_tool_count=12,
+        )
+
+        upsert = server.build_update_proto().server
+        self.assertEqual(upsert.last_discovered_at, "2026-08-01T12:00:00Z")
+        self.assertEqual(upsert.last_discovered_tool_count, 12)
+
+    def test_upsert_proto_carries_id_and_config(self):
+        """Create and update both send MCPServer_Upsert under upsert_mcp_server."""
+        server = _mcp_server(timeout=15, enabled_functions=["search_tickets"])
+
+        upsert = server.build_create_proto().server
+        self.assertEqual(server.create_command_type, "upsert_mcp_server")
+        self.assertEqual(server.update_command_type, "upsert_mcp_server")
+        self.assertEqual(upsert.id, "srv_1")
+        self.assertEqual(upsert.provider_id, "ticketing")
+        self.assertEqual(upsert.auth.header, "Authorization")
+        self.assertEqual(upsert.auth.secret_name, "ticketing_mcp_token")
+        self.assertEqual(upsert.timeout, 15)
+        self.assertEqual(list(upsert.enabled_functions.names), ["search_tickets"])
+        self.assertFalse(upsert.HasField("last_discovered_at"))
+
+    def test_delete_proto_uses_platform_id(self):
+        server = _mcp_server()
+
+        self.assertEqual(server.delete_command_type, "delete_mcp_server")
+        self.assertEqual(server.build_delete_proto().id, "srv_1")
+
+    def test_file_path_uses_cleaned_provider_id(self):
+        server = _mcp_server(name="internal-tools")
+
+        self.assertEqual(
+            server.file_path,
+            os.path.join("config", "mcp.yaml", "mcp_servers", "internal_tools"),
+        )
+
+    def test_validate_accepts_each_auth_method(self):
+        for auth in (
+            None,
+            MCPAuth(header="Authorization", secret_name="token"),
+            MCPAuth(query_param="api_key", secret_name="token"),
+            MCPAuth(
+                oauth=MCPOAuth(
+                    client_id="c", client_secret_name="s", token_url="https://example.com/token"
+                )
+            ),
+        ):
+            with self.subTest(auth=auth):
+                _mcp_server(auth=auth).validate()
+
+    def test_validate_rejects_invalid_config(self):
+        cases = {
+            "provider_id is required": {"name": ""},
+            "url is required": {"url": ""},
+            "must be an http(s) URL": {"url": "ftp://example.com"},
+            "timeout must be between 1 and 30": {"timeout": 31},
+            "Duplicate enabled_functions": {"enabled_functions": ["a", "a"]},
+            "enabled_functions entries cannot be empty": {"enabled_functions": [""]},
+            "only one of header, query_param or oauth": {
+                "auth": MCPAuth(
+                    header="Authorization",
+                    secret_name="token",
+                    oauth=MCPOAuth(
+                        client_id="c", client_secret_name="s", token_url="https://example.com/token"
+                    ),
+                )
+            },
+            "secret_name is required when auth.header": {"auth": MCPAuth(header="Authorization")},
+            "needs auth.header or auth.query_param": {"auth": MCPAuth(secret_name="token")},
+            "client_id is required": {
+                "auth": MCPAuth(
+                    oauth=MCPOAuth(client_secret_name="s", token_url="https://example.com/token")
+                )
+            },
+            "client_secret_name is required": {
+                "auth": MCPAuth(
+                    oauth=MCPOAuth(client_id="c", token_url="https://example.com/token")
+                )
+            },
+            "token_url is required": {
+                "auth": MCPAuth(oauth=MCPOAuth(client_id="c", client_secret_name="s"))
+            },
+            "token_url 'not-a-url' must be": {
+                "auth": MCPAuth(
+                    oauth=MCPOAuth(client_id="c", client_secret_name="s", token_url="not-a-url")
+                )
+            },
+        }
+        for message, overrides in cases.items():
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as cm:
+                    _mcp_server(**overrides).validate()
+                self.assertIn(message, str(cm.exception))
+
+    def test_auth_that_is_not_a_mapping_raises(self):
+        with self.assertRaises(ValueError):
+            MCPServer.from_yaml_dict(
+                {"provider_id": "ticketing", "url": "https://a.example.com", "auth": "token"},
+                resource_id="srv_1",
+            )
+
+    def test_validate_collection_rejects_duplicate_provider_ids(self):
+        servers = {
+            "srv_1": _mcp_server(resource_id="srv_1"),
+            "srv_2": _mcp_server(resource_id="srv_2"),
+        }
+
+        with self.assertRaises(ValueError) as cm:
+            MCPServer.validate_collection(servers)
+        self.assertIn("ticketing", str(cm.exception))
+
+    def test_discover_and_read_local_resource_from_fixture(self):
+        """Each server in config/mcp.yaml is discovered and read by provider_id."""
+        paths = MCPServer.discover_resources(MCP_TEST_PROJECT_DIR)
+
+        self.assertEqual(
+            [os.path.relpath(p, MCP_TEST_PROJECT_DIR) for p in paths],
+            [
+                os.path.join("config", "mcp.yaml", "mcp_servers", "ticketing"),
+                os.path.join("config", "mcp.yaml", "mcp_servers", "internal_tools"),
+                os.path.join("config", "mcp.yaml", "mcp_servers", "custom_1791899588123"),
+            ],
+        )
+        server = MCPServer.read_local_resource(
+            file_path=paths[1], resource_id="srv_oauth", resource_name="internal_tools"
+        )
+        self.assertEqual(server.name, "internal-tools")
+        self.assertEqual(server.auth.oauth.client_id, "adk-test-client")
+        self.assertIsNone(server.enabled_functions)
+
+    def test_discover_without_mcp_file_returns_nothing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertEqual(MCPServer.discover_resources(tmpdir), [])
+
+    def test_server_without_provider_id_is_keyed_like_agent_studio(self):
+        """A server with no providerId gets custom:<id>, the key Agent Studio shows.
+
+        Without it the server would have no name, discovery would skip it, and
+        the next push would delete it.
+        """
+        projection = {
+            "mcpConfig": {
+                "servers": {
+                    "entities": {
+                        "mcp-123": {
+                            "id": "mcp-123",
+                            "providerId": "",
+                            "url": "https://a.example.com",
+                        }
+                    }
+                }
+            }
+        }
+
+        server = MCPServer.from_projection(projection)["mcp-123"]
+
+        self.assertEqual(server.name, "custom:mcp-123")
+        self.assertEqual(server.to_yaml_dict()["provider_id"], "custom:mcp-123")
+        self.assertEqual(
+            server.file_path, os.path.join("config", "mcp.yaml", "mcp_servers", "custom_mcp_123")
+        )
+
+    def test_saved_profiles_are_not_pulled(self):
+        """Profiles duplicate server settings, so only servers come out of a projection."""
+        resources, slim = load_resources_from_projection(MCP_PROJECTION)
+
+        self.assertEqual(
+            {type(r) for by_id in resources.values() for r in by_id.values()}, {MCPServer}
+        )
+        self.assertEqual(slim, [])
 
 
 def _run_in_thread(func):

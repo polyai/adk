@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
+from pathlib import PurePath
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -40,6 +41,7 @@ from poly.resources import (
     FlowStep,
     Function,
     FunctionStep,
+    MCPServer,
     MultiResourceYamlResource,
     Pronunciation,
     Resource,
@@ -66,6 +68,7 @@ PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
+MAX_TEST_RUN_NAME_LENGTH = 120
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
@@ -1073,10 +1076,8 @@ class AgentStudioProject:
                     local_file_path = incoming_resource.get_path(self.root_path)
                 try:
                     # Normalise the local resource to ensure formatting differences don't cause unnecessary merge conflicts
-                    incoming_resource_mapping = self._make_resource_mapping(incoming_resource)
-                    local_resource = self.read_local_resource(
-                        resource=incoming_resource_mapping,
-                        resource_mappings=incoming_resource_mappings,
+                    local_resource, local_file_path = self._read_pulled_resource_locally(
+                        incoming_resource, original_resource, incoming_resource_mappings
                     )
                     local_content = local_resource.to_pretty(
                         resource_name=incoming_resource.name,
@@ -1127,7 +1128,7 @@ class AgentStudioProject:
                     original_content, local_content, incoming_content
                 )
 
-                if merged_contents == local_content:
+                if merged_contents == local_content and local_file_path == file_path:
                     continue
 
                 if resource_utils.contains_merge_conflict(merged_contents):
@@ -1178,6 +1179,31 @@ class AgentStudioProject:
                 resource_type.delete_resource(resource.get_path(self.root_path))
 
         return files_with_conflicts
+
+    def _read_pulled_resource_locally(
+        self,
+        incoming_resource: Resource,
+        original_resource: Optional[Resource],
+        resource_mappings: list[ResourceMapping],
+    ) -> tuple[Resource, str]:
+        incoming_path = incoming_resource.get_path(self.root_path)
+        try:
+            resource = self.read_local_resource(
+                resource=self._make_resource_mapping(incoming_resource),
+                resource_mappings=resource_mappings,
+            )
+            return resource, incoming_path
+        except FileNotFoundError:
+            if original_resource is None:
+                raise
+            original_path = original_resource.get_path(self.root_path)
+            if original_path == incoming_path:
+                raise
+        resource = self.read_local_resource(
+            resource=self._make_resource_mapping(original_resource),
+            resource_mappings=resource_mappings,
+        )
+        return resource, original_path
 
     def _stage_commands(
         self,
@@ -1576,10 +1602,15 @@ class AgentStudioProject:
         If new flow has function step as start step, create referencing a dummy default step.
         Then update the flow config to use the new step.
 
+        A renamed test case (same scenario, new file) is pushed as an update of
+        the saved case, keeping its id, rather than a delete and a create.
+
         When deleting a flow, only send a command to delete the flow config,
         not the steps/functions.
 
-        Remove subresource containers from updated resources.
+        Remove subresource containers from updated resources. ASR settings are pushed
+        only as their per-section voice channel commands, and removed background ambience
+        is switched off since it can't be cleared.
 
         If a flow step has changed type, delete the old step and create a new one.
         For the start step, use a dummy workaround as we can't delete a start step
@@ -1614,6 +1645,7 @@ class AgentStudioProject:
             # as a side effect) if a webchat command is actually queued
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
+        prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
         prepush.fix_orphaned_variables(
             state,
             new_resources,
@@ -1626,6 +1658,7 @@ class AgentStudioProject:
             new_resources, updated_resources, post_push_deleted_resources
         )
         prepush.prune_cascade_deleted_flow_children(deleted_resources)
+        prepush.push_asr_settings_by_section(new_resources, updated_resources)
         prepush.replace_flow_steps_with_dummy_workaround(
             state,
             new_resources,
@@ -2273,6 +2306,14 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == MCPServer and original_resource:
+            if not isinstance(original_resource, MCPServer):
+                raise TypeError(f"Original resource is not an MCPServer: {original_resource}")
+            additional_kwargs["known_last_discovered_at"] = original_resource.last_discovered_at
+            additional_kwargs["known_last_discovered_tool_count"] = (
+                original_resource.last_discovered_tool_count
+            )
+
         try:
             resource = resource_class.read_local_resource(
                 file_path=resource.file_path,
@@ -2615,6 +2656,9 @@ class AgentStudioProject:
         format: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
         on_save: Callable[[int, int], None] | None = None,
+        keep_files: bool = False,
+        create: bool = False,
+        source_branch_name: Optional[str] = None,
     ) -> tuple[bool, dict[str, Any]]:
         """Switch to a different branch in the project.
 
@@ -2626,28 +2670,47 @@ class AgentStudioProject:
                 If provided, the projection will be used instead of fetching it from the API.
             on_save: Optional callback invoked with (current, total)
                 during the resource save loop.
+            keep_files (bool): If True, track the branch without touching the project files,
+                so the next push sends the current working copy to it.
+            create (bool): If True, create the branch when it doesn't exist, from the
+                current branch or source_branch_name, as create_branch does.
+            source_branch_name (str): The branch to create from. Requires create.
 
         Returns:
             bool: True if the switch was successful, False otherwise
             dict[str, Any]: The projection data
+
+        Raises:
+            ValueError: If the options conflict, there are uncommitted changes without force
+                or keep_files, or the branch doesn't exist and can't be created.
         """
-        if self.get_diffs() and not force:
+        if keep_files and (force or format):
+            raise ValueError("--keep-files cannot be combined with --force or --format.")
+        if source_branch_name is not None and not create:
+            raise ValueError("--from requires --create.")
+        if not keep_files and not force and self.get_diffs():
             raise ValueError(
-                "Cannot switch branches with uncommitted changes. Use --force to switch and discard changes."
+                "Cannot switch branches with uncommitted changes. Use --force to switch and discard changes, or --keep-files to switch and keep them."
             )
 
         branches = self.api_handler.get_branches()
-        if branch_name not in branches:
-            raise ValueError(f"Branch {branch_name} does not exist.")
-        branch_id = branches[branch_name]["branchId"]
-        success = self.api_handler.switch_branch(branch_id)
-        projection = {}
-        if success:
+        if branch_name in branches:
+            branch_id = branches[branch_name]["branchId"]
+            if not self.api_handler.switch_branch(branch_id):
+                return False, {}
             self.branch_id = branch_id
+        elif create:
+            self.create_branch(branch_name, source_branch_name=source_branch_name)
+        else:
+            raise ValueError(f"Branch {branch_name} does not exist.")
+
+        if keep_files:
+            _, projection = self.load_project(projection_json=projection_json)
+        else:
             _, projection = self.pull_project(
                 force=True, format=format, projection_json=projection_json, on_save=on_save
             )
-        return success, projection
+        return True, projection
 
     def get_current_branch(self) -> Optional[str]:
         """Get the current branch name.
@@ -3517,22 +3580,40 @@ class AgentStudioProject:
         Runs all tests by default. Use files or tags to filter.
 
         Args:
-            files: List of specific test file paths to select.
+            files: Test files to select. Each matches the end of a test's path, so a
+                bare file name (with or without .yaml) or a glob such as "smoke_*" works.
             tags: List of tags to filter by.
 
         Returns:
             list[TestCase]: The matched test cases.
+
+        Raises:
+            ValueError: If any entry in files or tags matches no test.
         """
         tests: dict[str, TestCase] = self.resources.get(TestCase, {})
         matched: list[TestCase] = []
         if tags:
+            unmatched = set(tags)
             for test in tests.values():
                 if any(tag in test.tags.tags for tag in tags):
                     matched.append(test)
+                    unmatched -= set(test.tags.tags)
+            if unmatched:
+                raise ValueError(f"No tests match these tags: {', '.join(sorted(unmatched))}")
         elif files:
+            patterns = {
+                f: os.path.relpath(f, self.root_path) if os.path.isabs(f) else f for f in files
+            }
+            unmatched = set(files)
             for test in tests.values():
-                if test.file_path in files:
+                path = PurePath(test.file_path)
+                hits = {f for f, p in patterns.items() if path.match(p) or path.match(f"{p}.yaml")}
+                if hits:
                     matched.append(test)
+                    unmatched -= hits
+
+            if unmatched:
+                raise ValueError(f"No tests match these files: {', '.join(sorted(unmatched))}")
         else:
             matched = list(tests.values())
 
@@ -3541,11 +3622,12 @@ class AgentStudioProject:
 
         return matched
 
-    def trigger_tests(self, test_ids: list[str]) -> dict:
+    def trigger_tests(self, test_ids: list[str], name: str | None = None) -> dict:
         """Trigger tests for the project.
 
         Args:
             test_ids: List of test case resource IDs to run.
+            name: Optional name for the run.
 
         Returns:
             dict: API response with test run details.
@@ -3553,11 +3635,18 @@ class AgentStudioProject:
         if not test_ids:
             raise ValueError("No test IDs provided.")
 
+        name = (name or "").strip() or None
+        if name and len(name) > MAX_TEST_RUN_NAME_LENGTH:
+            raise ValueError(
+                f"Test run name must be at most {MAX_TEST_RUN_NAME_LENGTH} characters."
+            )
+
         return self.api_handler.trigger_test_run(
             self.region,
             self.project_id,
             test_ids,
             self.branch_id,
+            name=name,
         )
 
     def get_test_run(self, test_run_id: str) -> dict:
@@ -3585,92 +3674,172 @@ class AgentStudioProject:
             self.region, self.project_id, limit, offset, branch_id=self.branch_id
         )
 
-    # ── A/B tests ───────────────────────────────────────────────────
+    # ── Experiments ─────────────────────────────────────────────────
 
-    def create_ab_test(
-        self, name: str, variant_deployment_id: str, traffic_percentage: int
-    ) -> dict:
-        """Create a new A/B test for the project.
+    @property
+    def experiments_enabled(self) -> bool:
+        """Check if the project is eligible to use experiments.
+
+        Experiments require both the simplified deployment model (flag +
+        convergence, see ``using_simplified_deployments``) and a
+        ``deployment_mode`` that supports top-level branches — a ``simple``
+        mode project has no branch to test.
+        """
+        return self.using_simplified_deployments and self.deployment_mode != DeploymentMode.SIMPLE
+
+    def create_experiment(self, name: str, branch_id: str, traffic_percentage: int) -> dict:
+        """Create a new experiment for the project.
 
         Args:
-            name: Display name for the test.
-            variant_deployment_id: ID of the pre-release variant deployment.
-            traffic_percentage: Percentage of traffic routed to variant (0-100).
+            name: Display name for the experiment.
+            branch_id: ID of the top-level branch to test as the variant.
+            traffic_percentage: Percentage of traffic routed to the variant (1-99).
 
         Returns:
-            dict: The created A/B test record.
+            dict: The created experiment record.
+
+        Raises:
+            ValueError: If the name is empty, the traffic percentage is outside 1-99, or
+                the branch doesn't exist or isn't an eligible variant (the platform
+                rejects ``main``, child branches and diverged branches).
         """
-        return self.api_handler.create_ab_test(
+        if not name.strip():
+            raise ValueError("Experiment name is required and cannot be empty.")
+        if not 1 <= traffic_percentage <= 99:
+            raise ValueError("Traffic percentage must be an integer between 1 and 99.")
+
+        _, branches = self.get_branches()
+        branch_name = next(
+            (n for n, meta in branches.items() if meta["branchId"] == branch_id), None
+        )
+        if branch_name is None:
+            raise ValueError(f"No branch found with ID '{branch_id}'.")
+        meta = branches[branch_name]
+        if branch_name == "main":
+            raise ValueError(
+                "Cannot test 'main' against itself — choose a different branch as the variant."
+            )
+        if meta.get("parentBranchId") not in (None, "main"):
+            raise ValueError(
+                f"Branch '{branch_name}' is not a top-level branch — only a top-level"
+                " branch can be tested as a variant."
+            )
+        if meta.get("isDiverged"):
+            raise ValueError(
+                f"Branch '{branch_name}' is diverged from its parent. Switch to it and run"
+                " 'poly branch sync' before testing it as a variant."
+            )
+
+        return self.api_handler.create_experiment(
             region=self.region,
             account_id=self.account_id,
             project_id=self.project_id,
             name=name,
-            variant_deployment_id=variant_deployment_id,
+            branch_id=branch_id,
             traffic_percentage=traffic_percentage,
         )
 
-    def list_ab_tests(self, limit: int | None = None) -> list[dict]:
-        """List A/B tests for the project.
+    def list_experiments(self, limit: int | None = None, offset: int | None = None) -> list[dict]:
+        """List experiments for the project.
 
         Args:
-            limit: Maximum number of tests to return.
+            limit: Maximum number of experiments to return.
+            offset: Number of experiments to skip before collecting results.
 
         Returns:
-            list[dict]: A list of A/B test records.
+            list[dict]: A list of experiment records.
         """
-        result = self.api_handler.list_ab_tests(
+        result = self.api_handler.list_experiments(
             region=self.region,
             account_id=self.account_id,
             project_id=self.project_id,
             limit=limit,
+            offset=offset,
         )
-        return result.get("ab_tests", [])
+        return result.get("experiments", [])
 
-    def get_active_ab_test(self) -> dict:
-        """Get the active A/B test for the project.
-
-        Returns:
-            dict: The active A/B test record, or empty dict if none.
-        """
-        return self.api_handler.get_active_ab_test(
-            region=self.region,
-            account_id=self.account_id,
-            project_id=self.project_id,
-        )
-
-    def end_ab_test(self, ab_test_id: str, chosen_deployment_id: str) -> dict:
-        """End an A/B test and choose a winner.
+    def get_experiment(self, experiment_id: str) -> dict:
+        """Get a single experiment by ID.
 
         Args:
-            ab_test_id: The A/B test ID.
-            chosen_deployment_id: Deployment ID to keep (control or variant).
+            experiment_id: The experiment ID.
 
         Returns:
-            dict: The ended A/B test record.
+            dict: The experiment record.
         """
-        return self.api_handler.end_ab_test(
+        return self.api_handler.get_experiment(
             region=self.region,
             account_id=self.account_id,
             project_id=self.project_id,
-            ab_test_id=ab_test_id,
-            chosen_deployment_id=chosen_deployment_id,
+            experiment_id=experiment_id,
         )
 
-    def update_ab_test(self, ab_test_id: str, traffic_percentage: int) -> dict:
-        """Update traffic percentage for an A/B test.
+    def get_active_experiment(self) -> dict:
+        """Get the active experiment for the project, if any.
 
-        Args:
-            ab_test_id: The A/B test ID.
-            traffic_percentage: New traffic percentage (0-100).
+        Experiments are listed newest first and only one can be active, so
+        check the first.
 
         Returns:
-            dict: The updated A/B test record.
+            dict: The active experiment record, or empty dict if none.
         """
-        return self.api_handler.update_ab_test(
+        page = self.list_experiments(limit=1)
+        if page and not page[0].get("ended_at"):
+            return page[0]
+        return {}
+
+    def end_experiment(self, experiment_id: str, chosen_branch_id: str) -> dict:
+        """End an experiment and choose a winning branch.
+
+        The platform redeploys the winning branch to live automatically as
+        part of ending the experiment — no separate promotion call is needed.
+
+        Args:
+            experiment_id: The experiment ID.
+            chosen_branch_id: ID of the branch to keep (control or variant).
+
+        Returns:
+            dict: The ended experiment record.
+        """
+        return self.api_handler.end_experiment(
             region=self.region,
             account_id=self.account_id,
             project_id=self.project_id,
-            ab_test_id=ab_test_id,
+            experiment_id=experiment_id,
+            chosen_branch_id=chosen_branch_id,
+        )
+
+    def update_experiment(
+        self,
+        experiment_id: str,
+        name: str | None = None,
+        branch_id: str | None = None,
+        traffic_percentage: int | None = None,
+    ) -> dict:
+        """Update the name and/or traffic split for an experiment.
+
+        Args:
+            experiment_id: The experiment ID.
+            name: New display name, if renaming.
+            branch_id: ID of the variant branch whose traffic share is changing.
+                Required together with ``traffic_percentage``.
+            traffic_percentage: New percentage of traffic to route to the variant (1-99).
+
+        Returns:
+            dict: The updated experiment record.
+
+        Raises:
+            ValueError: If only one of ``branch_id`` and ``traffic_percentage`` is given.
+        """
+        if (branch_id is None) != (traffic_percentage is None):
+            raise ValueError("branch_id and traffic_percentage must be given together.")
+        return self.api_handler.update_experiment(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            experiment_id=experiment_id,
+            name=name,
+            branch_id=branch_id,
             traffic_percentage=traffic_percentage,
         )
 
@@ -4297,14 +4466,18 @@ class AgentStudioProject:
 
     @property
     def deployment_mode(self) -> DeploymentMode:
-        """Get the deployment mode for the project."""
+        """Get the deployment mode for the project.
+
+        Mirrors the platform: template-engine children are always simple, other
+        projects get sub-branches once simplified deployments are on. The stored
+        `config.deployment_mode` is no longer used.
+        """
         if self._deployment_mode is None:
-            cfg = self.get_project_info().get("config") or {}
-            deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
-            if (
-                deployment_mode == DeploymentMode.RELEASES_BRANCHES
-                and not self.using_simplified_deployments
-            ):
+            if self.get_project_info().get("parent_template_ref_id"):
+                deployment_mode = DeploymentMode.SIMPLE
+            elif self.using_simplified_deployments:
+                deployment_mode = DeploymentMode.RELEASES_BRANCHES
+            else:
                 deployment_mode = DeploymentMode.RELEASES
             self._deployment_mode = deployment_mode
         return self._deployment_mode
