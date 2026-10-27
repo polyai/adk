@@ -812,7 +812,7 @@ wheels = [
 
 [[package]]
 name = "polyai-adk"
-version = "0.73.3"
+version = "0.69.0"
 source = { editable = "." }
 dependencies = [
     { name = "argcomplete" },
