@@ -58,7 +58,7 @@ Examples:
 ~~~bash
 poly campaign preview 'Appointment reminders' --phone +15550100 --field first_name=Ada
 poly campaign preview 'Appointment reminders' --contact contact.json --sample-outputs outputs.json
-poly campaign preview 'Appointment reminders' --phone +15550100 --start-node call-1 --call-result no_answer
+poly campaign preview 'Appointment reminders' --phone +15550100 --start-node call-1 --result no_answer
 ~~~
 
 | Flag | Description |
@@ -69,8 +69,8 @@ poly campaign preview 'Appointment reminders' --phone +15550100 --start-node cal
 | `--field` | Another contact column, as `KEY=VALUE`. Repeatable. |
 | `--sample-outputs` | JSON file of what each node's function returns, keyed by node id. |
 | `--start-node` | Node id to carry on from. Defaults to the trigger. |
-| `--call-result` | How the call being left ended, e.g. `no_answer`. |
-| `--tool-called` | A tool the agent called on that call. Repeatable. |
+| `--result` | How the call or text at `--start-node` went, e.g. `no_answer` or `replied`. |
+| `--state` | A value that call or text reported back, as `KEY=VALUE`. Repeatable. |
 | `--ask-branches` | Stop at a condition with no sample output instead of taking its default branch. |
 
 `--json` output shape:
@@ -85,13 +85,13 @@ poly campaign preview 'Appointment reminders' --phone +15550100 --start-node cal
 
 ## `poly campaign test`
 
-Run one step of a test of the live campaign, and wait for it to finish. It calls and texts the test contact for real. The first step starts at the trigger; to carry on, pass the node it stopped at and the run it printed.
+Run one step of a test of the live campaign, and wait for it to finish. It calls and texts the test contact for real. The first step starts at the trigger. To carry on, pass the `--start-node` and the run it printed. After a call or a text, also say how it went with `--result`; after a wait, carry on from the node it printed.
 
 Examples:
 
 ~~~bash
 poly campaign test 'Appointment reminders' --phone +15550100
-poly campaign test 'Appointment reminders' --phone +15550100 --start-node call-1 --run run.json --call-result no_answer
+poly campaign test 'Appointment reminders' --phone +15550100 --start-node call-1 --run run.json --result no_answer
 ~~~
 
 | Flag | Description |
@@ -103,8 +103,8 @@ poly campaign test 'Appointment reminders' --phone +15550100 --start-node call-1
 | `--field` | A metadata column, as `KEY=VALUE`. Repeatable. |
 | `--start-node` | Node id to carry on from. |
 | `--run` | The run the previous step printed, as JSON or a JSON file. |
-| `--call-result` | How the call being left ended. |
-| `--tool-called` | A tool the agent called on that call. Repeatable. |
+| `--result` | How the call or text at `--start-node` went. |
+| `--state` | A value that call or text reported back, as `KEY=VALUE`. Repeatable. |
 | `--timeout` | Seconds to wait for the step. Defaults to `600`. |
 | `--force` | Run without confirmation. Implied by `--json`. |
 

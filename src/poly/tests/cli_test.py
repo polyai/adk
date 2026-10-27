@@ -6548,7 +6548,7 @@ class CampaignCommandTest(unittest.TestCase):
             fields=["age=30", "plan=gold"],
             sample_outputs_file=outputs.name,
             start_node="call-1",
-            call_result="no_answer",
+            send_result="no_answer",
             output_json=True,
         )
 
@@ -6567,7 +6567,7 @@ class CampaignCommandTest(unittest.TestCase):
                 },
                 "sampleOutputs": {"trigger-1": {"contacts": []}},
                 "startNodeId": "call-1",
-                "callOutcome": {"toolsCalled": [], "result": "no_answer"},
+                "sendOutcome": {"result": "no_answer", "state": {}},
             },
         )
         self.assertEqual(
@@ -6618,8 +6618,8 @@ class CampaignCommandTest(unittest.TestCase):
             phone="+15550100",
             start_node="call-1",
             run=json.dumps(run),
-            call_result="no_answer",
-            tools_called=["book"],
+            send_result="replied",
+            send_state=["booked=true", "slot=7pm"],
             output_json=True,
         )
 
@@ -6629,9 +6629,28 @@ class CampaignCommandTest(unittest.TestCase):
                 "contact": {"phone": "+15550100"},
                 "startNodeId": "call-1",
                 "run": {"contactId": "C1", "enrolmentId": "E1", "graphHash": "H1"},
-                "callOutcome": {"toolsCalled": ["book"], "result": "no_answer"},
+                "sendOutcome": {"result": "replied", "state": {"booked": True, "slot": "7pm"}},
             },
         )
+
+    def test_carry_on_hint_matches_how_the_step_stopped(self):
+        """A call or text carries on from itself with its result; a wait from the node after."""
+        cases = {
+            "reply": "--start-node sms-1 --result <how it went>",
+            "call": "--start-node sms-1 --result <how it went>",
+            "condition": "--start-node sms-1, with its branch in --sample-outputs",
+            "wait": "--start-node wait-1",
+            "end": None,
+        }
+        for stop_reason, expected in cases.items():
+            with self.subTest(stop_reason=stop_reason):
+                result = {
+                    "stop_reason": stop_reason,
+                    "stopped_at": "sms-1",
+                    "resume_node_id": "wait-1",
+                }
+
+                self.assertEqual(CampaignCommand._carry_on_flags(result), expected)
 
     def test_test_refuses_a_run_without_its_node(self):
         """A run without the node it stopped at is refused before anything is sent."""

@@ -94,7 +94,7 @@ class CampaignCommand(BaseCommand):
                 "  poly campaign preview 'Appointment reminders' --phone +15550100 \\\n"
                 "      --field first_name=Ada\n"
                 "  poly campaign preview 'Appointment reminders' --contact contact.json \\\n"
-                "      --sample-outputs outputs.json --start-node call-1 --call-result no_answer\n"
+                "      --sample-outputs outputs.json --start-node call-1 --result no_answer\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -133,12 +133,13 @@ class CampaignCommand(BaseCommand):
                 "branch. It calls and texts the test contact for real, a step at a time,\n"
                 "and waits for the step to finish. Asks for confirmation unless --force\n"
                 "or --json is given.\n\n"
-                "The first step starts at the trigger. To carry on, pass the node it\n"
-                "stopped at and the run it printed.\n\n"
+                "The first step starts at the trigger. To carry on, pass the node and\n"
+                "the run it printed; after a call or a text, also say how it went\n"
+                "with --result.\n\n"
                 "Examples:\n"
                 "  poly campaign test 'Appointment reminders' --phone +15550100\n"
                 "  poly campaign test 'Appointment reminders' --phone +15550100 \\\n"
-                "      --start-node call-1 --run run.json --call-result no_answer\n"
+                "      --start-node call-1 --run run.json --result no_answer\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -214,16 +215,17 @@ class CampaignCommand(BaseCommand):
             "--start-node", type=str, default=None, help="Node id to carry on from."
         )
         parser.add_argument(
-            "--call-result",
+            "--result",
             type=str,
             default=None,
-            help="How the call being left ended, e.g. no_answer.",
+            help="How the call or text at --start-node went, e.g. no_answer or replied.",
         )
         parser.add_argument(
-            "--tool-called",
+            "--state",
             action="append",
             default=[],
-            help="A tool the agent called on that call. Repeatable.",
+            metavar="KEY=VALUE",
+            help="A value that call or text reported back. Repeatable.",
         )
 
     @classmethod
@@ -241,8 +243,8 @@ class CampaignCommand(BaseCommand):
                 fields=args.field,
                 sample_outputs_file=args.sample_outputs,
                 start_node=args.start_node,
-                call_result=args.call_result,
-                tools_called=args.tool_called,
+                send_result=args.result,
+                send_state=args.state,
                 ask_branches=args.ask_branches,
                 output_json=args.json,
             )
@@ -258,8 +260,8 @@ class CampaignCommand(BaseCommand):
                 fields=args.field,
                 start_node=args.start_node,
                 run=args.run,
-                call_result=args.call_result,
-                tools_called=args.tool_called,
+                send_result=args.result,
+                send_state=args.state,
                 timeout=args.timeout,
                 force=args.force,
                 output_json=args.json,
@@ -383,14 +385,27 @@ class CampaignCommand(BaseCommand):
                 plain(f"   exit reason: {step['exit_reason']}")
         stopped_at = labels.get(result.get("stopped_at"), result.get("stopped_at"))
         info(f"Stopped: {result.get('stop_reason')}" + (f" at {stopped_at}" if stopped_at else ""))
-        if result.get("resume_node_id"):
-            info(f"Carries on from: {result['resume_node_id']}")
+        carry_on = cls._carry_on_flags(result)
+        if carry_on:
+            info(f"Carry on with: {carry_on}")
         if result.get("error"):
             failure = result["error"]
             where = labels.get(failure.get("node_id"), failure.get("node_id"))
             error(f"{failure.get('error')}" + (f" at {where}" if where else ""))
         for note in result.get("notes") or []:
             plain(f"note: {note}")
+
+    @staticmethod
+    def _carry_on_flags(result: dict[str, Any]) -> Optional[str]:
+        stop_reason = result.get("stop_reason")
+        stopped_at = result.get("stopped_at")
+        if stop_reason in ("call", "reply") and stopped_at:
+            return f"--start-node {stopped_at} --result <how it went>"
+        if stop_reason == "condition" and stopped_at:
+            return f"--start-node {stopped_at}, with its branch in --sample-outputs"
+        if stop_reason == "wait" and result.get("resume_node_id"):
+            return f"--start-node {result['resume_node_id']}"
+        return None
 
     @classmethod
     def campaign_preview(
@@ -403,14 +418,14 @@ class CampaignCommand(BaseCommand):
         fields: Optional[list[str]] = None,
         sample_outputs_file: Optional[str] = None,
         start_node: Optional[str] = None,
-        call_result: Optional[str] = None,
-        tools_called: Optional[list[str]] = None,
+        send_result: Optional[str] = None,
+        send_state: Optional[list[str]] = None,
         ask_branches: Optional[bool] = None,
         output_json: bool = False,
     ) -> None:
         """Dry-run a made-up contact through a campaign and print the steps. Nothing is sent."""
 
-        def build_inputs() -> tuple[dict, Optional[dict]]:
+        def build_inputs() -> tuple[dict, Optional[dict], dict]:
             contact = cls._read_json(contact_file, "--contact") if contact_file else {}
             if not isinstance(contact, dict):
                 raise ValueError("--contact must hold a JSON object.")
@@ -422,9 +437,9 @@ class CampaignCommand(BaseCommand):
                 if sample_outputs_file
                 else None
             )
-            return contact, outputs
+            return contact, outputs, cls._parse_fields(send_state or [])
 
-        contact, outputs = cls._call(output_json, build_inputs)
+        contact, outputs, state = cls._call(output_json, build_inputs)
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
         result = cls._call(
@@ -434,8 +449,8 @@ class CampaignCommand(BaseCommand):
                 contact,
                 sample_outputs=outputs,
                 start_node_id=start_node,
-                call_result=call_result,
-                tools_called=tools_called,
+                send_result=send_result,
+                send_state=state,
                 ask_branches=ask_branches,
             ),
         )
@@ -460,8 +475,8 @@ class CampaignCommand(BaseCommand):
         fields: Optional[list[str]] = None,
         start_node: Optional[str] = None,
         run: Optional[str] = None,
-        call_result: Optional[str] = None,
-        tools_called: Optional[list[str]] = None,
+        send_result: Optional[str] = None,
+        send_state: Optional[list[str]] = None,
         timeout: float = 600,
         force: bool = False,
         output_json: bool = False,
@@ -471,7 +486,7 @@ class CampaignCommand(BaseCommand):
 
         from poly.output.console import error, info, success, warning
 
-        def build_inputs() -> tuple[dict, Optional[dict]]:
+        def build_inputs() -> tuple[dict, Optional[dict], dict]:
             contact = cls._read_json(contact_file, "--contact") if contact_file else {}
             if not isinstance(contact, dict):
                 raise ValueError("--contact must hold a JSON object.")
@@ -491,9 +506,9 @@ class CampaignCommand(BaseCommand):
             previous_run = cls._read_json(run, "--run") if run else None
             if previous_run is not None and not isinstance(previous_run, dict):
                 raise ValueError("--run must be a JSON object.")
-            return contact, previous_run
+            return contact, previous_run, cls._parse_fields(send_state or [])
 
-        contact, previous_run = cls._call(output_json, build_inputs)
+        contact, previous_run, state = cls._call(output_json, build_inputs)
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
         campaign = cls._call(output_json, lambda: project.get_campaign(name))
@@ -515,8 +530,8 @@ class CampaignCommand(BaseCommand):
                 contact,
                 start_node_id=start_node,
                 run=previous_run,
-                call_result=call_result,
-                tools_called=tools_called,
+                send_result=send_result,
+                send_state=state,
             ),
         )
         if not output_json:

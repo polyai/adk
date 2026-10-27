@@ -3705,15 +3705,12 @@ class AgentStudioProject:
             raise self._campaign_error("validate", campaign, e) from e
 
     @staticmethod
-    def _call_outcome(
-        call_result: Optional[str], tools_called: Optional[list[str]]
+    def _send_outcome(
+        send_result: Optional[str], send_state: Optional[dict[str, Any]]
     ) -> Optional[dict[str, Any]]:
-        if call_result is None and not tools_called:
+        if send_result is None and not send_state:
             return None
-        outcome: dict[str, Any] = {"toolsCalled": list(tools_called or [])}
-        if call_result is not None:
-            outcome["result"] = call_result
-        return outcome
+        return {"result": send_result, "state": dict(send_state or {})}
 
     def preview_campaign(
         self,
@@ -3721,11 +3718,14 @@ class AgentStudioProject:
         contact_data: dict[str, Any],
         sample_outputs: Optional[dict[str, dict[str, Any]]] = None,
         start_node_id: Optional[str] = None,
-        call_result: Optional[str] = None,
-        tools_called: Optional[list[str]] = None,
+        send_result: Optional[str] = None,
+        send_state: Optional[dict[str, Any]] = None,
         ask_branches: Optional[bool] = None,
     ) -> dict[str, Any]:
         """Walk a made-up contact through the campaign on the current branch. Nothing is sent.
+
+        `send_result` and `send_state` say what the call or text at `start_node_id` reported,
+        when carrying on from one.
 
         Raises:
             ValueError: if the contact or sample outputs aren't JSON objects.
@@ -3743,8 +3743,8 @@ class AgentStudioProject:
             body["sampleOutputs"] = sample_outputs
         if start_node_id:
             body["startNodeId"] = start_node_id
-        if outcome := self._call_outcome(call_result, tools_called):
-            body["callOutcome"] = outcome
+        if outcome := self._send_outcome(send_result, send_state):
+            body["sendOutcome"] = outcome
         if ask_branches is not None:
             body["askBranches"] = ask_branches
         try:
@@ -3758,13 +3758,14 @@ class AgentStudioProject:
         contact: dict[str, Any],
         start_node_id: Optional[str] = None,
         run: Optional[dict[str, str]] = None,
-        call_result: Optional[str] = None,
-        tools_called: Optional[list[str]] = None,
+        send_result: Optional[str] = None,
+        send_state: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Start one real test step of the live campaign, which calls and texts `contact`.
 
         A first step takes neither `start_node_id` nor `run`; a later step needs both, from the
-        step before it.
+        step before it. Carrying on from a call or text, `send_result` and `send_state` say what
+        it reported.
 
         Raises:
             ValueError: if the contact has no phone, or the step inputs don't fit together.
@@ -3776,9 +3777,9 @@ class AgentStudioProject:
                 "A later test step needs both the node to carry on from and the previous "
                 "step's run; a first step needs neither."
             )
-        outcome = self._call_outcome(call_result, tools_called)
+        outcome = self._send_outcome(send_result, send_state)
         if outcome is not None and run is None:
-            raise ValueError("Only a later test step can leave a call.")
+            raise ValueError("Only a later test step can say how a call or text went.")
         body: dict[str, Any] = {"contact": contact}
         if run is not None:
             missing = [
@@ -3793,7 +3794,7 @@ class AgentStudioProject:
                 "graphHash": run["graph_hash"],
             }
         if outcome is not None:
-            body["callOutcome"] = outcome
+            body["sendOutcome"] = outcome
         campaign = self.get_campaign(name)
         try:
             return self.api_handler.start_outbound_campaign_test_step(campaign.resource_id, body)
