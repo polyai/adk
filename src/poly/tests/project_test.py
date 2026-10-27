@@ -21,7 +21,7 @@ from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
-from poly.project import AgentStudioProject, DeploymentMode
+from poly.project import STATUS_FILE, AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
     AttributeKind,
@@ -2716,6 +2716,53 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.clear_command_queue.assert_called_once()
 
 
+class StatusFileWritesTest(unittest.TestCase):
+    """When reading the api_handler property and pushing write the status file."""
+
+    def setUp(self):
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        self.root = _copy_test_project(self)
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        self.api_handler = MagicMock(branch_id=self.project.branch_id)
+        self.api_handler.queue_resources.return_value = []
+        self.project._api_handler = self.api_handler
+        self.status_file = os.path.join(self.root, STATUS_FILE)
+
+    def _status_file_state(self) -> tuple[int, bytes]:
+        with open(self.status_file, "rb") as f:
+            return os.stat(self.status_file).st_mtime_ns, f.read()
+
+    def test_dry_run_push_leaves_the_status_file_untouched(self):
+        self.project.save_config()
+        before = self._status_file_state()
+        topic_file = os.path.join(self.root, "topics", "topic_1.yaml")
+        with open(topic_file, encoding="utf-8") as f:
+            contents = f.read()
+        with open(topic_file, "w", encoding="utf-8") as f:
+            f.write(contents.replace("uses global functions.", "edited locally.", 1))
+
+        success, message, _ = self.project.push_project(dry_run=True, parent_projection_json={})
+
+        self.assertTrue(success, message)
+        self.api_handler.queue_resources.assert_called_once()
+        self.assertEqual(self._status_file_state(), before)
+
+    def test_api_handler_saves_only_when_the_branch_changes(self):
+        save_config = patch.object(AgentStudioProject, "save_config").start()
+
+        self.project.api_handler
+        save_config.assert_not_called()
+
+        self.api_handler.branch_id = "BRANCH-new"
+        self.project.api_handler
+        self.project.api_handler
+
+        self.assertEqual(self.project.branch_id, "BRANCH-new")
+        save_config.assert_called_once()
+
+
 class StageSetDefaultCommandsTest(unittest.TestCase):
     """Tests for the set-default commands _stage_commands emits for handoffs and variants."""
 
@@ -2731,7 +2778,7 @@ class StageSetDefaultCommandsTest(unittest.TestCase):
         self.queued_commands = []
         self.api_handler.sync_client.queue_command.side_effect = self.queued_commands.append
 
-        # Reading the api_handler property saves the project config as a side effect,
+        # Reading the api_handler property saves the project config when the branch changes,
         # which would write _gen/.agent_studio_config into the fixture project
         patch.object(AgentStudioProject, "save_config").start()
         self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)

@@ -151,9 +151,11 @@ class AgentStudioProject:
                 self.project_id,
                 self.branch_id,
             )
-        self.branch_id = self._api_handler.branch_id
-        if self.branch_id:
-            self.save_config()  # To save branch if it changed (e.g. deleted in remote)
+        branch_id = self._api_handler.branch_id
+        if branch_id != self.branch_id:
+            self.branch_id = branch_id
+            if branch_id:
+                self.save_config()  # The branch changed, e.g. it was deleted in Agent Studio
         return self._api_handler
 
     def build_project_config(self) -> dict:
