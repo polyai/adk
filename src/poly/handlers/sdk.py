@@ -12,6 +12,7 @@ import logging
 import os
 import uuid
 import warnings
+from http import HTTPStatus
 from typing import Any, Optional
 from urllib.parse import quote
 
@@ -1149,10 +1150,16 @@ class SourcererSDK:
         except ValueError:
             body = None
         if not isinstance(body, dict):
+            text = response.text or ""
+            if text.lstrip().startswith("<"):
+                try:
+                    text = HTTPStatus(response.status_code).phrase
+                except ValueError:
+                    text = "Unexpected response"
             return SourcererAPIError(
-                f"API Error {response.status_code}: {response.text}",
+                f"API Error {response.status_code}: {text}",
                 status_code=response.status_code,
-                server_message=response.text or None,
+                server_message=text or None,
             )
         server_message = body.get("error_message") or body.get("error") or body.get("message")
         return SourcererAPIError(

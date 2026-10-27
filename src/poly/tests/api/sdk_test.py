@@ -386,6 +386,22 @@ class OutboundCampaignRequests(unittest.TestCase):
         self.assertIsNone(error.error_code)
         self.assertEqual(error.server_message, "Bad gateway")
 
+    def test_html_error_page_is_reduced_to_its_status(self):
+        page = (
+            b"<!DOCTYPE html>\n<html><body><pre>Cannot POST /x/CMPGN-1/validate</pre></body></html>"
+        )
+        error = self._error_from(make_mock_response(404, content=page))
+
+        self.assertEqual(error.status_code, 404)
+        self.assertEqual(error.server_message, "Not Found")
+        self.assertNotIn("<", str(error))
+
+    def test_html_error_page_with_an_unknown_status_still_reads_cleanly(self):
+        error = self._error_from(make_mock_response(520, content=b"<html>origin error</html>"))
+
+        self.assertEqual(error.status_code, 520)
+        self.assertEqual(error.server_message, "Unexpected response")
+
     def test_error_body_that_is_a_list_is_read_as_text(self):
         response = make_mock_response(400, json_body=["bad"], content=b'["bad"]')
 
