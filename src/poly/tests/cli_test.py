@@ -6713,6 +6713,24 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertIn("to live", confirm.call_args.args[0])
         self.post.assert_not_called()
 
+    def test_lifecycle_on_an_unknown_campaign_fails_before_asking(self):
+        """A name that matches no campaign fails straight away, without the live warning."""
+        with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_lifecycle(TEST_DIR, "publish", "Nope")
+
+        self.assertEqual(exit.exception.code, 1)
+        confirm.assert_not_called()
+        self.post.assert_not_called()
+
+    def test_test_on_an_unknown_campaign_fails_before_asking(self):
+        """test checks the campaign exists before warning that it will call the contact."""
+        with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_test(TEST_DIR, "Nope", phone="+15550100")
+
+        self.assertEqual(exit.exception.code, 1)
+        confirm.assert_not_called()
+        self.session.request.assert_not_called()
+
     def test_unknown_campaign_lists_the_known_ones(self):
         """An unknown name lists the campaigns that do exist."""
         with self.assertRaises(SystemExit):

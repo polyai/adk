@@ -496,6 +496,7 @@ class CampaignCommand(BaseCommand):
         contact, previous_run = cls._call(output_json, build_inputs)
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
+        cls._call(output_json, lambda: project.get_campaign(name))
 
         if not output_json and not force:
             if not questionary.confirm(
@@ -554,6 +555,7 @@ class CampaignCommand(BaseCommand):
         _, prompt, done_message = LIFECYCLE_ACTIONS[action]
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
+        cls._call(output_json, lambda: project.get_campaign(name))
         if not output_json and not force:
             if not questionary.confirm(
                 prompt.format(name=name), default=False, auto_enter=False
