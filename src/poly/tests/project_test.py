@@ -12,6 +12,7 @@ import shutil
 import tempfile
 import unittest
 from copy import deepcopy
+from datetime import datetime
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
@@ -8048,6 +8049,72 @@ class CreateCallSessionTest(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             self.project.create_call_session("draft")
         self.assertNotIn("super-secret-token", str(ctx.exception))
+
+
+class PullRemoteRenameTest(unittest.TestCase):
+    """Pulling a single-file resource that was renamed in Agent Studio."""
+
+    @staticmethod
+    def _topic_projection(name: str, content: str = "Opening hours") -> dict:
+        return {
+            "knowledgeBase": {
+                "topics": {
+                    "ids": ["TOPIC-1"],
+                    "entities": {
+                        "TOPIC-1": {
+                            "id": "TOPIC-1",
+                            "name": name,
+                            "actions": "",
+                            "content": content,
+                        }
+                    },
+                },
+                "uninstantiatedTopics": {"ids": [], "entities": {}},
+            }
+        }
+
+    def setUp(self):
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.project = AgentStudioProject(
+            region="us-1",
+            account_id="account",
+            project_id="project",
+            root_path=self.root,
+            resources={},
+            last_updated=datetime.now(),
+            branch_id="main",
+            file_structure_info={},
+        )
+        self.project.pull_project(projection_json=self._topic_projection("Hours"))
+
+    def test_remote_rename_moves_the_file(self):
+        """The file moves to the new name and nothing is left to push."""
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._topic_projection("Opening hours")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(os.listdir(os.path.join(self.root, "topics")), ["opening_hours.yaml"])
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_remote_rename_keeps_a_local_edit(self):
+        """A local edit moves with the file instead of being lost, which would delete it on push."""
+        path = os.path.join(self.root, "topics", "hours.yaml")
+        with open(path, encoding="utf-8") as file:
+            contents = file.read()
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(contents.replace("Opening hours", "Open 9 to 5"))
+
+        self.project.pull_project(projection_json=self._topic_projection("Opening hours"))
+
+        with open(
+            os.path.join(self.root, "topics", "opening_hours.yaml"), encoding="utf-8"
+        ) as file:
+            self.assertIn("Open 9 to 5", file.read())
+        self.assertFalse(os.path.exists(path))
 
 
 if __name__ == "__main__":
