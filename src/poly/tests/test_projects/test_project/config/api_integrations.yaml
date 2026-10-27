@@ -15,3 +15,6 @@ api_integrations:
   - name: get_confirmation_status
     method: GET
     resource: /bookings/{booking_id}/confirmation-status
+    description: Confirmation status of a booking
+    headers:
+      Accept: application/json

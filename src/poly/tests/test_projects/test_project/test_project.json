@@ -1186,7 +1186,11 @@
             "resource_id": "",
             "name": "get_confirmation_status",
             "method": "GET",
-            "resource": "/bookings/{booking_id}/confirmation-status"
+            "resource": "/bookings/{booking_id}/confirmation-status",
+            "description": "Confirmation status of a booking",
+            "headers": {
+              "Accept": "application/json"
+            }
           }
         ]
       }

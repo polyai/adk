@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import ClassVar, Optional
 
 import poly.resources.resource_utils as utils
@@ -21,6 +21,7 @@ from poly.handlers.protobuf.api_integrations_pb2 import (
     ApiIntegrationOperation_Delete,
     ApiIntegrationOperation_Update,
     Environments,
+    OperationHeaders,
 )
 from poly.resources.resource import (
     MultiResourceYamlResource,
@@ -49,6 +50,22 @@ AVAILABLE_AUTH_TYPES = {
 
 # Matches an empty string (no URL configured) or a valid http(s) base URL
 URL_PATTERN = re.compile(r"^(https?://[^\s]+)?$")
+
+# The platform's rules for an operation's headers and description, mirrored so a bad
+# push fails in `poly validate` rather than on the server.
+HEADER_NAME_PATTERN = re.compile(r"^[!#$%&'*+^_`|~0-9A-Za-z-]+$")
+# Authorization comes from the environment's auth config and Host from its base URL.
+RESERVED_HEADER_NAMES = {"authorization", "host"}
+MAX_OPERATION_HEADERS = 50
+HEADER_VALUE_MAX = 4096
+OPERATION_DESCRIPTION_MAX = 1000
+
+
+def _is_valid_header_value(value: str) -> bool:
+    """ASCII with no control characters other than tab, and no leading or trailing space."""
+    return value == value.strip() and all(
+        0x20 <= ord(char) < 0x7F or char == "\t" for char in value
+    )
 
 
 def _default_config() -> "ApiIntegrationConfig":
@@ -209,6 +226,8 @@ class ApiIntegrationOperation(SubResource):
     integration_id: str = (
         ""  # Set by parent when yielding from get_new_updated_deleted_subresources
     )
+    description: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
 
     def validate(self) -> None:
         """Validate the operation's fields."""
@@ -227,34 +246,109 @@ class ApiIntegrationOperation(SubResource):
             raise ValueError(
                 f"Operation '{self.name}': resource '{self.resource}' is not a valid URL path."
             )
+        errors = self._description_errors() + self._header_errors()
+        if errors:
+            raise ValueError("; ".join(errors))
+
+    def _description_errors(self) -> list[str]:
+        label = f"Operation '{self.name}': "
+        if not isinstance(self.description, str):
+            return [f"{label}description must be text."]
+        if len(self.description) > OPERATION_DESCRIPTION_MAX:
+            return [f"{label}description is longer than {OPERATION_DESCRIPTION_MAX} characters."]
+        return []
+
+    def _header_errors(self) -> list[str]:
+        """Every header problem at once, so one validate run reports them all."""
+        label = f"Operation '{self.name}': "
+        if not isinstance(self.headers, dict):
+            return [f"{label}headers must be a mapping of header name to value."]
+        errors: list[str] = []
+        if len(self.headers) > MAX_OPERATION_HEADERS:
+            errors.append(
+                f"{label}has {len(self.headers)} headers; the limit is {MAX_OPERATION_HEADERS}."
+            )
+        seen: set[str] = set()
+        for header_name, value in self.headers.items():
+            if not HEADER_NAME_PATTERN.fullmatch(header_name):
+                errors.append(
+                    f"{label}header name '{header_name}' is not a valid HTTP header name."
+                )
+            lowered = header_name.lower()
+            if lowered in RESERVED_HEADER_NAMES:
+                errors.append(
+                    f"{label}header '{header_name}' is set from the environment config "
+                    "and cannot be set per operation."
+                )
+            if lowered in seen:
+                errors.append(
+                    f"{label}duplicate header '{header_name}' (header names are case-insensitive)."
+                )
+            seen.add(lowered)
+            if len(value) > HEADER_VALUE_MAX:
+                errors.append(
+                    f"{label}header '{header_name}' value is longer than "
+                    f"{HEADER_VALUE_MAX} characters."
+                )
+            elif not _is_valid_header_value(value):
+                errors.append(
+                    f"{label}header '{header_name}' value cannot contain line breaks, control "
+                    "characters or non-ASCII characters, or start or end with a space."
+                )
+        return errors
 
     @property
     def command_type(self) -> str:
         return "api_integration_operation"
 
+    def same_definition(self, other: "ApiIntegrationOperation") -> bool:
+        """Whether both operations describe the same platform state, ids aside."""
+        return (
+            self.name == other.name
+            and self.method == other.method
+            and self.resource == other.resource
+            and self.description == other.description
+            and self.headers == other.headers
+        )
+
     def to_yaml_dict(self) -> dict:
-        return {
+        data = {
             "name": self.name,
             "method": self.method,
             "resource": self.resource,
         }
+        if self.description:
+            data["description"] = self.description
+        if self.headers:
+            # A non-mapping is kept as written so validate() reports it, rather than the
+            # hash or the diff crashing first.
+            data["headers"] = dict(self.headers) if isinstance(self.headers, dict) else self.headers
+        return data
 
     def build_create_proto(self) -> ApiIntegrationOperation_Create:
-        return ApiIntegrationOperation_Create(
+        proto = ApiIntegrationOperation_Create(
             id=self.resource_id or str(uuid.uuid4()),
             name=self.name,
             method=self.method,
             resource=self.resource,
             integration_id=self.integration_id,
+            headers=self.headers,
         )
+        if self.description:
+            proto.description = self.description
+        return proto
 
     def build_update_proto(self) -> ApiIntegrationOperation_Update:
+        # The YAML is the full desired state, so every field is sent: an empty wrapper or
+        # an empty description clears what the platform holds, where an unsent one keeps it.
         return ApiIntegrationOperation_Update(
             id=self.resource_id,
             name=self.name,
             method=self.method,
             resource=self.resource,
             integration_id=self.integration_id,
+            description=self.description,
+            headers=OperationHeaders(entries=self.headers),
         )
 
     def build_delete_proto(self) -> ApiIntegrationOperation_Delete:
@@ -268,11 +362,17 @@ class ApiIntegrationOperation(SubResource):
         if not data:
             return cls(resource_id="", name="")
         data = utils.convert_keys_to_snake_case(data)
+        headers = data.get("headers") or {}
+        if isinstance(headers, dict):
+            # map<string, string> on the wire; anything else is left for validate() to report.
+            headers = {str(key): utils.header_value(value) for key, value in headers.items()}
         return cls(
             resource_id=data.get("resource_id") or data.get("id", ""),
             name=data.get("name", ""),
             method=data.get("method", "").upper(),
             resource=data.get("resource", ""),
+            description=data.get("description") or "",
+            headers=headers,
         )
 
 
@@ -462,35 +562,20 @@ class ApiIntegration(MultiResourceYamlResource):
             # For genuinely new ops (no match), generate a stable UUID now so that multiple
             # new ops don't all collide on the "" key when stored in new_subresources.
             effective_id = op_obj.resource_id or (old.resource_id if old else str(uuid.uuid4()))
-            op_with_parent = ApiIntegrationOperation(
-                resource_id=effective_id,
-                name=op_obj.name,
-                method=op_obj.method,
-                resource=op_obj.resource,
-                integration_id=self.resource_id,
+            # replace() carries every field, so a new one can't be silently dropped here.
+            op_with_parent = replace(
+                op_obj, resource_id=effective_id, integration_id=self.resource_id
             )
             if old is None:
                 new_ops.append(op_with_parent)
             else:
                 matched_old_ids.add(old.resource_id)
-                if (
-                    old.name != op_obj.name
-                    or old.method != op_obj.method
-                    or old.resource != op_obj.resource
-                ):
+                if not old.same_definition(op_obj):
                     updated_ops.append(op_with_parent)
 
         for old in old_ops_list:
             if old.resource_id not in matched_old_ids:
-                deleted_ops.append(
-                    ApiIntegrationOperation(
-                        resource_id=old.resource_id,
-                        name=old.name,
-                        method=old.method,
-                        resource=old.resource,
-                        integration_id=self.resource_id,
-                    )
-                )
+                deleted_ops.append(replace(old, integration_id=self.resource_id))
 
         # Check environment configs (sandbox, pre_release, live) for updates
         env_names = ("sandbox", "pre_release", "live")
