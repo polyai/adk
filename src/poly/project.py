@@ -103,6 +103,11 @@ class DeploymentMode(Enum):
     RELEASES_BRANCHES = "releases_branches"
 
 
+def _non_empty_types(resources: ResourceMap) -> ResourceMap:
+    """Return resources without the types that have none."""
+    return {resource_type: typed for resource_type, typed in resources.items() if typed}
+
+
 @dataclass
 class AgentStudioProject:
     """Dataclass representing an Agent Studio Project"""
@@ -1000,6 +1005,18 @@ class AgentStudioProject:
         original_slim_resources: list[ResourceMapping],
         incoming_slim_resources: list[ResourceMapping],
     ) -> list[str]:
+        # Nothing changed upstream, so every merge would keep the local side. Types with
+        # no resources are left out: the status file and a projection record them differently.
+        if (
+            not force
+            and _non_empty_types(original_resources) == _non_empty_types(incoming_resources)
+            and original_slim_resources == incoming_slim_resources
+        ):
+            if on_save:
+                total = sum(len(res) for res in incoming_resources.values())
+                on_save(total, total)
+            return []
+
         files_with_conflicts = []
 
         # Generate resource mappings
