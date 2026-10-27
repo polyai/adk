@@ -392,7 +392,13 @@ class SyncClientHandler:
             logger.error(f"Failed to sync branch '{self.sdk.branch_id}': {e}")
             return False, [], [{"path": [], "message": str(e)}]
 
-        if result.get("hasConflicts", False) or result.get("errors", []):
+        # Agent Studio answers a sync with conflicts as 200 {"outcome": "conflicts", ...}, with no
+        # hasConflicts (a merge with conflicts gets a 400 that has it).
+        if (
+            result.get("hasConflicts", False)
+            or result.get("outcome") == "conflicts"
+            or result.get("errors", [])
+        ):
             logger.info(
                 f"Failed to sync branch '{self.sdk.branch_id}' to {len(result.get('conflicts', []))} conflicts and {len(result.get('errors', []))} errors"
             )

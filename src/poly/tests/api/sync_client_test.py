@@ -250,6 +250,29 @@ class MergeBranch(unittest.TestCase):
         self.assertEqual(conflicts, [])
         self.assertEqual(errors, [{"path": [], "message": "API Error 400: boom"}])
 
+    def test_sync_conflicts_are_returned_not_reported_as_synced(self):
+        """Agent Studio answers a sync with conflicts as 200 with outcome "conflicts"."""
+        handler = self._handler_on_branch()
+        conflict = {"path": ["topics", "t-1", "content"], "type": "modify"}
+        handler._sdk.sync_branch.return_value = {
+            "outcome": "conflicts",
+            "conflicts": [conflict],
+            "value": {},
+            "errors": [],
+        }
+
+        success, conflicts, errors = handler.sync_branch()
+
+        self.assertFalse(success)
+        self.assertEqual(conflicts, [conflict])
+        self.assertEqual(errors, [])
+
+    def test_sync_without_conflicts_succeeds(self):
+        handler = self._handler_on_branch()
+        handler._sdk.sync_branch.return_value = {"sequence": "12", "snapshotKey": "snap-1"}
+
+        self.assertEqual(handler.sync_branch(), (True, [], []))
+
 
 class GetBranchCallInfo(unittest.TestCase):
     """Tests for SyncClientHandler.get_branch_call_info."""

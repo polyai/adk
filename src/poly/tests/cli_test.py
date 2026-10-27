@@ -817,6 +817,71 @@ class BranchCurrentTest(unittest.TestCase):
         mock_json_print.assert_called_once_with({"current_branch": "main", "parent_branch": None})
 
 
+class BranchSwitchTest(unittest.TestCase):
+    """Tests for 'poly branch switch <name>' and its --keep-files / --create / --from flags."""
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.branch.load_project").start()
+        self.proj = MagicMock()
+        self.proj.get_branches.return_value = ("main", {"main": {"branchId": "main"}})
+        self.proj.switch_branch.return_value = (True, {})
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.output.console.plain")
+    @patch("poly.output.console.success")
+    def test_flags_are_parsed_and_forwarded(self, mock_success, mock_plain):
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(
+            ["branch", "switch", "feature-b", "--create", "--from", "main", "--keep-files"]
+        )
+
+        BranchCommand.run(args)
+
+        kwargs = self.proj.switch_branch.call_args.kwargs
+        self.assertEqual(self.proj.switch_branch.call_args[0][0], "feature-b")
+        self.assertTrue(kwargs["keep_files"])
+        self.assertTrue(kwargs["create"])
+        self.assertEqual(kwargs["source_branch_name"], "main")
+        self.assertIn("Created branch 'feature-b'", mock_success.call_args[0][0])
+        self.assertIn("poly push", mock_plain.call_args[0][0])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output_reports_whether_the_branch_was_created(self, mock_json):
+        BranchCommand.branch_switch(
+            TEST_DIR, "feature-b", output_json=True, keep_files=True, create=True
+        )
+
+        mock_json.assert_called_once_with(
+            {"success": True, "branch_name": "feature-b", "created": True}
+        )
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output_reports_an_existing_branch_as_not_created(self, mock_json):
+        self.proj.get_branches.return_value = ("main", {"feature-b": {"branchId": "id-b"}})
+
+        BranchCommand.branch_switch(TEST_DIR, "feature-b", output_json=True, create=True)
+
+        mock_json.assert_called_once_with(
+            {"success": True, "branch_name": "feature-b", "created": False}
+        )
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output_reports_validation_errors(self, mock_json):
+        self.proj.switch_branch.side_effect = ValueError("Branch feature-b does not exist.")
+
+        with self.assertRaises(SystemExit) as exit_ctx:
+            BranchCommand.branch_switch(TEST_DIR, "feature-b", output_json=True)
+
+        self.assertEqual(exit_ctx.exception.code, 1)
+        mock_json.assert_called_once_with(
+            {"success": False, "error": "Branch feature-b does not exist."}
+        )
+
+
 class BranchSwitchInteractiveTest(unittest.TestCase):
     """Tests for BranchCommand.branch_switch's interactive picker (no branch_name given)."""
 
@@ -903,6 +968,15 @@ class BranchSwitchInteractiveTest(unittest.TestCase):
 
         self.proj.switch_branch.assert_not_called()
         self.assertIn("No branches found", mock_plain.call_args[0][0])
+
+
+# One field that both the parent and the branch changed.
+_GREETING_CONFLICT = {
+    "path": ["topics", "greeting", "content"],
+    "baseValue": "Hello",
+    "oursValue": "Hello from the parent",
+    "theirsValue": "Hello from the branch",
+}
 
 
 class BranchMergeTest(unittest.TestCase):
@@ -1004,6 +1078,24 @@ class BranchMergeTest(unittest.TestCase):
         mock_confirm.assert_not_called()
         self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
         self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
+
+    @patch("questionary.select")
+    def test_conflict_prompt_names_the_parent_branch(self, mock_select):
+        """The conflict menu offers the branch's parent, which for a sub-branch is its release."""
+        mock_select.return_value.ask.return_value = None
+        self.proj.merge_branch.return_value = (False, [_GREETING_CONFLICT], [])
+
+        for branch, parent in [("feature-a-child", "Release 1"), ("feature-a", "main")]:
+            with self.subTest(branch=branch):
+                self._set_current_branch(branch)
+
+                with self.assertRaises(SystemExit):
+                    BranchCommand.branch_merge(
+                        TEST_DIR, message="ship it", interactive=True, force=True
+                    )
+
+                choices = [c["name"] for c in mock_select.call_args.kwargs["choices"]]
+                self.assertIn(f"Use parent — {parent}", choices)
 
 
 class BranchSyncTest(unittest.TestCase):
@@ -1131,6 +1223,31 @@ class BranchSyncTest(unittest.TestCase):
 
         self.proj.sync_branch.assert_called_once_with(conflict_resolutions=resolutions)
         mock_success.assert_called_once()
+
+    @patch("questionary.select")
+    def test_conflict_prompt_names_the_parent_branch(self, mock_select):
+        """Syncing a sub-branch offers its release as the parent side, not main."""
+        mock_select.return_value.ask.return_value = None
+        self.proj.get_current_branch.return_value = "feature-a-child"
+        self.proj.get_branches.return_value = (
+            "feature-a-child",
+            dict(BranchMergeTest.BRANCH_TREE),
+        )
+        self.proj.sync_branch.return_value = (False, [_GREETING_CONFLICT], [])
+
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_sync(TEST_DIR, interactive=True)
+
+        choices = [c["name"] for c in mock_select.call_args.kwargs["choices"]]
+        self.assertIn("Use parent — Release 1", choices)
+
+    @patch("poly.output.console.success")
+    def test_sync_without_conflicts_does_not_look_up_the_parent(self, mock_success):
+        """Only the conflict prompt needs the parent's name, so a clean sync skips the lookup."""
+        BranchCommand.branch_sync(TEST_DIR)
+
+        mock_success.assert_called_once()
+        self.proj.get_branches.assert_not_called()
 
 
 class BranchMergeConflictHelpersTest(unittest.TestCase):

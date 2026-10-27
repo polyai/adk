@@ -20,6 +20,7 @@ from poly.output.console import (
     print_branch_history,
     print_experiment_detail,
     print_experiments,
+    print_merge_conflict_interactive_header,
     print_releases_branches,
     resolve_parent_branch_label,
 )
@@ -565,6 +566,41 @@ class MergeLeafDiffsTest(unittest.TestCase):
         )
 
         self.assertEqual(diffs, [("exampleQueries", [{"query": "one"}], [{"query": "two"}])])
+
+
+class PrintMergeConflictInteractiveHeaderTest(unittest.TestCase):
+    """Tests for print_merge_conflict_interactive_header, the panel above each conflict prompt."""
+
+    def _render(self, parent_value, branch_value) -> str:
+        with console.capture() as capture:
+            print_merge_conflict_interactive_header(
+                field_path="topics/greeting/content",
+                resource_key="topics/greeting",
+                conflict_index=1,
+                conflict_total=1,
+                auto_mergeable=False,
+                heavy=False,
+                base_value="Hello",
+                branch_label="feature-a-child",
+                branch_value=branch_value,
+                parent_label="Release 1",
+                parent_value=parent_value,
+            )
+        return capture.get()
+
+    def test_labels_the_parent_value_with_the_parent_branch(self):
+        """The parent's value is labelled with the parent branch's name, not as main."""
+        output = self._render("Hello from the parent", "Hello from the branch")
+
+        self.assertIn("Parent (Release 1)", output)
+        self.assertNotIn("Main", output)
+
+    def test_labels_each_differing_field_with_the_parent_branch(self):
+        """A whole-resource conflict labels each differing field's parent value the same way."""
+        output = self._render({"content": "From the parent"}, {"content": "From the branch"})
+
+        self.assertIn("Parent (Release 1)", output)
+        self.assertNotIn("Main", output)
 
 
 _EXPERIMENT = {

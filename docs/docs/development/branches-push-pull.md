@@ -24,6 +24,14 @@ Branches are created from `main`, and the new branch is created on the platform 
 
 `poly branch switch` behaves differently: it refuses to move while you have uncommitted changes, then replaces your local files with the target branch's state. So creating carries your work forward, and switching requires a clean tree.
 
+To switch while keeping your files, use `poly branch switch <branch_name> --keep-files`; your next `poly push` sends them to that branch. This is useful when the project lives in a git repo and each git branch maps to an Agent Studio branch of the same name: after `git switch`, run
+
+```bash
+poly branch switch "$(git branch --show-current)" --create --from main --keep-files
+```
+
+to track the matching branch, creating it from `main` if it doesn't exist yet.
+
 The ADK reflects the no-`main` rule throughout — `poly branch diff`, `merge`, `sync`, `tag`, and `untag` all refuse to run while you are on `main`. If a command tells you it does not support `main`, the fix is to switch to a branch.
 
 Branches exist on the platform, not just locally — `poly branch create` creates the branch in Agent Studio, so a teammate can switch to it, and you can inspect it in the web UI. This also means the branch you are on determines what `poly push` writes to and what `poly chat` talks to.
@@ -93,6 +101,16 @@ poly pull --format    # format all three sides before merging
 !!! info "A deleted local file stays deleted"
 
     If a file is missing locally but present in the tracked state, `poly pull` treats that as an intentional deletion and does not restore it. Files that are new on the remote are written directly, since there is no local version to merge against.
+
+## Syncing with the parent branch
+
+When the parent branch has moved on, bring its changes into your branch without merging back:
+
+```bash
+poly branch sync
+```
+
+Conflicts are resolved the same way as for a merge, with `--interactive` or `--resolutions` — see [`poly branch sync`](../reference/cli/branch.md#poly-branch-sync).
 
 ## Merging changes
 

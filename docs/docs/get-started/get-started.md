@@ -39,7 +39,7 @@ poly --help
 
 !!! tip "Optional — install the VS Code / Cursor extension"
 
-    If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../tooling/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.
+    If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../tooling/editor-extension.md) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.
 
 ## Step 2 — Run `poly setup`
 
