@@ -101,6 +101,11 @@ class FunctionCallArgumentAssertion:
     value_type: str
     assertion_type: str = "equals"
 
+    def __post_init__(self):
+        # The projection and YAML can hold a bool or number here; the proto field is a string.
+        if self.expected_value is not None and not isinstance(self.expected_value, str):
+            self.expected_value = json.dumps(self.expected_value)
+
     def to_yaml_dict(self) -> dict:
         return {
             "parameter_name": self.parameter_name,
