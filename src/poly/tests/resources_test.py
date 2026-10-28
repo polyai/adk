@@ -10197,7 +10197,22 @@ class TestCaseTests(unittest.TestCase):
         test_case = self._test_case_with_simulated_at("2026-01-15T09:30:00Z")
         for proto in (test_case.build_create_proto(), test_case.build_update_proto()):
             self.assertTrue(proto.HasField("simulated_at"))
-            self.assertEqual(proto.simulated_at, "2026-01-15T09:30:00Z")
+            self.assertEqual(proto.simulated_at, "2026-01-15T09:30:00.000Z")
+
+    def test_simulated_at_in_protos_is_utc_with_milliseconds(self):
+        cases = {
+            "2026-01-15T09:30:00+01:00": "2026-01-15T08:30:00.000Z",
+            "2026-01-15T09:30:00.5Z": "2026-01-15T09:30:00.500Z",
+            "2026-01-15 09:30": "2026-01-15T09:30:00.000Z",
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                proto = self._test_case_with_simulated_at(value).build_create_proto()
+                self.assertEqual(proto.simulated_at, expected)
+
+    def test_simulated_at_in_yaml_keeps_its_form(self):
+        test_case = self._test_case_with_simulated_at("2026-01-15T09:30:00.000Z")
+        self.assertEqual(test_case.to_yaml_dict()["simulated_at"], "2026-01-15T09:30:00Z")
 
     def test_read_simulated_at_from_projection(self):
         projection = {
