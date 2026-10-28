@@ -1,6 +1,282 @@
 # CHANGELOG
 
 
+## v0.74.0 (2026-10-28)
+
+### Features
+
+- Sync operation headers and description ([#388](https://github.com/polyai/adk/pull/388),
+  [`b2c74c1`](https://github.com/polyai/adk/commit/b2c74c1f4a0f5fba845d2a0ca7cc4bb5fd3c97ea))
+
+## Summary
+
+`poly pull` and `poly push` now carry an API integration operation's `description` and `headers`,
+  which Agent Studio has had for a while but the ADK dropped.
+
+## Motivation
+
+An operation renamed in the YAML is recreated on push, and until now that recreate lost the
+  operation's headers and description. Agents kept as code also had no way to set either.
+
+## Changes
+
+- Operations in `config/api_integrations.yaml` accept `description` and a `headers` mapping, written
+  as `name`, `description`, `method`, `resource`, `headers`. Both optional fields are omitted from
+  the file when empty, and removing one clears it in Agent Studio on the next push. - Header values
+  are text. `x-flag: true` reaches the platform as `"true"`; any other value YAML types for you
+  (`1.10`, `0123`, a list or a mapping) fails `poly validate` with a request to quote it, since its
+  original text is already lost. - `poly validate` applies the platform's header rules: token names,
+  never `Authorization` or `Host`, ASCII values up to 4096 characters with no edge spaces, at most
+  50 headers, no duplicates ignoring case; and a description of at most 1000 characters. Like every
+  other resource, validation stops at the first problem. - The operation diff copies the whole
+  operation, so a field can no longer be dropped from a create or a rename. - Docs: the resource
+  page and the `poly docs` copy gain the two fields, an example and the validation rules.
+
+## Test strategy
+
+- [x] Added/updated unit tests - `resources_test.py`: projection parsing with text header values,
+  YAML round-trip, create and update protos including the clearing update, diff detection for a
+  header-only and a description-only change, creates/updates/deletes keeping every field, and one
+  test per validation rule, including unquoted non-text header values. - `project_test.py`,
+  `ApiIntegrationSyncTest` on a real temp project: pull writes the fields only where set, pull →
+  push sends nothing, a header edit sends the full header map, removing both sends a clearing
+  update, a reserved header or an unquoted `1.10` header value fails the push locally. - The fixture
+  project's operation gained both fields. - [x] Manual CLI testing (`poly <command>`) - [x] Tested
+  against a live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+`mkdocs build --strict` passes on this branch. No skill describes operation fields, so none changed.
+
+Manual run against a live project, on a test branch: `poly pull` wrote an existing operation's
+  `Accept` header; `poly push` straight after reported no changes; adding a description and a header
+  to another operation pushed and read back identically from the platform's projection; removing the
+  header pushed an empty header map (the projection showed `{}`); a second `poly pull` left `poly
+  status` clean; `poly validate` and `poly push` both refused an `Authorization` header locally.
+
+---------
+
+Co-authored-by: Claude Fable 5.1 <noreply@anthropic.com>
+
+
+## v0.73.5 (2026-10-27)
+
+### Bug Fixes
+
+- Keep the blank lines after a function's module docstring
+  ([#386](https://github.com/polyai/adk/pull/386),
+  [`13e2726`](https://github.com/polyai/adk/commit/13e27260123198520e1d155715ba76c6d4c37d4b))
+
+## Summary
+
+Function code now survives being written to disk and read back unchanged. Before, functions with a
+  module docstring followed by an unusual gap, or with code starting with blank lines, were pushed
+  as updates on every push, even when nobody had edited them.
+
+## Motivation
+
+`Function.make_pretty` stripped every newline after a module docstring and inserted the generated
+  import header with a fixed gap. `from_pretty` removes only the header line, so the code came back
+  with that fixed gap, not the original one. Ruff, for example, puts two blank lines before a
+  top-level `def`. Separately, reading a file has always dropped blank lines at the very start of
+  the code, so code stored with leading blank lines never compared equal to its file. `push_project`
+  compares the code, so these functions produced spurious `update_function` and
+  `update_flow_transition_function` commands, and pushes looked like they touched functions nobody
+  changed.
+
+## Changes
+
+- `make_pretty` splits the original newlines after a docstring around the header line, so
+  `from_pretty` gives back the same gap. - `Function` drops leading blank lines from its code when
+  it is built, the same way flow step prompts are stripped, so code from the projection or an older
+  status file compares equal to its file. - Functions that already round-tripped render exactly as
+  before. Only functions that were changed by the round trip render differently.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New tests: code with 1 to 4 newlines after a docstring, followed by a `def` or by imports, survives
+  `make_pretty` then `from_pretty` unchanged. The common one-blank-line case still renders as
+  before. A function with two blank lines after its docstring, written to disk and pushed with no
+  edits, reports no changes. Code starting with blank lines round-trips once they are dropped. The
+  round-trip and push tests fail without the change.
+
+Across copies of 80 real projects (7,202 functions), the functions that didn't survive the round
+  trip went from 33 in 11 projects to none. All 474 flow function steps round-trip too.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- Load projects whose status file has null file structure info
+  ([#387](https://github.com/polyai/adk/pull/387),
+  [`58c7d79`](https://github.com/polyai/adk/commit/58c7d7945538353eb8b3ab77cb806fc3a8145457))
+
+## Summary
+
+Projects whose status file stores `"file_structure_info": null` now load again instead of crashing
+  with `AttributeError: 'NoneType' object has no attribute 'values'`.
+
+## Motivation
+
+Status files written by older ADK versions can contain `"file_structure_info": null`. The flow step
+  resource ID migration read that key with `status_dict.get("file_structure_info", {})`, which
+  returns `None` when the key is present with a null value, so any command that loads such a project
+  failed in the migration.
+
+## Changes
+
+- `migrate_flow_step_resource_ids` treats a null `file_structure_info` the same as a missing one. -
+  Added a test that runs the migration on a status dict with `"file_structure_info": None`.
+
+The other status-file keys the migrations read (`resources` and the per-type resource maps) are
+  always written as objects, so they don't need the same guard.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+The new test fails with the original `AttributeError` without the fix and passes with it.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+### Performance Improvements
+
+- Skip the pull merge when nothing changed upstream ([#384](https://github.com/polyai/adk/pull/384),
+  [`76e7f7c`](https://github.com/polyai/adk/commit/76e7f7c579cf5fb8d927cef16e1a05901db1c87c))
+
+## Summary
+
+`poly pull` and the merge step of `poly push` now skip the three-way merge when nothing has changed
+  upstream since the last pull, instead of rendering and merging every resource only to keep the
+  local side.
+
+## Motivation
+
+A non-force pull renders the base, local and incoming version of every resource and merges them,
+  even when base and incoming are identical and the merge can only return the local file.
+  Multi-resource YAML files are rendered three times, and YAML round-trip dumping dominates the
+  cost. Every plain `poly push` pays this before it diffs, as does any tool that pushes with a
+  projection from the same pull it last synced.
+
+## Changes
+
+- `_update_pulled_resources` returns early, with no conflicts, when it isn't a force pull and the
+  incoming resources and slim resources equal the base. - Resource types with no resources are
+  ignored in that comparison. A projection leaves them out while the status file loads them as
+  empty, so without this the shortcut would never match on most projects. - When anything has
+  changed upstream, including a resource type the last pull didn't know about, the full merge runs
+  as before. - `on_save` still reports `total/total` when the merge is skipped.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New tests: an unchanged pull leaves the project tree byte-identical and runs no merges, including
+  when the status file has unloaded empty types that the projection leaves out. A plain push against
+  an unchanged projection queues the same resources as a force push, and a single remote change is
+  still merged before pushing. One existing test that counted a merge on an unchanged file now
+  asserts no merge runs.
+
+Against a live project, the status file round trip was checked to compare equal.
+
+Timed the merge step of an unchanged pull on 56 real projects: p50 0.39 s, p90 1.22 s and max 1.96 s
+  before, under 2 ms after on every project. The largest projects (2-5 MB of resources) averaged
+  about 1 s before.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- Stop rewriting the status file on every api_handler access
+  ([#385](https://github.com/polyai/adk/pull/385),
+  [`c01c54c`](https://github.com/polyai/adk/commit/c01c54cb8c534e630ba6062da15d0f868d9964df))
+
+## Summary
+
+Reading `AgentStudioProject.api_handler` no longer rewrites the status file every time. It saves
+  only when the branch reported by the API handler has actually changed, so a dry-run push no longer
+  writes to disk at all.
+
+## Motivation
+
+The property called `save_config()` on every access, which serialises the whole status to JSON and
+  base64 and writes it out. A single push reads the property several times, so large projects paid
+  for repeated full rewrites of a multi-megabyte file, and a dry run, which should have no side
+  effects, still changed the status file.
+
+## Changes
+
+- `api_handler` saves the status file only when the handler's `branch_id` differs from the
+  project's, for example when the branch was deleted in Agent Studio. - `resource_to_dict` caches
+  each class's `__init__` parameter names instead of calling `inspect.signature` for every resource
+  it serialises.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New tests: a dry-run push with a local edit leaves the status file byte-identical with the same
+  modification time, and reading `api_handler` saves once when the branch changes and not otherwise.
+  Both fail without the change.
+
+On copies of real projects, a dry-run push on a 3.9 MB project rewrote the status file 3 times (0.10
+  s) before and not at all after.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.73.4 (2026-10-27)
 
 ### Bug Fixes
