@@ -1,6 +1,72 @@
 # CHANGELOG
 
 
+## v0.74.0 (2026-10-28)
+
+### Features
+
+- Sync operation headers and description ([#388](https://github.com/polyai/adk/pull/388),
+  [`b2c74c1`](https://github.com/polyai/adk/commit/b2c74c1f4a0f5fba845d2a0ca7cc4bb5fd3c97ea))
+
+## Summary
+
+`poly pull` and `poly push` now carry an API integration operation's `description` and `headers`,
+  which Agent Studio has had for a while but the ADK dropped.
+
+## Motivation
+
+An operation renamed in the YAML is recreated on push, and until now that recreate lost the
+  operation's headers and description. Agents kept as code also had no way to set either.
+
+## Changes
+
+- Operations in `config/api_integrations.yaml` accept `description` and a `headers` mapping, written
+  as `name`, `description`, `method`, `resource`, `headers`. Both optional fields are omitted from
+  the file when empty, and removing one clears it in Agent Studio on the next push. - Header values
+  are text. `x-flag: true` reaches the platform as `"true"`; any other value YAML types for you
+  (`1.10`, `0123`, a list or a mapping) fails `poly validate` with a request to quote it, since its
+  original text is already lost. - `poly validate` applies the platform's header rules: token names,
+  never `Authorization` or `Host`, ASCII values up to 4096 characters with no edge spaces, at most
+  50 headers, no duplicates ignoring case; and a description of at most 1000 characters. Like every
+  other resource, validation stops at the first problem. - The operation diff copies the whole
+  operation, so a field can no longer be dropped from a create or a rename. - Docs: the resource
+  page and the `poly docs` copy gain the two fields, an example and the validation rules.
+
+## Test strategy
+
+- [x] Added/updated unit tests - `resources_test.py`: projection parsing with text header values,
+  YAML round-trip, create and update protos including the clearing update, diff detection for a
+  header-only and a description-only change, creates/updates/deletes keeping every field, and one
+  test per validation rule, including unquoted non-text header values. - `project_test.py`,
+  `ApiIntegrationSyncTest` on a real temp project: pull writes the fields only where set, pull →
+  push sends nothing, a header edit sends the full header map, removing both sends a clearing
+  update, a reserved header or an unquoted `1.10` header value fails the push locally. - The fixture
+  project's operation gained both fields. - [x] Manual CLI testing (`poly <command>`) - [x] Tested
+  against a live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+`mkdocs build --strict` passes on this branch. No skill describes operation fields, so none changed.
+
+Manual run against a live project, on a test branch: `poly pull` wrote an existing operation's
+  `Accept` header; `poly push` straight after reported no changes; adding a description and a header
+  to another operation pushed and read back identically from the platform's projection; removing the
+  header pushed an empty header map (the projection showed `{}`); a second `poly pull` left `poly
+  status` clean; `poly validate` and `poly push` both refused an `Authorization` header locally.
+
+---------
+
+Co-authored-by: Claude Fable 5.1 <noreply@anthropic.com>
+
+
 ## v0.73.5 (2026-10-27)
 
 ### Bug Fixes
