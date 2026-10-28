@@ -87,7 +87,9 @@ class VoiceBargeInConfig(SubResource):
     """The barge_in section, pushed as the voice channel's barge-in config.
 
     The platform merges a barge-in update into what it has, so fields left out of the proto
-    keep their stored value.
+    keep their stored value. Clearing a field therefore takes a reset followed by an update;
+    that reset carries the section being updated. A reset without one would remove the
+    section, which isn't allowed: the project would fall back to its legacy barge-in flag.
     """
 
     barge_in: Optional[BargeIn] = None
@@ -112,6 +114,11 @@ class VoiceBargeInConfig(SubResource):
         )
 
     def build_delete_proto(self) -> VoiceChannel_ResetBargeInConfig:
+        if self.barge_in is None:
+            raise NotImplementedError(
+                "barge_in can't be removed from voice/speech_recognition/asr_settings.yaml. "
+                "Set 'enabled: false' to turn barge-in off."
+            )
         return VoiceChannel_ResetBargeInConfig()
 
     def build_create_proto(self) -> None:
@@ -145,8 +152,8 @@ def _as_section(value: Any, section_type: type, section_name: str) -> Any:
 class AsrSettings(YamlResource):
     """The voice channel's turn-taking: speech end delay and barge-in.
 
-    Each section is pushed with its own voice channel command. A section that is left out
-    uses the platform default, and removing one resets it.
+    Each section is pushed with its own voice channel command. Removing speech_end_delay_ms
+    resets it to the platform default. barge_in is always pulled and can't be removed.
     """
 
     speech_end_delay_ms: Optional[int]
@@ -181,15 +188,19 @@ class AsrSettings(YamlResource):
         if vad_config and vad_config.get("speechEndWindowSeconds") is not None:
             speech_end_delay_ms = round(vad_config["speechEndWindowSeconds"] * 1000)
 
-        barge_in = None
+        # The projection leaves out false values.
         barge_in_config = voice.get("bargeInConfig")
         if barge_in_config is not None:
-            # The projection leaves out false values.
             barge_in = BargeIn(
                 enabled=barge_in_config.get("enabled", False),
                 allow_on_first_turn=barge_in_config.get("allowedFirstTurn", False),
                 max_per_call=barge_in_config.get("maxPerCall"),
             )
+        else:
+            # Without a barge-in config the runtime uses the legacy flag. Its other fields
+            # aren't stored, which the runtime treats as off and no limit.
+            legacy_enabled = (voice.get("asrSettings") or {}).get("bargeIn", False)
+            barge_in = BargeIn(enabled=legacy_enabled)
 
         return {
             "asr_settings": cls(
@@ -282,7 +293,9 @@ class AsrSettings(YamlResource):
         ):
             # Barge-in updates merge, so clearing a field takes a reset before the update.
             deleted.append(
-                VoiceBargeInConfig(resource_id=self.resource_id, name="barge_in", barge_in=None)
+                VoiceBargeInConfig(
+                    resource_id=self.resource_id, name="barge_in", barge_in=self.barge_in
+                )
             )
 
         return [], updated, deleted

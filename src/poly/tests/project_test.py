@@ -2690,6 +2690,23 @@ class PushProjectTest(unittest.TestCase):
         self.assertIn(VoiceVadConfig, deleted_resources)
         self.assertNotIn(AsrSettings, call_args.kwargs["updated_resources"])
 
+    def test_push_project_removed_barge_in_is_refused(self):
+        """Removing barge_in queues a reset that can't be built, so the push fails."""
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        local_settings = project.resources[AsrSettings]["asr_settings"].to_yaml_dict()
+        local_settings.pop("barge_in")
+
+        with patch.object(AsrSettings, "_read_yaml_dict", return_value=local_settings):
+            project.push_project(force=True)
+
+        deleted_resources = self.mock_api_handler.queue_resources.call_args.kwargs[
+            "deleted_resources"
+        ]
+        removed_barge_in = deleted_resources[VoiceBargeInConfig]["asr_settings"]
+        with self.assertRaises(NotImplementedError) as cm:
+            removed_barge_in.build_delete_proto()
+        self.assertIn("barge_in can't be removed", str(cm.exception))
+
     def test_push_project_validation_error(self):
         project_data = deepcopy(PROJECT_DATA)
         # Create invalid resource (empty description)
