@@ -26,7 +26,7 @@ from poly.resources.agent_settings import (
 from poly.resources.api_integration import (
     AVAILABLE_AUTH_TYPES,
     AVAILABLE_OPERATIONS,
-    DEFAULT_SCHEMA_SOURCE,
+    HAND_WRITTEN_SCHEMA_SOURCE,
     HEADER_VALUE_MAX,
     MAX_OPERATION_HEADERS,
     MAX_SCHEMA_BYTES,
@@ -6773,8 +6773,8 @@ class ApiIntegrationTest(unittest.TestCase):
             self.assertEqual(integration.operations[0].name, "get")
             self.assertEqual(integration.operations[0].method, "GET")
 
-    def test_from_dict_reads_description_and_headers_as_text(self):
-        """A projection operation keeps its description and headers, header values as text."""
+    def test_from_dict_reads_description_and_headers(self):
+        """Bool header values become the platform's text; other non-text values are kept for validate()."""
         op = ApiIntegrationOperation.from_dict(
             {
                 "id": "op-1",
@@ -6782,12 +6782,18 @@ class ApiIntegrationTest(unittest.TestCase):
                 "method": "GET",
                 "resource": "/tickets/{id}",
                 "description": "Look up one ticket",
-                "headers": {"Accept": "application/json", "X-Flag": True, "X-Retries": 3},
+                "headers": {
+                    "Accept": "application/json",
+                    "X-Flag": True,
+                    "X-Off": False,
+                    "X-Version": 1.1,
+                },
             }
         )
         self.assertEqual(op.description, "Look up one ticket")
         self.assertEqual(
-            op.headers, {"Accept": "application/json", "X-Flag": "true", "X-Retries": "3"}
+            op.headers,
+            {"Accept": "application/json", "X-Flag": "true", "X-Off": "false", "X-Version": 1.1},
         )
 
     def test_from_dict_without_the_keys_loads_empty_fields(self):
@@ -6808,6 +6814,13 @@ class ApiIntegrationTest(unittest.TestCase):
         """An operation without them writes only name, method and resource."""
         self.assertEqual(
             _operation().to_yaml_dict(), {"name": "get", "method": "GET", "resource": "/a"}
+        )
+
+    def test_to_yaml_dict_puts_description_straight_after_name(self):
+        """The description reads as the operation's heading, ahead of method and resource."""
+        op = _operation(description="Look up", headers={"Accept": "application/json"})
+        self.assertEqual(
+            list(op.to_yaml_dict()), ["name", "description", "method", "resource", "headers"]
         )
 
     def test_yaml_round_trip_keeps_description_and_headers(self):
@@ -6947,7 +6960,7 @@ class ApiIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(pulled.schema_source, "")
         self.assertNotIn("schema_source", pulled.to_yaml_dict())
-        self.assertEqual(pulled.build_update_proto().schema_source, DEFAULT_SCHEMA_SOURCE)
+        self.assertEqual(pulled.build_update_proto().schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
 
         # A YAML that spells the default out is the same operation, hash included.
         explicit = ApiIntegrationOperation.from_dict(
@@ -7059,7 +7072,7 @@ class ApiIntegrationTest(unittest.TestCase):
         self.assertEqual(create.request_query_schema, json.dumps(QUERY_SCHEMA, separators=(",", ":")))
         self.assertEqual(json.loads(create.request_body_schema), BODY_SCHEMA)
         self.assertEqual(json.loads(create.response_schemas["200"]), OK_SCHEMA)
-        self.assertEqual(create.schema_source, DEFAULT_SCHEMA_SOURCE)
+        self.assertEqual(create.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
 
     def test_build_create_proto_without_schemas_sends_no_schema_fields(self):
         """An operation without schemas creates without any schema field or source."""
@@ -7095,7 +7108,7 @@ class ApiIntegrationTest(unittest.TestCase):
     def test_build_update_proto_defaults_the_source_when_yaml_omits_it(self):
         """A schema written without schema_source is pushed with the default label."""
         update = _operation(request_body_schema=BODY_SCHEMA).build_update_proto()
-        self.assertEqual(update.schema_source, DEFAULT_SCHEMA_SOURCE)
+        self.assertEqual(update.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
 
     def test_subresources_detect_schema_and_source_changes_but_not_formatting(self):
         """Key order sends nothing; an edited schema or a new source sends an update."""
@@ -7120,6 +7133,27 @@ class ApiIntegrationTest(unittest.TestCase):
         relabelled = _integration_with(_operation(request_body_schema=body, schema_source="openapi"))
         _, updated, _ = relabelled.get_new_updated_deleted_subresources(old)
         self.assertEqual([op.schema_source for op in updated], ["openapi"])
+
+    def test_subresources_push_a_hand_edit_of_a_labelled_schema_as_hand_written(self):
+        """Editing an observed schema without touching its label sends `manual`, not `observed`."""
+        old = _integration_with(
+            _operation(request_body_schema={"type": "object"}, schema_source="observed")
+        )
+
+        edited = _integration_with(
+            _operation(request_body_schema={"type": "array"}, schema_source="observed")
+        )
+        _, [update], _ = edited.get_new_updated_deleted_subresources(old)
+        self.assertEqual(update.build_update_proto().schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
+        # The local operation is untouched; only what is sent changes.
+        self.assertEqual(edited.operations[0].schema_source, "observed")
+
+        # A label the user changed along with the schema is theirs to keep.
+        relabelled = _integration_with(
+            _operation(request_body_schema={"type": "array"}, schema_source="openapi")
+        )
+        _, [update], _ = relabelled.get_new_updated_deleted_subresources(old)
+        self.assertEqual(update.build_update_proto().schema_source, "openapi")
 
 
 class VariableTest(unittest.TestCase):
@@ -8641,15 +8675,23 @@ class TestApiIntegrationValidate(unittest.TestCase):
         resource_utils.compute_hash_from_dict(op.to_yaml_dict())  # used to raise here
         self._assert_invalid(op, "headers must be a mapping")
 
-    def test_multiple_header_errors_are_reported_together(self):
-        """One validate run names every header problem."""
-        message = self._assert_invalid(
-            _operation(headers={"Authorization": "x", "Bad Name": " y"}),
-            "header 'Authorization' is set from",
-            "header name 'Bad Name'",
-            "header 'Bad Name' value cannot contain",
+    def test_header_value_that_is_not_text_raises_value_error(self):
+        """A value YAML typed for us would not be sent as written, so it has to be quoted."""
+        for value in (1.1, 123, 1000.0, ["a", "b"], {"k": "v"}, None, datetime.date(2024, 1, 1)):
+            with self.subTest(value=value):
+                self._assert_invalid(
+                    _operation(headers={"X-Version": value}),
+                    "header 'X-Version' value must be text; quote it in YAML",
+                )
+
+    def test_unquoted_yaml_header_values_are_rejected_except_booleans(self):
+        """`1.10` loads as 1.1 and `0123` as 123, so they fail; `true` is sent as written."""
+        loaded = resource_utils.load_yaml(
+            "name: get\nmethod: GET\nresource: /a\nheaders:\n  X-Flag: true\n  X-Version: 1.10\n"
         )
-        self.assertEqual(message.count("Operation 'get'"), 3)
+        op = ApiIntegrationOperation.from_dict(loaded)
+        self.assertEqual(op.headers["X-Flag"], "true")
+        self._assert_invalid(op, "header 'X-Version' value must be text")
 
     def test_operation_with_valid_schemas_passes(self):
         """Well-formed schemas, the 2020-12 dialect with a trailing #, and every key form are valid."""
@@ -8721,6 +8763,18 @@ class TestApiIntegrationValidate(unittest.TestCase):
             _operation(request_query_schema=schema), f"nests deeper than {MAX_SCHEMA_DEPTH} levels"
         )
 
+    def test_schema_depth_counts_objects_and_arrays_only(self):
+        """64 nested objects ending in a scalar are at the cap, as the platform counts them."""
+        schema: dict = {"type": "string"}
+        for _ in range(MAX_SCHEMA_DEPTH - 1):
+            schema = {"not": schema}
+        self._make_integration(operations=[_operation(request_query_schema=schema)]).validate()
+
+        self._assert_invalid(
+            _operation(request_query_schema={"not": schema}),
+            f"nests deeper than {MAX_SCHEMA_DEPTH} levels",
+        )
+
     def test_invalid_response_schema_key_raises_value_error(self):
         """Response keys are a status code, an uppercase status class or default."""
         for key in ("600", "2xx", "ok", "20"):
@@ -8756,19 +8810,15 @@ class TestApiIntegrationValidate(unittest.TestCase):
         )
         self._assert_invalid(op, "response_schemas must be a mapping")
 
-    def test_multiple_schema_errors_are_reported_together(self):
-        """One validate run names every schema problem."""
-        message = self._assert_invalid(
-            _operation(
-                method="GET",
-                request_body_schema={"type": "object"},
-                response_schemas={"ok": {"type": "nonsense"}},
-            ),
-            "GET requests have no body",
-            "response_schemas key 'ok'",
-            "response_schemas['ok'] is not a valid JSON Schema",
-        )
-        self.assertEqual(message.count("Operation 'get'"), 3)
+    def test_pattern_is_left_for_the_platform_to_compile(self):
+        """`pattern` is a JavaScript regex on the platform, so Python's `re` doesn't judge it."""
+        for pattern in (r"^\p{L}+$", r"^(?P<id>\d+)$"):
+            with self.subTest(pattern=pattern):
+                self._make_integration(
+                    operations=[
+                        _operation(request_query_schema={"type": "string", "pattern": pattern})
+                    ]
+                ).validate()
 
 
 class SafetyFiltersTests(unittest.TestCase):

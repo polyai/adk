@@ -60,7 +60,7 @@ from poly.resources import (
     VoiceStylePrompt,
     VoiceVadConfig,
 )
-from poly.resources.api_integration import DEFAULT_SCHEMA_SOURCE
+from poly.resources.api_integration import HAND_WRITTEN_SCHEMA_SOURCE
 from poly.resources.flows import (
     ASRBiasing,
     Condition,
@@ -8256,6 +8256,7 @@ class ApiIntegrationSyncTest(unittest.TestCase):
         self.assertEqual(ops["get_confirmation_status"]["headers"], {"Accept": "application/json"})
         self.assertNotIn("description", ops["create_booking"])
         self.assertNotIn("headers", ops["create_booking"])
+        self.assertEqual(list(ops["get_confirmation_status"])[:2], ["name", "description"])
 
     def test_pull_then_push_round_trips_with_no_changes(self):
         """Pushing straight after a pull finds nothing to send."""
@@ -8315,6 +8316,25 @@ class ApiIntegrationSyncTest(unittest.TestCase):
         self.assertIn("header 'Authorization' is set from the environment config", message)
         self.assertEqual(commands, [])
 
+    def test_unquoted_header_value_fails_push_validation(self):
+        """`1.10` would reach the platform as "1.1", so it stops the push until quoted."""
+        with open(self.path, encoding="utf-8") as file:
+            text = file.read()
+        self.assertEqual(text.count("Accept: application/json\n"), 1)
+        with open(self.path, "w", encoding="utf-8") as file:
+            file.write(
+                text.replace(
+                    "Accept: application/json\n",
+                    "Accept: application/json\n      X-Version: 1.10\n",
+                )
+            )
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertIn("header 'X-Version' value must be text; quote it in YAML", message)
+        self.assertEqual(commands, [])
+
     def test_pull_writes_schemas_as_nested_yaml_with_quoted_status_keys(self):
         """Schemas land as mappings, status keys quoted, and only where the platform has them."""
         ops = self._operations()
@@ -8338,8 +8358,8 @@ class ApiIntegrationSyncTest(unittest.TestCase):
         self.assertIn("'201':", text)
         self.assertNotIn('"{', text)
 
-    def test_schema_edit_sends_the_new_schema_with_its_source(self):
-        """Changing one keyword sends the operation with its full schema state and source."""
+    def test_schema_edit_sends_the_new_schema_as_hand_written(self):
+        """Changing one keyword sends the full schema state, labelled `manual` not `openapi`."""
 
         def tighten_notes(op):
             if op["name"] == "create_booking":
@@ -8353,7 +8373,20 @@ class ApiIntegrationSyncTest(unittest.TestCase):
         self.assertEqual(body["properties"]["notes"]["maxLength"], 200)
         self.assertEqual(json.loads(update.response_schemas.entries["201"]), _BOOKING_CREATED)
         self.assertEqual(update.request_query_schema, "")
-        self.assertEqual(update.schema_source, "openapi")
+        self.assertEqual(update.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
+
+    def test_schema_edit_with_a_new_source_keeps_that_source(self):
+        """A label changed along with the schema is the user's choice and is sent as written."""
+
+        def retag(op):
+            if op["name"] == "create_booking":
+                op["request_body_schema"]["properties"]["notes"]["maxLength"] = 200
+                op["schema_source"] = "observed"
+
+        self._edit_operations(retag)
+
+        [update] = self._push()["update_api_integration_operation"]
+        self.assertEqual(update.schema_source, "observed")
 
     def test_removing_all_schemas_sends_a_clearing_update_without_a_source(self):
         """Deleting every schema key sends empty values and leaves the stored source alone."""
@@ -8388,7 +8421,7 @@ class ApiIntegrationSyncTest(unittest.TestCase):
         [create] = self._push()["create_api_integration_operation"]
         self.assertEqual(create.name, "list_bookings")
         self.assertEqual(dict(create.response_schemas), {"200": "{}"})
-        self.assertEqual(create.schema_source, DEFAULT_SCHEMA_SOURCE)
+        self.assertEqual(create.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
 
     def test_dropping_only_the_source_relabels_with_the_default(self):
         """Removing schema_source while keeping the schema sends the default label."""
@@ -8402,7 +8435,7 @@ class ApiIntegrationSyncTest(unittest.TestCase):
         [update] = self._push()["update_api_integration_operation"]
         self.assertEqual(update.id, "OP-GET")
         self.assertEqual(json.loads(update.request_query_schema), _STATUS_QUERY)
-        self.assertEqual(update.schema_source, DEFAULT_SCHEMA_SOURCE)
+        self.assertEqual(update.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
 
     def test_unquoted_status_key_is_read_as_text_and_pushes_nothing(self):
         """A hand-typed `201:` is an int to YAML; it is read as '201' and is not a change."""

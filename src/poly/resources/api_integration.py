@@ -71,11 +71,17 @@ def _is_valid_header_value(value: str) -> bool:
     )
 
 
+def _bool_header_text(value: bool) -> str:
+    """`x-flag: true` as the platform stores it; plain `str()` would send Python's `"True"`."""
+    return "true" if value else "false"
+
+
 # An operation's request and response schemas are JSON Schema 2020-12, written as YAML
 # mappings in the file and stored as JSON text by the platform. These mirror its rules.
 SCHEMA_SOURCES = {"default", "manual", "observed", "openapi"}
-# A schema written to the YAML without `schema_source` is a hand edit.
-DEFAULT_SCHEMA_SOURCE = "manual"
+# The label for a hand-written schema, and what one written without `schema_source` is
+# pushed as. Not to be confused with `default`, which marks a prebuilt template's schema.
+HAND_WRITTEN_SCHEMA_SOURCE = "manual"
 JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 MAX_SCHEMA_BYTES = 65_536
 MAX_SCHEMA_DEPTH = 64
@@ -113,41 +119,49 @@ def _schema_text(schema: object) -> str:
 
 
 def _depth(node: object, level: int = 1) -> int:
+    """How deep objects and arrays nest, the root being 1. Like the platform, scalar leaves
+    don't count, so 64 nested objects ending in `"type": "string"` are 64 deep."""
     if isinstance(node, dict):
         children = node.values()
     elif isinstance(node, list):
         children = node
     else:
-        return level
+        return level - 1
     return max([level, *(_depth(child, level + 1) for child in children)])
 
 
-def _json_schema_errors(schema: object, where: str) -> list[str]:
-    """Why the platform would refuse `schema`, or [] when it would accept it."""
+def _validate_json_schema(schema: object, where: str) -> None:
+    """Raise ValueError for a schema the platform would refuse."""
     if not isinstance(schema, dict):
-        return [f"{where} must be a JSON Schema object (a YAML mapping)."]
+        raise ValueError(f"{where} must be a JSON Schema object (a YAML mapping).")
     dialect = schema.get("$schema")
     if dialect is not None and dialect not in (JSON_SCHEMA_DIALECT, f"{JSON_SCHEMA_DIALECT}#"):
-        return [f"{where}: $schema must be {JSON_SCHEMA_DIALECT} or omitted."]
+        raise ValueError(f"{where}: $schema must be {JSON_SCHEMA_DIALECT} or omitted.")
     if _depth(schema) > MAX_SCHEMA_DEPTH:
-        return [f"{where} nests deeper than {MAX_SCHEMA_DEPTH} levels."]
+        raise ValueError(f"{where} nests deeper than {MAX_SCHEMA_DEPTH} levels.")
     try:
         size = len(_schema_text(schema).encode("utf-8"))
     except (TypeError, ValueError) as error:
-        return [f"{where} is not valid JSON ({error}); quote dates and other special values."]
+        raise ValueError(
+            f"{where} is not valid JSON ({error}); quote dates and other special values."
+        ) from error
     if size > MAX_SCHEMA_BYTES:
-        return [f"{where} is {size} bytes; the limit is {MAX_SCHEMA_BYTES} bytes."]
+        raise ValueError(f"{where} is {size} bytes; the limit is {MAX_SCHEMA_BYTES} bytes.")
 
     # Imported here so the CLI doesn't pay for jsonschema at startup.
     from jsonschema import Draft202012Validator
     from jsonschema.exceptions import SchemaError
 
     try:
-        Draft202012Validator.check_schema(schema)
+        # No format checks: the platform compiles `pattern` as a JavaScript regex, which
+        # Python's `re` disagrees with both ways (`\p{L}`, `(?P<id>...)`), and checks the
+        # `$ref`/`$id` URIs itself on push.
+        Draft202012Validator.check_schema(schema, format_checker=None)
     except SchemaError as error:
         path = "/".join(str(part) for part in error.absolute_path) or "the root"
-        return [f"{where} is not a valid JSON Schema at {path}: {error.message}"]
-    return []
+        raise ValueError(
+            f"{where} is not a valid JSON Schema at {path}: {error.message}"
+        ) from error
 
 
 def _default_config() -> "ApiIntegrationConfig":
@@ -331,7 +345,7 @@ class ApiIntegrationOperation(SubResource):
         """The source pushed with the schemas: the YAML's, or the default when it has none."""
         if not self.has_schemas:
             return None
-        return self.schema_source or DEFAULT_SCHEMA_SOURCE
+        return self.schema_source or HAND_WRITTEN_SCHEMA_SOURCE
 
     def validate(self) -> None:
         """Validate the operation's fields."""
@@ -350,97 +364,84 @@ class ApiIntegrationOperation(SubResource):
             raise ValueError(
                 f"Operation '{self.name}': resource '{self.resource}' is not a valid URL path."
             )
-        errors = self._description_errors() + self._header_errors() + self._schema_errors()
-        if errors:
-            raise ValueError("; ".join(errors))
+        self._validate_description()
+        self._validate_headers()
+        self._validate_schemas()
 
-    def _description_errors(self) -> list[str]:
+    def _validate_description(self) -> None:
         label = f"Operation '{self.name}': "
         if not isinstance(self.description, str):
-            return [f"{label}description must be text."]
+            raise ValueError(f"{label}description must be text.")
         if len(self.description) > OPERATION_DESCRIPTION_MAX:
-            return [f"{label}description is longer than {OPERATION_DESCRIPTION_MAX} characters."]
-        return []
+            raise ValueError(
+                f"{label}description is longer than {OPERATION_DESCRIPTION_MAX} characters."
+            )
 
-    def _header_errors(self) -> list[str]:
-        """Every header problem at once, so one validate run reports them all."""
+    def _validate_headers(self) -> None:
         label = f"Operation '{self.name}': "
         if not isinstance(self.headers, dict):
-            return [f"{label}headers must be a mapping of header name to value."]
-        errors: list[str] = []
+            raise ValueError(f"{label}headers must be a mapping of header name to value.")
         if len(self.headers) > MAX_OPERATION_HEADERS:
-            errors.append(
+            raise ValueError(
                 f"{label}has {len(self.headers)} headers; the limit is {MAX_OPERATION_HEADERS}."
             )
         seen: set[str] = set()
         for header_name, value in self.headers.items():
             if not HEADER_NAME_PATTERN.fullmatch(header_name):
-                errors.append(
+                raise ValueError(
                     f"{label}header name '{header_name}' is not a valid HTTP header name."
                 )
             lowered = header_name.lower()
             if lowered in RESERVED_HEADER_NAMES:
-                errors.append(
+                raise ValueError(
                     f"{label}header '{header_name}' is set from the environment config "
                     "and cannot be set per operation."
                 )
             if lowered in seen:
-                errors.append(
+                raise ValueError(
                     f"{label}duplicate header '{header_name}' (header names are case-insensitive)."
                 )
             seen.add(lowered)
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"{label}header '{header_name}' value must be text; quote it in YAML."
+                )
             if len(value) > HEADER_VALUE_MAX:
-                errors.append(
+                raise ValueError(
                     f"{label}header '{header_name}' value is longer than "
                     f"{HEADER_VALUE_MAX} characters."
                 )
-            elif not _is_valid_header_value(value):
-                errors.append(
+            if not _is_valid_header_value(value):
+                raise ValueError(
                     f"{label}header '{header_name}' value cannot contain line breaks, control "
                     "characters or non-ASCII characters, or start or end with a space."
                 )
-        return errors
 
-    def _schema_errors(self) -> list[str]:
-        """Every schema problem at once, mirroring what the platform refuses on push."""
+    def _validate_schemas(self) -> None:
         label = f"Operation '{self.name}': "
-        errors: list[str] = []
         if self.request_query_schema is not None:
-            errors += [
-                label + message
-                for message in _json_schema_errors(
-                    self.request_query_schema, "request_query_schema"
-                )
-            ]
+            _validate_json_schema(self.request_query_schema, f"{label}request_query_schema")
         if self.request_body_schema is not None:
             if self.method in BODYLESS_METHODS:
-                errors.append(
+                raise ValueError(
                     f"{label}{self.method} requests have no body; remove request_body_schema "
                     "or change the method."
                 )
-            errors += [
-                label + message
-                for message in _json_schema_errors(self.request_body_schema, "request_body_schema")
-            ]
+            _validate_json_schema(self.request_body_schema, f"{label}request_body_schema")
         if not isinstance(self.response_schemas, dict):
-            errors.append(f"{label}response_schemas must be a mapping of status code to schema.")
-        else:
-            for key, schema in self.response_schemas.items():
-                if not RESPONSE_KEY_PATTERN.fullmatch(key):
-                    errors.append(
-                        f"{label}response_schemas key '{key}' must be a status code ('200'), "
-                        "a status class ('4XX') or 'default'."
-                    )
-                errors += [
-                    label + message
-                    for message in _json_schema_errors(schema, f"response_schemas['{key}']")
-                ]
+            raise ValueError(f"{label}response_schemas must be a mapping of status code to schema.")
+        for key, schema in self.response_schemas.items():
+            if not RESPONSE_KEY_PATTERN.fullmatch(key):
+                raise ValueError(
+                    f"{label}response_schemas key '{key}' must be a status code ('200'), "
+                    "a status class ('4XX') or 'default'."
+                )
+            _validate_json_schema(schema, f"{label}response_schemas['{key}']")
         if self.schema_source and self.schema_source not in SCHEMA_SOURCES:
-            errors.append(
+            raise ValueError(
                 f"{label}schema_source '{self.schema_source}' invalid, "
                 f"must be one of {sorted(SCHEMA_SOURCES)}."
             )
-        return errors
 
     @property
     def command_type(self) -> str:
@@ -458,20 +459,36 @@ class ApiIntegrationOperation(SubResource):
             and self.resource == other.resource
             and self.description == other.description
             and self.headers == other.headers
-            and self.request_query_schema == other.request_query_schema
-            and self.request_body_schema == other.request_body_schema
-            and self.response_schemas == other.response_schemas
+            and self.same_schemas(other)
             and self._effective_schema_source() == other._effective_schema_source()
         )
 
+    def same_schemas(self, other: "ApiIntegrationOperation") -> bool:
+        return (
+            self.request_query_schema == other.request_query_schema
+            and self.request_body_schema == other.request_body_schema
+            and self.response_schemas == other.response_schemas
+        )
+
+    def is_hand_edit_of(self, old: "ApiIntegrationOperation") -> bool:
+        """Whether the schemas were edited but kept the label `old` was pulled with.
+
+        Such an edit is the user's, not the earlier writer's: the platform requires a
+        source on every schema write so that a new schema never inherits the old label.
+        """
+        return (
+            self.has_schemas
+            and not self.same_schemas(old)
+            and self._effective_schema_source() == old._effective_schema_source()
+        )
+
     def to_yaml_dict(self) -> dict:
-        data = {
-            "name": self.name,
-            "method": self.method,
-            "resource": self.resource,
-        }
+        # The description comes straight after the name, so it reads as the operation's heading.
+        data = {"name": self.name}
         if self.description:
             data["description"] = self.description
+        data["method"] = self.method
+        data["resource"] = self.resource
         if self.headers:
             # A non-mapping is kept as written so validate() reports it, rather than the
             # hash or the diff crashing first.
@@ -550,8 +567,13 @@ class ApiIntegrationOperation(SubResource):
         data = utils.convert_keys_to_snake_case(data)
         headers = data.get("headers") or {}
         if isinstance(headers, dict):
-            # map<string, string> on the wire; anything else is left for validate() to report.
-            headers = {str(key): utils.header_value(value) for key, value in headers.items()}
+            # map<string, string> on the wire. YAML has already typed unquoted scalars, and
+            # only a bool converts back to the text that was written (`1.10` loads as 1.1),
+            # so every other non-string value is left for validate() to report.
+            headers = {
+                str(key): _bool_header_text(value) if isinstance(value, bool) else value
+                for key, value in headers.items()
+            }
         response_schemas = data.get("response_schemas") or {}
         if isinstance(response_schemas, dict):
             parsed = {str(key): _parse_schema(value) for key, value in response_schemas.items()}
@@ -560,7 +582,7 @@ class ApiIntegrationOperation(SubResource):
         # written without a source is pushed as it. Holding it as "" keeps the hash, the
         # diff and the file in agreement, so pulled files never carry the label.
         source = data.get("schema_source")
-        if source is not None and str(source) == DEFAULT_SCHEMA_SOURCE:
+        if source is not None and str(source) == HAND_WRITTEN_SCHEMA_SOURCE:
             source = None
         operation = cls(
             resource_id=data.get("resource_id") or data.get("id", ""),
@@ -776,6 +798,10 @@ class ApiIntegration(MultiResourceYamlResource):
             else:
                 matched_old_ids.add(old.resource_id)
                 if not old.same_definition(op_obj):
+                    if op_obj.is_hand_edit_of(old):
+                        # Pushed as hand-written. The file keeps the old label until the
+                        # next pull, which brings `manual` down and drops the key.
+                        op_with_parent.schema_source = ""
                     updated_ops.append(op_with_parent)
 
         for old in old_ops_list:

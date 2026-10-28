@@ -251,6 +251,22 @@ class TestCaseTags(SubResource):
         raise NotImplementedError("Test Case Tags cannot be deleted")
 
 
+def _header_value(value: Any) -> str:
+    """Render a YAML value as the text a carrier would actually send.
+
+    SIP headers are `map<string, string>`, but YAML types unquoted scalars, so
+    `x-flag: true` arrives as a Python bool. Plain `str()` would send `"True"`
+    — Python's capitalisation, which no carrier and no other client produces.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return ""
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return str(value)
+
+
 @dataclass
 class TestCaseSipHeaders(SubResource):
     """Dataclass representing the mock SIP headers on a test case"""
@@ -272,9 +288,7 @@ class TestCaseSipHeaders(SubResource):
             id=self.resource_id,
             # map<string, string> on the wire: a header value is always text,
             # unlike an integration attribute.
-            sip_headers={
-                str(key): utils.header_value(value) for key, value in self.headers.items()
-            },
+            sip_headers={str(key): _header_value(value) for key, value in self.headers.items()},
         )
 
     def build_create_proto(self) -> None:
@@ -445,7 +459,7 @@ class ApiResponse:
     def to_proto(self) -> ApiResponseProto:
         kwargs: dict[str, Any] = {
             "status": self.status,
-            "headers": {str(key): utils.header_value(value) for key, value in self.headers.items()},
+            "headers": {str(key): _header_value(value) for key, value in self.headers.items()},
         }
         if self.body is not None:
             kwargs["body"] = Value(string_value=_body_text(self.body))
