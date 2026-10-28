@@ -9,6 +9,7 @@ import os
 import shutil
 import tempfile
 import threading
+import typing
 import unittest
 from typing import Optional
 
@@ -12312,6 +12313,22 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             resource_utils.check_yaml_field_types(test_case)
         self.assertIn("assertions.prompts[1]", str(ctx.exception))
+
+    def test_field_types_are_resolved_once_per_class(self):
+        """Type hints are worked out once per class, while values are checked on every call."""
+        resource_utils._field_type_hints.cache_clear()
+        good = Topic(resource_id="T-1", name="a", actions="x", content="y", example_queries=[])
+        bad = Topic(resource_id="T-2", name="b", actions={"k": "v"}, content="y", example_queries=[])
+
+        with unittest.mock.patch(
+            "typing.get_type_hints", wraps=typing.get_type_hints
+        ) as get_type_hints:
+            resource_utils.check_yaml_field_types(good)
+            with self.assertRaises(ValueError):
+                resource_utils.check_yaml_field_types(bad)
+
+        resolved = [c.args[0] for c in get_type_hints.call_args_list]
+        self.assertEqual(resolved.count(Topic), 1)
 
     def test_valid_resource_passes(self):
         """A correctly typed resource should not raise."""
