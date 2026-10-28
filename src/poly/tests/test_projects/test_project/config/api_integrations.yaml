@@ -13,5 +13,8 @@ api_integrations:
       auth_type: apiKey
   operations:
   - name: get_confirmation_status
+    description: Confirmation status of a booking
     method: GET
     resource: /bookings/{booking_id}/confirmation-status
+    headers:
+      Accept: application/json
