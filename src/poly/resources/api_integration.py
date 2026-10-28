@@ -68,6 +68,11 @@ def _is_valid_header_value(value: str) -> bool:
     )
 
 
+def _bool_header_text(value: bool) -> str:
+    """`x-flag: true` as the platform stores it; plain `str()` would send Python's `"True"`."""
+    return "true" if value else "false"
+
+
 def _default_config() -> "ApiIntegrationConfig":
     return ApiIntegrationConfig(base_url="", auth_type="none")
 
@@ -246,56 +251,57 @@ class ApiIntegrationOperation(SubResource):
             raise ValueError(
                 f"Operation '{self.name}': resource '{self.resource}' is not a valid URL path."
             )
-        errors = self._description_errors() + self._header_errors()
-        if errors:
-            raise ValueError("; ".join(errors))
+        self._validate_description()
+        self._validate_headers()
 
-    def _description_errors(self) -> list[str]:
+    def _validate_description(self) -> None:
         label = f"Operation '{self.name}': "
         if not isinstance(self.description, str):
-            return [f"{label}description must be text."]
+            raise ValueError(f"{label}description must be text.")
         if len(self.description) > OPERATION_DESCRIPTION_MAX:
-            return [f"{label}description is longer than {OPERATION_DESCRIPTION_MAX} characters."]
-        return []
+            raise ValueError(
+                f"{label}description is longer than {OPERATION_DESCRIPTION_MAX} characters."
+            )
 
-    def _header_errors(self) -> list[str]:
-        """Every header problem at once, so one validate run reports them all."""
+    def _validate_headers(self) -> None:
         label = f"Operation '{self.name}': "
         if not isinstance(self.headers, dict):
-            return [f"{label}headers must be a mapping of header name to value."]
-        errors: list[str] = []
+            raise ValueError(f"{label}headers must be a mapping of header name to value.")
         if len(self.headers) > MAX_OPERATION_HEADERS:
-            errors.append(
+            raise ValueError(
                 f"{label}has {len(self.headers)} headers; the limit is {MAX_OPERATION_HEADERS}."
             )
         seen: set[str] = set()
         for header_name, value in self.headers.items():
             if not HEADER_NAME_PATTERN.fullmatch(header_name):
-                errors.append(
+                raise ValueError(
                     f"{label}header name '{header_name}' is not a valid HTTP header name."
                 )
             lowered = header_name.lower()
             if lowered in RESERVED_HEADER_NAMES:
-                errors.append(
+                raise ValueError(
                     f"{label}header '{header_name}' is set from the environment config "
                     "and cannot be set per operation."
                 )
             if lowered in seen:
-                errors.append(
+                raise ValueError(
                     f"{label}duplicate header '{header_name}' (header names are case-insensitive)."
                 )
             seen.add(lowered)
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"{label}header '{header_name}' value must be text; quote it in YAML."
+                )
             if len(value) > HEADER_VALUE_MAX:
-                errors.append(
+                raise ValueError(
                     f"{label}header '{header_name}' value is longer than "
                     f"{HEADER_VALUE_MAX} characters."
                 )
-            elif not _is_valid_header_value(value):
-                errors.append(
+            if not _is_valid_header_value(value):
+                raise ValueError(
                     f"{label}header '{header_name}' value cannot contain line breaks, control "
                     "characters or non-ASCII characters, or start or end with a space."
                 )
-        return errors
 
     @property
     def command_type(self) -> str:
@@ -312,13 +318,12 @@ class ApiIntegrationOperation(SubResource):
         )
 
     def to_yaml_dict(self) -> dict:
-        data = {
-            "name": self.name,
-            "method": self.method,
-            "resource": self.resource,
-        }
+        # The description comes straight after the name, so it reads as the operation's heading.
+        data = {"name": self.name}
         if self.description:
             data["description"] = self.description
+        data["method"] = self.method
+        data["resource"] = self.resource
         if self.headers:
             # A non-mapping is kept as written so validate() reports it, rather than the
             # hash or the diff crashing first.
@@ -364,8 +369,13 @@ class ApiIntegrationOperation(SubResource):
         data = utils.convert_keys_to_snake_case(data)
         headers = data.get("headers") or {}
         if isinstance(headers, dict):
-            # map<string, string> on the wire; anything else is left for validate() to report.
-            headers = {str(key): utils.header_value(value) for key, value in headers.items()}
+            # map<string, string> on the wire. YAML has already typed unquoted scalars, and
+            # only a bool converts back to the text that was written (`1.10` loads as 1.1),
+            # so every other non-string value is left for validate() to report.
+            headers = {
+                str(key): _bool_header_text(value) if isinstance(value, bool) else value
+                for key, value in headers.items()
+            }
         return cls(
             resource_id=data.get("resource_id") or data.get("id", ""),
             name=data.get("name", ""),

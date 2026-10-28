@@ -16,7 +16,6 @@ import sys
 import types
 import typing
 from dataclasses import fields, is_dataclass
-from datetime import date, datetime
 from difflib import unified_diff
 from enum import Enum
 from io import StringIO
@@ -676,22 +675,6 @@ def to_snake_case(s: str) -> str:
 def convert_keys_to_snake_case(dict_obj: dict) -> dict:
     """Convert config keys to snake_case for consistency."""
     return {to_snake_case(k): v for k, v in dict_obj.items()}
-
-
-def header_value(value: object) -> str:
-    """Render a YAML scalar as the text an HTTP or SIP header carries on the wire.
-
-    Headers are `map<string, string>` in the protos, but YAML types unquoted scalars, so
-    `x-flag: true` arrives as a Python bool. Plain `str()` would send `"True"`, Python's
-    capitalisation, which no carrier and no other client produces.
-    """
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if value is None:
-        return ""
-    if isinstance(value, (date, datetime)):
-        return value.isoformat()
-    return str(value)
 
 
 def is_valid_language_code(code: str) -> bool:

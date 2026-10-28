@@ -6761,8 +6761,8 @@ class ApiIntegrationTest(unittest.TestCase):
             self.assertEqual(integration.operations[0].name, "get")
             self.assertEqual(integration.operations[0].method, "GET")
 
-    def test_from_dict_reads_description_and_headers_as_text(self):
-        """A projection operation keeps its description and headers, header values as text."""
+    def test_from_dict_reads_description_and_headers(self):
+        """Bool header values become the platform's text; other non-text values are kept for validate()."""
         op = ApiIntegrationOperation.from_dict(
             {
                 "id": "op-1",
@@ -6770,12 +6770,18 @@ class ApiIntegrationTest(unittest.TestCase):
                 "method": "GET",
                 "resource": "/tickets/{id}",
                 "description": "Look up one ticket",
-                "headers": {"Accept": "application/json", "X-Flag": True, "X-Retries": 3},
+                "headers": {
+                    "Accept": "application/json",
+                    "X-Flag": True,
+                    "X-Off": False,
+                    "X-Version": 1.1,
+                },
             }
         )
         self.assertEqual(op.description, "Look up one ticket")
         self.assertEqual(
-            op.headers, {"Accept": "application/json", "X-Flag": "true", "X-Retries": "3"}
+            op.headers,
+            {"Accept": "application/json", "X-Flag": "true", "X-Off": "false", "X-Version": 1.1},
         )
 
     def test_from_dict_without_the_keys_loads_empty_fields(self):
@@ -6796,6 +6802,13 @@ class ApiIntegrationTest(unittest.TestCase):
         """An operation without them writes only name, method and resource."""
         self.assertEqual(
             _operation().to_yaml_dict(), {"name": "get", "method": "GET", "resource": "/a"}
+        )
+
+    def test_to_yaml_dict_puts_description_straight_after_name(self):
+        """The description reads as the operation's heading, ahead of method and resource."""
+        op = _operation(description="Look up", headers={"Accept": "application/json"})
+        self.assertEqual(
+            list(op.to_yaml_dict()), ["name", "description", "method", "resource", "headers"]
         )
 
     def test_yaml_round_trip_keeps_description_and_headers(self):
@@ -8407,15 +8420,23 @@ class TestApiIntegrationValidate(unittest.TestCase):
         resource_utils.compute_hash_from_dict(op.to_yaml_dict())  # used to raise here
         self._assert_invalid(op, "headers must be a mapping")
 
-    def test_multiple_header_errors_are_reported_together(self):
-        """One validate run names every header problem."""
-        message = self._assert_invalid(
-            _operation(headers={"Authorization": "x", "Bad Name": " y"}),
-            "header 'Authorization' is set from",
-            "header name 'Bad Name'",
-            "header 'Bad Name' value cannot contain",
+    def test_header_value_that_is_not_text_raises_value_error(self):
+        """A value YAML typed for us would not be sent as written, so it has to be quoted."""
+        for value in (1.1, 123, 1000.0, ["a", "b"], {"k": "v"}, None, datetime.date(2024, 1, 1)):
+            with self.subTest(value=value):
+                self._assert_invalid(
+                    _operation(headers={"X-Version": value}),
+                    "header 'X-Version' value must be text; quote it in YAML",
+                )
+
+    def test_unquoted_yaml_header_values_are_rejected_except_booleans(self):
+        """`1.10` loads as 1.1 and `0123` as 123, so they fail; `true` is sent as written."""
+        loaded = resource_utils.load_yaml(
+            "name: get\nmethod: GET\nresource: /a\nheaders:\n  X-Flag: true\n  X-Version: 1.10\n"
         )
-        self.assertEqual(message.count("Operation 'get'"), 3)
+        op = ApiIntegrationOperation.from_dict(loaded)
+        self.assertEqual(op.headers["X-Flag"], "true")
+        self._assert_invalid(op, "header 'X-Version' value must be text")
 
 
 class SafetyFiltersTests(unittest.TestCase):
