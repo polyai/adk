@@ -8426,10 +8426,6 @@ class ApiIntegrationSyncTest(unittest.TestCase):
             grouped.setdefault(command.type, []).append(getattr(command, command.type))
         return grouped
 
-    def _push_message(self) -> str:
-        """The message from a dry-run push, e.g. "No changes detected"."""
-        return self.project.push_project(dry_run=True)[1]
-
     def test_pull_writes_description_and_headers_only_where_set(self):
         """The pulled file carries both fields on the operation that has them and neither elsewhere."""
         ops = self._operations()
@@ -8541,8 +8537,8 @@ class ApiIntegrationSyncTest(unittest.TestCase):
         self.assertIn("'201':", text)
         self.assertNotIn('"{', text)
 
-    def test_schema_edit_sends_the_new_schema_as_hand_written(self):
-        """Changing one keyword sends the full schema state, labelled `manual` not `openapi`."""
+    def test_schema_edit_sends_the_new_schema_with_its_source(self):
+        """Changing one keyword sends the operation with its full schema state and source."""
 
         def tighten_notes(op):
             if op["name"] == "create_booking":
@@ -8556,49 +8552,8 @@ class ApiIntegrationSyncTest(unittest.TestCase):
         self.assertEqual(body["properties"]["notes"]["maxLength"], 200)
         self.assertEqual(json.loads(update.response_schemas.entries["201"]), _BOOKING_CREATED)
         self.assertEqual(update.request_query_schema, "")
-        self.assertEqual(update.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
-
-    def test_hand_edit_pushed_as_manual_settles_on_the_next_pull(self):
-        """The file keeps the old label until a pull brings `manual` down; nothing flips back."""
-
-        def tighten_notes(op):
-            if op["name"] == "create_booking":
-                op["request_body_schema"]["properties"]["notes"]["maxLength"] = 200
-
-        self._edit_operations(tighten_notes)
-        with patch.object(AgentStudioInterface, "send_queued_commands", return_value=True):
-            success, message, _ = self.project.push_project(
-                projection_json=_api_integration_projection(), parent_projection_json={}
-            )
-        self.assertTrue(success, message)
-        self.assertEqual(self._operations()["create_booking"]["schema_source"], "openapi")
-        # Local still matches what was pushed, so pushing again sends nothing.
-        self.assertEqual(self._push_message(), "No changes detected")
-
-        # The platform now holds the edit, labelled as hand-written.
-        remote = _api_integration_projection()
-        operations = remote["apiIntegrations"]["apiIntegrations"]["entities"]["INT-1"]["operations"]
-        body = json.loads(operations["OP-POST"]["requestBodySchema"])
-        body["properties"]["notes"]["maxLength"] = 200
-        operations["OP-POST"].update(requestBodySchema=json.dumps(body), schemaSource="manual")
-        conflicts, _ = self.project.pull_project(projection_json=remote)
-
-        self.assertEqual(conflicts, [])
-        self.assertNotIn("schema_source", self._operations()["create_booking"])
-        self.assertEqual(self._push_message(), "No changes detected")
-
-    def test_schema_edit_with_a_new_source_keeps_that_source(self):
-        """A label changed along with the schema is the user's choice and is sent as written."""
-
-        def retag(op):
-            if op["name"] == "create_booking":
-                op["request_body_schema"]["properties"]["notes"]["maxLength"] = 200
-                op["schema_source"] = "observed"
-
-        self._edit_operations(retag)
-
-        [update] = self._push()["update_api_integration_operation"]
-        self.assertEqual(update.schema_source, "observed")
+        # The label is sent as the file has it, so a writer updating its own schema keeps it.
+        self.assertEqual(update.schema_source, "openapi")
 
     def test_removing_all_schemas_sends_a_clearing_update_without_a_source(self):
         """Deleting every schema key sends empty values and leaves the stored source alone."""

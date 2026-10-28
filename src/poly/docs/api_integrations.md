@@ -48,7 +48,7 @@ Each operation is one HTTP endpoint. You define:
 - **request_query_schema**: Optional JSON Schema (2020-12) for the query parameters, written as a YAML mapping.
 - **request_body_schema**: Optional JSON Schema for the request body. Not allowed on `GET` or `DELETE`.
 - **response_schemas**: Optional mapping from a response key to a JSON Schema for that response body. Keys are a status code (`'200'`), a status class (`'4XX'`) or `default`. An unquoted `200:` is read as the text `'200'`, and `poly pull` writes status keys quoted.
-- **schema_source**: Where the schemas came from: `observed`, `openapi` or `default`. Hand-written schemas are `manual`, the default, which the file never spells out: a schema without the key is pushed as `manual`, and `poly pull` omits the key for one. Editing a schema without changing its `schema_source` pushes it as `manual`, and the next `poly pull` drops the key.
+- **schema_source**: Where the schemas came from: `observed`, `openapi` or `default`. Hand-written schemas are `manual`, the default, which the file never spells out: a schema without the key is pushed as `manual`, and `poly pull` omits the key for one. The label is pushed as the file has it, so after editing a schema by hand, delete `schema_source` to mark it `manual`.
 
 The optional fields are omitted from the file when empty, and removing one from the file clears it in Agent Studio on the next push.
 

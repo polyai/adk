@@ -459,27 +459,10 @@ class ApiIntegrationOperation(SubResource):
             and self.resource == other.resource
             and self.description == other.description
             and self.headers == other.headers
-            and self.same_schemas(other)
-            and self._effective_schema_source() == other._effective_schema_source()
-        )
-
-    def same_schemas(self, other: "ApiIntegrationOperation") -> bool:
-        return (
-            self.request_query_schema == other.request_query_schema
+            and self.request_query_schema == other.request_query_schema
             and self.request_body_schema == other.request_body_schema
             and self.response_schemas == other.response_schemas
-        )
-
-    def is_hand_edit_of(self, old: "ApiIntegrationOperation") -> bool:
-        """Whether the schemas were edited but kept the label `old` was pulled with.
-
-        Such an edit is the user's, not the earlier writer's: the platform requires a
-        source on every schema write so that a new schema never inherits the old label.
-        """
-        return (
-            self.has_schemas
-            and not self.same_schemas(old)
-            and self._effective_schema_source() == old._effective_schema_source()
+            and self._effective_schema_source() == other._effective_schema_source()
         )
 
     def to_yaml_dict(self) -> dict:
@@ -798,10 +781,6 @@ class ApiIntegration(MultiResourceYamlResource):
             else:
                 matched_old_ids.add(old.resource_id)
                 if not old.same_definition(op_obj):
-                    if op_obj.is_hand_edit_of(old):
-                        # Pushed as hand-written. The file keeps the old label until the
-                        # next pull, which brings `manual` down and drops the key.
-                        op_with_parent.schema_source = ""
                     updated_ops.append(op_with_parent)
 
         for old in old_ops_list:

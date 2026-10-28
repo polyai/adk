@@ -7164,26 +7164,16 @@ class ApiIntegrationTest(unittest.TestCase):
         _, updated, _ = relabelled.get_new_updated_deleted_subresources(old)
         self.assertEqual([op.schema_source for op in updated], ["openapi"])
 
-    def test_subresources_push_a_hand_edit_of_a_labelled_schema_as_hand_written(self):
-        """Editing an observed schema without touching its label sends `manual`, not `observed`."""
+    def test_subresources_send_an_unchanged_label_with_an_edited_schema(self):
+        """Updating an observed schema and keeping its label sends `observed`, as written."""
         old = _integration_with(
             _operation(request_body_schema={"type": "object"}, schema_source="observed")
         )
-
         edited = _integration_with(
             _operation(request_body_schema={"type": "array"}, schema_source="observed")
         )
         _, [update], _ = edited.get_new_updated_deleted_subresources(old)
-        self.assertEqual(update.build_update_proto().schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
-        # The local operation is untouched; only what is sent changes.
-        self.assertEqual(edited.operations[0].schema_source, "observed")
-
-        # A label the user changed along with the schema is theirs to keep.
-        relabelled = _integration_with(
-            _operation(request_body_schema={"type": "array"}, schema_source="openapi")
-        )
-        _, [update], _ = relabelled.get_new_updated_deleted_subresources(old)
-        self.assertEqual(update.build_update_proto().schema_source, "openapi")
+        self.assertEqual(update.build_update_proto().schema_source, "observed")
 
 
 class VariableTest(unittest.TestCase):
