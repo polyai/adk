@@ -1,6 +1,55 @@
 # CHANGELOG
 
 
+## v0.75.1 (2026-10-28)
+
+### Bug Fixes
+
+- Push test case assertions whose expected value is a bool or number
+  ([#392](https://github.com/polyai/adk/pull/392),
+  [`a8a7232`](https://github.com/polyai/adk/commit/a8a72327390a92ea7420fac3b2c8c801c30eb9be))
+
+## Summary
+
+Test cases with a boolean or number expected value in a function call assertion can be pushed again.
+  Before, the push failed with `TypeError: bad argument type for built-in operation`.
+
+## Motivation
+
+The project projection can return a function call argument's `expectedValue` as a JSON boolean or
+  number, not a string. `TestCase.from_projection` passed it through unchanged, so `poly pull` wrote
+  it unquoted (`expected_value: false`). Reading that file back gives a bool, and
+  `FunctionCallArgumentAssertion.to_proto` fails because the proto's `expected_value` is a string
+  field. Every push that included the test case failed, including the merge step in CI.
+
+## Changes
+
+- `FunctionCallArgumentAssertion` stores a non-string `expected_value` as its JSON text (`false`
+  becomes `"false"`, `4` becomes `"4"`). This covers values from the projection and unquoted values
+  already written to YAML. - `poly pull` now writes these values quoted (`expected_value: 'false'`).
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New tests: a projection with a boolean and an integer expected value builds a proto and writes
+  quoted YAML, and a test case file with an unquoted `true` builds a proto. Both fail without the
+  fix.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.75.0 (2026-10-28)
 
 ### Features
