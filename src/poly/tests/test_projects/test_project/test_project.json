@@ -1184,13 +1184,62 @@
         "operations": [
           {
             "resource_id": "",
+            "name": "create_booking",
+            "method": "POST",
+            "resource": "/bookings",
+            "request_body_schema": {
+              "type": "object",
+              "required": [
+                "customer_id"
+              ],
+              "properties": {
+                "customer_id": {
+                  "type": "string"
+                },
+                "notes": {
+                  "type": "string",
+                  "maxLength": 500
+                }
+              },
+              "additionalProperties": false
+            },
+            "response_schemas": {
+              "201": {
+                "type": "object",
+                "properties": {
+                  "booking_id": {
+                    "type": "string"
+                  }
+                }
+              },
+              "default": {
+                "type": "object",
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "resource_id": "",
             "name": "get_confirmation_status",
             "method": "GET",
             "resource": "/bookings/{booking_id}/confirmation-status",
             "description": "Confirmation status of a booking",
             "headers": {
               "Accept": "application/json"
-            }
+            },
+            "request_query_schema": {
+              "type": "object",
+              "properties": {
+                "include_history": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "schema_source": "observed"
           }
         ]
       }

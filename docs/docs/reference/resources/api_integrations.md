@@ -72,8 +72,14 @@ Each entry is one HTTP endpoint:
 | `method` | One of `GET`, `POST`, `PATCH`, `PUT`, `DELETE`. |
 | `resource` | Path template, e.g. `/tickets/{id}`. Path variables become call arguments. |
 | `headers` | Optional mapping of header name to value, sent on every call to the operation. Up to 50 headers. `Authorization` and `Host` come from the environment config and can't be set here. |
+| `request_query_schema` | Optional [JSON Schema](https://json-schema.org/draft/2020-12){ target="_blank" rel="noopener" } for the query parameters, written as a YAML mapping. |
+| `request_body_schema` | Optional JSON Schema for the request body. Not allowed on `GET` or `DELETE`. |
+| `response_schemas` | Optional mapping from a response key to a JSON Schema for that response body. Keys are a status code (`'200'`), a status class (`'4XX'`) or `default`. An unquoted `200:` is read as the text `'200'`, and `poly pull` writes status keys quoted. |
+| `schema_source` | Where the schemas came from: `observed`, `openapi` or `default`. Hand-written schemas are `manual`, the default, which the file never spells out: a schema without the key is pushed as `manual`, and `poly pull` omits the key for one. The label is pushed as the file has it, so after editing a schema by hand, delete `schema_source` to mark it `manual`. |
 
-Both optional fields are omitted from the file when empty, and removing one from the file clears it in Agent Studio on the next push.
+The optional fields are omitted from the file when empty, and removing one from the file clears it in Agent Studio on the next push.
+
+Schemas are nested YAML, not JSON strings, so quote values YAML would otherwise type for you: `type: "null"`, a `pattern` or `const` that looks like a date or a number. Schemas written in Agent Studio or imported from an OpenAPI document pull down unchanged and push back as they were.
 
 ### Example
 
@@ -101,6 +107,25 @@ api_integrations:
         resource: /contacts/{contact_id}
         headers:
           Content-Type: application/json
+        request_body_schema:
+          type: object
+          required: [phone_number]
+          properties:
+            phone_number:
+              type: string
+        response_schemas:
+          '200':
+            type: object
+            properties:
+              id:
+                type: string
+              phone_number:
+                type: string
+          default:
+            type: object
+            properties:
+              error:
+                type: string
 ~~~
 
 ## Usage
@@ -134,6 +159,12 @@ response = conv.api.salesforce.update_contact(
 - No two operations in the same integration may share both `name` and `method`.
 - An operation's `description` is at most 1000 characters.
 - Header names are HTTP tokens (letters, digits and ``!#$%&'*+-^_`|~``), unique ignoring case, and never `Authorization` or `Host`. Values are text, so quote one YAML would otherwise read as a number, date, list or mapping (`X-Version: '1.10'`); `true` and `false` are sent as written. Values are ASCII with no line breaks or control characters, don't start or end with a space, and are at most 4096 characters. An operation has at most 50 headers.
+- Each schema is a mapping that passes the JSON Schema 2020-12 meta-schema, nests objects and arrays at most 64 levels deep, and is at most 64 KB as compact JSON. A `$schema` keyword, if present, must be `https://json-schema.org/draft/2020-12/schema`.
+- `request_body_schema` is not allowed on `GET` or `DELETE` operations.
+- `response_schemas` keys match `^([1-5]\d{2}|[1-5]XX|default)$`.
+- `schema_source` is one of `default`, `manual`, `observed`, `openapi`.
+- `$ref`, `$id` and `$schema` values must be valid URIs. The ADK does not check this locally; Agent Studio refuses them on push.
+- A `pattern` must compile as a JavaScript regular expression with the `u` flag. Agent Studio checks this on push; `poly validate` does not, since Python's regex syntax differs.
 
 ## Best practices
 

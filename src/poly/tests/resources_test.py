@@ -26,8 +26,11 @@ from poly.resources.agent_settings import (
 from poly.resources.api_integration import (
     AVAILABLE_AUTH_TYPES,
     AVAILABLE_OPERATIONS,
+    HAND_WRITTEN_SCHEMA_SOURCE,
     HEADER_VALUE_MAX,
     MAX_OPERATION_HEADERS,
+    MAX_SCHEMA_BYTES,
+    MAX_SCHEMA_DEPTH,
     OPERATION_DESCRIPTION_MAX,
     URL_PATTERN,
     ApiIntegration,
@@ -6521,11 +6524,20 @@ class HandoffTests(unittest.TestCase):
         self.assertIn("H1", discovered[0])
 
 
+QUERY_SCHEMA = {"type": "object", "properties": {"family": {"type": "string"}}}
+BODY_SCHEMA = {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}
+OK_SCHEMA = {"type": "object", "properties": {"resourceType": {"const": "Bundle"}}}
+
+
 def _operation(**kwargs) -> ApiIntegrationOperation:
     """An operation with plain defaults; pass fields to override them."""
     defaults = {"resource_id": "op-1", "name": "get", "method": "GET", "resource": "/a"}
     defaults.update(kwargs)
     return ApiIntegrationOperation(**defaults)
+
+
+def _integration_with(op: ApiIntegrationOperation) -> ApiIntegration:
+    return ApiIntegration(resource_id="int-1", name="api", operations=[op])
 
 
 class ApiIntegrationTest(unittest.TestCase):
@@ -6929,6 +6941,239 @@ class ApiIntegrationTest(unittest.TestCase):
         self.assertEqual((updated[0].description, updated[0].headers), ("Fetch", {"Accept": "a"}))
         self.assertEqual((deleted[0].description, deleted[0].headers), ("Old", {"X": "y"}))
         self.assertEqual(deleted[0].integration_id, "int-1")
+
+    def test_from_dict_parses_projection_json_strings_into_objects(self):
+        """The projection carries schemas as JSON text; the operation holds them as objects."""
+        op = ApiIntegrationOperation.from_dict(
+            {
+                "id": "op-1",
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "requestQuerySchema": json.dumps(QUERY_SCHEMA),
+                "requestBodySchema": json.dumps(BODY_SCHEMA),
+                "responseSchemas": {"200": json.dumps(OK_SCHEMA), "4XX": "{}"},
+                "schemaSource": "observed",
+            }
+        )
+        self.assertEqual(op.request_query_schema, QUERY_SCHEMA)
+        self.assertEqual(op.request_body_schema, BODY_SCHEMA)
+        self.assertEqual(op.response_schemas, {"200": OK_SCHEMA, "4XX": {}})
+        self.assertEqual(op.schema_source, "observed")
+        self.assertTrue(op.has_schemas)
+
+    def test_from_dict_without_schemas_drops_the_platform_default_source(self):
+        """The platform labels every operation; without a schema the label stays out of the file."""
+        op = ApiIntegrationOperation.from_dict(
+            {
+                "name": "get",
+                "method": "GET",
+                "resource": "/x",
+                "responseSchemas": {},
+                "schemaSource": "manual",
+            }
+        )
+        self.assertFalse(op.has_schemas)
+        self.assertEqual(op.schema_source, "")
+        self.assertNotIn("schema_source", op.to_yaml_dict())
+
+    def test_from_dict_treats_manual_as_the_implicit_default(self):
+        """The platform's `manual` label is the ADK's default: not stored or written, still pushed."""
+        pulled = ApiIntegrationOperation.from_dict(
+            {
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "requestBodySchema": json.dumps(BODY_SCHEMA),
+                "schemaSource": "manual",
+            }
+        )
+        self.assertEqual(pulled.schema_source, "")
+        self.assertNotIn("schema_source", pulled.to_yaml_dict())
+        self.assertEqual(pulled.build_update_proto().schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
+
+        # A YAML that spells the default out is the same operation, hash included.
+        explicit = ApiIntegrationOperation.from_dict(
+            {
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "request_body_schema": BODY_SCHEMA,
+                "schema_source": "manual",
+            }
+        )
+        self.assertTrue(explicit.same_definition(pulled))
+        self.assertEqual(
+            resource_utils.compute_hash_from_dict(explicit.to_yaml_dict()),
+            resource_utils.compute_hash_from_dict(pulled.to_yaml_dict()),
+        )
+
+    def test_from_dict_accepts_objects_and_treats_empty_values_as_unset(self):
+        """YAML and status files give objects; None, "" and a null response entry mean no schema."""
+        from_objects = ApiIntegrationOperation.from_dict(
+            {
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "request_body_schema": BODY_SCHEMA,
+                "response_schemas": {"200": OK_SCHEMA, "404": None},
+                "schema_source": "openapi",
+            }
+        )
+        from_strings = ApiIntegrationOperation.from_dict(
+            {
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "requestQuerySchema": "",
+                "requestBodySchema": json.dumps(BODY_SCHEMA),
+                "responseSchemas": {"200": json.dumps(OK_SCHEMA), "404": ""},
+                "schemaSource": "openapi",
+            }
+        )
+        self.assertTrue(from_objects.same_definition(from_strings))
+        self.assertIsNone(from_objects.request_query_schema)
+        self.assertEqual(from_objects.response_schemas, {"200": OK_SCHEMA})
+
+    def test_from_dict_stringifies_integer_keys_so_hashing_works(self):
+        """YAML reads `200:` and `properties: {1: …}` as ints; as text the hash no longer raises."""
+        op = ApiIntegrationOperation.from_dict(
+            {
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "response_schemas": {
+                    200: {"type": "object", "properties": {1: {"type": "string"}}},
+                    "default": {},
+                },
+            }
+        )
+        self.assertEqual(set(op.response_schemas), {"200", "default"})
+        self.assertEqual(op.response_schemas["200"]["properties"], {"1": {"type": "string"}})
+        resource_utils.compute_hash_from_dict(op.to_yaml_dict())  # mixed key types would raise
+
+    def test_empty_object_is_a_schema_not_unset(self):
+        """`{}` is the permissive schema and is kept, unlike a missing key."""
+        op = _operation(request_query_schema={})
+        self.assertTrue(op.has_schemas)
+        self.assertEqual(op.to_yaml_dict()["request_query_schema"], {})
+        self.assertEqual(op.build_create_proto().request_query_schema, "{}")
+
+    def test_to_yaml_dict_omits_unset_schema_keys(self):
+        """An operation without schemas writes only name, method and resource."""
+        self.assertEqual(set(_operation().to_yaml_dict()), {"name", "method", "resource"})
+
+    def test_yaml_round_trip_keeps_schemas_and_quotes_status_keys(self):
+        """Dumped YAML quotes '200' so it reloads as text, and reloading gives the same operation."""
+        op = _operation(
+            request_body_schema=BODY_SCHEMA,
+            response_schemas={"200": OK_SCHEMA, "4XX": {}, "default": {"type": "object"}},
+            schema_source="openapi",
+        )
+        text = resource_utils.dump_yaml(op.to_yaml_dict())
+        self.assertIn("'200':", text)
+        self.assertIn("4XX:", text)
+        self.assertIn("default:", text)
+        loaded = ApiIntegrationOperation.from_dict(resource_utils.load_yaml(text))
+        self.assertTrue(loaded.same_definition(op))
+        self.assertEqual(loaded.schema_source, "openapi")
+
+    def test_status_dict_round_trip_and_old_status_files_load(self):
+        """The status file stores schemas as objects; a status file from before the fields loads."""
+        op = _operation(request_query_schema=QUERY_SCHEMA, schema_source="manual")
+        stored = resource_utils.resource_to_dict(op)
+        self.assertEqual(stored["request_query_schema"], QUERY_SCHEMA)
+        self.assertTrue(ApiIntegrationOperation.from_dict(stored).same_definition(op))
+
+        legacy = ApiIntegration(
+            resource_id="int-1",
+            name="api",
+            operations=[{"resource_id": "", "name": "get", "method": "GET", "resource": "/x"}],
+        )
+        self.assertFalse(legacy.operations[0].has_schemas)
+
+    def test_build_create_proto_carries_schemas_as_compact_json(self):
+        """A create sends each schema as compact JSON, in the bare response map, with the default source."""
+        create = _operation(
+            request_query_schema=QUERY_SCHEMA,
+            request_body_schema=BODY_SCHEMA,
+            response_schemas={"200": OK_SCHEMA},
+        ).build_create_proto()
+        self.assertEqual(create.request_query_schema, json.dumps(QUERY_SCHEMA, separators=(",", ":")))
+        self.assertEqual(json.loads(create.request_body_schema), BODY_SCHEMA)
+        self.assertEqual(json.loads(create.response_schemas["200"]), OK_SCHEMA)
+        self.assertEqual(create.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
+
+    def test_build_create_proto_without_schemas_sends_no_schema_fields(self):
+        """An operation without schemas creates without any schema field or source."""
+        create = _operation().build_create_proto()
+        self.assertFalse(create.HasField("request_query_schema"))
+        self.assertFalse(create.HasField("request_body_schema"))
+        self.assertEqual(len(create.response_schemas), 0)
+        self.assertFalse(create.HasField("schema_source"))
+
+    def test_build_update_proto_sends_full_schema_state(self):
+        """An update sends every schema field: the unset query schema as "" and the source."""
+        update = _operation(
+            request_body_schema=BODY_SCHEMA,
+            response_schemas={"200": OK_SCHEMA},
+            schema_source="openapi",
+        ).build_update_proto()
+        self.assertTrue(update.HasField("request_query_schema"))
+        self.assertEqual(update.request_query_schema, "")
+        self.assertEqual(json.loads(update.request_body_schema), BODY_SCHEMA)
+        self.assertEqual(json.loads(update.response_schemas.entries["200"]), OK_SCHEMA)
+        self.assertEqual(update.schema_source, "openapi")
+
+    def test_build_update_proto_clears_removed_schemas_without_a_source(self):
+        """An operation without schemas sends empty values to clear them, and no source."""
+        update = _operation().build_update_proto()
+        for name in ("request_query_schema", "request_body_schema"):
+            self.assertTrue(update.HasField(name))
+            self.assertEqual(getattr(update, name), "")
+        self.assertTrue(update.HasField("response_schemas"))
+        self.assertEqual(len(update.response_schemas.entries), 0)
+        self.assertFalse(update.HasField("schema_source"))
+
+    def test_build_update_proto_defaults_the_source_when_yaml_omits_it(self):
+        """A schema written without schema_source is pushed with the default label."""
+        update = _operation(request_body_schema=BODY_SCHEMA).build_update_proto()
+        self.assertEqual(update.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
+
+    def test_subresources_detect_schema_and_source_changes_but_not_formatting(self):
+        """Key order sends nothing; an edited schema or a new source sends an update."""
+        body = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+        old = _integration_with(_operation(request_body_schema=body, schema_source="manual"))
+
+        reordered = _integration_with(
+            _operation(
+                request_body_schema={
+                    "required": ["id"],
+                    "properties": {"id": {"type": "string"}},
+                    "type": "object",
+                }
+            )  # no schema_source: equals the stored default
+        )
+        self.assertEqual(reordered.get_new_updated_deleted_subresources(old), ([], [], []))
+
+        edited = _integration_with(_operation(request_body_schema={"type": "object"}))
+        _, updated, _ = edited.get_new_updated_deleted_subresources(old)
+        self.assertEqual([op.request_body_schema for op in updated], [{"type": "object"}])
+
+        relabelled = _integration_with(_operation(request_body_schema=body, schema_source="openapi"))
+        _, updated, _ = relabelled.get_new_updated_deleted_subresources(old)
+        self.assertEqual([op.schema_source for op in updated], ["openapi"])
+
+    def test_subresources_send_an_unchanged_label_with_an_edited_schema(self):
+        """Updating an observed schema and keeping its label sends `observed`, as written."""
+        old = _integration_with(
+            _operation(request_body_schema={"type": "object"}, schema_source="observed")
+        )
+        edited = _integration_with(
+            _operation(request_body_schema={"type": "array"}, schema_source="observed")
+        )
+        _, [update], _ = edited.get_new_updated_deleted_subresources(old)
+        self.assertEqual(update.build_update_proto().schema_source, "observed")
 
 
 class VariableTest(unittest.TestCase):
@@ -8467,6 +8712,133 @@ class TestApiIntegrationValidate(unittest.TestCase):
         op = ApiIntegrationOperation.from_dict(loaded)
         self.assertEqual(op.headers["X-Flag"], "true")
         self._assert_invalid(op, "header 'X-Version' value must be text")
+
+    def test_operation_with_valid_schemas_passes(self):
+        """Well-formed schemas, the 2020-12 dialect with a trailing #, and every key form are valid."""
+        self._make_integration(
+            operations=[
+                _operation(
+                    method="POST",
+                    request_query_schema={"type": "object"},
+                    request_body_schema={
+                        "$schema": "https://json-schema.org/draft/2020-12/schema#",
+                        "type": "object",
+                    },
+                    response_schemas={"200": {"type": "object"}, "4XX": {}, "default": {}},
+                    schema_source="openapi",
+                )
+            ]
+        ).validate()
+
+    def test_request_body_schema_on_bodyless_method_raises_value_error(self):
+        """GET and DELETE carry no body, so a body schema on them is refused."""
+        for method in ("GET", "DELETE"):
+            with self.subTest(method=method):
+                self._assert_invalid(
+                    _operation(method=method, request_body_schema={"type": "object"}),
+                    f"{method} requests have no body",
+                )
+
+    def test_non_object_schema_raises_value_error(self):
+        """A list, a non-JSON string or a number is not a schema."""
+        for schema in (["type"], "not json", 3):
+            with self.subTest(schema=schema):
+                self._assert_invalid(
+                    _operation(request_query_schema=schema),
+                    "request_query_schema must be a JSON Schema object",
+                )
+
+    def test_schema_failing_the_meta_schema_raises_value_error(self):
+        """A schema the 2020-12 meta-schema rejects is reported with its path."""
+        self._assert_invalid(
+            _operation(request_query_schema={"type": "nonsense"}),
+            "request_query_schema is not a valid JSON Schema at type",
+        )
+
+    def test_schema_with_another_dialect_raises_value_error(self):
+        """Only the 2020-12 dialect is stored."""
+        self._assert_invalid(
+            _operation(
+                request_query_schema={
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                }
+            ),
+            "$schema must be https://json-schema.org/draft/2020-12/schema",
+        )
+
+    def test_schema_over_size_limit_raises_value_error(self):
+        """A schema over the platform's byte cap, measured as compact JSON, is refused."""
+        big = {"type": "string", "enum": [f"value-{i:06d}" for i in range(MAX_SCHEMA_BYTES // 10)]}
+        self._assert_invalid(
+            _operation(request_query_schema=big), f"the limit is {MAX_SCHEMA_BYTES} bytes"
+        )
+
+    def test_schema_nested_too_deep_raises_value_error(self):
+        """A schema deeper than the platform's nesting cap is refused before the meta-schema runs."""
+        schema: dict = {"type": "string"}
+        for _ in range(MAX_SCHEMA_DEPTH):
+            schema = {"type": "object", "properties": {"child": schema}}
+        self._assert_invalid(
+            _operation(request_query_schema=schema), f"nests deeper than {MAX_SCHEMA_DEPTH} levels"
+        )
+
+    def test_schema_depth_counts_objects_and_arrays_only(self):
+        """64 nested objects ending in a scalar are at the cap, as the platform counts them."""
+        schema: dict = {"type": "string"}
+        for _ in range(MAX_SCHEMA_DEPTH - 1):
+            schema = {"not": schema}
+        self._make_integration(operations=[_operation(request_query_schema=schema)]).validate()
+
+        self._assert_invalid(
+            _operation(request_query_schema={"not": schema}),
+            f"nests deeper than {MAX_SCHEMA_DEPTH} levels",
+        )
+
+    def test_invalid_response_schema_key_raises_value_error(self):
+        """Response keys are a status code, an uppercase status class or default."""
+        for key in ("600", "2xx", "ok", "20"):
+            with self.subTest(key=key):
+                self._assert_invalid(
+                    _operation(response_schemas={key: {"type": "object"}}),
+                    f"response_schemas key '{key}' must be a status code",
+                )
+
+    def test_invalid_schema_source_raises_value_error(self):
+        """An unknown schema_source is refused."""
+        self._assert_invalid(
+            _operation(request_query_schema={"type": "object"}, schema_source="guess"),
+            "schema_source 'guess' invalid",
+        )
+
+    def test_schema_with_an_unquoted_date_raises_value_error(self):
+        """An unquoted YAML date is not JSON and is reported as such."""
+        self._assert_invalid(
+            _operation(request_query_schema={"type": "string", "const": datetime.date(2024, 1, 1)}),
+            "request_query_schema is not valid JSON",
+        )
+
+    def test_response_schemas_not_a_mapping_raises_value_error(self):
+        """A list under `response_schemas` is reported rather than crashing the read."""
+        op = ApiIntegrationOperation.from_dict(
+            {
+                "name": "list_users",
+                "method": "GET",
+                "resource": "/users",
+                "response_schemas": [{"type": "object"}],
+            }
+        )
+        self._assert_invalid(op, "response_schemas must be a mapping")
+
+    def test_pattern_is_left_for_the_platform_to_compile(self):
+        """`pattern` is a JavaScript regex on the platform, so Python's `re` doesn't judge it."""
+        for pattern in (r"^\p{L}+$", r"^(?P<id>\d+)$"):
+            with self.subTest(pattern=pattern):
+                self._make_integration(
+                    operations=[
+                        _operation(request_query_schema={"type": "string", "pattern": pattern})
+                    ]
+                ).validate()
 
 
 class SafetyFiltersTests(unittest.TestCase):
