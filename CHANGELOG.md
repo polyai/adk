@@ -1,6 +1,63 @@
 # CHANGELOG
 
 
+## v0.75.2 (2026-10-28)
+
+### Bug Fixes
+
+- Send test case simulated_at with milliseconds ([#393](https://github.com/polyai/adk/pull/393),
+  [`ff5ccf9`](https://github.com/polyai/adk/commit/ff5ccf97af1c3b9a7cba1e77642e8dea099c75fe))
+
+## Summary
+
+Create and update test case commands now send `simulated_at` as a UTC timestamp with milliseconds
+  (`2026-01-15T09:30:00.000Z`), the form Agent Studio reads back from its snapshots. The YAML in a
+  project keeps its existing form (`2026-01-15T09:30:00Z`).
+
+## Motivation
+
+Agent Studio stores `simulated_at` as sent, but its snapshots round-trip the value through a
+  timestamp and read it back with milliseconds. A branch rebuilt from its history therefore had
+  `2026-01-15T09:30:00Z`, while the same branch loaded from a snapshot had
+  `2026-01-15T09:30:00.000Z`. After a deploy wrote a snapshot, the branch's state looked changed
+  with no edit between. A client that compares branch state to decide whether anything landed,
+  before pushing again, saw a change that wasn't there, and its next push was refused as out of
+  date.
+
+Sending the snapshot's form means both paths agree for every test case pushed from the ADK.
+
+## Changes
+
+- `format_simulated_at_for_api` renders `simulated_at` in UTC with milliseconds, or `""` to clear
+  it. Offsets are converted to UTC, as the snapshot does. - `TestCase.build_create_proto` and
+  `build_update_proto` use it. The YAML, the projection read and change detection still use
+  `format_simulated_at`, so files and diffs are unchanged.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+`resources_test.py`: - `test_simulated_at_in_protos` now expects `.000Z`. - New: offsets, fractional
+  seconds and space-separated input all reach the proto in UTC with milliseconds. - New: the YAML
+  keeps the form without milliseconds.
+
+Full suite: 2,497 passed.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/` (none: files and CLI output are
+  unchanged)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.75.1 (2026-10-28)
 
 ### Bug Fixes
