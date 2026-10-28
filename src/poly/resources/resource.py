@@ -560,7 +560,9 @@ class MultiResourceYamlResource(YamlResource, ABC):
     # (top_level_name, resource_key) -> (yaml_list, keys, positions): the clean name of each entry
     # and the index of the first entry per clean name. Only valid for the exact list object it was
     # built from, so a reload or cache clear (which yields new lists) drops it. One per thread,
-    # so threads indexing different lists don't evict or edit each other's entries.
+    # so threads indexing different lists don't evict or edit each other's entries. Only save()
+    # and delete_resource() may change a cached entry in place, because they keep the index in
+    # step; any other in-place edit to an entry's key leaves the index stale.
     _match_index: ClassVar[_PerThreadMatchIndex] = _PerThreadMatchIndex()
 
     # When True, the top-level key maps to a single dict (not a list). Used for singleton resources like VoiceGreeting.

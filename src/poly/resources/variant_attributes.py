@@ -211,28 +211,20 @@ def _variant_ids_by_name(resource_mappings: list[ResourceMapping]) -> dict[str, 
 
 def _variant_id_to_name(resource_mappings: list[ResourceMapping]) -> dict[str, str]:
     """Map variant ids to names; the last mapping wins for a repeated id."""
-    return utils.memo_for_mappings(
-        resource_mappings,
-        "variant_id_to_name",
-        lambda: {
-            resource.resource_id: resource.resource_name
-            for resource in resource_mappings
-            if resource.resource_type == Variant
-        },
-    )
+    return {
+        resource.resource_id: resource.resource_name
+        for resource in resource_mappings
+        if resource.resource_type == Variant
+    }
 
 
 def _variant_name_to_id(resource_mappings: list[ResourceMapping]) -> dict[str, str]:
     """Map variant names to ids; the last mapping wins for a repeated name."""
-    return utils.memo_for_mappings(
-        resource_mappings,
-        "variant_name_to_id",
-        lambda: {
-            resource.resource_name: resource.resource_id
-            for resource in resource_mappings
-            if resource.resource_type == Variant
-        },
-    )
+    return {
+        resource.resource_name: resource.resource_id
+        for resource in resource_mappings
+        if resource.resource_type == Variant
+    }
 
 
 @register_resource("variants")
