@@ -41,10 +41,10 @@ This lets you test against staging in sandbox and promote without changing code.
 Each operation is one HTTP endpoint. You define:
 
 - **name**: Operation name; used at runtime as `conv.api.<api_name>.<operation_name>(...)`.
+- **description**: Optional note on what the operation does (up to 1000 characters).
 - **method**: HTTP method (e.g. `GET`, `POST`, `PUT`, `DELETE`).
 - **resource**: Path template (e.g. `/tickets/{id}`). Path variables are exposed as arguments when calling the operation.
-- **description**: Optional note on what the operation does (up to 1000 characters).
-- **headers**: Optional mapping of header name to value, sent on every call to the operation (up to 50). `Authorization` and `Host` come from the environment config and can't be set here.
+- **headers**: Optional mapping of header name to value, sent on every call to the operation (up to 50). `Authorization` and `Host` come from the environment config and can't be set here. Quote a value YAML would otherwise read as a number, date, list or mapping (`X-Version: '1.10'`).
 
 Both optional fields are omitted from the file when empty, and removing one from the file clears it in Agent Studio on the next push.
 
@@ -76,9 +76,9 @@ api_integrations:
         method: GET
         resource: /contacts/{contact_id}
       - name: update_contact
+        description: Change a contact's phone number
         method: PATCH
         resource: /contacts/{contact_id}
-        description: Change a contact's phone number
         headers:
           Content-Type: application/json
 ```

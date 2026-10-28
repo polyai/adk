@@ -68,9 +68,9 @@ Each entry is one HTTP endpoint:
 | Field | Description |
 |---|---|
 | `name` | Operation name. Called at runtime as `conv.api.<api_name>.<name>(...)`. |
+| `description` | Optional note on what the operation does, up to 1000 characters. |
 | `method` | One of `GET`, `POST`, `PATCH`, `PUT`, `DELETE`. |
 | `resource` | Path template, e.g. `/tickets/{id}`. Path variables become call arguments. |
-| `description` | Optional note on what the operation does, up to 1000 characters. |
 | `headers` | Optional mapping of header name to value, sent on every call to the operation. Up to 50 headers. `Authorization` and `Host` come from the environment config and can't be set here. |
 
 Both optional fields are omitted from the file when empty, and removing one from the file clears it in Agent Studio on the next push.
@@ -96,9 +96,9 @@ api_integrations:
         method: GET
         resource: /contacts/{contact_id}
       - name: update_contact
+        description: Change a contact's phone number
         method: PATCH
         resource: /contacts/{contact_id}
-        description: Change a contact's phone number
         headers:
           Content-Type: application/json
 ~~~
@@ -133,7 +133,7 @@ response = conv.api.salesforce.update_contact(
 - Every operation needs a non-empty `name`, a `method` from the supported set, and a `resource` path matching a valid URL-path pattern (optionally with `{param}` placeholders).
 - No two operations in the same integration may share both `name` and `method`.
 - An operation's `description` is at most 1000 characters.
-- Header names are HTTP tokens (letters, digits and ``!#$%&'*+-^_`|~``), unique ignoring case, and never `Authorization` or `Host`. Values are ASCII with no line breaks or control characters, don't start or end with a space, and are at most 4096 characters. An operation has at most 50 headers.
+- Header names are HTTP tokens (letters, digits and ``!#$%&'*+-^_`|~``), unique ignoring case, and never `Authorization` or `Host`. Values are text, so quote one YAML would otherwise read as a number, date, list or mapping (`X-Version: '1.10'`); `true` and `false` are sent as written. Values are ASCII with no line breaks or control characters, don't start or end with a space, and are at most 4096 characters. An operation has at most 50 headers.
 
 ## Best practices
 

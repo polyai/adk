@@ -8398,6 +8398,7 @@ class ApiIntegrationSyncTest(unittest.TestCase):
         self.assertEqual(ops["get_confirmation_status"]["headers"], {"Accept": "application/json"})
         self.assertNotIn("description", ops["create_booking"])
         self.assertNotIn("headers", ops["create_booking"])
+        self.assertEqual(list(ops["get_confirmation_status"])[:2], ["name", "description"])
 
     def test_pull_then_push_round_trips_with_no_changes(self):
         """Pushing straight after a pull finds nothing to send."""
@@ -8455,6 +8456,25 @@ class ApiIntegrationSyncTest(unittest.TestCase):
 
         self.assertFalse(success)
         self.assertIn("header 'Authorization' is set from the environment config", message)
+        self.assertEqual(commands, [])
+
+    def test_unquoted_header_value_fails_push_validation(self):
+        """`1.10` would reach the platform as "1.1", so it stops the push until quoted."""
+        with open(self.path, encoding="utf-8") as file:
+            text = file.read()
+        self.assertEqual(text.count("Accept: application/json\n"), 1)
+        with open(self.path, "w", encoding="utf-8") as file:
+            file.write(
+                text.replace(
+                    "Accept: application/json\n",
+                    "Accept: application/json\n      X-Version: 1.10\n",
+                )
+            )
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertIn("header 'X-Version' value must be text; quote it in YAML", message)
         self.assertEqual(commands, [])
 
 
