@@ -1,6 +1,94 @@
 # CHANGELOG
 
 
+## v0.75.0 (2026-10-28)
+
+### Features
+
+- Sync operation request and response schemas ([#389](https://github.com/polyai/adk/pull/389),
+  [`c84bc7a`](https://github.com/polyai/adk/commit/c84bc7ad9f1b840bd83cbe342d0dcdd7e4186c16))
+
+## Summary
+
+An operation in `config/api_integrations.yaml` can now carry JSON Schemas for its query parameters,
+  request body and responses, plus a label saying where they came from. `poly pull`, `push` and
+  `diff` sync them with Agent Studio.
+
+## Motivation
+
+Agent Studio stores request and response schemas on API operations. Teams keeping an agent as code
+  couldn't see or edit them, and tools that build integrations through the ADK couldn't record what
+  they learned about an API.
+
+## Changes
+
+- New operation keys: `request_query_schema` and `request_body_schema` (YAML mappings),
+  `response_schemas` (a mapping from `'200'`, `'4XX'` or `default` to a schema) and `schema_source`
+  (`manual`, `observed`, `openapi` or `default`). - Pull writes the platform's JSON text as nested
+  YAML; push sends it back as compact JSON. The YAML is the full desired state: a key removed from
+  the file is cleared on push. - `manual` is the default label and the file never spells it out: a
+  schema written without `schema_source` is pushed as `manual`, and `poly pull` omits the key for
+  hand-written schemas, so the file, its hash and the diff always agree. `observed`, `openapi` and
+  `default` are written as pulled. Every label is pushed exactly as the file has it, so a writer
+  updating its own `observed` schema keeps the label; a hand edit is marked by deleting
+  `schema_source`. - Unquoted numeric keys such as `200:` are read as text, so a hand-typed status
+  code is not a change, and `poly pull` writes status keys quoted. - `poly validate` mirrors the
+  platform: an object that passes the JSON Schema 2020-12 meta-schema, only the 2020-12 `$schema`
+  dialect, at most 64 KB as compact JSON and 64 levels of objects and arrays deep (scalar leaves
+  don't count, as on the platform), response keys in the accepted format, a known `schema_source`,
+  and no body schema on `GET` or `DELETE`. Like every other resource, validation stops at the first
+  problem. `pattern` is not checked locally: the platform compiles it as a JavaScript regex, which
+  Python's `re` disagrees with both ways, so it is left to Agent Studio on push. - Docs: the
+  resource page and the `poly docs` copy gain the four fields, a worked example and the validation
+  rules. - Known limits: a push still sends every command in one batch, so a project with dozens of
+  operations carrying 64 KB schemas can exceed the platform's batch size limit; a change that is
+  only leading or trailing whitespace inside a schema string is not detected as a change; and
+  `$ref`/`$id` URIs and `pattern` regexes are not checked locally (the platform refuses a malformed
+  one on push).
+
+## Test strategy
+
+- [x] Added/updated unit tests - `resources_test.py`: JSON-text and object parsing give the same
+  operation, integer keys become text, `{}` is a schema while a missing key is not, YAML round-trip
+  with quoted status keys, status files from before the fields still load, create and update protos
+  including the clearing update and the default source, the diff ignores key order but catches a
+  schema or source change, an edited schema keeps the label it was written with, and one test per
+  validation rule, including depth at exactly 64 objects and JavaScript-only patterns. -
+  `project_test.py`, `ApiIntegrationSyncTest` on a real temp project: pull writes nested YAML with
+  quoted status keys, pull → push sends nothing, a schema edit sends the new schema with its source,
+  removing every schema sends a clearing update without a source, a new operation without
+  `schema_source` is created as `manual`, dropping only the source relabels, a hand-typed `201:`
+  round-trips, a body schema on a GET fails the push locally. - The fixture project gained a POST
+  operation with a body schema and two response schemas, and a query schema on the existing
+  operation. - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a live Agent Studio
+  project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+`mkdocs build --strict` passes on this branch. No skill describes operation fields, so none changed.
+
+Manual run against a live project, on a test branch: a query schema plus `'200'`/`default` responses
+  written without `schema_source` pushed and came back from the projection as compact JSON labelled
+  `manual`; a body schema with `schema_source: observed` on a POST came back as `observed`; `poly
+  pull` after the push reproduced the file and `poly status` stayed clean; hand-editing `'200':` to
+  `200:` was not a change; a body schema on a GET failed `poly validate` and `poly push` locally
+  with the operation named; deleting every schema key pushed a clearing update (no request schemas,
+  empty responses) and deleting only `schema_source: observed` relabelled the operation `manual`,
+  which the next pull wrote back without the key.
+
+---------
+
+Co-authored-by: Claude Fable 5.1 <noreply@anthropic.com>
+
+
 ## v0.74.0 (2026-10-28)
 
 ### Features
