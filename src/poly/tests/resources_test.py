@@ -9875,6 +9875,79 @@ class TestCaseTests(unittest.TestCase):
         self.assertIs(call.to_yaml_dict()["is_asserted"], False)
         self.assertFalse(call.to_proto().is_asserted)
 
+    def test_non_string_expected_value_from_projection_round_trips(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        "TEST-typed": {
+                            "name": "Typed values test",
+                            "scenario": "Book a table.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                            "assertions": [
+                                {
+                                    "payload": {
+                                        "$case": "functionCall",
+                                        "value": {
+                                            "name": "test_function",
+                                            "arguments": {
+                                                "confirmed": {
+                                                    "expectedValue": False,
+                                                    "valueType": "boolean",
+                                                },
+                                                "party_size": {
+                                                    "expectedValue": 4,
+                                                    "valueType": "integer",
+                                                },
+                                            },
+                                            "isAsserted": True,
+                                        },
+                                    }
+                                }
+                            ],
+                        }
+                    }
+                }
+            }
+        }
+        test_case = TestCase.from_projection(projection)["TEST-typed"]
+        call = test_case.assertions.function_calls[0]
+        arguments = {arg.parameter_name: arg.expected_value for arg in call.arguments}
+        self.assertEqual(arguments, {"confirmed": "false", "party_size": "4"})
+
+        proto_arguments = call.to_proto().arguments
+        self.assertEqual(proto_arguments["confirmed"].expected_value, "false")
+        self.assertEqual(proto_arguments["party_size"].expected_value, "4")
+
+        written = test_case.to_pretty()
+        self.assertIn("expected_value: 'false'", written)
+        self.assertIn("expected_value: '4'", written)
+
+    def test_unquoted_expected_value_in_yaml_pushes(self):
+        file_path = os.path.join("test_suite", "typed_values_test.yaml")
+        contents = (
+            "name: Typed values test\n"
+            "scenario: Book a table.\n"
+            "channel: chat.polyai\n"
+            "language: en-GB\n"
+            "function_call_assertions:\n"
+            "  - name: test_function\n"
+            "    arguments:\n"
+            "      - parameter_name: confirmed\n"
+            "        expected_value: true\n"
+            "        value_type: boolean\n"
+        )
+        with mock_read_from_file({file_path: contents}):
+            test_case = TestCase.read_local_resource(
+                file_path=file_path,
+                resource_id="TEST-typed_values",
+                resource_name="Typed values test",
+            )
+        call = test_case.assertions.function_calls[0]
+        self.assertEqual(call.arguments[0].expected_value, "true")
+        self.assertEqual(call.to_proto().arguments["confirmed"].expected_value, "true")
+
     def test_read_local_resource_filename_mismatch_raises(self):
         file_path = os.path.join("test_suite", "greeting_flow_test.yaml")
         with mock_read_from_file(
