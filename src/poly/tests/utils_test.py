@@ -50,7 +50,6 @@ from poly.resources.flows import (
     StepType,
     VADConfig,
 )
-from poly.resources.resource import _strip_strings
 from poly.utils import prepush, stub_gen
 
 
@@ -1762,6 +1761,10 @@ class LoadYamlParserTests(unittest.TestCase):
     def test_ryaml_is_used(self):
         self.assertIsNotNone(resource_utils.ryaml)
 
+    def test_falls_back_to_ruamel_without_ryaml(self):
+        with patch.object(resource_utils, "ryaml", None):
+            self.assertEqual(resource_utils.load_yaml("a: 1\nb: [x]\n"), {"a": 1, "b": ["x"]})
+
     def test_clib_marker_covers_running_python(self):
         covered = _clib_requirement().marker.evaluate(
             {
@@ -1850,22 +1853,41 @@ class DumpYamlTests(unittest.TestCase):
     def test_keys_with_anchor_characters_round_trip(self):
         self.assert_round_trips({"Bull & Anchor": 1, "*starred": 2})
 
+    def test_tabs_inside_lines_keep_block_style(self):
+        text = self.assert_round_trips({"table": "Name:\tJohn\nAge:\t42"})
+        self.assertEqual(text, "table: |-\n  Name:\tJohn\n  Age:\t42\n")
+
+    def test_lines_starting_with_a_tab_are_escaped(self):
+        text = self.assert_round_trips({"code": "def f():\n\treturn 1"})
+        self.assertEqual(text, 'code: "def f():\\n\\treturn 1"\n')
+
+
+class FormatYamlTests(unittest.TestCase):
+    def test_trailing_spaces_are_trimmed_so_block_style_survives(self):
+        source = 'prompt: "Call the agent \\nThen stop.  "\n'
+        self.assertEqual(
+            resource_utils.format_yaml(source, "flow.yaml"), "prompt: |-\n  Call the agent\n  Then stop.\n"
+        )
+
+    def test_invalid_yaml_is_returned_unchanged(self):
+        self.assertEqual(resource_utils.format_yaml("key: [unclosed", "x.yaml"), "key: [unclosed")
+
 
 class StripStringsTests(unittest.TestCase):
     def test_strips_the_ends_of_single_line_strings(self):
-        self.assertEqual(_strip_strings({"a": "  text  "}), {"a": "text"})
+        self.assertEqual(resource_utils.strip_strings({"a": "  text  "}), {"a": "text"})
 
     def test_strips_trailing_whitespace_from_each_line(self):
         self.assertEqual(
-            _strip_strings({"a": ["First line  \n\t\nSecond line \n"]}),
+            resource_utils.strip_strings({"a": ["First line  \n\t\nSecond line \n"]}),
             {"a": ["First line\n\nSecond line"]},
         )
 
     def test_keeps_leading_indentation_of_inner_lines(self):
-        self.assertEqual(_strip_strings("Steps:\n  - one\n  - two"), "Steps:\n  - one\n  - two")
+        self.assertEqual(resource_utils.strip_strings("Steps:\n  - one\n  - two"), "Steps:\n  - one\n  - two")
 
     def test_removes_zero_width_no_break_spaces(self):
-        self.assertEqual(_strip_strings("Hello\ufeff\nWorld"), "Hello\nWorld")
+        self.assertEqual(resource_utils.strip_strings("Hello\ufeff\nWorld"), "Hello\nWorld")
 
 
 if __name__ == "__main__":

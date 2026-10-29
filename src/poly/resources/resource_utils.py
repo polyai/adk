@@ -22,6 +22,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Callable, Optional, TypeVar, Union
 
 import yaml
+from ruamel.yaml import YAML
 from ruamel.yaml.nodes import ScalarNode
 from ruamel.yaml.resolver import VersionedResolver
 
@@ -29,9 +30,6 @@ try:
     import ryaml
 except ImportError:  # No ryaml wheel for this platform
     ryaml = None
-    from ruamel.yaml import YAML
-
-    _fallback_loader = YAML(typ="safe")
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +46,7 @@ _NO_WRAP = 1_000_000_000
 # ruamel's resolver is the strictest reader of these files we support (older ADK versions use
 # it), so any string it would read as another type is written quoted.
 _resolver = VersionedResolver()
+_fallback_loader = YAML(typ="safe")
 
 
 def _reads_as_other_type(value: str) -> bool:
@@ -64,19 +63,26 @@ class _Dumper(_DumperMixin, yaml.CSafeDumper if hasattr(yaml, "CSafeDumper") els
     pass
 
 
-# libyaml's emitter treats characters beyond U+FFFF (emoji) as unprintable and escapes the whole
-# string, so data holding them goes through PyYAML's pure-Python emitter instead.
+# libyaml's emitter escapes the whole string when it holds characters beyond U+FFFF (emoji) or a
+# tab, so data holding either goes through PyYAML's pure-Python emitter instead.
 class _PureDumper(_DumperMixin, yaml.SafeDumper):
-    pass
+    def analyze_scalar(self, scalar):
+        """Allow tabs inside block scalars, as YAML does, unless a line starts with one."""
+        lines = scalar.split("\n")
+        if len(lines) > 1 and "\t" in scalar and not any(line.startswith("\t") for line in lines):
+            analysis = super().analyze_scalar(scalar.replace("\t", " "))
+            analysis.scalar = scalar
+            return analysis
+        return super().analyze_scalar(scalar)
 
 
-def _has_astral(data) -> bool:
+def _needs_pure_emitter(data) -> bool:
     if isinstance(data, str):
-        return bool(data) and max(data) > "\uffff"
+        return bool(data) and (max(data) > "\uffff" or ("\t" in data and "\n" in data))
     if isinstance(data, dict):
-        return any(_has_astral(k) or _has_astral(v) for k, v in data.items())
+        return any(_needs_pure_emitter(k) or _needs_pure_emitter(v) for k, v in data.items())
     if isinstance(data, (list, tuple)):
-        return any(_has_astral(item) for item in data)
+        return any(_needs_pure_emitter(item) for item in data)
     return False
 
 
@@ -136,6 +142,25 @@ def _serialize_value(value):
     return value
 
 
+def strip_strings(data):
+    """Recursively strip whitespace from the ends of strings and of each line in them.
+
+    A line ending in whitespace, or a string holding U+FEFF (an invisible character pasted in from
+    some editors), can't be written as a YAML block scalar, so both are removed to keep multiline
+    strings readable.
+    """
+    if isinstance(data, dict):
+        return {k: strip_strings(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [strip_strings(item) for item in data]
+    if isinstance(data, str):
+        stripped = data.replace("\ufeff", "").strip()
+        if "\n" in stripped:
+            return "\n".join(line.rstrip() for line in stripped.split("\n"))
+        return stripped
+    return data
+
+
 def dump_yaml(data, stream=None):
     """Dump data to YAML, with block style for multiline strings.
 
@@ -149,7 +174,7 @@ def dump_yaml(data, stream=None):
     return yaml.dump(
         data,
         stream,
-        Dumper=_PureDumper if _has_astral(data) else _Dumper,
+        Dumper=_PureDumper if _needs_pure_emitter(data) else _Dumper,
         sort_keys=False,
         default_flow_style=False,
         allow_unicode=True,
@@ -688,7 +713,7 @@ def format_yaml(yaml_content: str, file_name: str) -> str:
         data = load_yaml(yaml_content)
         if data is None:
             return yaml_content
-        return dump_yaml(data)
+        return dump_yaml(strip_strings(data))
     except Exception:
         return yaml_content
 

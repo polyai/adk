@@ -66,8 +66,8 @@ def parse_simulated_at(value: str | datetime | None) -> Optional[datetime]:
     """Parse a test clock value into a UTC datetime, or None when unset.
 
     Accepts an ISO 8601 string (the platform projection format) or a datetime
-    (ruamel parses unquoted YAML timestamps into one). Naive datetimes are
-    assumed to be UTC.
+    (the fallback YAML loader reads unquoted timestamps as one). Naive datetimes
+    are assumed to be UTC.
     """
     if value is None or value == "":
         return None
@@ -339,8 +339,8 @@ def _normalise_attribute(value: Any) -> Any:
 def _validate_attribute_value(value: Any, path: str) -> None:
     """Reject values a google.protobuf.Struct cannot carry.
 
-    YAML types unquoted scalars, so `expiry: 2026-08-12` becomes a
-    `datetime.date` and `Struct.update` fails with a bare
+    The fallback YAML loader types unquoted dates, so `expiry: 2026-08-12`
+    becomes a `datetime.date` and `Struct.update` fails with a bare
     `ValueError: Unexpected type` naming neither the key nor the file. The
     wire format is JSON, exactly as in the UI, where the type picker offers
     string, number, boolean and JSON and nothing else.
