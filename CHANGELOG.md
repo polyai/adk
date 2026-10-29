@@ -1,6 +1,88 @@
 # CHANGELOG
 
 
+## v0.77.0 (2026-10-29)
+
+### Features
+
+- Load YAML with ryaml and dump with PyYAML ([#395](https://github.com/polyai/adk/pull/395),
+  [`213018f`](https://github.com/polyai/adk/commit/213018f171ee19e525e1d114ce571b0c0d0d8933))
+
+## Summary
+
+YAML is now loaded with `ryaml`, a Rust parser, and dumped with PyYAML instead of ruamel.yaml. On
+  large projects this makes pulls about 60% faster, diffs about 70% faster and push dry runs about
+  20% faster. The file format changes in two visible ways: long strings are no longer wrapped at 100
+  characters, and trailing spaces at the end of lines inside multiline strings are removed.
+
+## Motivation
+
+YAML handling was the biggest cost in pull and diff. ruamel.yaml builds every loaded and dumped
+  value in pure Python, and dumping alone was about half of a fresh pull. Timings on five real
+  projects (310 to 1,779 files), best of 3:
+
+| Operation | Before | After | Change | | --- | --- | --- | --- | | Pull (fresh, into an empty
+  directory) | 4.23 s | 1.72 s | −59% | | Push (dry run, one topic edited) | 2.86 s | 2.20 s | −23%
+  | | Diff (two projections) | 6.09 s | 1.72 s | −72% |
+
+## Changes
+
+- `load_yaml` uses `ryaml`. On platforms without a `ryaml` wheel, it falls back to ruamel.yaml's
+  safe loader. - `ryaml` keeps a few unquoted forms as strings where ruamel.yaml converted them:
+  dates and timestamps (`2026-09-23`), leading-zero numbers (`0777`) and numbers with underscores
+  (`1_000`). Test case clock fields already accept a string or a datetime, so they behave the same.
+  - `dump_yaml` uses PyYAML. It keeps `|` block style for multiline strings and quotes any string
+  that ruamel.yaml would read as another type, so older versions read new files the same way. It
+  never writes anchors and doesn't wrap long lines. Data containing emoji goes through PyYAML's
+  pure-Python emitter, because libyaml's emitter escapes characters beyond U+FFFF. -
+  `_strip_strings` also trims trailing whitespace from each line of a multiline string and removes
+  U+FEFF. A line ending in a space, or a U+FEFF, would force the string into an escaped
+  double-quoted form. Multi-resource files now go through `_strip_strings` when saved, as
+  single-resource files already did. Local and remote hashes are computed from the stripped data, so
+  this pushes nothing on its own. - New runtime dependencies: `pyyaml` and `ryaml`, the latter
+  limited to the platforms its wheels cover. `ryaml` has no musllinux wheels and needs glibc 2.28 or
+  later, so installing on Alpine needs a Rust toolchain to build it. - `licenses.json`, the `poly
+  format` reference page and the resources contributor guide are updated.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+- New tests cover dump output (block style, quoting, no wrapping, emoji, no anchors, empty values,
+  keys with `&` and `*`) and the per-line trimming. They check that every file loads back to the
+  same data with both `ryaml` and ruamel.yaml. - Every YAML file in 13,795 files across 80 real
+  projects loads to identical data with `ryaml` and ruamel.yaml, apart from the forms listed above,
+  none of which appear in those files. - Every YAML file in 68,607 files across 425 real projects
+  was loaded and dumped with main and with this branch, run through prettier, and compared with the
+  committed copy. Apart from trimmed whitespace, no file loads back to different data. The format
+  changes are: - 42% of files are unchanged. - 48.5% only have long strings moved onto one line. -
+  7.5% only lose trailing spaces. - About 1.5% use different quoting (for example `yes` becomes
+  `"yes"`). - 4 files keep an escaped multiline string, because it contains a tab.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+A long string, before and after:
+
+```yaml # before description: Account holder status was set to valid for the remainder of the call
+  based on an FAQ asked # after description: Account holder status was set to valid for the
+  remainder of the call based on an FAQ asked ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.76.0 (2026-10-29)
 
 ### Features
