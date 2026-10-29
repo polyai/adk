@@ -94,12 +94,31 @@ def format_simulated_at(value: Optional[datetime]) -> Optional[str]:
     return value.isoformat().replace("+00:00", "Z")
 
 
+def format_simulated_at_for_api(value: Optional[str]) -> str:
+    """Render a test clock value as Agent Studio stores it: UTC, with milliseconds.
+
+    Agent Studio reads the value back from its snapshots in this form
+    (2026-01-15T09:30:00.000Z), so sending it the same way keeps a branch's
+    state identical whether it is rebuilt from history or loaded from a
+    snapshot. An empty string is the explicit "clear" signal.
+    """
+    parsed = parse_simulated_at(value)
+    if parsed is None:
+        return ""
+    return parsed.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 @dataclass
 class FunctionCallArgumentAssertion:
     parameter_name: str
     expected_value: str
     value_type: str
     assertion_type: str = "equals"
+
+    def __post_init__(self):
+        # The projection and YAML can hold a bool or number here; the proto field is a string.
+        if self.expected_value is not None and not isinstance(self.expected_value, str):
+            self.expected_value = json.dumps(self.expected_value)
 
     def to_yaml_dict(self) -> dict:
         return {
@@ -1201,7 +1220,7 @@ class TestCase(YamlResource):
             caller_number=self.caller_number or "",
             # Empty string is the explicit "clear" signal, as for caller_number and
             # variant_id — an omitted optional field reads as "no update" platform-side.
-            simulated_at=self.simulated_at or "",
+            simulated_at=format_simulated_at_for_api(self.simulated_at),
         )
 
     def build_update_proto(self) -> Update_TestCase:
@@ -1215,7 +1234,7 @@ class TestCase(YamlResource):
             caller_number=self.caller_number or "",
             # Empty string is the explicit "clear" signal, as for caller_number and
             # variant_id — an omitted optional field reads as "no update" platform-side.
-            simulated_at=self.simulated_at or "",
+            simulated_at=format_simulated_at_for_api(self.simulated_at),
         )
 
     def build_delete_proto(self) -> Delete_TestCase:
