@@ -1,6 +1,167 @@
 # CHANGELOG
 
 
+## v0.75.3 (2026-10-29)
+
+### Performance Improvements
+
+- Index multi-resource lookups and reuse mapping tables
+  ([#329](https://github.com/polyai/adk/pull/329),
+  [`d3dcb0e`](https://github.com/polyai/adk/commit/d3dcb0e49f1e1419c0f00be9336c955e10edfe33))
+
+## Summary
+
+Removes two sources of repeated full-list work on large projects: finding an entry in a
+  multi-resource YAML file by name, and rebuilding lookup tables from resource mappings for every
+  resource read.
+
+## Motivation
+
+On a large production project (about 1,238 variants with 21 attributes each, plus 3,317
+  pronunciation rules), `pull`, `status` and `push` spend a lot of time on work that grows
+  quadratically with project size:
+
+- Every lookup by name in a multi-resource file (`_find_matching`) scanned the whole list and called
+  `clean_name` on every entry. Each command does one lookup per resource, so the cost is O(N²). -
+  Every pronunciation read copied the whole rule list and scanned it to find the entry at a known
+  index. - Every resource read rebuilt its reference-lookup dict, and every variant attribute
+  rebuilt its variant id/name map, from the full mappings list (thousands of entries). The mappings
+  list is the same for the whole command.
+
+## Changes
+
+- `MultiResourceYamlResource` keeps an index per `(top_level_name, resource_key)` holding the list
+  it was built from, each entry's clean name, and the position of the first entry for each clean
+  name. The index is only used while it refers to the same list object at the same length, so when
+  `_file_cache` reloads or clears a file (which creates new lists) the index is rebuilt. `save` and
+  `delete_resource` keep the index up to date, and first-match semantics are unchanged when two
+  entries share a clean name. - New `_entry_key` classmethod for the clean name an entry is matched
+  by. `KeyphraseBoosting` overrides it to read resolved YAML scalars as text, as its discovery
+  already does. A hand-typed `keyphrase: 2024` or `keyphrase: true` can now be looked up. Before
+  this change, `clean_name` raised `TypeError` on that entry, so every lookup that reached it
+  failed. - `Pronunciation.read_from_file` and `read_local_resource` read the rule directly at the
+  path's index, with a bounds check. A missing index still raises `FileNotFoundError`. - New
+  `resource_utils.memo_for_mappings(mappings, key, build)`: a single-slot cache of tables derived
+  from one mappings list. A cached table is reused while calls pass the same list object at the same
+  length. An empty or missing list always calls `build()`. It is used by the reference replacer and
+  by the variant name table in `Variant.validate`, which are both built once per resource.
+  `VariantAttribute` builds its variant id/name tables directly, since it does so about once per
+  attribute. - `sync_ids_with_parent` builds its combined mappings list once, before the loop,
+  instead of on every iteration.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New tests read and write real files in a temp directory:
+
+- Index: duplicate clean names (first match wins for read, save and delete); delete then append; a
+  save that changes an entry's name; numeric and boolean keyphrases; reload after the file changes
+  on disk; variants and attributes interleaved in `variant_attributes.yaml`. - Pronunciation reads
+  by index, including out-of-range indexes. - Memo: reuse, separate tables per key, invalidation
+  when the list is extended, a rebuild for a different list of the same length, empty lists that are
+  never cached, and reference swaps equal to the unmemoised builder across flow scopes and both
+  directions. Variant validation and pretty-dict round trips pick up a variant appended after an
+  earlier call.
+
+The benchmark writes identical file digests on `main` and on this branch after every phase.
+
+On copies of real projects, against `main` at 0.74.0, a dry-run push with one topic edited (best of
+  5) went from 0.449 s to 0.330 s (−27%) on a project with about 1,300 resources, mostly variants,
+  and by 6–15% on three other large projects. Smaller projects without many multi-resource entries
+  are unchanged. The queued resources were identical to main's on six real projects for no edit, one
+  topic edited, one multi-resource entry edited and one topic deleted.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`scripts/bench_large_project.py` at its default scale (1,238 variants × 21 attributes, 3,317
+  pronunciations), on `main` at 0.74.0 against this branch, both with the libyaml parser. Best of
+  three interleaved runs:
+
+| Phase | `main` | This PR | |---|---|---| | init | 1.20 s | 1.16 s | | force-pull | 2.29 s | 1.74 s
+  | | pull | 2.37 s | 1.74 s | | status | 1.15 s | 0.57 s | | push | 1.07 s | 0.38 s | | total |
+  8.17 s | 5.78 s |
+
+The per-phase file digests are identical on both.
+
+At 6,638 pronunciation rules, reading every rule with `Pronunciation.read_local_resource` takes 0.94
+  s on `main` and 0.19 s on this branch.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- Resolve dataclass field types once per class when checking YAML types
+  ([#391](https://github.com/polyai/adk/pull/391),
+  [`e2946d8`](https://github.com/polyai/adk/commit/e2946d8cfa9f7a2e453019f8df927d25e58f936a))
+
+## Summary
+
+`check_yaml_field_types` now works out each dataclass's field types once per class instead of on
+  every call, so reading resources spends less time resolving type hints. The checks and their
+  errors are unchanged.
+
+**Stacked on #329. Merge #329 first, then retarget this PR to `main`.**
+
+## Motivation
+
+Every resource read calls `check_yaml_field_types`, and every call ran `typing.get_type_hints` on
+  the resource's class and unwrapped each field's `Optional`, list and dict arguments. All of that
+  depends only on the class, so a push on a large project repeated it thousands of times for the
+  same few classes.
+
+## Changes
+
+- New `_field_type_hints(cls)`, cached per class, returns each field's name, unwrapped type hint,
+  and list and dict type arguments. - `check_yaml_field_types` reads that plan and only checks
+  values, so it raises the same errors for the same inputs.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New test: checking two resources of the same class resolves its type hints once, and a badly typed
+  value is still caught on the second check. It fails without the change. The existing
+  `CheckYamlFieldTypesTest` cases pass unchanged.
+
+On copies of real projects, a dry-run push with one topic edited (best of 5) took 10–19% less time
+  than #329 alone on five large projects, and 8–15% less than `main` when applied without #329.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+`scripts/bench_large_project.py` at its default scale (1,238 variants × 21 attributes, 3,317
+  pronunciations), best of three interleaved runs:
+
+| Phase | #329 | #329 + this PR | |---|---|---| | force-pull | 1.76 s | 1.61 s | | pull | 1.73 s |
+  1.63 s | | status | 0.56 s | 0.34 s | | push | 0.38 s | 0.16 s | | total | 5.52 s | 4.88 s |
+
+The per-phase file digests are identical to `main`'s.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.75.2 (2026-10-28)
 
 ### Bug Fixes
