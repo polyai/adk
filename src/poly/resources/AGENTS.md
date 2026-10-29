@@ -29,7 +29,7 @@ The `add-resource-type` skill walks through this end to end.
 
 - `validate` should catch everything the platform would reject, so a bad push fails locally.
 - `to_yaml_dict` / `from_yaml_dict` must round-trip: a pull followed by a push sends nothing.
-- Read and write YAML through `resource_utils` (`load_yaml`, `dump_yaml`) so comments and key
-  order survive.
+- Read and write YAML through `resource_utils` (`load_yaml`, `dump_yaml`) so key order, quoting
+  and block style match everywhere. Neither keeps comments.
 - A resource the user can't access is kept as a slim resource for reference mapping, and never
   written to disk or deleted.

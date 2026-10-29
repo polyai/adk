@@ -336,13 +336,21 @@ class SubResource(BaseResource, ABC):
 
 
 def _strip_strings(data):
-    """Recursively strip leading/trailing whitespace from all string values."""
+    """Recursively strip whitespace from the ends of strings and of each line in them.
+
+    A line ending in whitespace, or a string holding U+FEFF (an invisible character pasted in from
+    some editors), can't be written as a YAML block scalar, so both are removed to keep multiline
+    strings readable.
+    """
     if isinstance(data, dict):
         return {k: _strip_strings(v) for k, v in data.items()}
     if isinstance(data, list):
         return [_strip_strings(item) for item in data]
     if isinstance(data, str):
-        return data.strip()
+        stripped = data.replace("\ufeff", "").strip()
+        if "\n" in stripped:
+            return "\n".join(line.rstrip() for line in stripped.split("\n"))
+        return stripped
     return data
 
 
@@ -675,7 +683,7 @@ class MultiResourceYamlResource(YamlResource, ABC):
     ) -> None:
         """Save the resource to a local path."""
         yaml_content = self.to_pretty_dict(
-            self.to_yaml_dict(),
+            _strip_strings(self.to_yaml_dict()),
             file_path=getattr(self, "file_path", None),
             **kwargs,
         )

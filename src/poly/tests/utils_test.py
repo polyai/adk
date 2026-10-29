@@ -50,6 +50,7 @@ from poly.resources.flows import (
     StepType,
     VADConfig,
 )
+from poly.resources.resource import _strip_strings
 from poly.utils import prepush, stub_gen
 
 
@@ -1758,10 +1759,8 @@ class LoadYamlParserTests(unittest.TestCase):
     def assert_same_load(self, text: str) -> None:
         self.assertEqual(repr(resource_utils.load_yaml(text)), repr(self.pure_loader.load(text)))
 
-    @unittest.skipUnless(_libyaml_expected(), "ruamel.yaml.clib is not installed on this platform")
-    def test_libyaml_parser_is_used(self):
-        self.assertIsNotNone(CParser)
-        self.assertIs(resource_utils._yaml_loader.Parser, CParser)
+    def test_ryaml_is_used(self):
+        self.assertIsNotNone(resource_utils.ryaml)
 
     def test_clib_marker_covers_running_python(self):
         covered = _clib_requirement().marker.evaluate(
@@ -1785,9 +1784,15 @@ class LoadYamlParserTests(unittest.TestCase):
             with self.subTest(path=str(path.relative_to(TEST_PROJECTS_DIR))):
                 self.assert_same_load(path.read_text(encoding="utf-8"))
 
-    @unittest.skipIf(CParser is None, "libyaml parser not installed")
-    def test_edge_case_scalars_load_identically(self):
-        self.assert_same_load(EDGE_CASE_YAML)
+    def test_edge_case_scalars_load_identically_except_dates_and_digit_strings(self):
+        loaded = resource_utils.load_yaml(EDGE_CASE_YAML)
+        expected = self.pure_loader.load(EDGE_CASE_YAML)
+        # ruamel reads these as dates and numbers; ryaml keeps them as written
+        expected.update(
+            leading_zero="0777", underscored="1_000", date="2026-09-23",
+            timestamp="2026-09-23T10:00:00Z",
+        )
+        self.assertEqual(repr(loaded), repr(expected))
 
     @unittest.skipIf(CParser is None, "libyaml parser not installed")
     def test_crlf_and_byte_order_mark_load_identically(self):
@@ -1795,8 +1800,72 @@ class LoadYamlParserTests(unittest.TestCase):
 
     def test_invalid_yaml_raises_yaml_error(self):
         for loader in (resource_utils.load_yaml, self.pure_loader.load):
-            with self.subTest(loader=loader), self.assertRaises(YAMLError):
+            with self.subTest(loader=loader), self.assertRaises((YAMLError, ValueError)):
                 loader("key: [unclosed")
+
+
+
+class DumpYamlTests(unittest.TestCase):
+    """dump_yaml writes files that every supported reader loads back to the same data."""
+
+    def setUp(self):
+        self.ruamel_loader = YAML(typ="safe")
+
+    def assert_round_trips(self, data):
+        text = resource_utils.dump_yaml(data)
+        self.assertEqual(resource_utils.load_yaml(text), data)
+        self.assertEqual(self.ruamel_loader.load(text), data)
+        return text
+
+    def test_multiline_strings_use_block_style(self):
+        text = self.assert_round_trips({"prompt": "First line\nSecond line"})
+        self.assertEqual(text, "prompt: |-\n  First line\n  Second line\n")
+
+    def test_strings_that_read_as_other_types_are_quoted(self):
+        for value in ("0118", "1_000", "2026-11-02T06:30:00Z", "2026-11-02", "true", "null", "1e3"):
+            with self.subTest(value=value):
+                text = self.assert_round_trips({"value": value})
+                self.assertEqual(text, f"value: '{value}'\n")
+
+    def test_plain_strings_stay_unquoted(self):
+        self.assertEqual(resource_utils.dump_yaml({"name": "Refunds"}), "name: Refunds\n")
+
+    def test_long_strings_are_not_wrapped(self):
+        text = self.assert_round_trips({"description": "word " * 40 + "end"})
+        self.assertEqual(len(text.splitlines()), 1)
+
+    def test_emoji_keep_block_style(self):
+        text = self.assert_round_trips({"content": "Thanks! \U0001f60a\nAnything else?"})
+        self.assertEqual(text, "content: |-\n  Thanks! \U0001f60a\n  Anything else?\n")
+
+    def test_repeated_objects_are_written_in_full(self):
+        shared = {"sandbox": "", "live": "+447700900000"}
+        text = self.assert_round_trips({"a": shared, "b": shared})
+        self.assertNotIn("&", text)
+        self.assertNotIn("*", text)
+
+    def test_none_is_written_as_an_empty_value(self):
+        self.assertEqual(resource_utils.dump_yaml({"value": None}), "value:\n")
+
+    def test_keys_with_anchor_characters_round_trip(self):
+        self.assert_round_trips({"Bull & Anchor": 1, "*starred": 2})
+
+
+class StripStringsTests(unittest.TestCase):
+    def test_strips_the_ends_of_single_line_strings(self):
+        self.assertEqual(_strip_strings({"a": "  text  "}), {"a": "text"})
+
+    def test_strips_trailing_whitespace_from_each_line(self):
+        self.assertEqual(
+            _strip_strings({"a": ["First line  \n\t\nSecond line \n"]}),
+            {"a": ["First line\n\nSecond line"]},
+        )
+
+    def test_keeps_leading_indentation_of_inner_lines(self):
+        self.assertEqual(_strip_strings("Steps:\n  - one\n  - two"), "Steps:\n  - one\n  - two")
+
+    def test_removes_zero_width_no_break_spaces(self):
+        self.assertEqual(_strip_strings("Hello\ufeff\nWorld"), "Hello\nWorld")
 
 
 if __name__ == "__main__":

@@ -335,6 +335,11 @@
     "URL": "https://docs.astral.sh/ruff"
   },
   {
+    "License": "MIT",
+    "Name": "ryaml",
+    "URL": "https://github.com/emmatyping/ryaml"
+  },
+  {
     "License": "MIT License",
     "Name": "six",
     "URL": "https://github.com/benjaminp/six"
