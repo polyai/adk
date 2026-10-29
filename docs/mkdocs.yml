@@ -143,6 +143,7 @@ nav:
           - test: reference/cli/test.md
           - conversations: reference/cli/conversations.md
           - deployments: reference/cli/deployments.md
+          - campaign: reference/cli/campaign.md
           - metrics: reference/cli/metrics.md
           - rtc: reference/cli/rtc.md
           - audio-cache: reference/cli/audio-cache.md

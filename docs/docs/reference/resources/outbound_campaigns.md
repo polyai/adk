@@ -11,7 +11,7 @@ An outbound campaign contacts people for you: it imports contacts, then calls an
 
 !!! note "Drafts only"
 
-    Your files hold the campaign's draft. What is live changes only when the campaign is published. Archived campaigns are not pulled.
+    Your files hold the campaign's draft. What is live changes only when you publish with [`poly campaign publish`](../cli/campaign.md#poly-campaign-publish). Archived campaigns are not pulled.
 
 ## Location
 
@@ -150,6 +150,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 
 ## Best practices
 
+- Run [`poly campaign validate`](../cli/campaign.md#poly-campaign-validate) and `poly campaign preview` after every push, before you publish.
 - Name nodes after what they do, like `Reminder call`, so routes read clearly.
 - Keep node names stable: renaming a node gives it a new identity and history.
 - Make a campaign on a branch, merge it, then publish it from `main`.
@@ -164,5 +165,12 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 
     Call and SMS nodes enter a flow by its name.
     [Open flows](./flows.md)
+
+-   **`poly campaign`**
+
+    ---
+
+    Validate, preview, test, publish, pause, resume and archive a campaign.
+    [Open `poly campaign`](../cli/campaign.md)
 
 </div>

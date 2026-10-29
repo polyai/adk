@@ -527,3 +527,30 @@ class SyncClientHandler:
 
         logger.info(f"Successfully removed staging tag from branch ID:'{branch_id}'")
         return True
+
+    def validate_outbound_campaign(self, campaign_id: str) -> dict[str, Any]:
+        """Validate a campaign on the current branch."""
+        self.assert_branch_exists()
+        return self.sdk.validate_outbound_campaign(self.branch_id, campaign_id)
+
+    def dry_run_outbound_campaign(self, campaign_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Dry-run a campaign on the current branch."""
+        self.assert_branch_exists()
+        return self.sdk.dry_run_outbound_campaign(self.branch_id, campaign_id, body)
+
+    def start_outbound_campaign_test_step(
+        self, campaign_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Start a real test step of the live campaign."""
+        return self.sdk.start_outbound_campaign_test_step(campaign_id, body)
+
+    def get_outbound_campaign_test_step(self, campaign_id: str, step_id: str) -> dict[str, Any]:
+        """Read a test step of the live campaign."""
+        return self.sdk.get_outbound_campaign_test_step(campaign_id, step_id)
+
+    def send_command_to_main(self, command: Command) -> dict[str, Any]:
+        """Send one command straight to main, bypassing the branch's command queue."""
+        command.metadata.CopyFrom(self.sdk.create_metadata())
+        command.command_id = str(uuid.uuid4())
+        logger.info(f"Sending {command.type} to main")
+        return self.sdk.send_commands_to_branch([command], "main")

@@ -12,7 +12,9 @@ import logging
 import os
 import uuid
 import warnings
+from http import HTTPStatus
 from typing import Any, Optional
+from urllib.parse import quote
 
 import requests
 
@@ -30,7 +32,17 @@ warnings.filterwarnings("ignore", category=UserWarning, module="google.protobuf.
 class SourcererAPIError(Exception):
     """Exception raised when the Sourcerer API returns an error"""
 
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        status_code: Optional[int] = None,
+        error_code: Optional[str] = None,
+        server_message: Optional[str] = None,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_code = error_code
+        self.server_message = server_message
 
 
 class SourcererSDK:
@@ -696,16 +708,7 @@ class SourcererSDK:
                 logger.exception(f"✗ Protobuf serialization failed: {e}")
                 raise SourcererAPIError(f"Failed to serialize command batch: {e}")
 
-            # Update headers for protobuf content
-            correlation_id = f"adk-{uuid.uuid4()}"
-            headers = {
-                "X-API-KEY": retrieve_api_key(self.region),
-                "X-PolyAI-Correlation-Id": correlation_id,
-                "X-Poly-Source": "adk",
-                "Content-Type": "application/octet-stream",
-            }
-            if self.email:
-                headers["X-PolyAI-Email"] = self.email
+            headers = self._command_batch_headers()
 
             logger.info(f"Sending to URL: {self._get_command_batch_url()}")
 
@@ -1059,6 +1062,112 @@ class SourcererSDK:
             return result.get("projection", result)
         except requests.exceptions.RequestException as e:
             raise SourcererAPIError(self._format_request_error(e)) from e
+
+    def _command_batch_headers(self) -> dict[str, str]:
+        headers = {
+            "X-API-KEY": retrieve_api_key(self.region),
+            "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+            "X-Poly-Source": "adk",
+            "Content-Type": "application/octet-stream",
+        }
+        if self.email:
+            headers["X-PolyAI-Email"] = self.email
+        return headers
+
+    def send_commands_to_branch(self, commands: list[Command], branch_id: str) -> dict[str, Any]:
+        """Send `commands` as one batch to `branch_id`, apart from the queued commands."""
+        command_batch = CommandBatch()
+        command_batch.commands.extend(commands)
+        command_batch.last_known_sequence = self.fetch_last_known_sequence_number(branch_id)
+        url = f"{self._get_branches_url()}/{branch_id}/command-batch"
+        try:
+            response = requests.post(
+                url,
+                data=command_batch.SerializeToString(),
+                headers=self._command_batch_headers(),
+            )
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            raise self._api_error(e) from e
+        try:
+            response_data = response.json()
+        except ValueError:
+            raise SourcererAPIError(f"Failed to parse response: {response.text}")
+        if response_data.get("error"):
+            raise SourcererAPIError(
+                f"Error: {response_data['error']}",
+                status_code=response.status_code,
+                error_code=response_data.get("error_code"),
+                server_message=str(response_data["error"]),
+            )
+        return response_data
+
+    def _outbound_campaign_url(self, branch_id: str, campaign_id: str, *segments: str) -> str:
+        path = "/".join(quote(part, safe="") for part in (campaign_id, *segments))
+        return f"{self._get_branches_url()}/{quote(branch_id, safe='')}/outbound-campaigns/{path}"
+
+    def _campaign_request(self, method: str, url: str, body: Optional[dict] = None) -> dict:
+        try:
+            response = self.session.request(method, url, json=body)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            raise self._api_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(f"Failed to parse response: {e}") from e
+
+    def validate_outbound_campaign(self, branch_id: str, campaign_id: str) -> dict[str, Any]:
+        """Validate a campaign as it is on `branch_id`."""
+        url = self._outbound_campaign_url(branch_id, campaign_id, "validate")
+        return self._campaign_request("POST", url)
+
+    def dry_run_outbound_campaign(
+        self, branch_id: str, campaign_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Dry-run a campaign on `branch_id`. Nothing is sent or stored."""
+        url = self._outbound_campaign_url(branch_id, campaign_id, "dry-run")
+        return self._campaign_request("POST", url, body)
+
+    def start_outbound_campaign_test_step(
+        self, campaign_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Start a real test step of the live campaign."""
+        url = self._outbound_campaign_url("main", campaign_id, "test-steps")
+        return self._campaign_request("POST", url, body)
+
+    def get_outbound_campaign_test_step(self, campaign_id: str, step_id: str) -> dict[str, Any]:
+        """Read a test step of the live campaign."""
+        url = self._outbound_campaign_url("main", campaign_id, "test-steps", step_id)
+        return self._campaign_request("GET", url)
+
+    @staticmethod
+    def _api_error(e: requests.exceptions.RequestException) -> SourcererAPIError:
+        response = getattr(e, "response", None)
+        if response is None:
+            return SourcererAPIError(f"Request failed: {e}")
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            text = response.text or ""
+            if text.lstrip().startswith("<"):
+                try:
+                    text = HTTPStatus(response.status_code).phrase
+                except ValueError:
+                    text = "Unexpected response"
+            return SourcererAPIError(
+                f"API Error {response.status_code}: {text}",
+                status_code=response.status_code,
+                server_message=text or None,
+            )
+        server_message = body.get("error_message") or body.get("error") or body.get("message")
+        return SourcererAPIError(
+            f"API Error {response.status_code}: {body}",
+            status_code=response.status_code,
+            error_code=body.get("error_code"),
+            server_message=str(server_message) if server_message else None,
+        )
 
     @staticmethod
     def _format_request_error(e: requests.exceptions.RequestException) -> str:

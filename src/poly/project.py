@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import shutil
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields
@@ -3695,6 +3696,251 @@ class AgentStudioProject:
             raise ValueError("No tests found to run based on the provided criteria.")
 
         return matched
+
+    @property
+    def outbound_campaigns_enabled(self) -> bool:
+        """Whether outbound campaigns are turned on for this project in Agent Studio."""
+        return self.api_handler.feature_flag_enabled(
+            key="outbound-campaigns",
+            region=self.region,
+            project_id=self.project_id,
+            account_id=self.account_id,
+            default=False,
+        )
+
+    def get_campaign(self, name: str) -> OutboundCampaign:
+        """Return the pushed campaign with this name or folder name.
+
+        Raises:
+            ValueError: if no campaign matches, several do, or it exists only in local files.
+        """
+        campaigns = list(self.resources.get(OutboundCampaign, {}).values())
+        for matches in (
+            lambda campaign: campaign.name == name,
+            lambda campaign: campaign.folder == resource_utils.clean_name(name),
+        ):
+            found = [campaign for campaign in campaigns if matches(campaign)]
+            if len(found) == 1:
+                return found[0]
+            if len(found) > 1:
+                raise ValueError(f"More than one campaign is named '{name}'.")
+        if name in self._local_campaign_names():
+            raise ValueError(f"Campaign '{name}' has not been pushed yet. Run `poly push` first.")
+        known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
+        raise ValueError(f"No campaign named '{name}'. Campaigns: {known}.")
+
+    def _local_campaign_names(self) -> list[str]:
+        names = []
+        for file_path in OutboundCampaign.discover_resources(self.root_path):
+            try:
+                campaign_file = os.path.dirname(file_path)
+                names.append(
+                    resource_utils.load_yaml(Resource.read_from_file(campaign_file))["name"]
+                )
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        return names
+
+    def campaign_node_names(self, campaign: OutboundCampaign) -> dict[str, str]:
+        """Return the names of a pushed campaign's nodes, by node id."""
+        return {
+            node.node_id: node.name
+            for node in self.resources.get(OutboundCampaignNode, {}).values()
+            if node.campaign_id == campaign.resource_id
+        }
+
+    def _campaign_node_id(self, campaign: OutboundCampaign, node: str) -> str:
+        names = self.campaign_node_names(campaign)
+        if node in names:
+            return node
+        ids = {resource_utils.clean_name(name): node_id for node_id, name in names.items()}
+        if resource_utils.clean_name(node) in ids:
+            return ids[resource_utils.clean_name(node)]
+        known = ", ".join(sorted(names.values())) or "none"
+        raise ValueError(f"Campaign '{campaign.name}' has no node named '{node}'. Nodes: {known}.")
+
+    @staticmethod
+    def _campaign_error(
+        action: str, campaign: OutboundCampaign, error: SourcererAPIError
+    ) -> SourcererAPIError:
+        reason = (error.server_message or str(error)).replace(campaign.resource_id, campaign.name)
+        message = f"Could not {action} campaign '{campaign.name}': {reason}"
+        if error.error_code == "CAMPAIGNS_KEY_MISSING" or error.status_code == 412:
+            message += (
+                "\nThis project is not set up to run campaigns yet. Publish or resume a "
+                "campaign once in Agent Studio, then try again."
+            )
+        elif error.error_code == "OUTBOUND_CAMPAIGNS_DISABLED":
+            message += "\nOutbound campaigns aren't turned on for this project."
+        return SourcererAPIError(
+            message,
+            status_code=error.status_code,
+            error_code=error.error_code,
+            server_message=error.server_message,
+        )
+
+    def validate_campaign(self, name: str) -> dict[str, Any]:
+        """Check the campaign as pushed to the current branch; returns its errors and warnings."""
+        campaign = self.get_campaign(name)
+        try:
+            return self.api_handler.validate_outbound_campaign(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("validate", campaign, e) from e
+
+    @staticmethod
+    def _send_outcome(
+        send_result: Optional[str], send_state: Optional[dict[str, Any]]
+    ) -> Optional[dict[str, Any]]:
+        if send_result is None and not send_state:
+            return None
+        return {"result": send_result, "state": dict(send_state or {})}
+
+    def preview_campaign(
+        self,
+        name: str,
+        contact_data: dict[str, Any],
+        sample_outputs: Optional[dict[str, dict[str, Any]]] = None,
+        start_node: Optional[str] = None,
+        send_result: Optional[str] = None,
+        send_state: Optional[dict[str, Any]] = None,
+        ask_branches: Optional[bool] = None,
+    ) -> dict[str, Any]:
+        """Walk a made-up contact through the campaign on the current branch. Nothing is sent.
+
+        Nodes are given by name (or id): `start_node`, and the keys of `sample_outputs`.
+        `send_result` and `send_state` say what the call or text at `start_node` reported,
+        when carrying on from one.
+
+        Raises:
+            ValueError: if the contact or sample outputs aren't JSON objects, or name no node.
+        """
+        if not isinstance(contact_data, dict):
+            raise ValueError("Contact data must be a JSON object.")
+        if sample_outputs is not None and (
+            not isinstance(sample_outputs, dict)
+            or not all(isinstance(output, dict) for output in sample_outputs.values())
+        ):
+            raise ValueError("Sample outputs must be a JSON object of node name to object.")
+        campaign = self.get_campaign(name)
+        body: dict[str, Any] = {"contactData": contact_data}
+        if sample_outputs:
+            body["sampleOutputs"] = {
+                self._campaign_node_id(campaign, node): output
+                for node, output in sample_outputs.items()
+            }
+        if start_node:
+            body["startNodeId"] = self._campaign_node_id(campaign, start_node)
+        if outcome := self._send_outcome(send_result, send_state):
+            body["sendOutcome"] = outcome
+        if ask_branches is not None:
+            body["askBranches"] = ask_branches
+        try:
+            return self.api_handler.dry_run_outbound_campaign(campaign.resource_id, body)
+        except SourcererAPIError as e:
+            raise self._campaign_error("preview", campaign, e) from e
+
+    def start_campaign_test(
+        self,
+        name: str,
+        contact: dict[str, Any],
+        start_node: Optional[str] = None,
+        run: Optional[dict[str, str]] = None,
+        send_result: Optional[str] = None,
+        send_state: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Start one real test step of the live campaign, which calls and texts `contact`.
+
+        A first step takes neither `start_node` (a node's name or id) nor `run`; a later step
+        needs both, from the step before it. Carrying on from a call or text, `send_result` and
+        `send_state` say what it reported.
+
+        Raises:
+            ValueError: if the contact has no phone, the step inputs don't fit together, or
+                `start_node` names no node.
+        """
+        if not isinstance(contact, dict) or not isinstance(contact.get("phone"), str):
+            raise ValueError("The test contact needs a phone number.")
+        if (run is None) != (start_node is None):
+            raise ValueError(
+                "A later test step needs both the node to carry on from and the previous "
+                "step's run; a first step needs neither."
+            )
+        outcome = self._send_outcome(send_result, send_state)
+        if outcome is not None and run is None:
+            raise ValueError("Only a later test step can say how a call or text went.")
+        campaign = self.get_campaign(name)
+        body: dict[str, Any] = {"contact": contact}
+        if run is not None:
+            missing = [
+                key for key in ("contact_id", "enrolment_id", "graph_hash") if not run.get(key)
+            ]
+            if missing:
+                raise ValueError(f"The run is missing {', '.join(missing)}.")
+            body["startNodeId"] = self._campaign_node_id(campaign, start_node)
+            body["run"] = {
+                "contactId": run["contact_id"],
+                "enrolmentId": run["enrolment_id"],
+                "graphHash": run["graph_hash"],
+            }
+        if outcome is not None:
+            body["sendOutcome"] = outcome
+        try:
+            return self.api_handler.start_outbound_campaign_test_step(campaign.resource_id, body)
+        except SourcererAPIError as e:
+            raise self._campaign_error("test", campaign, e) from e
+
+    def wait_for_campaign_test_step(
+        self,
+        name: str,
+        step_id: str,
+        timeout: float = 600,
+        poll_interval: float = 5,
+    ) -> dict[str, Any]:
+        """Poll a test step until it stops running and return it.
+
+        Raises:
+            TimeoutError: if it is still queued or running after `timeout` seconds.
+        """
+        campaign = self.get_campaign(name)
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                step = self.api_handler.get_outbound_campaign_test_step(
+                    campaign.resource_id, step_id
+                )
+            except SourcererAPIError as e:
+                raise self._campaign_error("test", campaign, e) from e
+            if step.get("status") not in ("queued", "running"):
+                return step
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Test step {step_id} of campaign '{campaign.name}' is still "
+                    f"{step.get('status')} after {timeout:g} seconds."
+                )
+            time.sleep(poll_interval)
+
+    def _send_campaign_lifecycle(self, action: str, command_type: str, name: str) -> None:
+        campaign = self.get_campaign(name)
+        try:
+            self.api_handler.send_outbound_campaign_lifecycle(command_type, campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error(action, campaign, e) from e
+
+    def publish_campaign(self, name: str) -> None:
+        """Publish the campaign on live, so it starts contacting people."""
+        self._send_campaign_lifecycle("publish", "outbound_campaign_publish", name)
+
+    def pause_campaign(self, name: str) -> None:
+        """Pause the live campaign."""
+        self._send_campaign_lifecycle("pause", "outbound_campaign_pause", name)
+
+    def resume_campaign(self, name: str) -> None:
+        """Resume the paused live campaign, so it contacts people again."""
+        self._send_campaign_lifecycle("resume", "outbound_campaign_resume", name)
+
+    def archive_campaign(self, name: str) -> None:
+        """Archive the campaign on live."""
+        self._send_campaign_lifecycle("archive", "outbound_campaign_archive_definition", name)
 
     def trigger_tests(self, test_ids: list[str], name: str | None = None) -> dict:
         """Trigger tests for the project.
