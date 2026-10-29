@@ -1,6 +1,93 @@
 # CHANGELOG
 
 
+## v0.76.0 (2026-10-29)
+
+### Features
+
+- Pull barge-in from the legacy setting and refuse removing it
+  ([#394](https://github.com/polyai/adk/pull/394),
+  [`a9043fb`](https://github.com/polyai/adk/commit/a9043fb6dcab83feb04018cb32df0a443dcc5706))
+
+## Summary
+
+`poly pull` now writes `barge_in` from Agent Studio's earlier ASR barge-in setting when the project
+  has no voice-channel barge-in config. Removing `barge_in` from `asr_settings.yaml` now fails the
+  push.
+
+## Motivation
+
+Agent Studio stores barge-in in two places: the earlier ASR setting (on or off) and the newer
+  voice-channel barge-in config. At runtime, the earlier setting is the base. The newer config
+  overrides it only when it exists, and only for the fields it sets.
+
+[#359](https://github.com/polyai/adk/pull/359) pulled only the newer config. So a project still on
+  the earlier setting pulled `asr_settings.yaml` as `{}`, even when barge-in was on. That led to two
+  problems:
+
+- **Pull showed nothing.** Nothing in the project showed that barge-in was on. Adding a `barge_in`
+  section to "match" could silently switch it off. - **Removing the section handed barge-in to the
+  earlier setting.** Removing `barge_in` sent a reset, which hands barge-in back to the earlier
+  setting. On a new project that setting is off, so barge-in stopped while Agent Studio's Model
+  Configuration page still showed it on.
+
+## Changes
+
+- **Pull:** - With a barge-in config, `barge_in` is pulled from it, as before. - Without one,
+  `barge_in` is pulled as `enabled: <earlier setting>, allow_on_first_turn: false`. The runtime
+  treats the unset fields the same way (off, no limit per call). - `barge_in` is therefore always in
+  the file when the project has a voice channel. - **Push:** - Pushing an unchanged pulled section
+  sends nothing. - The first change to `barge_in` stores the whole section as the voice-channel
+  config. Barge-in keeps working as before: the runtime only applies fields that are set, so storing
+  `{enabled: <earlier setting>}` changes nothing on calls. - Removing `barge_in` fails the push with
+  "Set 'enabled: false' to turn barge-in off", in the same way as `background_ambience`. - Clearing
+  `max_per_call` still sends a reset followed by an update. - **Not changed:** `speech_end_delay_ms`
+  stays optional, and removing it still resets it. - **Docs:** the speech recognition reference and
+  the `poly docs` page describe `barge_in` as always present and not removable, and list it under
+  validation.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+- **Unit tests:** - pulling the earlier setting, including when nothing is stored; - a pulled
+  section reading back with no commands; - the first edit sending an update; - removing `barge_in`
+  failing at the resource and project level; - removing `speech_end_delay_ms` still resetting; - a
+  `max_per_call` clear still building its reset. - **Against a live project, on a new branch with no
+  barge-in config and barge-in off in the earlier setting:** 1. Pulled `barge_in: {enabled: false,
+  allow_on_first_turn: false}`, and `poly status` showed no changes. 2. Removed `barge_in`: the push
+  failed with exit code 1, and a pull showed the platform unchanged. 3. Set `enabled: true` and
+  `speech_end_delay_ms: 700`, then pushed and pulled: the file was identical and status was clean.
+
+4. Removed only `speech_end_delay_ms`: it was reset, the pull was identical and status was clean.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`: no skill mentions `barge_in`
+
+## Screenshots / Logs
+
+A project still on the earlier setting, with barge-in on, pulls `asr_settings.yaml` as:
+
+```yaml barge_in: enabled: true
+
+allow_on_first_turn: false ```
+
+Removing the section:
+
+``` Error: barge_in can't be removed from voice/speech_recognition/asr_settings.yaml. Set 'enabled:
+  false' to turn barge-in off. ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.75.3 (2026-10-29)
 
 ### Performance Improvements
