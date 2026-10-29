@@ -201,7 +201,7 @@ def migrate_flow_step_settings(status_dict: dict) -> None:
 def migrate_flow_step_resource_ids(status_dict: dict) -> None:
     """Re-key flow step resource IDs from {flow_name}_{step_id} to {flow_id}_{step_id}."""
     resources = status_dict.get("resources", {})
-    file_structure_info = status_dict.get("file_structure_info", {})
+    file_structure_info = status_dict.get("file_structure_info") or {}
 
     for resource_key in ("flow_steps", "function_steps"):
         entries = resources.get(resource_key)

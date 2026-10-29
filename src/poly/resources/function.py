@@ -258,7 +258,9 @@ class Function(Resource):
         self.resource_id = resource_id
         self.name = name
         self.description = description
-        self.code = code
+        # Without leading blank lines is the canonical form: reading a file has always
+        # dropped them.
+        self.code = code.lstrip("\n") if code else code
         self.parameters = [
             FunctionParameters(**p) if isinstance(p, dict) else p for p in (parameters or [])
         ]
@@ -546,11 +548,21 @@ class Function(Resource):
         if docstring_end is not None:
             before_docstring = contents[:docstring_end]
             after_docstring = contents[docstring_end:].lstrip("\n")
+            gap = len(contents) - docstring_end - len(after_docstring)
+            imports_follow = after_docstring.startswith(("from ", "import "))
 
-            # Add header after docstring with appropriate spacing
-            if after_docstring and (
-                after_docstring.startswith("from ") or after_docstring.startswith("import ")
-            ):
+            if after_docstring and gap:
+                # from_pretty removes only the header line, so split the original newlines
+                # around it to give back the same gap.
+                before_header = 2 if imports_follow and gap >= 2 else 1
+                code = (
+                    before_docstring
+                    + "\n" * before_header
+                    + FUNCTION_HEADER
+                    + "\n" * (gap - before_header)
+                    + after_docstring
+                )
+            elif imports_follow:
                 # There are imports right after, add header with single newline
                 code = before_docstring + "\n\n" + FUNCTION_HEADER + after_docstring
             else:

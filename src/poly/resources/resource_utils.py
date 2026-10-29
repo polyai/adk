@@ -39,6 +39,12 @@ _yaml_loader = yaml.YAML(typ="safe")
 _yaml_loader.preserve_quotes = False
 
 
+@functools.cache
+def _init_params(cls: type) -> frozenset[str]:
+    """Return the names of a class's __init__ parameters, excluding self."""
+    return frozenset(inspect.signature(cls.__init__).parameters) - {"self"}
+
+
 def resource_to_dict(obj) -> dict:
     """Recursively serialize a resource dataclass to a dict.
 
@@ -48,7 +54,7 @@ def resource_to_dict(obj) -> dict:
     """
     from dataclasses import fields
 
-    valid_params = set(inspect.signature(type(obj).__init__).parameters.keys()) - {"self"}
+    valid_params = _init_params(type(obj))
     result = {}
     for f in fields(obj):
         if f.name not in valid_params:

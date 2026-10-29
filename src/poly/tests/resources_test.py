@@ -27,6 +27,12 @@ from poly.resources.agent_settings import (
 from poly.resources.api_integration import (
     AVAILABLE_AUTH_TYPES,
     AVAILABLE_OPERATIONS,
+    HAND_WRITTEN_SCHEMA_SOURCE,
+    HEADER_VALUE_MAX,
+    MAX_OPERATION_HEADERS,
+    MAX_SCHEMA_BYTES,
+    MAX_SCHEMA_DEPTH,
+    OPERATION_DESCRIPTION_MAX,
     URL_PATTERN,
     ApiIntegration,
     ApiIntegrationConfig,
@@ -65,6 +71,7 @@ from poly.resources.flows import (
     parse_reasoning_effort,
 )
 from poly.resources.function import (
+    FUNCTION_HEADER,
     Function,
     FunctionDelayResponse,
     FunctionLatencyControl,
@@ -81,6 +88,7 @@ from poly.resources.languages import (
 )
 from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
 from poly.resources.outbound_campaign import (
+    TIMEZONES,
     OutboundCampaign,
     OutboundCampaignFunction,
     OutboundCampaignNode,
@@ -203,6 +211,35 @@ class FunctionTests(unittest.TestCase):
         pretty_code = function_with_docstring.to_pretty(resource_mappings=[])
         expected_code = '"""This is a docstring."""\n\n' + TEST_CODE_PRETTY
         self.assertEqual(pretty_code, expected_code)
+
+    def test_blank_lines_after_docstring_survive_round_trip(self):
+        for body in ("def test_code(conv: Conversation):\n    pass\n", TEST_CODE):
+            for newlines in (1, 2, 3, 4):
+                with self.subTest(body=body[:6], newlines=newlines):
+                    code = '"""This is a docstring."""' + "\n" * newlines + body
+                    pretty = Function.make_pretty(code, resource_mappings=[])
+                    self.assertIn(FUNCTION_HEADER, pretty)
+                    self.assertEqual(Function.from_pretty(pretty, resource_mappings=[]), code)
+
+    def test_leading_blank_lines_are_dropped_so_code_round_trips(self):
+        function = Function(
+            resource_id="123",
+            name="test_code",
+            code="\n\ndef test_code(conv: Conversation):\n    pass\n",
+        )
+
+        self.assertEqual(function.code, "def test_code(conv: Conversation):\n    pass\n")
+        pretty = function.to_pretty(resource_mappings=[])
+        self.assertEqual(Function.from_pretty(pretty, resource_mappings=[]), function.raw)
+
+    def test_to_pretty_keeps_header_one_line_after_docstring(self):
+        code = '"""This is a docstring."""\n\ndef test_code(conv: Conversation):\n    pass\n'
+        self.assertEqual(
+            Function.make_pretty(code, resource_mappings=[]),
+            '"""This is a docstring."""\n'
+            + FUNCTION_HEADER
+            + "\ndef test_code(conv: Conversation):\n    pass\n",
+        )
 
     def test_to_pretty_convert_flow_import(self):
         function_code = """import random
@@ -6500,6 +6537,22 @@ class HandoffTests(unittest.TestCase):
         self.assertIn("H1", discovered[0])
 
 
+QUERY_SCHEMA = {"type": "object", "properties": {"family": {"type": "string"}}}
+BODY_SCHEMA = {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}
+OK_SCHEMA = {"type": "object", "properties": {"resourceType": {"const": "Bundle"}}}
+
+
+def _operation(**kwargs) -> ApiIntegrationOperation:
+    """An operation with plain defaults; pass fields to override them."""
+    defaults = {"resource_id": "op-1", "name": "get", "method": "GET", "resource": "/a"}
+    defaults.update(kwargs)
+    return ApiIntegrationOperation(**defaults)
+
+
+def _integration_with(op: ApiIntegrationOperation) -> ApiIntegration:
+    return ApiIntegration(resource_id="int-1", name="api", operations=[op])
+
+
 class ApiIntegrationTest(unittest.TestCase):
     """Tests for ApiIntegration, ApiIntegrationConfig, Environments, ApiIntegrationOperation."""
 
@@ -6762,6 +6815,378 @@ class ApiIntegrationTest(unittest.TestCase):
             self.assertEqual(len(integration.operations), 1)
             self.assertEqual(integration.operations[0].name, "get")
             self.assertEqual(integration.operations[0].method, "GET")
+
+    def test_from_dict_reads_description_and_headers(self):
+        """Bool header values become the platform's text; other non-text values are kept for validate()."""
+        op = ApiIntegrationOperation.from_dict(
+            {
+                "id": "op-1",
+                "name": "get_ticket",
+                "method": "GET",
+                "resource": "/tickets/{id}",
+                "description": "Look up one ticket",
+                "headers": {
+                    "Accept": "application/json",
+                    "X-Flag": True,
+                    "X-Off": False,
+                    "X-Version": 1.1,
+                },
+            }
+        )
+        self.assertEqual(op.description, "Look up one ticket")
+        self.assertEqual(
+            op.headers,
+            {"Accept": "application/json", "X-Flag": "true", "X-Off": "false", "X-Version": 1.1},
+        )
+
+    def test_from_dict_without_the_keys_loads_empty_fields(self):
+        """Minimal YAML, an old status file or explicit nulls give an empty description and headers."""
+        for extra in (
+            {},
+            {"description": None, "headers": None},
+            {"description": "", "headers": {}},
+        ):
+            with self.subTest(extra=extra):
+                op = ApiIntegrationOperation.from_dict(
+                    {"name": "get", "method": "GET", "resource": "/x", **extra}
+                )
+                self.assertEqual(op.description, "")
+                self.assertEqual(op.headers, {})
+
+    def test_to_yaml_dict_omits_empty_description_and_headers(self):
+        """An operation without them writes only name, method and resource."""
+        self.assertEqual(
+            _operation().to_yaml_dict(), {"name": "get", "method": "GET", "resource": "/a"}
+        )
+
+    def test_to_yaml_dict_puts_description_straight_after_name(self):
+        """The description reads as the operation's heading, ahead of method and resource."""
+        op = _operation(description="Look up", headers={"Accept": "application/json"})
+        self.assertEqual(
+            list(op.to_yaml_dict()), ["name", "description", "method", "resource", "headers"]
+        )
+
+    def test_yaml_round_trip_keeps_description_and_headers(self):
+        """to_yaml_dict → dump → load → from_dict gives back the same operation."""
+        op = _operation(description="Look up", headers={"Accept": "application/json"})
+        loaded = ApiIntegrationOperation.from_dict(
+            resource_utils.load_yaml(resource_utils.dump_yaml(op.to_yaml_dict()))
+        )
+        self.assertEqual(loaded.description, "Look up")
+        self.assertEqual(loaded.headers, {"Accept": "application/json"})
+        self.assertTrue(loaded.same_definition(op))
+
+    def test_build_create_proto_carries_description_and_headers(self):
+        """A create sends the description and the bare headers map."""
+        create = _operation(
+            integration_id="int-1", description="Look up", headers={"Accept": "application/json"}
+        ).build_create_proto()
+        self.assertEqual(create.description, "Look up")
+        self.assertEqual(dict(create.headers), {"Accept": "application/json"})
+
+    def test_build_update_proto_sends_description_and_headers(self):
+        """An update sends the description and the headers wrapper."""
+        update = _operation(
+            integration_id="int-1", description="Look up", headers={"Accept": "application/json"}
+        ).build_update_proto()
+        self.assertEqual(update.description, "Look up")
+        self.assertEqual(dict(update.headers.entries), {"Accept": "application/json"})
+
+    def test_build_update_proto_clears_removed_description_and_headers(self):
+        """An operation without them still sends both, so the platform clears what it holds."""
+        update = _operation(integration_id="int-1").build_update_proto()
+        self.assertTrue(update.HasField("description"))
+        self.assertEqual(update.description, "")
+        self.assertTrue(update.HasField("headers"))
+        self.assertEqual(len(update.headers.entries), 0)
+
+    def test_subresources_detect_header_only_and_description_only_changes(self):
+        """A change to just the headers or just the description is an update; no change is nothing."""
+        old = ApiIntegration(
+            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+        )
+
+        same = ApiIntegration(
+            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+        )
+        self.assertEqual(same.get_new_updated_deleted_subresources(old), ([], [], []))
+
+        header_change = ApiIntegration(
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(headers={"Accept": "application/json"})],
+        )
+        _, updated, _ = header_change.get_new_updated_deleted_subresources(old)
+        self.assertEqual([op.headers for op in updated], [{"Accept": "application/json"}])
+
+        description_change = ApiIntegration(
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(description="Fetch", headers={"Accept": "text/plain"})],
+        )
+        _, updated, _ = description_change.get_new_updated_deleted_subresources(old)
+        self.assertEqual([op.description for op in updated], ["Fetch"])
+
+    def test_subresources_carry_every_field_on_new_updated_and_deleted_operations(self):
+        """Creates, name-matched updates and deletes keep description and headers (they used to be copied by hand)."""
+        yaml_op = ApiIntegrationOperation(
+            name="get", method="GET", resource="/a", description="Fetch", headers={"Accept": "a"}
+        )
+        new_ops, _, _ = ApiIntegration(
+            resource_id="int-1", name="API", operations=[yaml_op]
+        ).get_new_updated_deleted_subresources(None)
+        self.assertEqual((new_ops[0].description, new_ops[0].headers), ("Fetch", {"Accept": "a"}))
+        self.assertEqual(new_ops[0].integration_id, "int-1")
+        self.assertTrue(new_ops[0].resource_id)
+
+        old = ApiIntegration(
+            resource_id="int-1",
+            name="API",
+            operations=[
+                _operation(headers={"Accept": "text/plain"}),
+                _operation(resource_id="op-2", name="gone", description="Old", headers={"X": "y"}),
+            ],
+        )
+        _, updated, deleted = ApiIntegration(
+            resource_id="int-1", name="API", operations=[yaml_op]
+        ).get_new_updated_deleted_subresources(old)
+        self.assertEqual(updated[0].resource_id, "op-1")
+        self.assertEqual((updated[0].description, updated[0].headers), ("Fetch", {"Accept": "a"}))
+        self.assertEqual((deleted[0].description, deleted[0].headers), ("Old", {"X": "y"}))
+        self.assertEqual(deleted[0].integration_id, "int-1")
+
+    def test_from_dict_parses_projection_json_strings_into_objects(self):
+        """The projection carries schemas as JSON text; the operation holds them as objects."""
+        op = ApiIntegrationOperation.from_dict(
+            {
+                "id": "op-1",
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "requestQuerySchema": json.dumps(QUERY_SCHEMA),
+                "requestBodySchema": json.dumps(BODY_SCHEMA),
+                "responseSchemas": {"200": json.dumps(OK_SCHEMA), "4XX": "{}"},
+                "schemaSource": "observed",
+            }
+        )
+        self.assertEqual(op.request_query_schema, QUERY_SCHEMA)
+        self.assertEqual(op.request_body_schema, BODY_SCHEMA)
+        self.assertEqual(op.response_schemas, {"200": OK_SCHEMA, "4XX": {}})
+        self.assertEqual(op.schema_source, "observed")
+        self.assertTrue(op.has_schemas)
+
+    def test_from_dict_without_schemas_drops_the_platform_default_source(self):
+        """The platform labels every operation; without a schema the label stays out of the file."""
+        op = ApiIntegrationOperation.from_dict(
+            {
+                "name": "get",
+                "method": "GET",
+                "resource": "/x",
+                "responseSchemas": {},
+                "schemaSource": "manual",
+            }
+        )
+        self.assertFalse(op.has_schemas)
+        self.assertEqual(op.schema_source, "")
+        self.assertNotIn("schema_source", op.to_yaml_dict())
+
+    def test_from_dict_treats_manual_as_the_implicit_default(self):
+        """The platform's `manual` label is the ADK's default: not stored or written, still pushed."""
+        pulled = ApiIntegrationOperation.from_dict(
+            {
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "requestBodySchema": json.dumps(BODY_SCHEMA),
+                "schemaSource": "manual",
+            }
+        )
+        self.assertEqual(pulled.schema_source, "")
+        self.assertNotIn("schema_source", pulled.to_yaml_dict())
+        self.assertEqual(pulled.build_update_proto().schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
+
+        # A YAML that spells the default out is the same operation, hash included.
+        explicit = ApiIntegrationOperation.from_dict(
+            {
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "request_body_schema": BODY_SCHEMA,
+                "schema_source": "manual",
+            }
+        )
+        self.assertTrue(explicit.same_definition(pulled))
+        self.assertEqual(
+            resource_utils.compute_hash_from_dict(explicit.to_yaml_dict()),
+            resource_utils.compute_hash_from_dict(pulled.to_yaml_dict()),
+        )
+
+    def test_from_dict_accepts_objects_and_treats_empty_values_as_unset(self):
+        """YAML and status files give objects; None, "" and a null response entry mean no schema."""
+        from_objects = ApiIntegrationOperation.from_dict(
+            {
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "request_body_schema": BODY_SCHEMA,
+                "response_schemas": {"200": OK_SCHEMA, "404": None},
+                "schema_source": "openapi",
+            }
+        )
+        from_strings = ApiIntegrationOperation.from_dict(
+            {
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "requestQuerySchema": "",
+                "requestBodySchema": json.dumps(BODY_SCHEMA),
+                "responseSchemas": {"200": json.dumps(OK_SCHEMA), "404": ""},
+                "schemaSource": "openapi",
+            }
+        )
+        self.assertTrue(from_objects.same_definition(from_strings))
+        self.assertIsNone(from_objects.request_query_schema)
+        self.assertEqual(from_objects.response_schemas, {"200": OK_SCHEMA})
+
+    def test_from_dict_stringifies_integer_keys_so_hashing_works(self):
+        """YAML reads `200:` and `properties: {1: …}` as ints; as text the hash no longer raises."""
+        op = ApiIntegrationOperation.from_dict(
+            {
+                "name": "search",
+                "method": "POST",
+                "resource": "/a",
+                "response_schemas": {
+                    200: {"type": "object", "properties": {1: {"type": "string"}}},
+                    "default": {},
+                },
+            }
+        )
+        self.assertEqual(set(op.response_schemas), {"200", "default"})
+        self.assertEqual(op.response_schemas["200"]["properties"], {"1": {"type": "string"}})
+        resource_utils.compute_hash_from_dict(op.to_yaml_dict())  # mixed key types would raise
+
+    def test_empty_object_is_a_schema_not_unset(self):
+        """`{}` is the permissive schema and is kept, unlike a missing key."""
+        op = _operation(request_query_schema={})
+        self.assertTrue(op.has_schemas)
+        self.assertEqual(op.to_yaml_dict()["request_query_schema"], {})
+        self.assertEqual(op.build_create_proto().request_query_schema, "{}")
+
+    def test_to_yaml_dict_omits_unset_schema_keys(self):
+        """An operation without schemas writes only name, method and resource."""
+        self.assertEqual(set(_operation().to_yaml_dict()), {"name", "method", "resource"})
+
+    def test_yaml_round_trip_keeps_schemas_and_quotes_status_keys(self):
+        """Dumped YAML quotes '200' so it reloads as text, and reloading gives the same operation."""
+        op = _operation(
+            request_body_schema=BODY_SCHEMA,
+            response_schemas={"200": OK_SCHEMA, "4XX": {}, "default": {"type": "object"}},
+            schema_source="openapi",
+        )
+        text = resource_utils.dump_yaml(op.to_yaml_dict())
+        self.assertIn("'200':", text)
+        self.assertIn("4XX:", text)
+        self.assertIn("default:", text)
+        loaded = ApiIntegrationOperation.from_dict(resource_utils.load_yaml(text))
+        self.assertTrue(loaded.same_definition(op))
+        self.assertEqual(loaded.schema_source, "openapi")
+
+    def test_status_dict_round_trip_and_old_status_files_load(self):
+        """The status file stores schemas as objects; a status file from before the fields loads."""
+        op = _operation(request_query_schema=QUERY_SCHEMA, schema_source="manual")
+        stored = resource_utils.resource_to_dict(op)
+        self.assertEqual(stored["request_query_schema"], QUERY_SCHEMA)
+        self.assertTrue(ApiIntegrationOperation.from_dict(stored).same_definition(op))
+
+        legacy = ApiIntegration(
+            resource_id="int-1",
+            name="api",
+            operations=[{"resource_id": "", "name": "get", "method": "GET", "resource": "/x"}],
+        )
+        self.assertFalse(legacy.operations[0].has_schemas)
+
+    def test_build_create_proto_carries_schemas_as_compact_json(self):
+        """A create sends each schema as compact JSON, in the bare response map, with the default source."""
+        create = _operation(
+            request_query_schema=QUERY_SCHEMA,
+            request_body_schema=BODY_SCHEMA,
+            response_schemas={"200": OK_SCHEMA},
+        ).build_create_proto()
+        self.assertEqual(create.request_query_schema, json.dumps(QUERY_SCHEMA, separators=(",", ":")))
+        self.assertEqual(json.loads(create.request_body_schema), BODY_SCHEMA)
+        self.assertEqual(json.loads(create.response_schemas["200"]), OK_SCHEMA)
+        self.assertEqual(create.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
+
+    def test_build_create_proto_without_schemas_sends_no_schema_fields(self):
+        """An operation without schemas creates without any schema field or source."""
+        create = _operation().build_create_proto()
+        self.assertFalse(create.HasField("request_query_schema"))
+        self.assertFalse(create.HasField("request_body_schema"))
+        self.assertEqual(len(create.response_schemas), 0)
+        self.assertFalse(create.HasField("schema_source"))
+
+    def test_build_update_proto_sends_full_schema_state(self):
+        """An update sends every schema field: the unset query schema as "" and the source."""
+        update = _operation(
+            request_body_schema=BODY_SCHEMA,
+            response_schemas={"200": OK_SCHEMA},
+            schema_source="openapi",
+        ).build_update_proto()
+        self.assertTrue(update.HasField("request_query_schema"))
+        self.assertEqual(update.request_query_schema, "")
+        self.assertEqual(json.loads(update.request_body_schema), BODY_SCHEMA)
+        self.assertEqual(json.loads(update.response_schemas.entries["200"]), OK_SCHEMA)
+        self.assertEqual(update.schema_source, "openapi")
+
+    def test_build_update_proto_clears_removed_schemas_without_a_source(self):
+        """An operation without schemas sends empty values to clear them, and no source."""
+        update = _operation().build_update_proto()
+        for name in ("request_query_schema", "request_body_schema"):
+            self.assertTrue(update.HasField(name))
+            self.assertEqual(getattr(update, name), "")
+        self.assertTrue(update.HasField("response_schemas"))
+        self.assertEqual(len(update.response_schemas.entries), 0)
+        self.assertFalse(update.HasField("schema_source"))
+
+    def test_build_update_proto_defaults_the_source_when_yaml_omits_it(self):
+        """A schema written without schema_source is pushed with the default label."""
+        update = _operation(request_body_schema=BODY_SCHEMA).build_update_proto()
+        self.assertEqual(update.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
+
+    def test_subresources_detect_schema_and_source_changes_but_not_formatting(self):
+        """Key order sends nothing; an edited schema or a new source sends an update."""
+        body = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+        old = _integration_with(_operation(request_body_schema=body, schema_source="manual"))
+
+        reordered = _integration_with(
+            _operation(
+                request_body_schema={
+                    "required": ["id"],
+                    "properties": {"id": {"type": "string"}},
+                    "type": "object",
+                }
+            )  # no schema_source: equals the stored default
+        )
+        self.assertEqual(reordered.get_new_updated_deleted_subresources(old), ([], [], []))
+
+        edited = _integration_with(_operation(request_body_schema={"type": "object"}))
+        _, updated, _ = edited.get_new_updated_deleted_subresources(old)
+        self.assertEqual([op.request_body_schema for op in updated], [{"type": "object"}])
+
+        relabelled = _integration_with(_operation(request_body_schema=body, schema_source="openapi"))
+        _, updated, _ = relabelled.get_new_updated_deleted_subresources(old)
+        self.assertEqual([op.schema_source for op in updated], ["openapi"])
+
+    def test_subresources_send_an_unchanged_label_with_an_edited_schema(self):
+        """Updating an observed schema and keeping its label sends `observed`, as written."""
+        old = _integration_with(
+            _operation(request_body_schema={"type": "object"}, schema_source="observed")
+        )
+        edited = _integration_with(
+            _operation(request_body_schema={"type": "array"}, schema_source="observed")
+        )
+        _, [update], _ = edited.get_new_updated_deleted_subresources(old)
+        self.assertEqual(update.build_update_proto().schema_source, "observed")
 
 
 class VariableTest(unittest.TestCase):
@@ -8197,6 +8622,239 @@ class TestApiIntegrationValidate(unittest.TestCase):
         with self.assertRaises(ValueError, msg="Operation name cannot be empty."):
             integration.validate()
 
+    def _assert_invalid(self, op: ApiIntegrationOperation, *fragments: str) -> str:
+        """Validation of an integration holding `op` fails, naming every fragment."""
+        integration = self._make_integration(operations=[op])
+        with self.assertRaises(ValueError) as ctx:
+            integration.validate()
+        for fragment in fragments:
+            self.assertIn(fragment, str(ctx.exception))
+        return str(ctx.exception)
+
+    def test_operation_with_description_and_headers_passes(self):
+        """A description at the limit and well-formed headers (tab allowed) are valid."""
+        self._make_integration(
+            operations=[
+                _operation(
+                    description="x" * OPERATION_DESCRIPTION_MAX,
+                    headers={
+                        "Accept": "application/json",
+                        "X-Api-Version": "2024-01-01",
+                        "X-Tab": "a\tb",
+                    },
+                )
+            ]
+        ).validate()
+
+    def test_description_over_limit_raises_value_error(self):
+        """A description longer than the platform's cap is rejected."""
+        self._assert_invalid(
+            _operation(description="x" * (OPERATION_DESCRIPTION_MAX + 1)),
+            f"description is longer than {OPERATION_DESCRIPTION_MAX} characters",
+        )
+
+    def test_invalid_header_name_raises_value_error(self):
+        """Header names with separators or no characters are rejected."""
+        for name in ("Content Type", "X:Header", "Accept.Json", "X/Y", ""):
+            with self.subTest(name=name):
+                self._assert_invalid(
+                    _operation(headers={name: "v"}),
+                    f"header name '{name}' is not a valid HTTP header name",
+                )
+
+    def test_reserved_header_raises_value_error(self):
+        """Authorization and Host, in any case, come from the environment config."""
+        for name in ("Authorization", "host"):
+            with self.subTest(name=name):
+                self._assert_invalid(
+                    _operation(headers={name: "v"}),
+                    f"header '{name}' is set from the environment config",
+                )
+
+    def test_duplicate_header_ignoring_case_raises_value_error(self):
+        """Two spellings of one header name are a duplicate."""
+        self._assert_invalid(
+            _operation(headers={"Accept": "a", "accept": "b"}), "duplicate header 'accept'"
+        )
+
+    def test_header_value_over_limit_raises_value_error(self):
+        """A header value longer than the platform's cap is rejected."""
+        self._assert_invalid(
+            _operation(headers={"X-Long": "v" * (HEADER_VALUE_MAX + 1)}),
+            f"header 'X-Long' value is longer than {HEADER_VALUE_MAX} characters",
+        )
+
+    def test_header_value_with_bad_characters_raises_value_error(self):
+        """Line breaks, control characters, non-ASCII and edge spaces are rejected."""
+        for value in ("line\nbreak", " padded", "padded ", "café", "bell\x07"):
+            with self.subTest(value=value):
+                self._assert_invalid(
+                    _operation(headers={"X-Value": value}),
+                    "header 'X-Value' value cannot contain",
+                )
+
+    def test_too_many_headers_raises_value_error(self):
+        """More headers than the platform accepts are rejected."""
+        headers = {f"X-H{i}": "v" for i in range(MAX_OPERATION_HEADERS + 1)}
+        self._assert_invalid(
+            _operation(headers=headers),
+            f"has {MAX_OPERATION_HEADERS + 1} headers; the limit is {MAX_OPERATION_HEADERS}",
+        )
+
+    def test_headers_not_a_mapping_raises_value_error(self):
+        """A list under `headers` is reported rather than crashing the read."""
+        op = ApiIntegrationOperation.from_dict(
+            {"name": "list_users", "method": "GET", "resource": "/users", "headers": ["Accept"]}
+        )
+        self.assertEqual(op.to_yaml_dict()["headers"], ["Accept"])
+        resource_utils.compute_hash_from_dict(op.to_yaml_dict())  # used to raise here
+        self._assert_invalid(op, "headers must be a mapping")
+
+    def test_header_value_that_is_not_text_raises_value_error(self):
+        """A value YAML typed for us would not be sent as written, so it has to be quoted."""
+        for value in (1.1, 123, 1000.0, ["a", "b"], {"k": "v"}, None, datetime.date(2024, 1, 1)):
+            with self.subTest(value=value):
+                self._assert_invalid(
+                    _operation(headers={"X-Version": value}),
+                    "header 'X-Version' value must be text; quote it in YAML",
+                )
+
+    def test_unquoted_yaml_header_values_are_rejected_except_booleans(self):
+        """`1.10` loads as 1.1 and `0123` as 123, so they fail; `true` is sent as written."""
+        loaded = resource_utils.load_yaml(
+            "name: get\nmethod: GET\nresource: /a\nheaders:\n  X-Flag: true\n  X-Version: 1.10\n"
+        )
+        op = ApiIntegrationOperation.from_dict(loaded)
+        self.assertEqual(op.headers["X-Flag"], "true")
+        self._assert_invalid(op, "header 'X-Version' value must be text")
+
+    def test_operation_with_valid_schemas_passes(self):
+        """Well-formed schemas, the 2020-12 dialect with a trailing #, and every key form are valid."""
+        self._make_integration(
+            operations=[
+                _operation(
+                    method="POST",
+                    request_query_schema={"type": "object"},
+                    request_body_schema={
+                        "$schema": "https://json-schema.org/draft/2020-12/schema#",
+                        "type": "object",
+                    },
+                    response_schemas={"200": {"type": "object"}, "4XX": {}, "default": {}},
+                    schema_source="openapi",
+                )
+            ]
+        ).validate()
+
+    def test_request_body_schema_on_bodyless_method_raises_value_error(self):
+        """GET and DELETE carry no body, so a body schema on them is refused."""
+        for method in ("GET", "DELETE"):
+            with self.subTest(method=method):
+                self._assert_invalid(
+                    _operation(method=method, request_body_schema={"type": "object"}),
+                    f"{method} requests have no body",
+                )
+
+    def test_non_object_schema_raises_value_error(self):
+        """A list, a non-JSON string or a number is not a schema."""
+        for schema in (["type"], "not json", 3):
+            with self.subTest(schema=schema):
+                self._assert_invalid(
+                    _operation(request_query_schema=schema),
+                    "request_query_schema must be a JSON Schema object",
+                )
+
+    def test_schema_failing_the_meta_schema_raises_value_error(self):
+        """A schema the 2020-12 meta-schema rejects is reported with its path."""
+        self._assert_invalid(
+            _operation(request_query_schema={"type": "nonsense"}),
+            "request_query_schema is not a valid JSON Schema at type",
+        )
+
+    def test_schema_with_another_dialect_raises_value_error(self):
+        """Only the 2020-12 dialect is stored."""
+        self._assert_invalid(
+            _operation(
+                request_query_schema={
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                }
+            ),
+            "$schema must be https://json-schema.org/draft/2020-12/schema",
+        )
+
+    def test_schema_over_size_limit_raises_value_error(self):
+        """A schema over the platform's byte cap, measured as compact JSON, is refused."""
+        big = {"type": "string", "enum": [f"value-{i:06d}" for i in range(MAX_SCHEMA_BYTES // 10)]}
+        self._assert_invalid(
+            _operation(request_query_schema=big), f"the limit is {MAX_SCHEMA_BYTES} bytes"
+        )
+
+    def test_schema_nested_too_deep_raises_value_error(self):
+        """A schema deeper than the platform's nesting cap is refused before the meta-schema runs."""
+        schema: dict = {"type": "string"}
+        for _ in range(MAX_SCHEMA_DEPTH):
+            schema = {"type": "object", "properties": {"child": schema}}
+        self._assert_invalid(
+            _operation(request_query_schema=schema), f"nests deeper than {MAX_SCHEMA_DEPTH} levels"
+        )
+
+    def test_schema_depth_counts_objects_and_arrays_only(self):
+        """64 nested objects ending in a scalar are at the cap, as the platform counts them."""
+        schema: dict = {"type": "string"}
+        for _ in range(MAX_SCHEMA_DEPTH - 1):
+            schema = {"not": schema}
+        self._make_integration(operations=[_operation(request_query_schema=schema)]).validate()
+
+        self._assert_invalid(
+            _operation(request_query_schema={"not": schema}),
+            f"nests deeper than {MAX_SCHEMA_DEPTH} levels",
+        )
+
+    def test_invalid_response_schema_key_raises_value_error(self):
+        """Response keys are a status code, an uppercase status class or default."""
+        for key in ("600", "2xx", "ok", "20"):
+            with self.subTest(key=key):
+                self._assert_invalid(
+                    _operation(response_schemas={key: {"type": "object"}}),
+                    f"response_schemas key '{key}' must be a status code",
+                )
+
+    def test_invalid_schema_source_raises_value_error(self):
+        """An unknown schema_source is refused."""
+        self._assert_invalid(
+            _operation(request_query_schema={"type": "object"}, schema_source="guess"),
+            "schema_source 'guess' invalid",
+        )
+
+    def test_schema_with_an_unquoted_date_raises_value_error(self):
+        """An unquoted YAML date is not JSON and is reported as such."""
+        self._assert_invalid(
+            _operation(request_query_schema={"type": "string", "const": datetime.date(2024, 1, 1)}),
+            "request_query_schema is not valid JSON",
+        )
+
+    def test_response_schemas_not_a_mapping_raises_value_error(self):
+        """A list under `response_schemas` is reported rather than crashing the read."""
+        op = ApiIntegrationOperation.from_dict(
+            {
+                "name": "list_users",
+                "method": "GET",
+                "resource": "/users",
+                "response_schemas": [{"type": "object"}],
+            }
+        )
+        self._assert_invalid(op, "response_schemas must be a mapping")
+
+    def test_pattern_is_left_for_the_platform_to_compile(self):
+        """`pattern` is a JavaScript regex on the platform, so Python's `re` doesn't judge it."""
+        for pattern in (r"^\p{L}+$", r"^(?P<id>\d+)$"):
+            with self.subTest(pattern=pattern):
+                self._make_integration(
+                    operations=[
+                        _operation(request_query_schema={"type": "string", "pattern": pattern})
+                    ]
+                ).validate()
+
 
 class SafetyFiltersTests(unittest.TestCase):
     """Tests for SafetyFilters resources (General, Voice, Chat)."""
@@ -9232,6 +9890,79 @@ class TestCaseTests(unittest.TestCase):
         self.assertIs(call.to_yaml_dict()["is_asserted"], False)
         self.assertFalse(call.to_proto().is_asserted)
 
+    def test_non_string_expected_value_from_projection_round_trips(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        "TEST-typed": {
+                            "name": "Typed values test",
+                            "scenario": "Book a table.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                            "assertions": [
+                                {
+                                    "payload": {
+                                        "$case": "functionCall",
+                                        "value": {
+                                            "name": "test_function",
+                                            "arguments": {
+                                                "confirmed": {
+                                                    "expectedValue": False,
+                                                    "valueType": "boolean",
+                                                },
+                                                "party_size": {
+                                                    "expectedValue": 4,
+                                                    "valueType": "integer",
+                                                },
+                                            },
+                                            "isAsserted": True,
+                                        },
+                                    }
+                                }
+                            ],
+                        }
+                    }
+                }
+            }
+        }
+        test_case = TestCase.from_projection(projection)["TEST-typed"]
+        call = test_case.assertions.function_calls[0]
+        arguments = {arg.parameter_name: arg.expected_value for arg in call.arguments}
+        self.assertEqual(arguments, {"confirmed": "false", "party_size": "4"})
+
+        proto_arguments = call.to_proto().arguments
+        self.assertEqual(proto_arguments["confirmed"].expected_value, "false")
+        self.assertEqual(proto_arguments["party_size"].expected_value, "4")
+
+        written = test_case.to_pretty()
+        self.assertIn("expected_value: 'false'", written)
+        self.assertIn("expected_value: '4'", written)
+
+    def test_unquoted_expected_value_in_yaml_pushes(self):
+        file_path = os.path.join("test_suite", "typed_values_test.yaml")
+        contents = (
+            "name: Typed values test\n"
+            "scenario: Book a table.\n"
+            "channel: chat.polyai\n"
+            "language: en-GB\n"
+            "function_call_assertions:\n"
+            "  - name: test_function\n"
+            "    arguments:\n"
+            "      - parameter_name: confirmed\n"
+            "        expected_value: true\n"
+            "        value_type: boolean\n"
+        )
+        with mock_read_from_file({file_path: contents}):
+            test_case = TestCase.read_local_resource(
+                file_path=file_path,
+                resource_id="TEST-typed_values",
+                resource_name="Typed values test",
+            )
+        call = test_case.assertions.function_calls[0]
+        self.assertEqual(call.arguments[0].expected_value, "true")
+        self.assertEqual(call.to_proto().arguments["confirmed"].expected_value, "true")
+
     def test_read_local_resource_filename_mismatch_raises(self):
         file_path = os.path.join("test_suite", "greeting_flow_test.yaml")
         with mock_read_from_file(
@@ -9481,7 +10212,22 @@ class TestCaseTests(unittest.TestCase):
         test_case = self._test_case_with_simulated_at("2026-01-15T09:30:00Z")
         for proto in (test_case.build_create_proto(), test_case.build_update_proto()):
             self.assertTrue(proto.HasField("simulated_at"))
-            self.assertEqual(proto.simulated_at, "2026-01-15T09:30:00Z")
+            self.assertEqual(proto.simulated_at, "2026-01-15T09:30:00.000Z")
+
+    def test_simulated_at_in_protos_is_utc_with_milliseconds(self):
+        cases = {
+            "2026-01-15T09:30:00+01:00": "2026-01-15T08:30:00.000Z",
+            "2026-01-15T09:30:00.5Z": "2026-01-15T09:30:00.500Z",
+            "2026-01-15 09:30": "2026-01-15T09:30:00.000Z",
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                proto = self._test_case_with_simulated_at(value).build_create_proto()
+                self.assertEqual(proto.simulated_at, expected)
+
+    def test_simulated_at_in_yaml_keeps_its_form(self):
+        test_case = self._test_case_with_simulated_at("2026-01-15T09:30:00.000Z")
+        self.assertEqual(test_case.to_yaml_dict()["simulated_at"], "2026-01-15T09:30:00Z")
 
     def test_read_simulated_at_from_projection(self):
         projection = {
@@ -14414,9 +15160,7 @@ class OutboundCampaignTests(unittest.TestCase):
 
         self.assertEqual(data["target"], "csv")
         self.assertEqual(data["targetNodeId"], "end-1")
-        self.assertEqual(
-            OutboundCampaignNode.to_pretty_dict(data, mappings, file_path), pretty
-        )
+        self.assertEqual(OutboundCampaignNode.to_pretty_dict(data, mappings, file_path), pretty)
 
     def test_node_yaml_fills_in_schema_defaults(self):
         node = OutboundCampaignNode.from_yaml_dict(
@@ -14498,6 +15242,7 @@ class OutboundCampaignTests(unittest.TestCase):
                     campaign.folder_name = folder
                     campaign.save(root)
                     path = os.path.join(root, campaign.file_path)
+
                     def read(path=path):
                         return OutboundCampaign.read_local_resource(path, "CMPGN-ONE", "x")
 
@@ -14584,7 +15329,6 @@ class OutboundCampaignTests(unittest.TestCase):
         cases = {
             "can't be before 'startDate'": {"startDate": "2026-02-01", "endDate": "2026-01-31"},
             "must be an ISO 3166-1": {"country": "XX"},
-            "must be an IANA time zone": {"defaultTimezone": "Mars/Olympus_Mons"},
             "needs at least one day": {"contactWindow": {**window, "daysOfWeek": []}},
             'as "HH:mm"': {"contactWindow": {**window, "startTime": "9am"}},
             "must end after it starts": {"contactWindow": {**window, "endTime": "08:00"}},
@@ -14596,6 +15340,13 @@ class OutboundCampaignTests(unittest.TestCase):
                 campaign.settings = {**campaign.settings, **settings}
                 with self.assertRaisesRegex(ValueError, re.escape(message)):
                     campaign.validate(resource_mappings=[])
+
+    @unittest.skipUnless(TIMEZONES, "no IANA time zone database on this system")
+    def test_validate_rejects_an_unknown_time_zone(self):
+        campaign = _campaign()
+        campaign.settings = {**campaign.settings, "defaultTimezone": "Mars/Olympus_Mons"}
+        with self.assertRaisesRegex(ValueError, "must be an IANA time zone"):
+            campaign.validate(resource_mappings=[])
 
     def test_validate_accepts_settings_the_platform_accepts(self):
         campaign = _campaign()

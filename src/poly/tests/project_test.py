@@ -23,7 +23,7 @@ from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
-from poly.project import AgentStudioProject, DeploymentMode
+from poly.project import STATUS_FILE, AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
     AttributeKind,
@@ -64,6 +64,7 @@ from poly.resources import (
     VoiceStylePrompt,
     VoiceVadConfig,
 )
+from poly.resources.api_integration import HAND_WRITTEN_SCHEMA_SOURCE
 from poly.resources.flows import (
     ASRBiasing,
     Condition,
@@ -2190,6 +2191,26 @@ class PushProjectTest(unittest.TestCase):
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
+    def test_push_project_function_with_blank_lines_after_docstring_has_no_changes(self):
+        """A function written to disk and read back unchanged is not pushed as an update."""
+        root = _copy_test_project(self)
+        project_data = deepcopy(PROJECT_DATA)
+        function_data = project_data["resources"]["functions"]["FUNCTION-test_function"]
+        function_data["code"] = '"""Global helpers."""\n\n\n' + function_data["code"]
+        project = AgentStudioProject.from_dict(project_data, root)
+        function = project.resources[Function]["FUNCTION-test_function"]
+        function.save(
+            root,
+            resource_name=function.name,
+            resource_mappings=project._make_resource_mappings(project.resources),
+        )
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+        self.mock_api_handler.queue_resources.assert_not_called()
+
     def test_push_project_merge_conflict(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_pull.return_value = (["functions/test_function.py"], {})
@@ -2720,6 +2741,53 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.clear_command_queue.assert_called_once()
 
 
+class StatusFileWritesTest(unittest.TestCase):
+    """When reading the api_handler property and pushing write the status file."""
+
+    def setUp(self):
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        self.root = _copy_test_project(self)
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        self.api_handler = MagicMock(branch_id=self.project.branch_id)
+        self.api_handler.queue_resources.return_value = []
+        self.project._api_handler = self.api_handler
+        self.status_file = os.path.join(self.root, STATUS_FILE)
+
+    def _status_file_state(self) -> tuple[int, bytes]:
+        with open(self.status_file, "rb") as f:
+            return os.stat(self.status_file).st_mtime_ns, f.read()
+
+    def test_dry_run_push_leaves_the_status_file_untouched(self):
+        self.project.save_config()
+        before = self._status_file_state()
+        topic_file = os.path.join(self.root, "topics", "topic_1.yaml")
+        with open(topic_file, encoding="utf-8") as f:
+            contents = f.read()
+        with open(topic_file, "w", encoding="utf-8") as f:
+            f.write(contents.replace("uses global functions.", "edited locally.", 1))
+
+        success, message, _ = self.project.push_project(dry_run=True, parent_projection_json={})
+
+        self.assertTrue(success, message)
+        self.api_handler.queue_resources.assert_called_once()
+        self.assertEqual(self._status_file_state(), before)
+
+    def test_api_handler_saves_only_when_the_branch_changes(self):
+        save_config = patch.object(AgentStudioProject, "save_config").start()
+
+        self.project.api_handler
+        save_config.assert_not_called()
+
+        self.api_handler.branch_id = "BRANCH-new"
+        self.project.api_handler
+        self.project.api_handler
+
+        self.assertEqual(self.project.branch_id, "BRANCH-new")
+        save_config.assert_called_once()
+
+
 class StageSetDefaultCommandsTest(unittest.TestCase):
     """Tests for the set-default commands _stage_commands emits for handoffs and variants."""
 
@@ -2735,7 +2803,7 @@ class StageSetDefaultCommandsTest(unittest.TestCase):
         self.queued_commands = []
         self.api_handler.sync_client.queue_command.side_effect = self.queued_commands.append
 
-        # Reading the api_handler property saves the project config as a side effect,
+        # Reading the api_handler property saves the project config when the branch changes,
         # which would write _gen/.agent_studio_config into the fixture project
         patch.object(AgentStudioProject, "save_config").start()
         self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
@@ -4703,14 +4771,103 @@ class MultiResourcePullMergeTest(unittest.TestCase):
         self.assertEqual(self._sms_merge_calls(), [])
 
     def test_locally_deleted_file_stays_deleted_when_remote_is_unchanged(self):
-        """With no local entries to normalise, the raw file text (empty) is merged instead."""
         os.remove(self.sms_file)
 
         conflicts = self._pull(self._incoming())
 
         self.assertEqual(conflicts, [])
         self.assertFalse(os.path.exists(self.sms_file))
-        self.assertEqual(len(self._sms_merge_calls()), 1)
+        self.assertEqual(self._sms_merge_calls(), [])
+
+    def test_unchanged_projection_leaves_local_edits_untouched(self):
+        self._edit_local(self.TEMPLATE_1_TEXT, "Edited locally")
+        tree = _read_tree(self.root)
+
+        conflicts = self._pull(self._incoming())
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(_read_tree(self.root), tree)
+        self.merge_spy.assert_not_called()
+
+    def test_unchanged_projection_without_empty_types_is_not_merged(self):
+        """A projection leaves out types with no resources; the status file loads them empty."""
+        project_data = deepcopy(PROJECT_DATA)
+        del project_data["resources"]["variant_attributes"]
+        self.project = AgentStudioProject.from_dict(project_data, self.root)
+        self.assertIn(VariantAttribute, self.project._not_loaded_resources)
+        incoming = {
+            resource_type: resources
+            for resource_type, resources in self._incoming().items()
+            if resources
+        }
+        tree = _read_tree(self.root)
+
+        conflicts = self._pull(incoming)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(_read_tree(self.root), tree)
+        self.merge_spy.assert_not_called()
+
+
+class PushReconcileTest(unittest.TestCase):
+    """A plain push merges the latest projection into a real copy of the test project first."""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_api_handler.queue_resources = MagicMock(return_value=[])
+        self.mock_api_handler.send_queued_commands = MagicMock(return_value=True)
+        patch.object(AgentStudioProject, "save_config").start()
+        patch.object(AgentStudioProject, "_fetch_parent_resources", return_value={}).start()
+        patch("poly.utils.save_imports").start()
+        patch("poly.utils.export_decorators").start()
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+
+        self.root = _copy_test_project(self)
+        self._edit_local("topics/topic_1.yaml", "uses global functions.", "edited locally.")
+        self._edit_local("config/sms_templates.yaml", "a test template", "edited locally")
+
+    def _edit_local(self, rel_path: str, old: str, new: str) -> None:
+        path = os.path.join(self.root, rel_path)
+        with open(path, encoding="utf-8") as f:
+            contents = f.read()
+        self.assertIn(old, contents)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(contents.replace(old, new, 1))
+
+    def _push(self, incoming: dict, force: bool = False) -> dict:
+        """Push with Agent Studio serving incoming, and return what was queued."""
+        self.mock_api_handler.pull_resources.return_value = (incoming, [], {})
+        self.mock_api_handler.queue_resources.reset_mock()
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        success, message, _ = project.push_project(force=force)
+        self.assertTrue(success, message)
+        return self.mock_api_handler.queue_resources.call_args.kwargs
+
+    def test_unchanged_projection_queues_the_same_batch_as_no_merge(self):
+        incoming = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root).resources
+        tree = _read_tree(self.root)
+
+        merged = self._push(deepcopy(incoming))
+
+        self.assertEqual(_read_tree(self.root), tree)
+        self.assertEqual(merged, self._push(deepcopy(incoming), force=True))
+        self.assertEqual(set(merged["updated_resources"][Topic]), {"TOPIC-Topic 1"})
+        self.assertEqual(set(merged["updated_resources"][SMSTemplate]), {"SMS_TEMPLATE-123"})
+
+    def test_single_remote_change_is_merged_before_pushing(self):
+        incoming = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root).resources
+        incoming[Topic]["TOPIC-Topic 2"].content = "Edited remotely"
+
+        queued = self._push(incoming)
+
+        with open(os.path.join(self.root, "topics", "topic_2.yaml"), encoding="utf-8") as f:
+            self.assertIn("content: Edited remotely", f.read())
+        self.assertEqual(set(queued["updated_resources"][Topic]), {"TOPIC-Topic 1"})
+        self.assertEqual(set(queued["updated_resources"][SMSTemplate]), {"SMS_TEMPLATE-123"})
 
 
 class TopicTagsSyncTest(unittest.TestCase):
@@ -4948,6 +5105,29 @@ class MigrateFlowStepResourceIdsTest(unittest.TestCase):
 
         flow_steps = status_dict["resources"]["flow_steps"]
         self.assertIn("FLOW-abc_step-1", flow_steps)
+        self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
+
+    def test_null_file_structure_info_still_rekeys(self):
+        """Status files written by older versions can store file_structure_info as null."""
+        from poly.migration_utils import migrate_flow_step_resource_ids
+
+        status_dict = {
+            "resources": {
+                "flow_steps": {
+                    "SMS Flow_step-1": {
+                        "resource_id": "SMS Flow_step-1",
+                        "flow_name": "SMS Flow",
+                        "flow_id": "FLOW-abc",
+                    },
+                },
+            },
+            "file_structure_info": None,
+        }
+
+        migrate_flow_step_resource_ids(status_dict)
+
+        flow_steps = status_dict["resources"]["flow_steps"]
+        self.assertEqual(list(flow_steps), ["FLOW-abc_step-1"])
         self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
 
 
@@ -8722,6 +8902,342 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertFalse(success)
         self.assertEqual(commands, [])
         self.assertIn("functions/trigger.py has no node of that name", message)
+
+
+_STATUS_QUERY = {"type": "object", "properties": {"include_history": {"type": "boolean"}}}
+_BOOKING_BODY = {
+    "type": "object",
+    "required": ["customer_id"],
+    "properties": {
+        "customer_id": {"type": "string"},
+        "notes": {"type": "string", "maxLength": 500},
+    },
+    "additionalProperties": False,
+}
+_BOOKING_CREATED = {"type": "object", "properties": {"booking_id": {"type": "string"}}}
+_BOOKING_ERROR = {"type": "object", "properties": {"error": {"type": "string"}}}
+
+
+def _api_integration_projection() -> dict:
+    """One integration with two operations, shaped as the platform serves the projection.
+
+    Schemas travel as JSON text, and a request schema that is unset has no key at all.
+    """
+    return {
+        "apiIntegrations": {
+            "apiIntegrations": {
+                "ids": ["INT-1"],
+                "entities": {
+                    "INT-1": {
+                        "id": "INT-1",
+                        "name": "customer_api",
+                        "description": "Bookings",
+                        "environments": {
+                            "sandbox": {"baseUrl": "https://dev-customer.com", "authType": "basic"},
+                            "preRelease": {
+                                "baseUrl": "https://dev-customer.com",
+                                "authType": "basic",
+                            },
+                            "live": {"baseUrl": "https://customer.com", "authType": "apiKey"},
+                        },
+                        "operations": {
+                            "OP-GET": {
+                                "id": "OP-GET",
+                                "name": "get_confirmation_status",
+                                "method": "GET",
+                                "resource": "/bookings/{booking_id}/confirmation-status",
+                                "description": "Confirmation status of a booking",
+                                "headers": {"Accept": "application/json"},
+                                "requestQuerySchema": json.dumps(_STATUS_QUERY),
+                                "responseSchemas": {},
+                                "schemaSource": "observed",
+                            },
+                            "OP-POST": {
+                                "id": "OP-POST",
+                                "name": "create_booking",
+                                "method": "POST",
+                                "resource": "/bookings",
+                                "description": "",
+                                "headers": {},
+                                "requestBodySchema": json.dumps(_BOOKING_BODY),
+                                "responseSchemas": {
+                                    "201": json.dumps(_BOOKING_CREATED),
+                                    "default": json.dumps(_BOOKING_ERROR),
+                                },
+                                "schemaSource": "openapi",
+                            },
+                            "OP-DELETE": {
+                                "id": "OP-DELETE",
+                                "name": "cancel_booking",
+                                "method": "DELETE",
+                                "resource": "/bookings/{booking_id}",
+                                "description": "",
+                                "headers": {},
+                                "responseSchemas": {"204": "{}"},
+                                "schemaSource": "manual",
+                            },
+                        },
+                    }
+                },
+            }
+        }
+    }
+
+
+class ApiIntegrationSyncTest(unittest.TestCase):
+    """Pull, push and diff of an API integration's operations in a real temp project."""
+
+    def setUp(self):
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.project = AgentStudioProject(
+            region="us-1",
+            account_id="account",
+            project_id="project",
+            root_path=self.root,
+            resources={},
+            last_updated=datetime.now(),
+            branch_id="main",
+            file_structure_info={},
+        )
+        conflicts, _ = self.project.pull_project(projection_json=_api_integration_projection())
+        self.assertEqual(conflicts, [])
+        self.path = os.path.join(self.root, "config", "api_integrations.yaml")
+
+    def _yaml(self) -> dict:
+        with open(self.path, encoding="utf-8") as file:
+            return resource_utils.load_yaml(file.read())
+
+    def _write_yaml(self, data: dict) -> None:
+        with open(self.path, "w", encoding="utf-8") as file:
+            file.write(resource_utils.dump_yaml(data))
+
+    def _edit_operations(self, edit) -> None:
+        """Apply `edit(operation_dict)` to every operation in the pulled file and write it back."""
+        data = self._yaml()
+        for operation in data["api_integrations"][0]["operations"]:
+            edit(operation)
+        self._write_yaml(data)
+
+    def _operations(self) -> dict[str, dict]:
+        return {op["name"]: op for op in self._yaml()["api_integrations"][0]["operations"]}
+
+    def _push(self) -> dict[str, list]:
+        """A dry-run push, as {command type: [payload protos]}."""
+        success, message, commands = self.project.push_project(dry_run=True)
+        self.assertTrue(success, message)
+        grouped: dict[str, list] = {}
+        for command in commands:
+            grouped.setdefault(command.type, []).append(getattr(command, command.type))
+        return grouped
+
+    def test_pull_writes_description_and_headers_only_where_set(self):
+        """The pulled file carries both fields on the operation that has them and neither elsewhere."""
+        ops = self._operations()
+        self.assertEqual(
+            ops["get_confirmation_status"]["description"], "Confirmation status of a booking"
+        )
+        self.assertEqual(ops["get_confirmation_status"]["headers"], {"Accept": "application/json"})
+        self.assertNotIn("description", ops["create_booking"])
+        self.assertNotIn("headers", ops["create_booking"])
+        self.assertEqual(list(ops["get_confirmation_status"])[:2], ["name", "description"])
+
+    def test_pull_then_push_round_trips_with_no_changes(self):
+        """Pushing straight after a pull finds nothing to send."""
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self.project.get_diffs(), {})
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+        self.assertEqual(commands, [])
+
+    def test_header_edit_sends_the_operation_with_all_its_headers(self):
+        """Adding a header sends one operation update carrying the whole header map."""
+
+        def add_version(op):
+            if op["name"] == "get_confirmation_status":
+                op["headers"]["X-Api-Version"] = "2024-01-01"
+
+        self._edit_operations(add_version)
+
+        [update] = self._push()["update_api_integration_operation"]
+        self.assertEqual(update.id, "OP-GET")
+        self.assertEqual(
+            dict(update.headers.entries),
+            {"Accept": "application/json", "X-Api-Version": "2024-01-01"},
+        )
+        self.assertEqual(update.description, "Confirmation status of a booking")
+
+    def test_removing_description_and_headers_sends_a_clearing_update(self):
+        """Deleting both keys sends an empty headers wrapper and an empty description."""
+
+        def drop_both(op):
+            op.pop("description", None)
+            op.pop("headers", None)
+
+        self._edit_operations(drop_both)
+
+        [update] = self._push()["update_api_integration_operation"]
+        self.assertEqual(update.id, "OP-GET")
+        self.assertTrue(update.HasField("headers"))
+        self.assertEqual(len(update.headers.entries), 0)
+        self.assertTrue(update.HasField("description"))
+        self.assertEqual(update.description, "")
+
+    def test_reserved_header_fails_push_validation(self):
+        """A header the platform would refuse stops the push locally."""
+
+        def add_authorization(op):
+            op.setdefault("headers", {})["Authorization"] = "Bearer token"
+
+        self._edit_operations(add_authorization)
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertIn("header 'Authorization' is set from the environment config", message)
+        self.assertEqual(commands, [])
+
+    def test_unquoted_header_value_fails_push_validation(self):
+        """`1.10` would reach the platform as "1.1", so it stops the push until quoted."""
+        with open(self.path, encoding="utf-8") as file:
+            text = file.read()
+        self.assertEqual(text.count("Accept: application/json\n"), 1)
+        with open(self.path, "w", encoding="utf-8") as file:
+            file.write(
+                text.replace(
+                    "Accept: application/json\n",
+                    "Accept: application/json\n      X-Version: 1.10\n",
+                )
+            )
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertIn("header 'X-Version' value must be text; quote it in YAML", message)
+        self.assertEqual(commands, [])
+
+    def test_pull_writes_schemas_as_nested_yaml_with_quoted_status_keys(self):
+        """Schemas land as mappings, status keys quoted, and only where the platform has them."""
+        ops = self._operations()
+        self.assertEqual(ops["create_booking"]["request_body_schema"], _BOOKING_BODY)
+        self.assertEqual(
+            ops["create_booking"]["response_schemas"],
+            {"201": _BOOKING_CREATED, "default": _BOOKING_ERROR},
+        )
+        self.assertEqual(ops["create_booking"]["schema_source"], "openapi")
+        self.assertNotIn("request_query_schema", ops["create_booking"])
+        self.assertEqual(ops["get_confirmation_status"]["request_query_schema"], _STATUS_QUERY)
+        self.assertEqual(ops["get_confirmation_status"]["schema_source"], "observed")
+        self.assertNotIn("request_body_schema", ops["get_confirmation_status"])
+        self.assertNotIn("response_schemas", ops["get_confirmation_status"])
+        # `manual` is the default, so the file doesn't spell it out.
+        self.assertEqual(ops["cancel_booking"]["response_schemas"], {"204": {}})
+        self.assertNotIn("schema_source", ops["cancel_booking"])
+
+        with open(self.path, encoding="utf-8") as file:
+            text = file.read()
+        self.assertIn("'201':", text)
+        self.assertNotIn('"{', text)
+
+    def test_schema_edit_sends_the_new_schema_with_its_source(self):
+        """Changing one keyword sends the operation with its full schema state and source."""
+
+        def tighten_notes(op):
+            if op["name"] == "create_booking":
+                op["request_body_schema"]["properties"]["notes"]["maxLength"] = 200
+
+        self._edit_operations(tighten_notes)
+
+        [update] = self._push()["update_api_integration_operation"]
+        self.assertEqual(update.id, "OP-POST")
+        body = json.loads(update.request_body_schema)
+        self.assertEqual(body["properties"]["notes"]["maxLength"], 200)
+        self.assertEqual(json.loads(update.response_schemas.entries["201"]), _BOOKING_CREATED)
+        self.assertEqual(update.request_query_schema, "")
+        # The label is sent as the file has it, so a writer updating its own schema keeps it.
+        self.assertEqual(update.schema_source, "openapi")
+
+    def test_removing_all_schemas_sends_a_clearing_update_without_a_source(self):
+        """Deleting every schema key sends empty values and leaves the stored source alone."""
+
+        def drop_schemas(op):
+            if op["name"] == "create_booking":
+                for key in ("request_body_schema", "response_schemas", "schema_source"):
+                    op.pop(key, None)
+
+        self._edit_operations(drop_schemas)
+
+        [update] = self._push()["update_api_integration_operation"]
+        self.assertEqual(update.id, "OP-POST")
+        self.assertEqual(update.request_body_schema, "")
+        self.assertTrue(update.HasField("response_schemas"))
+        self.assertEqual(len(update.response_schemas.entries), 0)
+        self.assertFalse(update.HasField("schema_source"))
+
+    def test_new_operation_with_a_schema_and_no_source_creates_with_the_default(self):
+        """A schema written without schema_source is created labelled as a hand edit."""
+        data = self._yaml()
+        data["api_integrations"][0]["operations"].append(
+            {
+                "name": "list_bookings",
+                "method": "GET",
+                "resource": "/bookings",
+                "response_schemas": {"200": {}},
+            }
+        )
+        self._write_yaml(data)
+
+        [create] = self._push()["create_api_integration_operation"]
+        self.assertEqual(create.name, "list_bookings")
+        self.assertEqual(dict(create.response_schemas), {"200": "{}"})
+        self.assertEqual(create.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
+
+    def test_dropping_only_the_source_relabels_with_the_default(self):
+        """Removing schema_source while keeping the schema sends the default label."""
+
+        def drop_source(op):
+            if op["name"] == "get_confirmation_status":
+                op.pop("schema_source")
+
+        self._edit_operations(drop_source)
+
+        [update] = self._push()["update_api_integration_operation"]
+        self.assertEqual(update.id, "OP-GET")
+        self.assertEqual(json.loads(update.request_query_schema), _STATUS_QUERY)
+        self.assertEqual(update.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
+
+    def test_unquoted_status_key_is_read_as_text_and_pushes_nothing(self):
+        """A hand-typed `201:` is an int to YAML; it is read as '201' and is not a change."""
+        with open(self.path, encoding="utf-8") as file:
+            text = file.read()
+        self.assertIn("'201':", text)
+        with open(self.path, "w", encoding="utf-8") as file:
+            file.write(text.replace("'201':", "201:"))
+
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        success, message, _ = self.project.push_project(dry_run=True)
+        self.assertFalse(success)
+        self.assertEqual(message, "No changes detected")
+
+    def test_body_schema_on_get_fails_push_validation(self):
+        """A body schema the platform would refuse on a GET stops the push locally."""
+
+        def add_body(op):
+            if op["name"] == "get_confirmation_status":
+                op["request_body_schema"] = {"type": "object"}
+
+        self._edit_operations(add_body)
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertIn("GET requests have no body", message)
+        self.assertEqual(commands, [])
 
 
 if __name__ == "__main__":
