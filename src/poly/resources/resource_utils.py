@@ -775,21 +775,31 @@ def _matches_scalar(value: object, expected: type) -> bool:
     return isinstance(value, expected)
 
 
+@functools.cache
+def _field_type_hints(cls: type) -> tuple[tuple[str, object, tuple, tuple], ...]:
+    """Return (field name, unwrapped hint, list args, dict args) for each dataclass field."""
+    hints = typing.get_type_hints(cls)
+    plan = []
+    for f in fields(cls):
+        hint = _unwrap_optional(hints.get(f.name, type(None)))
+        list_args = typing.get_args(hint) if typing.get_origin(hint) is list else ()
+        dict_args = typing.get_args(hint) if typing.get_origin(hint) is dict else ()
+        plan.append((f.name, hint, list_args, dict_args))
+    return tuple(plan)
+
+
 def check_yaml_field_types(instance: object, _path: str = "") -> None:
     """Validate that scalar and list[scalar] fields have the correct type after YAML parsing."""
-    hints = typing.get_type_hints(type(instance))
-    for f in fields(instance):
-        value = getattr(instance, f.name)
+    for name, hint, list_args, dict_args in _field_type_hints(type(instance)):
+        value = getattr(instance, name)
         if value is None:
             continue
-        hint = _unwrap_optional(hints.get(f.name, type(None)))
-        field_path = f"{_path}.{f.name}" if _path else f.name
+        field_path = f"{_path}.{name}" if _path else name
 
         if hint in _SCALAR_TYPES and not _matches_scalar(value, hint):
             raise ValueError(
                 f"'{field_path}' should be {hint.__name__} but got {type(value).__name__}."
             )
-        list_args = typing.get_args(hint) if typing.get_origin(hint) is list else ()
         if list_args and list_args[0] in _SCALAR_TYPES:
             expected_item_type = list_args[0]
             if not isinstance(value, list):
@@ -803,7 +813,6 @@ def check_yaml_field_types(instance: object, _path: str = "") -> None:
                         f"'{field_path}[{i}]' should be {expected_item_type.__name__} "
                         f"but got {type(item).__name__}."
                     )
-        dict_args = typing.get_args(hint) if typing.get_origin(hint) is dict else ()
         if len(dict_args) == 2 and isinstance(value, dict):
             key_type, val_type = dict_args
             for k, v in value.items():
