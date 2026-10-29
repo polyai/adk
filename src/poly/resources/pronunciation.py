@@ -18,7 +18,6 @@ from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     _parse_multi_resource_path,
-    _strip_strings,
     register_resource,
 )
 
@@ -242,7 +241,7 @@ class Pronunciation(MultiResourceYamlResource):
     ) -> None:
         """Save the resource; pronunciations are matched by position (index), not by name."""
         yaml_content = self.to_pretty_dict(
-            _strip_strings(self.to_yaml_dict()),
+            utils.strip_strings(self.to_yaml_dict()),
             file_path=self.file_path,
             **kwargs,
         )

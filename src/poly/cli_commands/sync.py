@@ -708,7 +708,7 @@ class FormatCommand(BaseCommand):
             help="Run ruff and YAML/JSON formatting on the project (optional ty with --ty).",
             description=(
                 "Run ruff (lint + format) on Python and formatting on YAML/JSON resources.\n\n"
-                "By default applies fixes (ruff check --fix, ruff format; YAML/JSON via ruamel.yaml and stdlib).\n"
+                "By default applies fixes (ruff check --fix, ruff format; YAML and JSON in process).\n"
                 "Use --check to only verify without writing changes. Use --ty to also run type checking.\n\n"
                 "Examples:\n"
                 "  poly format\n"

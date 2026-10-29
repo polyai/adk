@@ -335,28 +335,17 @@ class SubResource(BaseResource, ABC):
     name: str
 
 
-def _strip_strings(data):
-    """Recursively strip leading/trailing whitespace from all string values."""
-    if isinstance(data, dict):
-        return {k: _strip_strings(v) for k, v in data.items()}
-    if isinstance(data, list):
-        return [_strip_strings(item) for item in data]
-    if isinstance(data, str):
-        return data.strip()
-    return data
-
-
 class YamlResource(Resource, ABC):
     """Abstract base class for YAML resources in the Agent Studio."""
 
     @property
     def raw(self) -> str:
         """Serialize the resource into a YAML string representation."""
-        return utils.dump_yaml(_strip_strings(self.to_yaml_dict()))
+        return utils.dump_yaml(utils.strip_strings(self.to_yaml_dict()))
 
     def compute_hash(self) -> str:
         """Compute a hash from the dict representation (avoids YAML serialization)."""
-        return utils.compute_hash_from_dict(_strip_strings(self.to_yaml_dict()))
+        return utils.compute_hash_from_dict(utils.strip_strings(self.to_yaml_dict()))
 
     @classmethod
     def to_pretty_dict(
@@ -376,7 +365,9 @@ class YamlResource(Resource, ABC):
             "resource_name": getattr(self, "name", None),
             **kwargs,
         }
-        return utils.dump_yaml(self.to_pretty_dict(_strip_strings(self.to_yaml_dict()), **merged))
+        return utils.dump_yaml(
+            self.to_pretty_dict(utils.strip_strings(self.to_yaml_dict()), **merged)
+        )
 
     @classmethod
     def make_pretty(
@@ -675,7 +666,7 @@ class MultiResourceYamlResource(YamlResource, ABC):
     ) -> None:
         """Save the resource to a local path."""
         yaml_content = self.to_pretty_dict(
-            self.to_yaml_dict(),
+            utils.strip_strings(self.to_yaml_dict()),
             file_path=getattr(self, "file_path", None),
             **kwargs,
         )
