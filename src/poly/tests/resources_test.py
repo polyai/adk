@@ -81,6 +81,7 @@ from poly.resources.languages import (
 )
 from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
 from poly.resources.outbound_campaign import (
+    TIMEZONES,
     OutboundCampaign,
     OutboundCampaignFunction,
     OutboundCampaignNode,
@@ -14414,9 +14415,7 @@ class OutboundCampaignTests(unittest.TestCase):
 
         self.assertEqual(data["target"], "csv")
         self.assertEqual(data["targetNodeId"], "end-1")
-        self.assertEqual(
-            OutboundCampaignNode.to_pretty_dict(data, mappings, file_path), pretty
-        )
+        self.assertEqual(OutboundCampaignNode.to_pretty_dict(data, mappings, file_path), pretty)
 
     def test_node_yaml_fills_in_schema_defaults(self):
         node = OutboundCampaignNode.from_yaml_dict(
@@ -14498,6 +14497,7 @@ class OutboundCampaignTests(unittest.TestCase):
                     campaign.folder_name = folder
                     campaign.save(root)
                     path = os.path.join(root, campaign.file_path)
+
                     def read(path=path):
                         return OutboundCampaign.read_local_resource(path, "CMPGN-ONE", "x")
 
@@ -14584,7 +14584,6 @@ class OutboundCampaignTests(unittest.TestCase):
         cases = {
             "can't be before 'startDate'": {"startDate": "2026-02-01", "endDate": "2026-01-31"},
             "must be an ISO 3166-1": {"country": "XX"},
-            "must be an IANA time zone": {"defaultTimezone": "Mars/Olympus_Mons"},
             "needs at least one day": {"contactWindow": {**window, "daysOfWeek": []}},
             'as "HH:mm"': {"contactWindow": {**window, "startTime": "9am"}},
             "must end after it starts": {"contactWindow": {**window, "endTime": "08:00"}},
@@ -14596,6 +14595,13 @@ class OutboundCampaignTests(unittest.TestCase):
                 campaign.settings = {**campaign.settings, **settings}
                 with self.assertRaisesRegex(ValueError, re.escape(message)):
                     campaign.validate(resource_mappings=[])
+
+    @unittest.skipUnless(TIMEZONES, "no IANA time zone database on this system")
+    def test_validate_rejects_an_unknown_time_zone(self):
+        campaign = _campaign()
+        campaign.settings = {**campaign.settings, "defaultTimezone": "Mars/Olympus_Mons"}
+        with self.assertRaisesRegex(ValueError, "must be an IANA time zone"):
+            campaign.validate(resource_mappings=[])
 
     def test_validate_accepts_settings_the_platform_accepts(self):
         campaign = _campaign()
