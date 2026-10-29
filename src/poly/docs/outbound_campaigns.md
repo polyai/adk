@@ -2,7 +2,7 @@
 
 ## Purpose
 
-An outbound campaign contacts people for you: it imports contacts, then calls and texts them following a graph of nodes, and records how each contact ended. The ADK syncs each campaign's **draft**: its settings and node graph. What is live changes only when you publish.
+An outbound campaign contacts people for you: it imports contacts, then calls and texts them, moving each contact from node to node, and records how each contact ended. The ADK syncs each campaign's **draft**: its settings and nodes. What is live changes only when the campaign is published. Archived campaigns are not pulled.
 
 ## Location
 
@@ -11,19 +11,17 @@ outbound_campaigns/
   {campaign_name}/
     campaign.yaml        # name, description, settings, nodes
     functions/
-      {node_id}.py       # code of that node's function, only when it has code
+      {node_name}.py     # code of that node's function, only when it has code
 ```
 
-The folder name is the campaign's name, lowercased with punctuation replaced by `_`. Renaming a campaign means changing `name` and renaming the folder to match; the campaign keeps its identity. Archived campaigns are not pulled.
+The folder name is the campaign's name, lowercased with punctuation replaced by `_`. A second campaign with the same name gets the end of its id added, as in `reminders-a1b2c3d4`. Renaming a campaign means changing `name` and renaming the folder to match; the campaign keeps its identity.
 
 ## campaign.yaml
-
-`campaign.yaml` has the same shape as the `campaign` block of a campaign exported from Agent Studio, so keys are camelCase. The one difference: a node function's `code` lives in `functions/{node_id}.py`, not in the YAML.
 
 - **name**: Required, under 256 characters.
 - **description**: Optional text, or empty for none.
 - **settings**: The whole settings object. Fields left out take their default (`dailyContactLimit: 3`, everything else empty).
-  - **startDate**, **endDate**: ISO dates.
+  - **startDate**, **endDate**: ISO dates; the end can't be before the start.
   - **fromNumber**, **smsFromNumber**: Numbers calls and texts come from.
   - **defaultVariant**: Name of the variant the campaign's calls use.
   - **country**: ISO 3166-1 alpha-2 code (e.g. `US`). Required to publish.
@@ -31,28 +29,33 @@ The folder name is the campaign's name, lowercased with punctuation replaced by 
   - **dailyContactLimit**: Most times a contact is reached per day.
   - **voiceDispatchLimits**, **smsDispatchLimits**: `maxConcurrent`, `perHour`, `perDay`.
   - **defaultTimezone**: IANA time zone, used when a contact has none.
-  - **contactWindow**: `daysOfWeek` (`monday` .. `sunday`), `startTime` and `endTime` as `"HH:mm"` in the contact's time zone.
-- **nodes**: List of nodes. Each has:
-  - **id**: Unique within the campaign; it names the node's function file. Routes refer to nodes by id.
-  - **position**: `x`, `y` on the Agent Studio canvas.
-  - **label**: Optional display name.
-  - **data**: The node's `type` and its fields (below).
+  - **contactWindow**: `daysOfWeek` (at least one of `monday` .. `sunday`), `startTime` and `endTime` as `"HH:mm"` in the contact's time zone, ending after it starts.
+- **nodes**: List of nodes, in any order. Each has a **name**, unique in the campaign, a **type**, and that type's fields (below). Nodes refer to each other by name. Positions on the Agent Studio canvas are not in the file: a node keeps its position, and a new node is placed next to the node that routes to it.
+
+A node's name is its identity. Renaming a node deletes it and creates a new one with a new history; rename its `.py` file to match.
 
 ### Node types
 
-Every node except `wait` has a **function** with a `name` (a Python name) and a `description`; on an `end` node it is optional. Its code goes in `functions/{node_id}.py`, and the file's `def` line must be the one the node expects (Agent Studio shows it).
-
 | type | Fields |
 |---|---|
-| `trigger` | `function`, `routes`, `sourceType` (`csv`, `api`, `webhook`; default `csv`), `ingestInterval` (`hourly`, `daily`, `manual`; default `daily`) |
-| `call` | `flowName`, `amdFlowName` (optional), `function`, `greeting`, `voicemailEnabled`, `voicemailScript` and `voicemailWhen` (`detection`, `final_retry`; both required when voicemail is on), `maxAttempts` (1-5), `backoff`, `backoffUnit` (`minutes`, `hours`, `days`), `routes`, `defaultRoute` |
-| `sms` | `function`, `messageTemplate`, `replyFlowName`, `replyTimeoutValue`, `replyTimeoutUnit` (all three optional), `routes`, `defaultRoute` |
-| `conditional` | `function`, `branches` (each `id`, `variable`, `targetNodeId`), `defaultTargetNodeId` |
-| `wait` | `amount`, `unit`, `targetNodeId` |
-| `writeback` | `target` (`api`, `csv`), `function`, `targetNodeId` |
+| `trigger` | `function`, `routes` (each `next` and an optional `outcome`), `sourceType` (`csv`, `api`, `webhook`; default `csv`), `ingestInterval` (`hourly`, `daily`, `manual`; default `daily`) |
+| `call` | `flowName`, `amdFlowName` (optional), `function`, `greeting`, `voicemailEnabled`, `voicemailScript` and `voicemailWhen` (`detection`, `final_retry`; both required when voicemail is on), `maxAttempts` (1-5), `backoff`, `backoffUnit` (`minutes`, `hours`, `days`), `defaultRoute` |
+| `sms` | `function`, `messageTemplate`, `replyFlowName`, `replyTimeoutValue`, `replyTimeoutUnit` (all three optional), `defaultRoute` |
+| `conditional` | `function`, `branches` (each `id`, `variable`, `next`), `defaultNext` |
+| `wait` | `amount`, `unit`, `next` |
+| `writeback` | `target` (`api`, `csv`), `function`, `next` |
 | `end` | `exitReason`, `writebackEnabled`, `function` (optional) |
 
-A route is `targetNodeId` plus an optional `outcome`; `defaultRoute` is the node for outcomes no route matches. Flow fields hold a flow's name.
+`next`, `defaultNext` and `defaultRoute` name the node a contact moves to. A call or text always moves to its `defaultRoute`; put a `conditional` after it to branch on how it went. Flow fields hold a flow's name. At most one node is a `trigger`.
+
+### Functions
+
+Every node except `wait` has a **function** with a `name` (a Python name) and a `description`; on an `end` node it is optional, and a webhook trigger runs none. Its code goes in `functions/{node_name}.py` (the name lowercased, punctuation replaced by `_`). The `def` line must be whole on one line and take exactly these parameters:
+
+- `trigger` with `sourceType: csv`: `contacts`, `outbound_campaign`
+- `trigger` with `sourceType: api`: `outbound_campaign`, `sync`
+- `writeback` with `target: csv`: `outbound_contacts`, `outbound_campaign`
+- any other node: `outbound_contact`, `outbound_campaign`
 
 ## Example
 
@@ -68,44 +71,34 @@ settings:
     startTime: '09:00'
     endTime: '17:00'
 nodes:
-- id: trigger-1
-  position: {x: 0.0, y: 0.0}
-  data:
-    type: trigger
-    function: {name: map_contacts, description: Maps CSV rows to contacts.}
-    routes:
-    - targetNodeId: call-1
-- id: call-1
-  position: {x: 0.0, y: 200.0}
-  label: Reminder call
-  data:
-    type: call
-    flowName: Reminder
-    function: {name: call_args, description: Passes the appointment to the call.}
-    greeting: Hi, this is a reminder about your appointment.
-    voicemailEnabled: false
-    maxAttempts: 2
-    backoff: 1
-    backoffUnit: hours
-    defaultRoute: end-1
-- id: end-1
-  position: {x: 0.0, y: 400.0}
-  data: {type: end, exitReason: completed, writebackEnabled: false}
+- name: Import contacts
+  type: trigger
+  function: {name: map_contacts, description: Maps CSV rows to contacts.}
+  routes:
+  - next: Reminder call
+- name: Reminder call
+  type: call
+  flowName: Reminder
+  function: {name: call_args, description: Passes the appointment to the call.}
+  greeting: Hi, this is a reminder about your appointment.
+  voicemailEnabled: false
+  maxAttempts: 2
+  backoff: 1
+  backoffUnit: hours
+  defaultRoute: Done
+- name: Done
+  type: end
+  exitReason: completed
+  writebackEnabled: false
 ```
 
-`functions/trigger-1.py`:
+`functions/import_contacts.py`:
 
 ```python
 def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
     return {"contacts": [...]}
 ```
 
-## Pushing
-
-`poly push` sends only what changed, node by node: a moved node sends its position, an edited node (or its function file) its data, and nodes added or removed are created or deleted. Settings are always sent whole. A new campaign folder creates a draft campaign. Removing a campaign's folder deletes it, which the platform allows only for a draft that was never published.
-
-`poly validate` checks each field. The graph itself (one trigger, routes to nodes that exist, every node reachable) is checked by `poly campaign validate` after you push.
-
 ## Running a campaign
 
-Use `poly campaign` (`validate`, `preview`, `test`, `publish`, `pause`, `resume`, `archive`); see `poly campaign --help`. `publish`, `pause`, `resume` and `archive` act on the live campaign on `main`.
+Use `poly campaign` (`validate`, `preview`, `test`, `publish`, `pause`, `resume`, `archive`); see `poly campaign --help`. Run `poly campaign validate` after you push to check the whole graph, such as every node being reachable. `publish`, `pause`, `resume` and `archive` act on the live campaign on `main`.

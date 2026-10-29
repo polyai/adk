@@ -46,6 +46,7 @@ from poly.resources import (
     MultiResourceYamlResource,
     OutboundCampaign,
     OutboundCampaignFunction,
+    OutboundCampaignNode,
     Pronunciation,
     Resource,
     ResourceMap,
@@ -55,6 +56,7 @@ from poly.resources import (
     TestCase,
     Topic,
 )
+from poly.resources.outbound_campaign import campaign_folder_of, route_targets
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
     RESOURCE_NAME_TO_CLASS,
@@ -616,6 +618,7 @@ class AgentStudioProject:
         # Deal with empty flow folders
         # -------
 
+        OutboundCampaign.remove_empty_files(self.root_path)
         for folder in ("flows", "outbound_campaigns"):
             folder_path = os.path.join(self.root_path, folder)
             if os.path.exists(folder_path):
@@ -1237,6 +1240,7 @@ class AgentStudioProject:
             updated_resources,
             new_state,
         )
+        self._assign_campaign_positions(new_resources, new_state)
 
         # Queue new/updated/deleted resources
         commands = self.api_handler.get_queued_commands()
@@ -1482,6 +1486,20 @@ class AgentStudioProject:
         return True, "Resources pushed successfully.", commands
 
     @staticmethod
+    def _assign_campaign_positions(new_resources: ResourceMap, new_state: ResourceMap) -> None:
+        """Lay out the new nodes of each campaign around the nodes it already has."""
+        campaign_ids = {
+            node.campaign_id for node in new_resources.get(OutboundCampaignNode, {}).values()
+        }
+        for campaign_id in campaign_ids:
+            nodes = [
+                node
+                for node in new_state.get(OutboundCampaignNode, {}).values()
+                if node.campaign_id == campaign_id
+            ]
+            resource_utils.assign_campaign_positions(nodes, lambda node: route_targets(node.data))
+
+    @staticmethod
     def _assign_flow_positions(
         new_resources: ResourceMap,
         updated_resources: ResourceMap,
@@ -1649,12 +1667,7 @@ class AgentStudioProject:
         )
         prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
         prepush.group_outbound_campaign_changes(
-            state,
-            new_resources,
-            updated_resources,
-            deleted_resources,
-            post_push_deleted_resources,
-            current_resources=self.resources,
+            state, new_resources, updated_resources, deleted_resources
         )
         prepush.fix_orphaned_variables(
             state,
@@ -2316,6 +2329,13 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == OutboundCampaignNode:
+            additional_kwargs["known_position"] = (
+                original_resource.position
+                if isinstance(original_resource, OutboundCampaignNode)
+                else None
+            )
+
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):
                 raise TypeError(f"Original resource is not an MCPServer: {original_resource}")
@@ -2415,6 +2435,20 @@ class AgentStudioProject:
                     parent_flow.resource_id if parent_flow else self.generate_uuid(FlowConfig)
                 )
 
+        campaign_folders_to_ids = {
+            campaign.folder: campaign_id
+            for campaign_id, campaign in self.resources.get(OutboundCampaign, {}).items()
+        }
+        for campaign_path in discovered_resources.get(OutboundCampaign, []):
+            folder = campaign_folder_of(campaign_path)
+            if folder not in campaign_folders_to_ids:
+                parent_campaign = parent_lookup.get(campaign_path)
+                campaign_folders_to_ids[folder] = (
+                    parent_campaign.resource_id
+                    if parent_campaign
+                    else self.generate_uuid(OutboundCampaign)
+                )
+
         if not self.file_structure_info:
             self.file_structure_info = self.compute_file_structure_info(self.resources)
 
@@ -2460,7 +2494,6 @@ class AgentStudioProject:
                     issubclass(resource_type, MultiResourceYamlResource)
                     or resource_type == Topic
                     or resource_type == ChildTopic
-                    or resource_type == OutboundCampaign
                 ):
                     resource = self.read_local_resource(
                         ResourceMapping(
@@ -2516,6 +2549,16 @@ class AgentStudioProject:
                         resource_id = flow_id
                     elif resource_type == Document:
                         resource_id = os.path.basename(file_path).upper()
+                    elif resource_type == OutboundCampaign:
+                        resource_id = campaign_folders_to_ids[campaign_folder_of(file_path)]
+                    elif resource_type == OutboundCampaignNode:
+                        campaign_id = campaign_folders_to_ids.get(campaign_folder_of(file_path), "")
+                        node_id = (
+                            parent_resource.node_id
+                            if isinstance(parent_resource, OutboundCampaignNode)
+                            else f"{resource.data.get('type') or 'node'}-{uuid.uuid4()}"
+                        )
+                        resource_id = f"{campaign_id}:{node_id}"
                     elif resource_type == OutboundCampaignFunction:
                         resource_id = OutboundCampaignFunction.id_from_path(file_path)
                     elif parent_resource:
@@ -3671,10 +3714,31 @@ class AgentStudioProject:
         names = []
         for file_path in OutboundCampaign.discover_resources(self.root_path):
             try:
-                names.append(resource_utils.load_yaml(Resource.read_from_file(file_path))["name"])
+                campaign_file = os.path.dirname(file_path)
+                names.append(
+                    resource_utils.load_yaml(Resource.read_from_file(campaign_file))["name"]
+                )
             except (OSError, ValueError, KeyError, TypeError):
                 continue
         return names
+
+    def campaign_node_names(self, campaign: OutboundCampaign) -> dict[str, str]:
+        """Return the names of a pushed campaign's nodes, by node id."""
+        return {
+            node.node_id: node.name
+            for node in self.resources.get(OutboundCampaignNode, {}).values()
+            if node.campaign_id == campaign.resource_id
+        }
+
+    def _campaign_node_id(self, campaign: OutboundCampaign, node: str) -> str:
+        names = self.campaign_node_names(campaign)
+        if node in names:
+            return node
+        ids = {resource_utils.clean_name(name): node_id for node_id, name in names.items()}
+        if resource_utils.clean_name(node) in ids:
+            return ids[resource_utils.clean_name(node)]
+        known = ", ".join(sorted(names.values())) or "none"
+        raise ValueError(f"Campaign '{campaign.name}' has no node named '{node}'. Nodes: {known}.")
 
     @staticmethod
     def _campaign_error(
@@ -3717,18 +3781,19 @@ class AgentStudioProject:
         name: str,
         contact_data: dict[str, Any],
         sample_outputs: Optional[dict[str, dict[str, Any]]] = None,
-        start_node_id: Optional[str] = None,
+        start_node: Optional[str] = None,
         send_result: Optional[str] = None,
         send_state: Optional[dict[str, Any]] = None,
         ask_branches: Optional[bool] = None,
     ) -> dict[str, Any]:
         """Walk a made-up contact through the campaign on the current branch. Nothing is sent.
 
-        `send_result` and `send_state` say what the call or text at `start_node_id` reported,
+        Nodes are given by name (or id): `start_node`, and the keys of `sample_outputs`.
+        `send_result` and `send_state` say what the call or text at `start_node` reported,
         when carrying on from one.
 
         Raises:
-            ValueError: if the contact or sample outputs aren't JSON objects.
+            ValueError: if the contact or sample outputs aren't JSON objects, or name no node.
         """
         if not isinstance(contact_data, dict):
             raise ValueError("Contact data must be a JSON object.")
@@ -3736,13 +3801,16 @@ class AgentStudioProject:
             not isinstance(sample_outputs, dict)
             or not all(isinstance(output, dict) for output in sample_outputs.values())
         ):
-            raise ValueError("Sample outputs must be a JSON object of node id to object.")
+            raise ValueError("Sample outputs must be a JSON object of node name to object.")
         campaign = self.get_campaign(name)
         body: dict[str, Any] = {"contactData": contact_data}
         if sample_outputs:
-            body["sampleOutputs"] = sample_outputs
-        if start_node_id:
-            body["startNodeId"] = start_node_id
+            body["sampleOutputs"] = {
+                self._campaign_node_id(campaign, node): output
+                for node, output in sample_outputs.items()
+            }
+        if start_node:
+            body["startNodeId"] = self._campaign_node_id(campaign, start_node)
         if outcome := self._send_outcome(send_result, send_state):
             body["sendOutcome"] = outcome
         if ask_branches is not None:
@@ -3756,23 +3824,24 @@ class AgentStudioProject:
         self,
         name: str,
         contact: dict[str, Any],
-        start_node_id: Optional[str] = None,
+        start_node: Optional[str] = None,
         run: Optional[dict[str, str]] = None,
         send_result: Optional[str] = None,
         send_state: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Start one real test step of the live campaign, which calls and texts `contact`.
 
-        A first step takes neither `start_node_id` nor `run`; a later step needs both, from the
-        step before it. Carrying on from a call or text, `send_result` and `send_state` say what
-        it reported.
+        A first step takes neither `start_node` (a node's name or id) nor `run`; a later step
+        needs both, from the step before it. Carrying on from a call or text, `send_result` and
+        `send_state` say what it reported.
 
         Raises:
-            ValueError: if the contact has no phone, or the step inputs don't fit together.
+            ValueError: if the contact has no phone, the step inputs don't fit together, or
+                `start_node` names no node.
         """
         if not isinstance(contact, dict) or not isinstance(contact.get("phone"), str):
             raise ValueError("The test contact needs a phone number.")
-        if (run is None) != (start_node_id is None):
+        if (run is None) != (start_node is None):
             raise ValueError(
                 "A later test step needs both the node to carry on from and the previous "
                 "step's run; a first step needs neither."
@@ -3780,6 +3849,7 @@ class AgentStudioProject:
         outcome = self._send_outcome(send_result, send_state)
         if outcome is not None and run is None:
             raise ValueError("Only a later test step can say how a call or text went.")
+        campaign = self.get_campaign(name)
         body: dict[str, Any] = {"contact": contact}
         if run is not None:
             missing = [
@@ -3787,7 +3857,7 @@ class AgentStudioProject:
             ]
             if missing:
                 raise ValueError(f"The run is missing {', '.join(missing)}.")
-            body["startNodeId"] = start_node_id
+            body["startNodeId"] = self._campaign_node_id(campaign, start_node)
             body["run"] = {
                 "contactId": run["contact_id"],
                 "enrolmentId": run["enrolment_id"],
@@ -3795,7 +3865,6 @@ class AgentStudioProject:
             }
         if outcome is not None:
             body["sendOutcome"] = outcome
-        campaign = self.get_campaign(name)
         try:
             return self.api_handler.start_outbound_campaign_test_step(campaign.resource_id, body)
         except SourcererAPIError as e:

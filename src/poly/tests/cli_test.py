@@ -6527,7 +6527,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
     def test_preview_sends_contact_and_sample_outputs(self):
-        """preview sends the contact and sample outputs to the branch's dry-run route."""
+        """preview sends the contact, and sample outputs and start node by id, to the dry-run route."""
         result = {
             "steps": [],
             "stopped_at": "call-1",
@@ -6537,7 +6537,7 @@ class CampaignCommandTest(unittest.TestCase):
         }
         self._respond(make_mock_response(200, result))
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as outputs:
-            json.dump({"trigger-1": {"contacts": []}}, outputs)
+            json.dump({"Import contacts": {"contacts": []}}, outputs)
         self.addCleanup(os.remove, outputs.name)
 
         CampaignCommand.campaign_preview(
@@ -6547,7 +6547,7 @@ class CampaignCommandTest(unittest.TestCase):
             first_name="Ada",
             fields=["age=30", "plan=gold"],
             sample_outputs_file=outputs.name,
-            start_node="call-1",
+            start_node="Reminder call",
             send_result="no_answer",
             output_json=True,
         )
@@ -6573,6 +6573,17 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertEqual(
             self._output(), {"success": True, "campaign": self.CAMPAIGN, "result": result}
         )
+
+    def test_preview_of_a_node_the_campaign_lacks_fails_before_sending(self):
+        """A node name that matches nothing is refused with the campaign's node names."""
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_preview(
+                TEST_DIR, self.CAMPAIGN, phone="+15550100", start_node="Goodbye", output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertIn("has no node named 'Goodbye'", self._output()["error"])
+        self.session.request.assert_not_called()
 
     def test_test_runs_on_main_and_waits_for_the_step(self):
         """test always runs on main, whatever the branch, and polls until the step is done."""
@@ -6636,10 +6647,10 @@ class CampaignCommandTest(unittest.TestCase):
     def test_carry_on_hint_matches_how_the_step_stopped(self):
         """A call or text carries on from itself with its result; a wait from the node after."""
         cases = {
-            "reply": "--start-node sms-1 --result <how it went>",
-            "call": "--start-node sms-1 --result <how it went>",
-            "condition": "--start-node sms-1, with its branch in --sample-outputs",
-            "wait": "--start-node wait-1",
+            "reply": "--start-node 'Reminder text' --result <how it went>",
+            "call": "--start-node 'Reminder text' --result <how it went>",
+            "condition": "--start-node 'Reminder text', with its branch in --sample-outputs",
+            "wait": "--start-node Wait",
             "end": None,
         }
         for stop_reason, expected in cases.items():
@@ -6650,7 +6661,12 @@ class CampaignCommandTest(unittest.TestCase):
                     "resume_node_id": "wait-1",
                 }
 
-                self.assertEqual(CampaignCommand._carry_on_flags(result), expected)
+                self.assertEqual(
+                    CampaignCommand._carry_on_flags(
+                        result, {"sms-1": "Reminder text", "wait-1": "Wait"}
+                    ),
+                    expected,
+                )
 
     def test_test_refuses_a_run_without_its_node(self):
         """A run without the node it stopped at is refused before anything is sent."""

@@ -87,7 +87,7 @@ A project looks like:
 ├── chat/                    # webchat channel config
 ├── flows/                   # multi-step guided conversations
 ├── functions/               # Python functions (deterministic logic, lifecycle hooks)
-├── outbound_campaigns/      # outbound campaign drafts: campaign.yaml + functions/<node_id>.py
+├── outbound_campaigns/      # outbound campaign drafts: campaign.yaml + functions/<node name>.py
 ├── topics/                  # knowledge base entries
 ├── test_suite/              # simulated conversation tests
 ├── real_time_configuration/ # per-environment RTC (see poly-adk-rtc)
@@ -142,17 +142,6 @@ poly deployments list             # what is deployed where
 ```
 
 **Never promote to `pre-release` or `live` unless the user explicitly asks** — `live` is production. Use `--dry-run` first to preview, and re-run tests against each environment after promoting. See `poly deployments --help` for the full surface, including rollback.
-
-### Outbound campaigns
-
-Campaigns in `outbound_campaigns/` are edited and pushed like any resource, then checked and run with `poly campaign` against what was pushed:
-
-```bash
-poly campaign validate 'Campaign name'   # graph check on the current branch
-poly campaign preview 'Campaign name' --phone +15550100   # dry run, sends nothing
-```
-
-`poly campaign test`, `publish`, `pause`, `resume` and `archive` act on the **live** campaign on `main`, and `test` calls and texts a real phone. **Never run them unless the user explicitly asks.**
 
 ## Rules and gotchas
 

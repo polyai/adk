@@ -1126,11 +1126,6 @@ class DTMFConfig:
         )
 
 
-def _drop_unset(values: dict) -> dict:
-    """Drop keys whose override was never set, so they don't surface as nulls in YAML."""
-    return {key: value for key, value in values.items() if value is not None}
-
-
 @dataclass
 class ASRConfig:
     """ASR Configuration."""
@@ -1145,7 +1140,7 @@ class ASRConfig:
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
-        return _drop_unset({"provider": self.provider, "model": self.model})
+        return utils.drop_unset({"provider": self.provider, "model": self.model})
 
     def to_proto(self) -> FlowASRConfig:
         """Convert to proto representation."""
@@ -1176,7 +1171,7 @@ class VADConfig:
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
-        return _drop_unset(
+        return utils.drop_unset(
             {
                 "provider": self.provider,
                 "vad_start": self.vad_start,
@@ -1274,7 +1269,7 @@ class LLMConfig:
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
-        return _drop_unset(
+        return utils.drop_unset(
             {
                 "provider_model_id": self.provider_model_id,
                 "reasoning_effort": self.reasoning_effort.value,

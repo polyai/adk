@@ -49,6 +49,8 @@ Exits `1` when the campaign is not valid. Warnings do not fail it.
 }
 ~~~
 
+The `result` is the platform's own, so it refers to nodes by id; the human output shows their names.
+
 ## `poly campaign preview`
 
 Walk a made-up contact through the campaign to the next call, condition or end. Nothing is called, texted or stored, and node functions are not run: say what each returns with `--sample-outputs`.
@@ -58,7 +60,7 @@ Examples:
 ~~~bash
 poly campaign preview 'Appointment reminders' --phone +15550100 --field first_name=Ada
 poly campaign preview 'Appointment reminders' --contact contact.json --sample-outputs outputs.json
-poly campaign preview 'Appointment reminders' --phone +15550100 --start-node call-1 --result no_answer
+poly campaign preview 'Appointment reminders' --phone +15550100 --start-node 'Reminder call' --result no_answer
 ~~~
 
 | Flag | Description |
@@ -67,8 +69,8 @@ poly campaign preview 'Appointment reminders' --phone +15550100 --start-node cal
 | `--phone` | The contact's phone number. |
 | `--first-name` | The contact's first name. |
 | `--field` | Another contact column, as `KEY=VALUE`. Repeatable. |
-| `--sample-outputs` | JSON file of what each node's function returns, keyed by node id. |
-| `--start-node` | Node id to carry on from. Defaults to the trigger. |
+| `--sample-outputs` | JSON file of what each node's function returns, keyed by node name. |
+| `--start-node` | Name of the node to carry on from. Defaults to the trigger. |
 | `--result` | How the call or text at `--start-node` went, e.g. `no_answer` or `replied`. |
 | `--state` | A value that call or text reported back, as `KEY=VALUE`. Repeatable. |
 | `--ask-branches` | Stop at a condition with no sample output instead of taking its default branch. |
@@ -91,7 +93,7 @@ Examples:
 
 ~~~bash
 poly campaign test 'Appointment reminders' --phone +15550100
-poly campaign test 'Appointment reminders' --phone +15550100 --start-node call-1 --run run.json --result no_answer
+poly campaign test 'Appointment reminders' --phone +15550100 --start-node 'Reminder call' --run run.json --result no_answer
 ~~~
 
 | Flag | Description |
@@ -101,7 +103,7 @@ poly campaign test 'Appointment reminders' --phone +15550100 --start-node call-1
 | `--first-name`, `--last-name` | The contact's name. |
 | `--external-id` | The contact's id in your own system. |
 | `--field` | A metadata column, as `KEY=VALUE`. Repeatable. |
-| `--start-node` | Node id to carry on from. |
+| `--start-node` | Name of the node to carry on from. |
 | `--run` | The run the previous step printed, as JSON or a JSON file. |
 | `--result` | How the call or text at `--start-node` went. |
 | `--state` | A value that call or text reported back, as `KEY=VALUE`. Repeatable. |

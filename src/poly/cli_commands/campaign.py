@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Any, Callable, Optional
@@ -94,7 +95,8 @@ class CampaignCommand(BaseCommand):
                 "  poly campaign preview 'Appointment reminders' --phone +15550100 \\\n"
                 "      --field first_name=Ada\n"
                 "  poly campaign preview 'Appointment reminders' --contact contact.json \\\n"
-                "      --sample-outputs outputs.json --start-node call-1 --result no_answer\n"
+                "      --sample-outputs outputs.json --start-node 'Reminder call' \\\n"
+                "      --result no_answer\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -114,7 +116,7 @@ class CampaignCommand(BaseCommand):
             "--sample-outputs",
             type=str,
             default=None,
-            help="JSON file of what each node's function returns, keyed by node id.",
+            help="JSON file of what each node's function returns, keyed by node name.",
         )
         cls._add_continue_flags(preview_parser)
         preview_parser.add_argument(
@@ -139,7 +141,7 @@ class CampaignCommand(BaseCommand):
                 "Examples:\n"
                 "  poly campaign test 'Appointment reminders' --phone +15550100\n"
                 "  poly campaign test 'Appointment reminders' --phone +15550100 \\\n"
-                "      --start-node call-1 --run run.json --result no_answer\n"
+                "      --start-node 'Reminder call' --run run.json --result no_answer\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -212,7 +214,7 @@ class CampaignCommand(BaseCommand):
     @staticmethod
     def _add_continue_flags(parser: ArgumentParser) -> None:
         parser.add_argument(
-            "--start-node", type=str, default=None, help="Node id to carry on from."
+            "--start-node", type=str, default=None, help="Name of the node to carry on from."
         )
         parser.add_argument(
             "--result",
@@ -319,14 +321,9 @@ class CampaignCommand(BaseCommand):
     @staticmethod
     def _node_labels(project: Any, name: str) -> dict[str, str]:
         try:
-            campaign = project.get_campaign(name)
+            return project.campaign_node_names(project.get_campaign(name))
         except ValueError:
             return {}
-        return {
-            node["id"]: node.get("label") or node["id"]
-            for node in campaign.nodes or []
-            if isinstance(node, dict) and node.get("id")
-        }
 
     @classmethod
     def campaign_validate(cls, base_path: str, name: str, output_json: bool = False) -> None:
@@ -385,7 +382,7 @@ class CampaignCommand(BaseCommand):
                 plain(f"   exit reason: {step['exit_reason']}")
         stopped_at = labels.get(result.get("stopped_at"), result.get("stopped_at"))
         info(f"Stopped: {result.get('stop_reason')}" + (f" at {stopped_at}" if stopped_at else ""))
-        carry_on = cls._carry_on_flags(result)
+        carry_on = cls._carry_on_flags(result, labels)
         if carry_on:
             info(f"Carry on with: {carry_on}")
         if result.get("error"):
@@ -396,15 +393,18 @@ class CampaignCommand(BaseCommand):
             plain(f"note: {note}")
 
     @staticmethod
-    def _carry_on_flags(result: dict[str, Any]) -> Optional[str]:
+    def _carry_on_flags(result: dict[str, Any], labels: dict[str, str]) -> Optional[str]:
+        def node(node_id: str) -> str:
+            return shlex.quote(labels.get(node_id, node_id))
+
         stop_reason = result.get("stop_reason")
         stopped_at = result.get("stopped_at")
         if stop_reason in ("call", "reply") and stopped_at:
-            return f"--start-node {stopped_at} --result <how it went>"
+            return f"--start-node {node(stopped_at)} --result <how it went>"
         if stop_reason == "condition" and stopped_at:
-            return f"--start-node {stopped_at}, with its branch in --sample-outputs"
+            return f"--start-node {node(stopped_at)}, with its branch in --sample-outputs"
         if stop_reason == "wait" and result.get("resume_node_id"):
-            return f"--start-node {result['resume_node_id']}"
+            return f"--start-node {node(result['resume_node_id'])}"
         return None
 
     @classmethod
@@ -448,7 +448,7 @@ class CampaignCommand(BaseCommand):
                 name,
                 contact,
                 sample_outputs=outputs,
-                start_node_id=start_node,
+                start_node=start_node,
                 send_result=send_result,
                 send_state=state,
                 ask_branches=ask_branches,
@@ -528,7 +528,7 @@ class CampaignCommand(BaseCommand):
             lambda: project.start_campaign_test(
                 name,
                 contact,
-                start_node_id=start_node,
+                start_node=start_node,
                 run=previous_run,
                 send_result=send_result,
                 send_state=state,
