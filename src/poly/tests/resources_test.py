@@ -7983,17 +7983,27 @@ class AsrSettingsTests(unittest.TestCase):
             ["voice_channel_update_barge_in_config", "voice_channel_update_vad_config"],
         )
 
-    def test_removed_sections_are_reset(self):
-        """Removing a section resets it on the platform."""
-        _, updated, deleted = self._changes({}, self.FULL_YAML)
+    def test_removed_speech_end_delay_is_reset(self):
+        """Removing speech_end_delay_ms resets it on the platform."""
+        without_delay = {k: v for k, v in self.FULL_YAML.items() if k != "speech_end_delay_ms"}
+        _, updated, deleted = self._changes(without_delay, self.FULL_YAML)
 
         self.assertEqual(updated, [])
         self.assertEqual(
-            sorted(sub_resource.delete_command_type for sub_resource in deleted),
-            ["voice_channel_reset_barge_in_config", "voice_channel_reset_vad_config"],
+            [sub_resource.delete_command_type for sub_resource in deleted],
+            ["voice_channel_reset_vad_config"],
         )
-        for sub_resource in deleted:
-            self.assertEqual(sub_resource.build_delete_proto().ListFields(), [])
+        self.assertEqual(deleted[0].build_delete_proto().ListFields(), [])
+
+    def test_removing_barge_in_cannot_be_pushed(self):
+        """A reset would hand barge-in back to the hidden legacy flag, so building it raises."""
+        without_barge_in = {k: v for k, v in self.FULL_YAML.items() if k != "barge_in"}
+        _, _, deleted = self._changes(without_barge_in, self.FULL_YAML)
+
+        self.assertEqual(len(deleted), 1)
+        with self.assertRaises(NotImplementedError) as cm:
+            deleted[0].build_delete_proto()
+        self.assertIn("enabled: false", str(cm.exception))
 
     def test_speech_end_delay_is_sent_in_seconds(self):
         """speech_end_delay_ms is stored as speechEndWindowSeconds."""
@@ -8024,6 +8034,7 @@ class AsrSettingsTests(unittest.TestCase):
             [sub_resource.delete_command_type for sub_resource in deleted],
             ["voice_channel_reset_barge_in_config"],
         )
+        self.assertEqual(deleted[0].build_delete_proto().ListFields(), [])
         self.assertEqual(
             [sub_resource.update_command_type for sub_resource in updated],
             ["voice_channel_update_barge_in_config"],
@@ -14590,10 +14601,12 @@ class AsrSettingsFromProjection(unittest.TestCase):
             },
         )
 
-    def test_unset_fields_are_omitted(self):
-        """A voice channel with nothing set pulls as an empty file, which pushes nothing."""
+    def test_unset_fields_pull_only_the_legacy_barge_in(self):
+        """A voice channel with nothing set pulls barge-in off, from the unset legacy flag."""
         asr = AsrSettings.from_projection({"channels": {"voice": {}}})["asr_settings"]
-        self.assertEqual(asr.to_yaml_dict(), {})
+        self.assertEqual(
+            asr.to_yaml_dict(), {"barge_in": {"enabled": False, "allow_on_first_turn": False}}
+        )
 
     def test_speech_end_delay_rounds_to_whole_milliseconds(self):
         """Float seconds don't leak into speech_end_delay_ms."""
@@ -14635,11 +14648,37 @@ class AsrSettingsFromProjection(unittest.TestCase):
         asr = AsrSettings.from_projection(projection)["asr_settings"]
         self.assertFalse(asr.barge_in.enabled)
 
-    def test_no_barge_in_config_pulls_no_section(self):
-        """Without bargeInConfig the platform default applies, so nothing is written."""
+    def test_no_barge_in_config_pulls_the_legacy_flag(self):
+        """Without bargeInConfig the runtime uses asrSettings.bargeIn, so that is pulled."""
         projection = {"channels": {"voice": {"asrSettings": {"bargeIn": True}}}}
         asr = AsrSettings.from_projection(projection)["asr_settings"]
-        self.assertIsNone(asr.barge_in)
+        self.assertEqual(asr.barge_in, BargeIn(enabled=True))
+
+    def test_legacy_barge_in_round_trips(self):
+        """A barge_in pulled from the legacy flag, read back unchanged, sends no commands."""
+        projection = {"channels": {"voice": {"asrSettings": {"bargeIn": True}}}}
+        pulled = AsrSettings.from_projection(projection)["asr_settings"]
+        read_back = AsrSettings.from_yaml_dict(
+            resource_utils.load_yaml(pulled.raw), resource_id="asr_settings", name="asr_settings"
+        )
+        self.assertEqual(read_back.get_new_updated_deleted_subresources(pulled), ([], [], []))
+
+    def test_editing_legacy_barge_in_stores_a_barge_in_config(self):
+        """The first edit sends an update, which stores the section as a barge-in config."""
+        projection = {"channels": {"voice": {"asrSettings": {"bargeIn": True}}}}
+        pulled = AsrSettings.from_projection(projection)["asr_settings"]
+        edited = AsrSettings(
+            resource_id="asr_settings",
+            name="asr_settings",
+            barge_in={"enabled": True, "allow_on_first_turn": True},
+        )
+        _, updated, deleted = edited.get_new_updated_deleted_subresources(pulled)
+
+        self.assertEqual(deleted, [])
+        self.assertEqual(
+            [sub_resource.update_command_type for sub_resource in updated],
+            ["voice_channel_update_barge_in_config"],
+        )
 
     def test_pull_then_push_round_trips(self):
         """A pulled file, read back unchanged, sends no commands."""
