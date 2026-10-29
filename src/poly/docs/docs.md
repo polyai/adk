@@ -53,7 +53,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   └── {campaign_name}/
 │       ├── campaign.yaml
 │       └── functions/
-│           └── {node_id}.py
+│           └── {node_name}.py
 ├── functions/                          # Global functions (shared across flows)
 │   ├── start_function.py               # Optional - runs at call start
 │   ├── end_function.py                 # Optional - runs at call end
