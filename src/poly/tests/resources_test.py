@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import datetime
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -87,6 +88,18 @@ from poly.resources.languages import (
     DefaultLanguage,
 )
 from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
+from poly.resources.outbound_campaign import (
+    TIMEZONES,
+    OutboundCampaign,
+    OutboundCampaignFunction,
+    OutboundCampaignNode,
+    OutboundCampaignSettings,
+    def_line_error,
+    function_parameters,
+    node_data_proto,
+    node_names,
+    route_targets,
+)
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
@@ -7899,7 +7912,9 @@ class AsrSettingsTests(unittest.TestCase):
     }
 
     def _from_yaml(self, yaml_dict: dict) -> AsrSettings:
-        return AsrSettings.from_yaml_dict(yaml_dict, resource_id="asr_settings", name="asr_settings")
+        return AsrSettings.from_yaml_dict(
+            yaml_dict, resource_id="asr_settings", name="asr_settings"
+        )
 
     def _changes(self, new: dict, old: Optional[dict]):
         old_resource = self._from_yaml(old) if old is not None else None
@@ -15208,6 +15223,790 @@ class MultiResourceFileCacheTests(unittest.TestCase):
 
             MultiResourceYamlResource.write_cache_to_file()
             self.assertTrue(os.path.exists(path))
+
+
+def _campaign_function(name: str, code: str = "") -> dict:
+    return {
+        "name": name,
+        "description": f"{name} description",
+        "code": code,
+        "parameters": {"ids": [], "entities": {}},
+    }
+
+
+def _campaign_entity(
+    campaign_id: str = "CMPGN-ONE",
+    name: str = "Reminders",
+    nodes: Optional[list[dict]] = None,
+    **fields,
+) -> dict:
+    if nodes is None:
+        nodes = [
+            {
+                "id": "trigger-1",
+                "position": {"x": 0, "y": 0},
+                "data": {
+                    "type": "trigger",
+                    "function": _campaign_function("map_contacts", "def map_contacts():\n    pass"),
+                    "routes": [{"targetNodeId": "call-1"}],
+                    "sourceType": "csv",
+                    "ingestInterval": "daily",
+                },
+            },
+            {
+                "id": "call-1",
+                "position": {"x": 0, "y": 200},
+                "label": "First call",
+                "data": {
+                    "type": "call",
+                    "flowName": "Booking",
+                    "function": _campaign_function("call_args"),
+                    "greeting": "Hi",
+                    "voicemailEnabled": False,
+                    "maxAttempts": 2,
+                    "backoff": 1,
+                    "backoffUnit": "hours",
+                    "routes": [],
+                    "defaultRoute": "end-1",
+                },
+            },
+            {
+                "id": "end-1",
+                "position": {"x": 0, "y": 400},
+                "data": {"type": "end", "exitReason": "done", "writebackEnabled": False},
+            },
+        ]
+    return {
+        "id": campaign_id,
+        "name": name,
+        "description": None,
+        "status": "draft",
+        "settings": {"fromNumber": "+15550100", "country": "US"},
+        "nodes": {"ids": [node["id"] for node in nodes], "entities": {n["id"]: n for n in nodes}},
+        "publishedNodes": None,
+        "archived": False,
+        **fields,
+    }
+
+
+def _campaigns_projection(*campaigns: dict) -> dict:
+    return {
+        "outboundCampaigns": {
+            "outboundCampaigns": {
+                "ids": [campaign["id"] for campaign in campaigns],
+                "entities": {campaign["id"]: campaign for campaign in campaigns},
+            }
+        }
+    }
+
+
+def _campaign(**fields) -> OutboundCampaign:
+    return OutboundCampaign.from_projection(_campaigns_projection(_campaign_entity(**fields)))[
+        fields.get("campaign_id", "CMPGN-ONE")
+    ]
+
+
+def _campaign_nodes(**fields) -> dict[str, OutboundCampaignNode]:
+    return OutboundCampaignNode.from_projection(_campaigns_projection(_campaign_entity(**fields)))
+
+
+def _node_mappings(nodes: dict[str, OutboundCampaignNode], root: str = "") -> list[ResourceMapping]:
+    return [
+        ResourceMapping(
+            resource_id=node.resource_id,
+            resource_type=OutboundCampaignNode,
+            resource_name=node.name,
+            file_path=os.path.join(root, node.file_path),
+            flow_name=None,
+            resource_prefix=None,
+        )
+        for node in nodes.values()
+    ]
+
+
+def _write_campaign(root: str, campaign: OutboundCampaign, nodes, mappings) -> None:
+    for resource in (campaign, *nodes):
+        resource.save(root, resource_mappings=mappings)
+
+
+class OutboundCampaignTests(unittest.TestCase):
+    """OutboundCampaign and OutboundCampaignNode parsing, files, validation and protos."""
+
+    def test_from_projection_reads_the_campaign_without_its_nodes(self):
+        campaign = _campaign()
+
+        self.assertEqual(campaign.resource_id, "CMPGN-ONE")
+        self.assertEqual(campaign.folder, "reminders")
+        self.assertEqual(list(campaign.to_yaml_dict()), ["name", "description", "settings"])
+
+    def test_nodes_from_projection_keep_their_order_ids_and_positions(self):
+        nodes = _campaign_nodes()
+
+        self.assertEqual(
+            list(nodes), ["CMPGN-ONE:trigger-1", "CMPGN-ONE:call-1", "CMPGN-ONE:end-1"]
+        )
+        self.assertEqual([node.name for node in nodes.values()], ["Trigger", "First call", "End"])
+        self.assertEqual(nodes["CMPGN-ONE:call-1"].position, {"x": 0.0, "y": 200.0})
+        self.assertEqual(nodes["CMPGN-ONE:trigger-1"].code, "def map_contacts():\n    pass")
+
+    def test_from_projection_never_reads_published_nodes(self):
+        entity = _campaign_entity(nodes=[])
+        entity["publishedNodes"] = _campaign_entity()["nodes"]
+
+        self.assertEqual(OutboundCampaignNode.from_projection(_campaigns_projection(entity)), {})
+
+    def test_from_projection_skips_archived_campaigns(self):
+        projection = _campaigns_projection(
+            _campaign_entity(),
+            _campaign_entity(campaign_id="CMPGN-OLD", name="Old", archived=True),
+        )
+
+        self.assertEqual(list(OutboundCampaign.from_projection(projection)), ["CMPGN-ONE"])
+        self.assertTrue(
+            all(
+                node.campaign_id == "CMPGN-ONE"
+                for node in OutboundCampaignNode.from_projection(projection).values()
+            )
+        )
+        self.assertEqual(
+            list(OutboundCampaignFunction.from_projection(projection)), ["reminders/trigger"]
+        )
+
+    def test_from_projection_without_campaigns_pulls_nothing(self):
+        for resource_type in (OutboundCampaign, OutboundCampaignNode, OutboundCampaignFunction):
+            with self.subTest(resource_type=resource_type.__name__):
+                self.assertEqual(resource_type.from_projection({}), {})
+
+    def test_unnamed_and_clashing_nodes_get_numbered_default_names(self):
+        """A pulled node always has a name, so files and routes can refer to it."""
+        nodes = [
+            {
+                "id": "end-a",
+                "position": {},
+                "data": {"type": "end", "exitReason": "a", "writebackEnabled": False},
+            },
+            {
+                "id": "end-b",
+                "label": "End",
+                "position": {},
+                "data": {"type": "end", "exitReason": "b", "writebackEnabled": False},
+            },
+            {"id": "sms-a", "label": "Text", "position": {}, "data": {"type": "sms"}},
+            {"id": "sms-b", "label": "text", "position": {}, "data": {"type": "sms"}},
+        ]
+
+        self.assertEqual(
+            node_names(nodes),
+            {"end-a": "End 2", "end-b": "End", "sms-a": "Text", "sms-b": "text 2"},
+        )
+
+    def test_call_and_sms_routes_from_the_platform_are_dropped(self):
+        """Calls and texts route only by defaultRoute; the platform still sends empty routes."""
+        call = _campaign_nodes()["CMPGN-ONE:call-1"]
+
+        self.assertNotIn("routes", call.data)
+        self.assertEqual(call.data["defaultRoute"], "end-1")
+
+    def test_campaigns_with_the_same_folder_name_get_distinct_folders(self):
+        """Agent Studio allows duplicate names, so a clash must not stop the whole pull."""
+        projection = _campaigns_projection(
+            _campaign_entity(),
+            _campaign_entity(campaign_id="CMPGN-TWO", name="Reminders!"),
+        )
+
+        campaigns = OutboundCampaign.from_projection(projection)
+        nodes = OutboundCampaignNode.from_projection(projection)
+        functions = OutboundCampaignFunction.from_projection(projection)
+
+        self.assertEqual(
+            [campaign.folder for campaign in campaigns.values()], ["reminders", "reminders-two"]
+        )
+        self.assertEqual(nodes["CMPGN-TWO:end-1"].campaign_folder, "reminders-two")
+        self.assertEqual(list(functions), ["reminders/trigger", "reminders-two/trigger"])
+        self.assertEqual(
+            len({resource.file_path for resource in (*campaigns.values(), *nodes.values())}), 8
+        )
+
+    def test_file_paths(self):
+        campaign = _campaign(name="Appointment Reminders!")
+        node = _campaign_nodes(name="Appointment Reminders!")["CMPGN-ONE:call-1"]
+        folder = os.path.join("outbound_campaigns", "appointment_reminders")
+
+        self.assertEqual(campaign.file_path, os.path.join(folder, "campaign.yaml", "campaign"))
+        self.assertEqual(
+            node.file_path, os.path.join(folder, "campaign.yaml", "nodes", "First_call")
+        )
+        self.assertEqual(node.function_file, os.path.join(folder, "functions", "first_call.py"))
+
+    def test_node_yaml_names_its_routes_and_hides_ids_and_positions(self):
+        nodes = _campaign_nodes()
+        mappings = _node_mappings(nodes)
+        trigger, call = nodes["CMPGN-ONE:trigger-1"], nodes["CMPGN-ONE:call-1"]
+
+        pretty = trigger.to_pretty_dict(trigger.to_yaml_dict(), mappings, trigger.file_path)
+
+        self.assertEqual(pretty["routes"], [{"next": "First call"}])
+        self.assertEqual(
+            call.to_pretty_dict(call.to_yaml_dict(), mappings, call.file_path)["defaultRoute"],
+            "End",
+        )
+        self.assertNotIn("id", pretty)
+        self.assertNotIn("position", pretty)
+        self.assertEqual(
+            pretty["function"], {"name": "map_contacts", "description": "map_contacts description"}
+        )
+
+    def test_node_routes_read_back_as_ids(self):
+        nodes = _campaign_nodes()
+        mappings = _node_mappings(nodes)
+        file_path = nodes["CMPGN-ONE:trigger-1"].file_path
+
+        data = OutboundCampaignNode.from_pretty_dict(
+            {
+                "name": "Branch",
+                "type": "conditional",
+                "branches": [{"id": "b", "variable": "v", "next": "First call"}],
+                "defaultNext": "End",
+            },
+            resource_mappings=mappings,
+            file_path=file_path,
+        )
+
+        self.assertEqual(data["branches"][0]["targetNodeId"], "call-1")
+        self.assertEqual(data["defaultTargetNodeId"], "end-1")
+
+    def test_writeback_keeps_its_target_apart_from_the_next_node(self):
+        nodes = _campaign_nodes()
+        mappings = _node_mappings(nodes)
+        file_path = nodes["CMPGN-ONE:end-1"].file_path
+        pretty = {"name": "Save", "type": "writeback", "target": "csv", "next": "End"}
+
+        data = OutboundCampaignNode.from_pretty_dict(
+            dict(pretty), resource_mappings=mappings, file_path=file_path
+        )
+
+        self.assertEqual(data["target"], "csv")
+        self.assertEqual(data["targetNodeId"], "end-1")
+        self.assertEqual(OutboundCampaignNode.to_pretty_dict(data, mappings, file_path), pretty)
+
+    def test_node_yaml_fills_in_schema_defaults(self):
+        node = OutboundCampaignNode.from_yaml_dict(
+            {"name": "Start", "type": "trigger", "function": {"name": "f", "description": ""}},
+            resource_id="CMPGN-ONE:t",
+        )
+
+        self.assertEqual(node.name, "Start")
+        self.assertEqual(
+            node.data,
+            {
+                "type": "trigger",
+                "function": {"name": "f", "description": ""},
+                "routes": [],
+                "sourceType": "csv",
+                "ingestInterval": "daily",
+            },
+        )
+        self.assertIsNone(node.position)
+
+    def test_campaign_and_nodes_share_campaign_yaml_in_the_local_order(self):
+        """Each resource writes only its own part, and a node keeps its place in the list."""
+        campaign, nodes = _campaign(), _campaign_nodes()
+        mappings = _node_mappings(nodes)
+        with tempfile.TemporaryDirectory() as root:
+            _write_campaign(root, campaign, nodes.values(), mappings)
+            path = os.path.join(root, "outbound_campaigns", "reminders", "campaign.yaml")
+            with open(path, encoding="utf-8") as file:
+                data = resource_utils.load_yaml(file.read())
+            data["nodes"].reverse()
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(resource_utils.dump_yaml(data))
+            MultiResourceYamlResource._file_cache.clear()
+
+            nodes["CMPGN-ONE:call-1"].data["greeting"] = "Hello"
+            campaign.description = "Monthly"
+            nodes["CMPGN-ONE:call-1"].save(root, resource_mappings=mappings)
+            campaign.save(root, resource_mappings=mappings)
+            with open(path, encoding="utf-8") as file:
+                saved = resource_utils.load_yaml(file.read())
+            MultiResourceYamlResource._file_cache.clear()
+
+        self.assertEqual(list(saved), ["name", "description", "settings", "nodes"])
+        self.assertEqual(saved["description"], "Monthly")
+        self.assertEqual(
+            [node["name"] for node in saved["nodes"]], ["End", "First call", "Trigger"]
+        )
+        self.assertEqual(saved["nodes"][1]["greeting"], "Hello")
+
+    def test_read_local_node_takes_its_code_and_last_known_position(self):
+        campaign, nodes = _campaign(), _campaign_nodes()
+        mappings = _node_mappings(nodes)
+        trigger = nodes["CMPGN-ONE:trigger-1"]
+        with tempfile.TemporaryDirectory() as root:
+            _write_campaign(root, campaign, nodes.values(), mappings)
+            code_path = os.path.join(root, trigger.function_file)
+            os.makedirs(os.path.dirname(code_path))
+            with open(code_path, "w", encoding="utf-8") as file:
+                file.write("def map_contacts(contacts, outbound_campaign):\n    pass\n")
+
+            read = OutboundCampaignNode.read_local_resource(
+                os.path.join(root, trigger.file_path),
+                resource_id=trigger.resource_id,
+                resource_name=trigger.name,
+                resource_mappings=_node_mappings(nodes, root),
+                known_position={"x": 5.0, "y": 6.0},
+            )
+            MultiResourceYamlResource._file_cache.clear()
+
+        self.assertEqual(read.code, "def map_contacts(contacts, outbound_campaign):\n    pass\n")
+        self.assertEqual(read.position, {"x": 5.0, "y": 6.0})
+        self.assertEqual(read.data, trigger.data)
+
+    def test_read_local_resource_checks_the_folder_against_the_name(self):
+        campaign = _campaign()
+        with tempfile.TemporaryDirectory() as root:
+            for folder, accepted in (("reminders-two", True), ("other", False)):
+                with self.subTest(folder=folder):
+                    campaign.folder_name = folder
+                    campaign.save(root)
+                    path = os.path.join(root, campaign.file_path)
+
+                    def read(path=path):
+                        return OutboundCampaign.read_local_resource(path, "CMPGN-ONE", "x")
+
+                    if accepted:
+                        self.assertEqual(read().folder, folder)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "does not match campaign name"):
+                            read()
+            MultiResourceYamlResource._file_cache.clear()
+
+    def test_deleting_the_campaign_and_its_nodes_removes_the_file(self):
+        campaign, nodes = _campaign(), _campaign_nodes()
+        with tempfile.TemporaryDirectory() as root:
+            _write_campaign(root, campaign, nodes.values(), _node_mappings(nodes))
+            path = os.path.join(root, "outbound_campaigns", "reminders", "campaign.yaml")
+            for node in nodes.values():
+                OutboundCampaignNode.delete_resource(os.path.join(root, node.file_path))
+            OutboundCampaign.delete_resource(os.path.join(root, campaign.file_path))
+            MultiResourceYamlResource._file_cache.clear()
+
+            self.assertFalse(os.path.exists(path))
+
+    def test_remove_empty_files_deletes_only_files_left_empty(self):
+        with tempfile.TemporaryDirectory() as root:
+            for folder, contents in (("empty", "nodes: []\n"), ("kept", "name: Kept\n")):
+                os.makedirs(os.path.join(root, "outbound_campaigns", folder))
+                with open(
+                    os.path.join(root, "outbound_campaigns", folder, "campaign.yaml"), "w"
+                ) as f:
+                    f.write(contents)
+
+            OutboundCampaign.remove_empty_files(root)
+
+            self.assertEqual(
+                sorted(
+                    folder
+                    for folder in os.listdir(os.path.join(root, "outbound_campaigns"))
+                    if os.listdir(os.path.join(root, "outbound_campaigns", folder))
+                ),
+                ["kept"],
+            )
+
+    def test_validate_accepts_a_pulled_campaign_and_its_nodes(self):
+        nodes = _campaign_nodes()
+        mappings = _node_mappings(nodes)
+        campaign = _campaign()
+        campaign.node_entries = [node.to_yaml_dict() for node in nodes.values()]
+
+        campaign.validate(resource_mappings=mappings)
+        for node in nodes.values():
+            node.code = node.code and "def map_contacts(contacts, outbound_campaign):\n    pass\n"
+            node.validate(resource_mappings=mappings)
+
+    def test_validate_reports_problems_with_the_node_list(self):
+        campaign = _campaign()
+        cases = {
+            "Nodes must be a list.": {"Trigger": {}},
+            "Node 1 must be a mapping.": ["Trigger"],
+            "Node 1 needs a name.": [{"type": "end"}],
+            "Node name 'first call' is used more than once.": [
+                {"name": "First call"},
+                {"name": "first call"},
+            ],
+            "A campaign can have only one trigger node.": [
+                {"name": "A", "type": "trigger"},
+                {"name": "B", "type": "trigger"},
+            ],
+        }
+        for message, entries in cases.items():
+            with self.subTest(message=message):
+                campaign.node_entries = entries
+                with self.assertRaisesRegex(ValueError, re.escape(message)):
+                    campaign.validate(resource_mappings=[])
+
+    def test_validate_reports_unknown_top_level_fields(self):
+        campaign = _campaign()
+        campaign.unknown_keys = ["note"]
+
+        with self.assertRaisesRegex(ValueError, "Unknown fields: note."):
+            campaign.validate(resource_mappings=[])
+
+    def test_validate_rejects_settings_the_platform_refuses(self):
+        window = {"daysOfWeek": ["monday"], "startTime": "09:00", "endTime": "17:00"}
+        cases = {
+            "can't be before 'startDate'": {"startDate": "2026-02-01", "endDate": "2026-01-31"},
+            "must be an ISO 3166-1": {"country": "XX"},
+            "needs at least one day": {"contactWindow": {**window, "daysOfWeek": []}},
+            'as "HH:mm"': {"contactWindow": {**window, "startTime": "9am"}},
+            "must end after it starts": {"contactWindow": {**window, "endTime": "08:00"}},
+            "'useCase' must be one of": {"useCase": "spam"},
+        }
+        for message, settings in cases.items():
+            with self.subTest(message=message):
+                campaign = _campaign()
+                campaign.settings = {**campaign.settings, **settings}
+                with self.assertRaisesRegex(ValueError, re.escape(message)):
+                    campaign.validate(resource_mappings=[])
+
+    @unittest.skipUnless(TIMEZONES, "no IANA time zone database on this system")
+    def test_validate_rejects_an_unknown_time_zone(self):
+        campaign = _campaign()
+        campaign.settings = {**campaign.settings, "defaultTimezone": "Mars/Olympus_Mons"}
+        with self.assertRaisesRegex(ValueError, "must be an IANA time zone"):
+            campaign.validate(resource_mappings=[])
+
+    def test_validate_accepts_settings_the_platform_accepts(self):
+        campaign = _campaign()
+        campaign.settings = {
+            **campaign.settings,
+            "startDate": "2026-01-01",
+            "endDate": "2026-01-01",
+            "country": "gb",
+            "contactWindow": {"daysOfWeek": ["friday"], "startTime": "08:30", "endTime": "20:00"},
+        }
+
+        campaign.validate(resource_mappings=[])
+
+    def test_node_validate_rejects_shapes_the_platform_refuses(self):
+        cases = {
+            "unknown fields for a call node: routes": {"routes": []},
+            "a call node needs 'greeting'": {"greeting": None},
+            "'maxAttempts' must be a whole number from 1 to 5": {"maxAttempts": 9},
+            "'backoffUnit' must be one of": {"backoffUnit": "weeks"},
+            "'voicemailScript' is required when voicemailEnabled is true": {
+                "voicemailEnabled": True
+            },
+            "'function.name' must be a valid Python name": {
+                "function": {"name": "1x", "description": ""}
+            },
+        }
+        for message, change in cases.items():
+            with self.subTest(message=message):
+                call = _campaign_nodes()["CMPGN-ONE:call-1"]
+                call.data = {**call.data, **change}
+                with self.assertRaisesRegex(ValueError, re.escape(message)):
+                    call.validate(resource_mappings=None)
+
+    def test_node_validate_rejects_a_route_to_a_node_not_in_the_campaign(self):
+        nodes = _campaign_nodes()
+        call = nodes["CMPGN-ONE:call-1"]
+        call.data["defaultRoute"] = "Goodbye"
+
+        with self.assertRaisesRegex(ValueError, "'Goodbye' is not a node in this campaign."):
+            call.validate(resource_mappings=_node_mappings(nodes))
+
+    def test_node_validate_rejects_code_for_a_node_without_a_function(self):
+        end = _campaign_nodes()["CMPGN-ONE:end-1"]
+        end.code = "def finish(outbound_contact, outbound_campaign):\n    pass\n"
+
+        with self.assertRaisesRegex(ValueError, "has code, but the node has no function"):
+            end.validate(resource_mappings=None)
+
+    def test_def_line_must_take_exactly_the_node_parameters(self):
+        contact = ("outbound_contact: OutboundContact", "outbound_campaign: OutboundCampaign")
+        cases = {
+            "def f(outbound_contact, outbound_campaign):\n    pass": None,
+            "def f(outbound_campaign: OutboundCampaign, outbound_contact=None):  # ok\n    pass": None,
+            "def f(outbound_contact, outbound_campaign): return {}": None,
+            "import os\n\ndef f(x):\n    pass\n\ndef f(outbound_contact, outbound_campaign):\n    pass": None,
+            "def f(outbound_contact):\n    pass": "f must take exactly (outbound_contact, outbound_campaign), not (outbound_contact)",
+            "def f(\n    outbound_contact, outbound_campaign\n):\n    pass": "with its whole def line",
+            "def g(outbound_contact, outbound_campaign):\n    pass": "with its whole def line",
+            "   ": None,
+        }
+        for code, error in cases.items():
+            with self.subTest(code=code):
+                found = def_line_error("f", code, contact)
+                if error is None:
+                    self.assertIsNone(found)
+                else:
+                    self.assertIn(error, found)
+
+    def test_function_parameters_follow_the_node_type(self):
+        cases = [
+            ({"type": "trigger", "sourceType": "csv"}, ("contacts", "outbound_campaign")),
+            ({"type": "trigger", "sourceType": "api"}, ("outbound_campaign", "sync")),
+            ({"type": "trigger", "sourceType": "webhook"}, None),
+            ({"type": "writeback", "target": "csv"}, ("outbound_contacts", "outbound_campaign")),
+            ({"type": "writeback", "target": "api"}, ("outbound_contact", "outbound_campaign")),
+            ({"type": "wait"}, None),
+            ({"type": "end"}, ("outbound_contact", "outbound_campaign")),
+        ]
+        for data, names in cases:
+            with self.subTest(data=data):
+                parameters = function_parameters(data)
+                self.assertEqual(
+                    tuple(p.split(":")[0] for p in parameters) if parameters else None, names
+                )
+
+    def test_node_validate_reports_a_wrong_def_line_with_its_file(self):
+        trigger = _campaign_nodes()["CMPGN-ONE:trigger-1"]
+
+        with self.assertRaisesRegex(ValueError, r"trigger\.py: map_contacts must take exactly"):
+            trigger.validate(resource_mappings=None)
+
+    def test_function_file_needs_its_node(self):
+        nodes = _campaign_nodes()
+        function = OutboundCampaignFunction(
+            resource_id="reminders/gone", name="gone", campaign_folder="reminders", stem="gone"
+        )
+
+        with self.assertRaisesRegex(ValueError, "functions/gone.py has no node of that name"):
+            function.validate(resource_mappings=_node_mappings(nodes))
+        function.stem = "first_call"
+        function.validate(resource_mappings=_node_mappings(nodes))
+
+    def test_default_variant_is_shown_by_name_and_read_back_as_its_id(self):
+        campaign = _campaign()
+        campaign.settings["defaultVariantId"] = "VARIANT-1"
+        mappings = [
+            ResourceMapping(
+                resource_id="VARIANT-1",
+                resource_type=Variant,
+                resource_name="spanish",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            )
+        ]
+
+        pretty = OutboundCampaign.to_pretty_dict(
+            campaign.to_yaml_dict(), resource_mappings=mappings
+        )
+        read_back = OutboundCampaign.from_pretty_dict(pretty, resource_mappings=mappings)
+
+        self.assertEqual(pretty["settings"]["defaultVariant"], "spanish")
+        self.assertNotIn("defaultVariantId", pretty["settings"])
+        self.assertEqual(read_back["settings"]["defaultVariantId"], "VARIANT-1")
+
+    def test_validate_rejects_a_default_variant_that_does_not_exist(self):
+        campaign = _campaign()
+        campaign.settings = {**campaign.settings, "defaultVariantId": "Klingon"}
+
+        with self.assertRaisesRegex(ValueError, "Variant 'Klingon' not found"):
+            campaign.validate(resource_mappings=[])
+
+    def test_settings_go_out_for_a_new_campaign_and_only_when_changed(self):
+        campaign, saved = _campaign(), _campaign()
+
+        self.assertEqual(
+            [type(change) for change in campaign.get_new_updated_deleted_subresources(None)[0]],
+            [OutboundCampaignSettings],
+        )
+        self.assertEqual(campaign.get_new_updated_deleted_subresources(saved), ([], [], []))
+        campaign.settings = {**campaign.settings, "dailyContactLimit": 5}
+        self.assertEqual(len(campaign.get_new_updated_deleted_subresources(saved)[1]), 1)
+
+    def test_node_protos_carry_the_name_as_label_and_ids_split_from_the_resource_id(self):
+        call = _campaign_nodes()["CMPGN-ONE:call-1"]
+
+        create = MessageToDict(call.build_create_proto())
+        update = MessageToDict(call.build_update_proto())
+        delete = MessageToDict(call.build_delete_proto())
+
+        self.assertEqual(create["outboundCampaignId"], "CMPGN-ONE")
+        self.assertEqual(create["node"]["id"], "call-1")
+        self.assertEqual(create["node"]["label"], "First call")
+        self.assertEqual(create["node"]["position"], {"y": 200.0})
+        self.assertEqual(create["node"]["call"]["defaultRoute"], "end-1")
+        self.assertNotIn("routes", create["node"]["call"])
+        self.assertEqual(set(update), {"outboundCampaignId", "nodeId", "data", "position", "label"})
+        self.assertEqual(delete, {"outboundCampaignId": "CMPGN-ONE", "nodeId": "call-1"})
+
+    def test_node_hash_covers_its_code(self):
+        node = _campaign_nodes()["CMPGN-ONE:trigger-1"]
+        before = node.compute_hash()
+
+        node.code = "def map_contacts(contacts, outbound_campaign):\n    return {}\n"
+
+        self.assertNotEqual(node.compute_hash(), before)
+
+    def test_new_nodes_are_laid_out_around_the_placed_ones(self):
+        nodes = _campaign_nodes()
+        for node in nodes.values():
+            node.position = None
+        nodes["CMPGN-ONE:trigger-1"].position = {"x": 10.0, "y": 20.0}
+        nodes["CMPGN-ONE:trigger-1"].data["routes"].append({"targetNodeId": "end-1"})
+
+        resource_utils.assign_campaign_positions(
+            list(nodes.values()), lambda node: route_targets(node.data)
+        )
+
+        self.assertEqual(nodes["CMPGN-ONE:trigger-1"].position, {"x": 10.0, "y": 20.0})
+        self.assertEqual(nodes["CMPGN-ONE:call-1"].position, {"x": 410.0, "y": 20.0})
+        self.assertEqual(nodes["CMPGN-ONE:end-1"].position, {"x": 410.0, "y": 220.0})
+
+    def test_a_node_nothing_routes_to_goes_right_of_everything(self):
+        nodes = list(_campaign_nodes().values())
+        nodes[2].position = None
+        nodes[1].data["defaultRoute"] = None
+
+        resource_utils.assign_campaign_positions(nodes, lambda node: route_targets(node.data))
+
+        self.assertEqual(nodes[2].position, {"x": 400.0, "y": 0.0})
+
+    def test_node_data_maps_onto_the_wire_field_names(self):
+        """Every node type's camelCase fields map onto the proto fields."""
+        call = {
+            "type": "call",
+            "flowName": "Booking",
+            "amdFlowName": "Voicemail",
+            "function": {"name": "call_args", "description": "d"},
+            "greeting": "Hi",
+            "voicemailEnabled": True,
+            "voicemailScript": "Call back",
+            "voicemailWhen": "final_retry",
+            "maxAttempts": 3,
+            "backoff": 2,
+            "backoffUnit": "days",
+            "defaultRoute": "end-1",
+        }
+        sms = {
+            "type": "sms",
+            "function": {"name": "sms_args", "description": "d"},
+            "messageTemplate": "Hi {{first_name}}",
+            "replyFlowName": "Reply",
+            "replyTimeoutValue": 0,
+            "replyTimeoutUnit": "hours",
+            "defaultRoute": None,
+        }
+        conditional = {
+            "type": "conditional",
+            "function": {"name": "pick", "description": "d"},
+            "branches": [{"id": "b-1", "variable": "yes", "targetNodeId": "end-1"}],
+            "defaultTargetNodeId": "wait-1",
+        }
+        writeback = {
+            "type": "writeback",
+            "target": "api",
+            "function": {"name": "push_crm", "description": "d"},
+            "targetNodeId": "end-1",
+        }
+        expected = {
+            "call": (
+                call,
+                {
+                    "flowName": "Booking",
+                    "amdFlowName": "Voicemail",
+                    "function": "call_args",
+                    "greeting": "Hi",
+                    "voicemailEnabled": True,
+                    "voicemailScript": "Call back",
+                    "voicemailWhen": "final_retry",
+                    "maxAttempts": 3,
+                    "backoff": 2,
+                    "backoffUnit": "days",
+                    "defaultRoute": "end-1",
+                    "campaignFunction": {"name": "call_args", "description": "d", "code": "code"},
+                },
+            ),
+            "sms": (
+                sms,
+                {
+                    "function": "sms_args",
+                    "messageTemplate": "Hi {{first_name}}",
+                    "replyFlowName": "Reply",
+                    "replyTimeoutValue": 0,
+                    "replyTimeoutUnit": "hours",
+                    "campaignFunction": {"name": "sms_args", "description": "d", "code": "code"},
+                },
+            ),
+            "conditional": (
+                conditional,
+                {
+                    "function": "pick",
+                    "branches": [{"id": "b-1", "variable": "yes", "targetNodeId": "end-1"}],
+                    "defaultTargetNodeId": "wait-1",
+                    "campaignFunction": {"name": "pick", "description": "d", "code": "code"},
+                },
+            ),
+            "writeback": (
+                writeback,
+                {
+                    "target": "api",
+                    "function": "push_crm",
+                    "targetNodeId": "end-1",
+                    "campaignFunction": {"name": "push_crm", "description": "d", "code": "code"},
+                },
+            ),
+        }
+        for node_type, (data, wire) in expected.items():
+            with self.subTest(node_type=node_type):
+                field_name, message = node_data_proto(data, "code")
+                self.assertEqual(field_name, node_type)
+                self.assertEqual(MessageToDict(message), wire)
+
+    def test_end_node_without_function_sends_none(self):
+        _, message = node_data_proto(
+            {"type": "end", "exitReason": "done", "writebackEnabled": False}, ""
+        )
+
+        self.assertEqual(MessageToDict(message), {"exitReason": "done"})
+        self.assertFalse(message.HasField("campaign_function"))
+
+    def test_settings_are_sent_whole(self):
+        campaign = _campaign()
+        campaign.settings["voiceDispatchLimits"] = {
+            "maxConcurrent": 5,
+            "perHour": None,
+            "perDay": None,
+        }
+        campaign.settings["contactWindow"] = {
+            "daysOfWeek": ["monday"],
+            "startTime": "09:00",
+            "endTime": "17:00",
+        }
+
+        proto = campaign.settings_change().build_update_proto()
+
+        self.assertEqual(proto.id, "CMPGN-ONE")
+        self.assertEqual(
+            MessageToDict(proto.settings),
+            {
+                "fromNumber": "+15550100",
+                "country": "US",
+                "dailyContactLimit": 3,
+                "voiceDispatchLimits": {"maxConcurrent": 5},
+                "contactWindow": {
+                    "daysOfWeek": ["monday"],
+                    "startTime": "09:00",
+                    "endTime": "17:00",
+                },
+            },
+        )
+        self.assertEqual(
+            campaign.settings_change().create_command_type, "outbound_campaign_update_settings"
+        )
+
+    def test_update_clears_a_removed_description(self):
+        campaign = _campaign()
+
+        proto = campaign.build_update_proto()
+
+        self.assertTrue(proto.clear_description)
+        self.assertFalse(proto.HasField("description"))
+        campaign.description = "Monthly"
+        self.assertEqual(campaign.build_update_proto().description, "Monthly")
 
 
 if __name__ == "__main__":

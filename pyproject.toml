@@ -64,6 +64,9 @@ exclude = [
     "F403",
     "F405",
 ]
+"src/poly/tests/test_projects/**/outbound_campaigns/**" = [
+    "F821",
+]
 
 [tool.coverage.run]
 omit = [

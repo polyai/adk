@@ -24,6 +24,9 @@ from poly.resources import (
     Function,
     FunctionStep,
     Handoff,
+    OutboundCampaign,
+    OutboundCampaignNode,
+    OutboundCampaignSettings,
     ResourceMap,
     ResourceMapping,
     SMSTemplate,
@@ -445,6 +448,9 @@ class AgentStudioInterface:
         FlowStep,
         Condition,
         ApiIntegration,
+        OutboundCampaign,
+        OutboundCampaignSettings,
+        OutboundCampaignNode,
     ]
 
     PRIORITY_DELETE_TYPES = [

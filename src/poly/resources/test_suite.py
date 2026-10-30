@@ -999,15 +999,9 @@ class TestCase(YamlResource):
     ) -> dict:
         """Return the pretty dictionary."""
         if variant_id := d.get("variant"):
-            variant_name = next(
-                (
-                    resource.resource_name
-                    for resource in resource_mappings or []
-                    if resource.resource_id == variant_id and resource.resource_type == Variant
-                ),
-                variant_id,
+            d["variant"] = (
+                utils.resource_name_for_id(variant_id, Variant, resource_mappings) or variant_id
             )
-            d["variant"] = variant_name
         return d
 
     @classmethod
@@ -1022,15 +1016,9 @@ class TestCase(YamlResource):
             yaml_dict, resource_mappings=resource_mappings, **kwargs
         )
         if variant_name := yaml_dict.get("variant"):
-            variant_id = next(
-                (
-                    resource.resource_id
-                    for resource in resource_mappings or []
-                    if resource.resource_name == variant_name and resource.resource_type == Variant
-                ),
-                variant_name,
+            yaml_dict["variant"] = (
+                utils.resource_id_for_name(variant_name, Variant, resource_mappings) or variant_name
             )
-            yaml_dict["variant"] = variant_id
         return yaml_dict
 
     @classmethod
@@ -1090,14 +1078,7 @@ class TestCase(YamlResource):
 
         # Variant is valid if exists
         if self.variant:
-            if not next(
-                (
-                    resource
-                    for resource in resource_mappings or []
-                    if resource.resource_id == self.variant and resource.resource_type == Variant
-                ),
-                None,
-            ):
+            if utils.resource_name_for_id(self.variant, Variant, resource_mappings) is None:
                 raise ValueError(f"Variant {self.variant} not found")
 
         # An unquoted number is the easy mistake here, and a silent one: YAML

@@ -43,6 +43,9 @@ from poly.resources import (
     FunctionStep,
     MCPServer,
     MultiResourceYamlResource,
+    OutboundCampaign,
+    OutboundCampaignFunction,
+    OutboundCampaignNode,
     Pronunciation,
     Resource,
     ResourceMap,
@@ -52,6 +55,7 @@ from poly.resources import (
     TestCase,
     Topic,
 )
+from poly.resources.outbound_campaign import campaign_folder_of, route_targets
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
     RESOURCE_NAME_TO_CLASS,
@@ -620,9 +624,11 @@ class AgentStudioProject:
         # Deal with empty flow folders
         # -------
 
-        flow_folder = os.path.join(self.root_path, "flows")
-        if os.path.exists(flow_folder):
-            self._delete_empty_folders(flow_folder)
+        OutboundCampaign.remove_empty_files(self.root_path)
+        for folder in ("flows", "outbound_campaigns"):
+            folder_path = os.path.join(self.root_path, folder)
+            if os.path.exists(folder_path):
+                self._delete_empty_folders(folder_path)
 
         # Save the updated project configuration
         self.resources = incoming_resources
@@ -1252,6 +1258,7 @@ class AgentStudioProject:
             updated_resources,
             new_state,
         )
+        self._assign_campaign_positions(new_resources, new_state)
 
         # Queue new/updated/deleted resources
         commands = self.api_handler.get_queued_commands()
@@ -1497,6 +1504,20 @@ class AgentStudioProject:
         return True, "Resources pushed successfully.", commands
 
     @staticmethod
+    def _assign_campaign_positions(new_resources: ResourceMap, new_state: ResourceMap) -> None:
+        """Lay out the new nodes of each campaign around the nodes it already has."""
+        campaign_ids = {
+            node.campaign_id for node in new_resources.get(OutboundCampaignNode, {}).values()
+        }
+        for campaign_id in campaign_ids:
+            nodes = [
+                node
+                for node in new_state.get(OutboundCampaignNode, {}).values()
+                if node.campaign_id == campaign_id
+            ]
+            resource_utils.assign_campaign_positions(nodes, lambda node: route_targets(node.data))
+
+    @staticmethod
     def _assign_flow_positions(
         new_resources: ResourceMap,
         updated_resources: ResourceMap,
@@ -1663,6 +1684,9 @@ class AgentStudioProject:
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
         prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
+        prepush.group_outbound_campaign_changes(
+            state, new_resources, updated_resources, deleted_resources
+        )
         prepush.fix_orphaned_variables(
             state,
             new_resources,
@@ -2323,6 +2347,13 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == OutboundCampaignNode:
+            additional_kwargs["known_position"] = (
+                original_resource.position
+                if isinstance(original_resource, OutboundCampaignNode)
+                else None
+            )
+
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):
                 raise TypeError(f"Original resource is not an MCPServer: {original_resource}")
@@ -2420,6 +2451,20 @@ class AgentStudioProject:
                 parent_flow = parent_lookup.get(flow_path)
                 flow_paths_to_ids[resource_utils.clean_name(flow_name)] = (
                     parent_flow.resource_id if parent_flow else self.generate_uuid(FlowConfig)
+                )
+
+        campaign_folders_to_ids = {
+            campaign.folder: campaign_id
+            for campaign_id, campaign in self.resources.get(OutboundCampaign, {}).items()
+        }
+        for campaign_path in discovered_resources.get(OutboundCampaign, []):
+            folder = campaign_folder_of(campaign_path)
+            if folder not in campaign_folders_to_ids:
+                parent_campaign = parent_lookup.get(campaign_path)
+                campaign_folders_to_ids[folder] = (
+                    parent_campaign.resource_id
+                    if parent_campaign
+                    else self.generate_uuid(OutboundCampaign)
                 )
 
         if not self.file_structure_info:
@@ -2522,6 +2567,18 @@ class AgentStudioProject:
                         resource_id = flow_id
                     elif resource_type == Document:
                         resource_id = os.path.basename(file_path).upper()
+                    elif resource_type == OutboundCampaign:
+                        resource_id = campaign_folders_to_ids[campaign_folder_of(file_path)]
+                    elif resource_type == OutboundCampaignNode:
+                        campaign_id = campaign_folders_to_ids.get(campaign_folder_of(file_path), "")
+                        node_id = (
+                            parent_resource.node_id
+                            if isinstance(parent_resource, OutboundCampaignNode)
+                            else f"{resource.data.get('type') or 'node'}-{uuid.uuid4()}"
+                        )
+                        resource_id = f"{campaign_id}:{node_id}"
+                    elif resource_type == OutboundCampaignFunction:
+                        resource_id = OutboundCampaignFunction.id_from_path(file_path)
                     elif parent_resource:
                         resource_id = parent_resource.resource_id
                     else:

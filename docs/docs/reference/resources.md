@@ -30,6 +30,7 @@ Every resource here follows the same sync process, including [permission-gated v
 | [MCP servers](./resources/mcp.md) | External tool servers the agent connects to over MCP | `config/mcp.yaml` |
 | [Entities](./resources/entities.md) | Structured values collected from the caller | `config/entities.yaml` |
 | [Functions](./resources/functions.md) | Python for deterministic logic and lifecycle hooks | `functions/` |
+| [Outbound campaigns](./resources/outbound_campaigns.md) | Campaigns that call and text contacts, node by node | `outbound_campaigns/` |
 
 ## Named values and destinations
 
