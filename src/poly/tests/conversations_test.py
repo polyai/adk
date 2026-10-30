@@ -58,7 +58,8 @@ class ConversationsSearchTest(unittest.TestCase):
         self.addCleanup(patch.stopall)
 
     def _render(self, args: Namespace) -> str:
-        with console.capture() as capture:
+        # Wide enough that no column truncates, whatever the platform calls UTC.
+        with patch.object(console, "_width", 200), console.capture() as capture:
             ConversationsCommand.conversations_search(TEST_DIR, args, output_json=False)
         return capture.get()
 
@@ -93,7 +94,9 @@ class ConversationsSearchTest(unittest.TestCase):
         output = self._render(args)
 
         region, endpoint, method = self.mock_request.call_args.args
-        self.assertEqual((region, endpoint, method), ("us-1", "/api/v1/conversations/search", "POST"))
+        self.assertEqual(
+            (region, endpoint, method), ("us-1", "/api/v1/conversations/search", "POST")
+        )
         self.assertEqual(
             self.mock_request.call_args.kwargs["data"],
             {

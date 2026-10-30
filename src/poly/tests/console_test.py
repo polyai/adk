@@ -779,7 +779,12 @@ class PrintConversationSearchTest(unittest.TestCase):
             "offset": 0,
         }
 
-        with patch("poly.output.console.warning") as mock_warning, console.capture() as capture:
+        with (
+            patch("poly.output.console.warning") as mock_warning,
+            # Wide enough that no column truncates, whatever the platform calls UTC.
+            patch.object(console, "_width", 200),
+            console.capture() as capture,
+        ):
             print_conversation_search(
                 result, fields=["poly_score", "duration", "channel", "call_summary"]
             )
