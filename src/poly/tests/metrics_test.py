@@ -852,7 +852,8 @@ class MetricsReadCommandTest(unittest.TestCase):
         self.addCleanup(patch.stopall)
 
     def _render(self, fn, *args, **kwargs) -> str:
-        with console.capture() as capture:
+        # Wide enough that no column truncates, whatever the platform calls UTC.
+        with patch.object(console, "_width", 200), console.capture() as capture:
             fn(*args, **kwargs)
         return capture.get()
 

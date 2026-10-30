@@ -721,7 +721,8 @@ class PrintAggregateTest(unittest.TestCase):
     """Tests for print_aggregate, the `metrics query` / `metrics score` table."""
 
     def _render(self, result: dict, headline: str | None = None) -> str:
-        with console.capture() as capture:
+        # Wide enough that no column truncates, whatever the platform calls UTC.
+        with patch.object(console, "_width", 200), console.capture() as capture:
             print_aggregate(result, headline=headline)
         return capture.get()
 
@@ -747,9 +748,7 @@ class PrintAggregateTest(unittest.TestCase):
 
     def test_full_page_hints_at_the_next_offset(self):
         """When the page is full, the footer says where the next page starts."""
-        output = self._render(
-            {"columns": ["avg"], "rows": [[1.0], [2.0]], "limit": 2, "offset": 2}
-        )
+        output = self._render({"columns": ["avg"], "rows": [[1.0], [2.0]], "limit": 2, "offset": 2})
 
         self.assertIn("Use --offset 4", output)
 
