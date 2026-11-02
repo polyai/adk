@@ -589,21 +589,31 @@ class AgentStudioInterface:
 
     def validate_outbound_campaign(self, campaign_id: str) -> dict[str, Any]:
         """Validate a campaign on the current branch."""
-        return self.sync_client.validate_outbound_campaign(campaign_id)
+        self.sync_client.assert_branch_exists()
+        return PlatformAPIHandler.validate_outbound_campaign(
+            self.region, self.account_id, self.project_id, self.branch_id, campaign_id
+        )
 
     def dry_run_outbound_campaign(self, campaign_id: str, body: dict[str, Any]) -> dict[str, Any]:
         """Dry-run a campaign on the current branch. Nothing is sent or stored."""
-        return self.sync_client.dry_run_outbound_campaign(campaign_id, body)
+        self.sync_client.assert_branch_exists()
+        return PlatformAPIHandler.dry_run_outbound_campaign(
+            self.region, self.account_id, self.project_id, self.branch_id, campaign_id, body
+        )
 
     def start_outbound_campaign_test_step(
         self, campaign_id: str, body: dict[str, Any]
     ) -> dict[str, Any]:
         """Start a real test step of the live campaign."""
-        return self.sync_client.start_outbound_campaign_test_step(campaign_id, body)
+        return PlatformAPIHandler.start_outbound_campaign_test_step(
+            self.region, self.account_id, self.project_id, campaign_id, body
+        )
 
     def get_outbound_campaign_test_step(self, campaign_id: str, step_id: str) -> dict[str, Any]:
         """Read a test step of the live campaign."""
-        return self.sync_client.get_outbound_campaign_test_step(campaign_id, step_id)
+        return PlatformAPIHandler.get_outbound_campaign_test_step(
+            self.region, self.account_id, self.project_id, campaign_id, step_id
+        )
 
     def send_outbound_campaign_lifecycle(self, command_type: str, campaign_id: str) -> None:
         """Send a publish, pause, resume or archive command for a campaign to main."""

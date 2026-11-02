@@ -19,9 +19,13 @@ Every subcommand takes the campaign's name (or its folder name) and acts on the 
 
 Outbound campaigns must be turned on for the project; otherwise every subcommand exits `1` and says so.
 
+Two campaigns can share a name. Each then has its own folder, such as `reminders-abcd1234`; name the campaign by its folder.
+
+`--field` and `--state` values are read as JSON when they parse as JSON, so `age=30`, `booked=true` and `note=null` give a number, a boolean and `null`. Any other value, such as `plan=gold`, is kept as a string. `--contact`, `--run`, `--last-send` and `--sample-outputs` take a JSON file or JSON written inline.
+
 | Argument | Description |
 |---|---|
-| `name` | The campaign's name. |
+| `name` | The campaign's name, or its folder name. |
 
 ## `poly campaign validate`
 
@@ -49,7 +53,7 @@ Exits `1` when the campaign is not valid. Warnings do not fail it.
 }
 ~~~
 
-The `result` is the platform's own, so it refers to nodes by id; the human output shows their names.
+The `result` is the platform's own, so it refers to nodes by id; the human output shows their names, in its messages too.
 
 ## `poly campaign preview`
 
@@ -63,6 +67,8 @@ poly campaign preview 'Appointment reminders' --contact contact.json --sample-ou
 poly campaign preview 'Appointment reminders' --phone +15550100 --start-node 'Reminder call' --result no_answer
 ~~~
 
+A preview keeps nothing between steps. Each step prints the flags to carry on with, including `--last-send` when the step left a call or a text: pass it back, so that the next step's conditions and templates read it as `journey.last_send`.
+
 | Flag | Description |
 |---|---|
 | `--contact` | JSON file with the contact's data, as an import would carry it. |
@@ -73,6 +79,7 @@ poly campaign preview 'Appointment reminders' --phone +15550100 --start-node 'Re
 | `--start-node` | Name of the node to carry on from. Defaults to the trigger. |
 | `--result` | How the call or text at `--start-node` went, e.g. `no_answer` or `replied`. |
 | `--state` | A value that call or text reported back, as `KEY=VALUE`. Repeatable. |
+| `--last-send` | The `last_send` the previous step printed, as JSON or a JSON file. Only with `--start-node`. |
 | `--ask-branches` | Stop at a condition with no sample output instead of taking its default branch. |
 
 `--json` output shape:
@@ -81,13 +88,15 @@ poly campaign preview 'Appointment reminders' --phone +15550100 --start-node 'Re
 {
   "success": true,
   "campaign": "Appointment reminders",
-  "result": {"steps": [], "stopped_at": "call-1", "stop_reason": "call", "error": null, "notes": []}
+  "result": {"steps": [], "stopped_at": "call-1", "stop_reason": "call", "error": null, "notes": [], "last_send": null}
 }
 ~~~
 
 ## `poly campaign test`
 
 Run one step of a test of the live campaign, and wait for it to finish. It calls and texts the test contact for real. The first step starts at the trigger. To carry on, pass the `--start-node` and the run it printed. After a call or a text, also say how it went with `--result`; after a wait, carry on from the node it printed.
+
+The run is printed as soon as the step starts, so it is not lost if waiting fails or you stop it; the step carries on regardless. A poll that fails with no response or a server error is retried three times. Node names are matched as they are on `main`, which the test runs, even from another branch.
 
 Examples:
 
@@ -110,6 +119,8 @@ poly campaign test 'Appointment reminders' --phone +15550100 --start-node 'Remin
 | `--timeout` | Seconds to wait for the step. Defaults to `600`. |
 | `--force` | Run without confirmation. Implied by `--json`. |
 
+The inputs are checked before you are asked to confirm.
+
 !!! warning "This contacts a real phone"
 
     `poly campaign test` runs the live campaign and calls or texts the number you give it.
@@ -127,6 +138,18 @@ poly campaign test 'Appointment reminders' --phone +15550100 --start-node 'Remin
     "result": {"steps": [], "stopped_at": "call-1", "stop_reason": "call", "resume_node_id": null, "error": null, "notes": []},
     "error": null
   }
+}
+~~~
+
+If waiting for the step fails or times out, the error carries the step and its run:
+
+~~~json
+{
+  "success": false,
+  "error": "Test step TSTEP-... of campaign 'Appointment reminders' is still running after 600 seconds.",
+  "campaign": "Appointment reminders",
+  "step_id": "TSTEP-...",
+  "run": {"contact_id": "...", "enrolment_id": "...", "graph_hash": "..."}
 }
 ~~~
 

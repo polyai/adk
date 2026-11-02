@@ -10,11 +10,13 @@ import os
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import quote
 
 import requests
 from ruamel.yaml import YAML
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
+from poly.handlers.sdk import SourcererAPIError
 from poly.handlers.utils import camel_to_snake_keys
 from poly.utils import raise_if_no_credentials, retrieve_api_key
 
@@ -76,6 +78,10 @@ FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+OUTBOUND_CAMPAIGN_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/branches/{branch_id}"
+    "/outbound-campaigns/{path}"
+)
 
 
 class PlatformAPIHandler:
@@ -1805,3 +1811,88 @@ class PlatformAPIHandler:
         """
         endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    @staticmethod
+    def _outbound_campaign_request(
+        region: str,
+        account_id: str,
+        project_id: str,
+        branch_id: str,
+        segments: tuple[str, ...],
+        method: str = "POST",
+        data: ty.Optional[dict] = None,
+    ) -> dict:
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id=quote(branch_id, safe=""),
+            path="/".join(quote(segment, safe="") for segment in segments),
+        )
+        try:
+            return PlatformAPIHandler.make_request(region, endpoint, method, data=data)
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
+
+    @staticmethod
+    def validate_outbound_campaign(
+        region: str, account_id: str, project_id: str, branch_id: str, campaign_id: str
+    ) -> dict:
+        """Validate a campaign as it is on `branch_id`.
+
+        Raises:
+            SourcererAPIError: with the platform's status, error code and message.
+        """
+        return PlatformAPIHandler._outbound_campaign_request(
+            region, account_id, project_id, branch_id, (campaign_id, "validate")
+        )
+
+    @staticmethod
+    def dry_run_outbound_campaign(
+        region: str,
+        account_id: str,
+        project_id: str,
+        branch_id: str,
+        campaign_id: str,
+        body: dict,
+    ) -> dict:
+        """Dry-run a campaign on `branch_id`. Nothing is sent or stored.
+
+        Raises:
+            SourcererAPIError: with the platform's status, error code and message.
+        """
+        return PlatformAPIHandler._outbound_campaign_request(
+            region, account_id, project_id, branch_id, (campaign_id, "dry-run"), data=body
+        )
+
+    @staticmethod
+    def start_outbound_campaign_test_step(
+        region: str, account_id: str, project_id: str, campaign_id: str, body: dict
+    ) -> dict:
+        """Start a real test step of the live campaign, on main.
+
+        Raises:
+            SourcererAPIError: with the platform's status, error code and message.
+        """
+        return PlatformAPIHandler._outbound_campaign_request(
+            region, account_id, project_id, "main", (campaign_id, "test-steps"), data=body
+        )
+
+    @staticmethod
+    def get_outbound_campaign_test_step(
+        region: str, account_id: str, project_id: str, campaign_id: str, step_id: str
+    ) -> dict:
+        """Read a test step of the live campaign, on main.
+
+        Raises:
+            SourcererAPIError: with the platform's status, error code and message.
+        """
+        return PlatformAPIHandler._outbound_campaign_request(
+            region,
+            account_id,
+            project_id,
+            "main",
+            (campaign_id, "test-steps", step_id),
+            method="GET",
+        )

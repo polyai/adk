@@ -111,7 +111,11 @@ class CampaignCommand(BaseCommand):
         preview_parser.add_argument(
             "--first-name", type=str, default=None, help="Contact's first name."
         )
-        cls._add_field(preview_parser, "Another contact column, as KEY=VALUE. Repeatable.")
+        cls._add_field(
+            preview_parser,
+            "Another contact column, as KEY=VALUE, the value read as JSON when it parses. "
+            "Repeatable.",
+        )
         preview_parser.add_argument(
             "--sample-outputs",
             type=str,
@@ -119,6 +123,12 @@ class CampaignCommand(BaseCommand):
             help="JSON file of what each node's function returns, keyed by node name.",
         )
         cls._add_continue_flags(preview_parser)
+        preview_parser.add_argument(
+            "--last-send",
+            type=str,
+            default=None,
+            help="The last_send the previous step printed: a JSON object or a JSON file.",
+        )
         preview_parser.add_argument(
             "--ask-branches",
             action="store_true",
@@ -159,7 +169,10 @@ class CampaignCommand(BaseCommand):
         test_parser.add_argument(
             "--external-id", type=str, default=None, help="Contact's id in your own system."
         )
-        cls._add_field(test_parser, "A metadata column, as KEY=VALUE. Repeatable.")
+        cls._add_field(
+            test_parser,
+            "A metadata column, as KEY=VALUE, the value read as JSON when it parses. Repeatable.",
+        )
         cls._add_continue_flags(test_parser)
         test_parser.add_argument(
             "--run",
@@ -227,7 +240,8 @@ class CampaignCommand(BaseCommand):
             action="append",
             default=[],
             metavar="KEY=VALUE",
-            help="A value that call or text reported back. Repeatable.",
+            help="A value that call or text reported back, as KEY=VALUE, the value read as JSON "
+            "when it parses. Repeatable.",
         )
 
     @classmethod
@@ -248,6 +262,7 @@ class CampaignCommand(BaseCommand):
                 send_result=args.result,
                 send_state=args.state,
                 ask_branches=args.ask_branches,
+                last_send=args.last_send,
                 output_json=args.json,
             )
         elif args.campaign_subcommand == "test":
@@ -278,11 +293,11 @@ class CampaignCommand(BaseCommand):
             )
 
     @staticmethod
-    def _fail(message: str, output_json: bool) -> None:
+    def _fail(message: str, output_json: bool, **details: Any) -> None:
         from poly.output.console import error
 
         if output_json:
-            json_print({"success": False, "error": message})
+            json_print({"success": False, "error": message, **details})
         else:
             error(message)
         sys.exit(1)
@@ -300,6 +315,10 @@ class CampaignCommand(BaseCommand):
         if os.path.isfile(value):
             with open(value, encoding="utf-8") as file:
                 text = file.read()
+        elif not value.lstrip().startswith(("{", "[")) and (
+            "/" in value or value.endswith(".json")
+        ):
+            raise ValueError(f"No file at {value} for {what}.")
         try:
             return json.loads(text)
         except json.JSONDecodeError as e:
@@ -319,11 +338,18 @@ class CampaignCommand(BaseCommand):
         return parsed
 
     @staticmethod
-    def _node_labels(project: Any, name: str) -> dict[str, str]:
+    def _node_labels(project: Any, name: str, live: bool = False) -> dict[str, str]:
         try:
-            return project.campaign_node_names(project.get_campaign(name))
-        except ValueError:
+            return project.campaign_node_names(project.get_campaign(name), live=live)
+        except (ValueError, SourcererAPIError):
             return {}
+
+    @staticmethod
+    def _name_nodes(text: str, labels: dict[str, str]) -> str:
+        for node_id in sorted(labels, key=len, reverse=True):
+            if labels[node_id]:
+                text = text.replace(node_id, labels[node_id])
+        return text
 
     @classmethod
     def campaign_validate(cls, base_path: str, name: str, output_json: bool = False) -> None:
@@ -347,7 +373,7 @@ class CampaignCommand(BaseCommand):
             prefix = f"{where}: " if where else ""
             if issue.get("field"):
                 prefix += f"{issue['field']}: "
-            return f"{prefix}{issue.get('message')}"
+            return f"{prefix}{cls._name_nodes(str(issue.get('message')), labels)}"
 
         for issue in result.get("warnings") or []:
             warning(describe(issue))
@@ -360,10 +386,11 @@ class CampaignCommand(BaseCommand):
         sys.exit(1)
 
     @classmethod
-    def _print_steps(cls, project: Any, name: str, result: dict) -> None:
+    def _print_steps(
+        cls, labels: dict[str, str], result: dict, carry_on_values: dict[str, Any]
+    ) -> None:
         from poly.output.console import error, info, plain
 
-        labels = cls._node_labels(project, name)
         for number, step in enumerate(result.get("steps") or [], start=1):
             node = labels.get(step.get("node_id"), step.get("node_id"))
             line = f"{number}. {node} ({step.get('node_type')})"
@@ -382,7 +409,7 @@ class CampaignCommand(BaseCommand):
                 plain(f"   exit reason: {step['exit_reason']}")
         stopped_at = labels.get(result.get("stopped_at"), result.get("stopped_at"))
         info(f"Stopped: {result.get('stop_reason')}" + (f" at {stopped_at}" if stopped_at else ""))
-        carry_on = cls._carry_on_flags(result, labels)
+        carry_on = cls._carry_on_flags(result, labels, carry_on_values)
         if carry_on:
             info(f"Carry on with: {carry_on}")
         if result.get("error"):
@@ -393,19 +420,31 @@ class CampaignCommand(BaseCommand):
             plain(f"note: {note}")
 
     @staticmethod
-    def _carry_on_flags(result: dict[str, Any], labels: dict[str, str]) -> Optional[str]:
+    def _carry_on_flags(
+        result: dict[str, Any],
+        labels: dict[str, str],
+        values: Optional[dict[str, Any]] = None,
+    ) -> Optional[str]:
         def node(node_id: str) -> str:
             return shlex.quote(labels.get(node_id, node_id))
 
         stop_reason = result.get("stop_reason")
         stopped_at = result.get("stopped_at")
         if stop_reason in ("call", "reply") and stopped_at:
-            return f"--start-node {node(stopped_at)} --result <how it went>"
-        if stop_reason == "condition" and stopped_at:
-            return f"--start-node {node(stopped_at)}, with its branch in --sample-outputs"
-        if stop_reason == "wait" and result.get("resume_node_id"):
-            return f"--start-node {node(result['resume_node_id'])}"
-        return None
+            flags, after = [f"--start-node {node(stopped_at)}", "--result <how it went>"], ""
+        elif stop_reason == "condition" and stopped_at:
+            flags, after = (
+                [f"--start-node {node(stopped_at)}"],
+                ", with its branch in --sample-outputs",
+            )
+        elif stop_reason == "wait" and result.get("resume_node_id"):
+            flags, after = [f"--start-node {node(result['resume_node_id'])}"], ""
+        else:
+            return None
+        for flag, value in (values or {}).items():
+            if value is not None:
+                flags.append(f"--{flag} {shlex.quote(json.dumps(value))}")
+        return " ".join(flags) + after
 
     @classmethod
     def campaign_preview(
@@ -421,11 +460,12 @@ class CampaignCommand(BaseCommand):
         send_result: Optional[str] = None,
         send_state: Optional[list[str]] = None,
         ask_branches: Optional[bool] = None,
+        last_send: Optional[str] = None,
         output_json: bool = False,
     ) -> None:
         """Dry-run a made-up contact through a campaign and print the steps. Nothing is sent."""
 
-        def build_inputs() -> tuple[dict, Optional[dict], dict]:
+        def build_inputs() -> tuple[dict, Optional[dict], dict, Optional[dict]]:
             contact = cls._read_json(contact_file, "--contact") if contact_file else {}
             if not isinstance(contact, dict):
                 raise ValueError("--contact must hold a JSON object.")
@@ -437,9 +477,10 @@ class CampaignCommand(BaseCommand):
                 if sample_outputs_file
                 else None
             )
-            return contact, outputs, cls._parse_fields(send_state or [])
+            previous_send = cls._read_json(last_send, "--last-send") if last_send else None
+            return contact, outputs, cls._parse_fields(send_state or []), previous_send
 
-        contact, outputs, state = cls._call(output_json, build_inputs)
+        contact, outputs, state, previous_send = cls._call(output_json, build_inputs)
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
         result = cls._call(
@@ -452,13 +493,18 @@ class CampaignCommand(BaseCommand):
                 send_result=send_result,
                 send_state=state,
                 ask_branches=ask_branches,
+                last_send=previous_send,
             ),
         )
         failed = result.get("stop_reason") == "error"
         if output_json:
             json_print({"success": not failed, "campaign": name, "result": result})
         else:
-            cls._print_steps(project, name, result)
+            cls._print_steps(
+                cls._node_labels(project, name),
+                result,
+                {"last-send": result.get("last_send")},
+            )
         if failed:
             sys.exit(1)
 
@@ -512,6 +558,13 @@ class CampaignCommand(BaseCommand):
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
         campaign = cls._call(output_json, lambda: project.get_campaign(name))
+        step_inputs = {
+            "start_node": start_node,
+            "run": previous_run,
+            "send_result": send_result,
+            "send_state": state,
+        }
+        cls._call(output_json, lambda: project.check_campaign_test(name, contact, **step_inputs))
 
         if not output_json and not force:
             if not questionary.confirm(
@@ -525,29 +578,36 @@ class CampaignCommand(BaseCommand):
 
         started = cls._call(
             output_json,
-            lambda: project.start_campaign_test(
-                name,
-                contact,
-                start_node=start_node,
-                run=previous_run,
-                send_result=send_result,
-                send_state=state,
-            ),
+            lambda: project.start_campaign_test(name, contact, **step_inputs),
         )
+        step_id, run_started = started.get("step_id"), started.get("run")
         if not output_json:
-            info(f"Started test step {started.get('step_id')} of campaign '{campaign.name}'.")
-        step = cls._call(
-            output_json,
-            lambda: project.wait_for_campaign_test_step(name, started["step_id"], timeout=timeout),
-        )
+            info(f"Started test step {step_id} of campaign '{campaign.name}'.")
+            info(f"Run: {shlex.quote(json.dumps(run_started))}")
+        try:
+            step = project.wait_for_campaign_test_step(name, step_id, timeout=timeout)
+        except (ValueError, SourcererAPIError, TimeoutError) as e:
+            cls._fail(str(e), output_json, campaign=name, step_id=step_id, run=run_started)
+        except KeyboardInterrupt:
+            cls._fail(
+                f"Stopped waiting for test step {step_id}. The step carries on.",
+                output_json,
+                campaign=name,
+                step_id=step_id,
+                run=run_started,
+            )
         done = step.get("status") == "done"
         if output_json:
             json_print({"success": done, "campaign": name, "test_step": step})
         else:
             if step.get("result"):
-                cls._print_steps(project, name, step["result"])
+                cls._print_steps(
+                    cls._node_labels(project, name, live=True),
+                    step["result"],
+                    {"run": step.get("run") or run_started},
+                )
             if done:
-                success(f"Test step finished. Run: {json.dumps(step.get('run'))}")
+                success("Test step finished.")
             else:
                 failure = (step.get("error") or {}).get("error")
                 error(f"Test step {step.get('status')}" + (f": {failure}" if failure else "."))
