@@ -8287,6 +8287,36 @@ class CampaignCommandTest(unittest.TestCase):
                     f"Campaign '{value}' has not been pushed yet. Run `poly push` first.",
                 )
 
+    def test_start_without_a_step_id_prints_the_run_but_no_step(self):
+        """With no step id there is no "Started test step None" line, but the run is kept."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        self._respond(make_mock_response(202, {"status": "queued", "run": run}))
+
+        with (
+            patch("poly.output.console.info") as info,
+            patch("poly.output.console.error") as error,
+            self.assertRaises(SystemExit) as exit,
+        ):
+            CampaignCommand.campaign_test(TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True)
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertEqual(
+            [call.args[0] for call in info.call_args_list],
+            [f"Run: {shlex.quote(json.dumps(run))}"],
+        )
+        self.assertIn("did not say which step", error.call_args.args[0])
+
+    def test_test_hint_never_suggests_sample_outputs(self):
+        """A real step runs conditions itself, so its hints leave --sample-outputs to preview."""
+        result = {"stop_reason": "condition", "stopped_at": "cond-1"}
+
+        self.assertIsNone(
+            CampaignCommand._carry_on_flags(result, {}, {"run": {}}, conditions=False)
+        )
+        self.assertIn(
+            "--sample-outputs", CampaignCommand._carry_on_flags(result, {}, {"run": None})
+        )
+
     def test_parsed_command_line_reaches_validate(self):
         """`poly campaign validate <name> --json` is wired through the parser to the handler."""
         cli = AgentStudioCLI()

@@ -434,7 +434,11 @@ class CampaignCommand(BaseCommand):
 
     @classmethod
     def _print_steps(
-        cls, labels: dict[str, str], result: dict, carry_on_values: dict[str, Any]
+        cls,
+        labels: dict[str, str],
+        result: dict,
+        carry_on_values: dict[str, Any],
+        conditions: bool = True,
     ) -> None:
         from poly.output.console import error, info, plain
 
@@ -458,7 +462,7 @@ class CampaignCommand(BaseCommand):
         info(f"Stopped: {result.get('stop_reason')}" + (f" at {stopped_at}" if stopped_at else ""))
         if result.get("stop_reason") == "no_route":
             info("No route matched the outcome, so the path stopped there.")
-        carry_on = cls._carry_on_flags(result, labels, carry_on_values)
+        carry_on = cls._carry_on_flags(result, labels, carry_on_values, conditions=conditions)
         if carry_on:
             info(f"Carry on with: {carry_on}")
         if result.get("error"):
@@ -505,6 +509,7 @@ class CampaignCommand(BaseCommand):
         result: dict[str, Any],
         labels: dict[str, str],
         values: Optional[dict[str, Any]] = None,
+        conditions: bool = True,
     ) -> Optional[str]:
         def node(node_id: str) -> str:
             return shlex.quote(labels.get(node_id, node_id))
@@ -513,7 +518,7 @@ class CampaignCommand(BaseCommand):
         stopped_at = result.get("stopped_at")
         if stop_reason in ("call", "reply") and stopped_at:
             flags, after = [f"--start-node {node(stopped_at)}", "--result <how it went>"], ""
-        elif stop_reason == "condition" and stopped_at:
+        elif stop_reason == "condition" and stopped_at and conditions:
             label = json.dumps(labels.get(stopped_at, stopped_at))
             flags, after = (
                 [f"--start-node {node(stopped_at)}", "--sample-outputs <file>"],
@@ -694,7 +699,8 @@ class CampaignCommand(BaseCommand):
         if output_json:
             json_progress({"step_id": step_id, "run": run_started})
         else:
-            info(f"Started test step {step_id} of campaign '{campaign.name}'.")
+            if step_id:
+                info(f"Started test step {step_id} of campaign '{campaign.name}'.")
             info(f"Run: {shlex.quote(json.dumps(run_started))}")
         if not step_id:
             cls._fail(
@@ -727,6 +733,7 @@ class CampaignCommand(BaseCommand):
                     cls._node_labels(project, name, live=True),
                     step["result"],
                     {"run": step.get("run") or run_started},
+                    conditions=False,
                 )
             if done:
                 success("Test step finished.")
