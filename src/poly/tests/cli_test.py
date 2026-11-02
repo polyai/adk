@@ -7432,6 +7432,61 @@ class CampaignCommandTest(unittest.TestCase):
 
                 self.assertIsNone(project._main_resources)
 
+    def test_lifecycle_that_times_out_says_it_may_have_gone_through(self):
+        """A change the platform is slow to answer may still apply, so it is not called a failure."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.side_effect = requests.ReadTimeout("read timed out")
+
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        output = self._output()
+        self.assertFalse(output["success"])
+        self.assertEqual(
+            output["error"],
+            "The platform did not answer in time, so `poly campaign resume` on campaign "
+            f"'{self.CAMPAIGN}' may have gone through. Check the campaign's status in Agent "
+            "Studio, or with `poly pull` on main, before sending it again.",
+        )
+        self.assertEqual(self.post.call_count, 1)
+
+    def test_lifecycle_stopped_while_sending_says_it_may_have_gone_through(self):
+        """Ctrl+C during the send gets the same warning, not a bare abort."""
+        with (
+            patch.object(self.project, "resume_campaign", side_effect=KeyboardInterrupt),
+            patch("poly.output.console.error") as error,
+            self.assertRaises(SystemExit) as exit,
+        ):
+            CampaignCommand.campaign_lifecycle(TEST_DIR, "resume", self.CAMPAIGN, force=True)
+
+        self.assertEqual(exit.exception.code, 130)
+        message = error.call_args.args[0]
+        self.assertTrue(message.startswith("You stopped the command while it was being sent"))
+        self.assertIn("may have gone through", message)
+        self.assertIn("`poly pull` on main", message)
+
+    def test_test_stopped_while_starting_says_the_step_may_have_started(self):
+        """Ctrl+C while a step is starting warns that it may still call."""
+        with (
+            patch.object(self.project, "start_campaign_test", side_effect=KeyboardInterrupt),
+            self.assertRaises(SystemExit) as exit,
+        ):
+            CampaignCommand.campaign_test(
+                TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 130)
+        output = self._output()
+        self.assertFalse(output["success"])
+        self.assertTrue(
+            output["error"].startswith("You stopped the command while the step was starting")
+        )
+        self.assertIn("may call or text +15550100", output["error"])
+        self.assertIn("Check the campaign's tests in Agent Studio", output["error"])
+
     def test_parsed_command_line_reaches_validate(self):
         """`poly campaign validate <name> --json` is wired through the parser to the handler."""
         cli = AgentStudioCLI()

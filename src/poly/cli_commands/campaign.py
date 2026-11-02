@@ -293,14 +293,14 @@ class CampaignCommand(BaseCommand):
             )
 
     @staticmethod
-    def _fail(message: str, output_json: bool, **details: Any) -> None:
+    def _fail(message: str, output_json: bool, exit_code: int = 1, **details: Any) -> None:
         from poly.output.console import error
 
         if output_json:
             json_print({"success": False, "error": message, **details})
         else:
             error(message)
-        sys.exit(1)
+        sys.exit(exit_code)
 
     @classmethod
     def _call(cls, output_json: bool, action: Callable[[], Any]) -> Any:
@@ -580,10 +580,22 @@ class CampaignCommand(BaseCommand):
                 warning("Aborted.")
                 sys.exit(0)
 
-        started = cls._call(
-            output_json,
-            lambda: project.start_campaign_test(name, contact, **step_inputs),
-        )
+        try:
+            started = cls._call(
+                output_json,
+                lambda: project.start_campaign_test(name, contact, **step_inputs),
+            )
+        except KeyboardInterrupt:
+            cls._fail(
+                project.campaign_test_unconfirmed(
+                    "You stopped the command while the step was starting",
+                    campaign.name,
+                    contact.get("phone"),
+                ),
+                output_json,
+                exit_code=130,
+                campaign=name,
+            )
         step_id, run_started = started.get("step_id"), started.get("run")
         if output_json:
             json_progress({"step_id": step_id, "run": run_started})
@@ -656,7 +668,18 @@ class CampaignCommand(BaseCommand):
                 sys.exit(0)
 
         method = getattr(project, f"{action}_campaign")
-        cls._call(output_json, lambda: method(name))
+        try:
+            cls._call(output_json, lambda: method(name))
+        except KeyboardInterrupt:
+            cls._fail(
+                project.campaign_change_unconfirmed(
+                    "You stopped the command while it was being sent", action, campaign.name
+                ),
+                output_json,
+                exit_code=130,
+                campaign=name,
+                action=action,
+            )
         if output_json:
             json_print({"success": True, "campaign": name, "action": action})
         else:

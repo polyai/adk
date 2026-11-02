@@ -261,4 +261,4 @@ poly campaign archive 'Appointment reminders'
 
 !!! warning "These commands act on live"
 
-    `publish`, `pause`, `resume` and `archive` change what the live campaign does straight away. Each asks for confirmation unless you pass `--force` or `--json`.
+    `publish`, `pause`, `resume` and `archive` change what the live campaign does straight away. Each asks for confirmation unless you pass `--force` or `--json`. If the platform does not answer in time, or you stop the command while it is sending, the change may still have gone through: check the campaign's status in Agent Studio, or with `poly pull` on main, before sending it again.

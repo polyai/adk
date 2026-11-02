@@ -4008,12 +4008,41 @@ class AgentStudioProject:
         except SourcererAPIError as e:
             if isinstance(e.__cause__, requests.exceptions.ReadTimeout):
                 raise SourcererAPIError(
-                    f"The platform did not answer in time, so the test step of campaign "
-                    f"'{campaign.name}' may have started and may call or text "
-                    f"{contact.get('phone')}. Check the campaign's tests in Agent Studio before "
-                    "running `poly campaign test` again."
+                    self.campaign_test_unconfirmed(
+                        "The platform did not answer in time", campaign.name, contact.get("phone")
+                    )
                 ) from e
             raise self._campaign_error("test", campaign, e) from e
+
+    @staticmethod
+    def campaign_test_unconfirmed(reason: str, campaign_name: str, phone: Any) -> str:
+        """Say that a test step whose start went unanswered may have started anyway.
+
+        Args:
+            reason: Why the start went unanswered, as the start of a sentence.
+            campaign_name: The campaign's name.
+            phone: The number the step calls or texts.
+        """
+        return (
+            f"{reason}, so the test step of campaign '{campaign_name}' may have started and may "
+            f"call or text {phone}. Check the campaign's tests in Agent Studio before running "
+            "`poly campaign test` again."
+        )
+
+    @staticmethod
+    def campaign_change_unconfirmed(reason: str, action: str, campaign_name: str) -> str:
+        """Say that a publish, pause, resume or archive that went unanswered may have applied.
+
+        Args:
+            reason: Why the change went unanswered, as the start of a sentence.
+            action: `publish`, `pause`, `resume` or `archive`.
+            campaign_name: The campaign's name.
+        """
+        return (
+            f"{reason}, so `poly campaign {action}` on campaign '{campaign_name}' may have gone "
+            "through. Check the campaign's status in Agent Studio, or with `poly pull` on main, "
+            "before sending it again."
+        )
 
     def wait_for_campaign_test_step(
         self,
@@ -4064,6 +4093,12 @@ class AgentStudioProject:
         try:
             self.api_handler.send_outbound_campaign_lifecycle(command_type, campaign.resource_id)
         except SourcererAPIError as e:
+            if isinstance(e.__cause__, requests.exceptions.ReadTimeout):
+                raise SourcererAPIError(
+                    self.campaign_change_unconfirmed(
+                        "The platform did not answer in time", action, campaign.name
+                    )
+                ) from e
             raise self._campaign_error(action, campaign, e) from e
 
     def publish_campaign(self, name: str) -> None:
