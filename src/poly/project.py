@@ -12,14 +12,16 @@ import shutil
 import tempfile
 import uuid
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, field, fields, replace
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
 from pathlib import PurePath
-from typing import Any, Optional, TypeAlias
+from typing import Any, Iterator, Optional, TypeAlias
 
 from google.protobuf.message import Message
+from ruamel.yaml import YAMLError
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
@@ -59,6 +61,7 @@ from poly.resources.outbound_campaign import (
     CAMPAIGN_FILE,
     CAMPAIGNS_DIR,
     FUNCTIONS_DIR,
+    NODES_KEY,
     campaign_folder_of,
     function_file_stem,
     is_empty_campaign_file,
@@ -71,6 +74,7 @@ from poly.resources.resource import (
     load_resources_from_projection,
 )
 from poly.utils import prepush
+from poly.utils.campaign_code import LocalCampaignCode, claim, plan
 from poly.utils.commands import queue_set_default_commands
 
 logger = logging.getLogger(__name__)
@@ -620,40 +624,48 @@ class AgentStudioProject:
         # Update resources
         # -------
 
-        files_with_conflicts = self._update_pulled_resources(
-            original_resources=self.resources,
-            incoming_resources=incoming_resources,
-            force=force,
-            format=format,
-            on_save=on_save,
-            original_slim_resources=self.slim_resources,
-            incoming_slim_resources=slim_resources,
-        )
+        saved_state = (self.resources, self.slim_resources, self.file_structure_info)
+        try:
+            with self._restore_campaigns_on_failure():
+                files_with_conflicts = self._update_pulled_resources(
+                    original_resources=self.resources,
+                    incoming_resources=incoming_resources,
+                    force=force,
+                    format=format,
+                    on_save=on_save,
+                    original_slim_resources=self.slim_resources,
+                    incoming_slim_resources=slim_resources,
+                )
 
-        # -------
-        # Deal with empty flow folders
-        # -------
+                # -------
+                # Deal with empty flow folders
+                # -------
 
-        OutboundCampaign.remove_empty_files(self.root_path)
-        for folder in ("flows", "outbound_campaigns"):
-            folder_path = os.path.join(self.root_path, folder)
-            if os.path.exists(folder_path):
-                self._delete_empty_folders(folder_path)
+                OutboundCampaign.remove_empty_files(self.root_path)
+                for folder in ("flows", "outbound_campaigns"):
+                    folder_path = os.path.join(self.root_path, folder)
+                    if os.path.exists(folder_path):
+                        self._delete_empty_folders(folder_path)
 
-        # Save the updated project configuration
-        self.resources = incoming_resources
-        self.slim_resources = slim_resources
+                # Save the updated project configuration
+                self.resources = incoming_resources
+                self.slim_resources = slim_resources
 
-        # Update file_structure_info
-        self.file_structure_info = self.compute_file_structure_info(incoming_resources)
+                # Update file_structure_info
+                self.file_structure_info = self.compute_file_structure_info(incoming_resources)
 
-        # Delete all new resources
-        if force:
-            self._delete_new_resources()
-            self._remove_stray_campaign_code(incoming_resources.get(OutboundCampaignNode) or {})
-            campaigns_path = os.path.join(self.root_path, CAMPAIGNS_DIR)
-            if os.path.exists(campaigns_path):
-                self._delete_empty_folders(campaigns_path)
+                # Delete all new resources
+                if force:
+                    self._delete_new_resources()
+                    self._remove_stray_campaign_code(
+                        incoming_resources.get(OutboundCampaignNode) or {}
+                    )
+                    campaigns_path = os.path.join(self.root_path, CAMPAIGNS_DIR)
+                    if os.path.exists(campaigns_path):
+                        self._delete_empty_folders(campaigns_path)
+        except BaseException:
+            self.resources, self.slim_resources, self.file_structure_info = saved_state
+            raise
 
         utils.export_decorators(DECORATORS, self.root_path)
         utils.save_imports(self.root_path)
@@ -1154,62 +1166,63 @@ class AgentStudioProject:
             name, number = f"{base}-{number}", number + 1
         return name
 
-    def _scan_local_campaign_code(self) -> dict[str, Any]:
+    def _scan_local_campaign_code(self) -> LocalCampaignCode:
         """Record every local function file and the local node reading it, before a pull.
 
-        Returns:
-            `files`: every `.py` under a campaign's `functions/`, by path, with its contents;
-            `kept`: the path each local node with a saved id reads, by id; `new`: the path and
-            type of each node added locally.
+        An entry keeps its saved node's id only with the same type: a retyped node is a new
+        node, as push treats it. A campaign whose `campaign.yaml` can't be read, such as one
+        left in conflict, is taken to read the files its saved nodes do.
         """
         campaigns_path = os.path.join(self.root_path, CAMPAIGNS_DIR)
-        files: dict[str, str] = {}
-        if os.path.isdir(campaigns_path):
-            for folder in sorted(os.listdir(campaigns_path)):
-                functions_path = os.path.join(campaigns_path, folder, FUNCTIONS_DIR)
-                if not os.path.isdir(functions_path):
-                    continue
+        local = LocalCampaignCode()
+        if not os.path.isdir(campaigns_path):
+            return local
+        for folder in sorted(os.listdir(campaigns_path)):
+            functions_path = os.path.join(campaigns_path, folder, FUNCTIONS_DIR)
+            if os.path.isdir(functions_path):
                 for file_name in sorted(os.listdir(functions_path)):
                     path = os.path.join(functions_path, file_name)
                     if file_name.endswith(".py") and os.path.isfile(path):
-                        files[path] = Resource.read_from_file(path)
-
-        kept: dict[str, str] = {}
-        new: list[tuple[str, Optional[str]]] = []
-        if not os.path.isdir(campaigns_path):
-            return {"files": files, "kept": kept, "new": new}
-        conflicts: list[str] = []
-        try:
-            new_mappings, kept_mappings, _ = self.find_new_kept_deleted(
-                self.discover_local_resources(conflict_files=conflicts),
-                conflict_files=conflicts,
-            )
-        except Exception:
-            conflicts.append("")
-        if conflicts:
-            for resource_id, node in self.resources.get(OutboundCampaignNode, {}).items():
-                kept[resource_id] = os.path.join(self.root_path, node.function_file)
-            return {"files": files, "kept": kept, "new": new}
-
-        for mapping in kept_mappings:
-            if mapping.resource_type is OutboundCampaignNode:
-                kept[mapping.resource_id] = self._campaign_code_path(mapping)
-        for mapping in new_mappings:
-            if mapping.resource_type is not OutboundCampaignNode:
+                        local.files[path] = Resource.read_from_file(path)
+            campaign_file = os.path.join(campaigns_path, folder, CAMPAIGN_FILE)
+            if not os.path.isfile(campaign_file):
                 continue
             try:
-                node = self.read_local_resource(
-                    mapping, resource_mappings=[], allow_code_conflict=True
+                top = OutboundCampaignNode._get_top_level_data(campaign_file)
+            except (resource_utils.MergeConflictError, YAMLError):
+                for node_id, node in self.resources.get(OutboundCampaignNode, {}).items():
+                    if node.campaign_folder == folder:
+                        local.kept[node_id] = os.path.join(self.root_path, node.function_file)
+                continue
+            entries = top.get(NODES_KEY) if isinstance(top, dict) else None
+            for entry in entries if isinstance(entries, list) else []:
+                name = entry.get("name") if isinstance(entry, dict) else None
+                if not isinstance(name, str) or not resource_utils.clean_name(name):
+                    continue
+                code_path = os.path.join(functions_path, f"{function_file_stem(name)}.py")
+                saved = self.file_structure_info.get(
+                    os.path.join(
+                        CAMPAIGNS_DIR,
+                        folder,
+                        CAMPAIGN_FILE,
+                        NODES_KEY,
+                        resource_utils.clean_name(name, lowercase=False),
+                    )
                 )
-                node_type = node.data.get("type") if isinstance(node.data, dict) else None
-            except Exception:
-                node_type = None
-            new.append((self._campaign_code_path(mapping), node_type))
-        return {"files": files, "kept": kept, "new": new}
+                saved_node = (
+                    self.resources.get(OutboundCampaignNode, {}).get(saved["resource_id"])
+                    if saved and saved.get("type") == RESOURCE_CLASS_TO_NAME[OutboundCampaignNode]
+                    else None
+                )
+                if saved_node is not None and saved_node.data.get("type") == entry.get("type"):
+                    local.kept[saved_node.resource_id] = code_path
+                else:
+                    local.new[code_path] = entry.get("type")
+        return local
 
     def _follow_local_campaign_code(
-        self, local: dict[str, Any], moved: list[tuple[str, str]]
-    ) -> dict[str, Any]:
+        self, local: LocalCampaignCode, moved: list[tuple[str, str]]
+    ) -> LocalCampaignCode:
         """Return the scan of local function files with each moved folder's paths moved."""
         campaigns_path = os.path.join(self.root_path, CAMPAIGNS_DIR)
         folders = dict(moved)
@@ -1221,11 +1234,7 @@ class AgentStudioProject:
             relative = os.path.relpath(path, os.path.join(campaigns_path, folder))
             return os.path.join(campaigns_path, folders[folder], relative)
 
-        return {
-            "files": {follow(path): code for path, code in local["files"].items()},
-            "kept": {resource_id: follow(path) for resource_id, path in local["kept"].items()},
-            "new": [(follow(path), node_type) for path, node_type in local["new"]],
-        }
+        return local.followed(follow)
 
     def _merge_campaign_code(
         self,
@@ -1233,24 +1242,18 @@ class AgentStudioProject:
         incoming_nodes: dict[str, OutboundCampaignNode],
         force: bool,
         renamed_away: set[str],
-        local: dict[str, Any],
+        local: LocalCampaignCode,
         format: bool = False,
     ) -> list[str]:
-        """Merge each node's code by node id: saved, local and incoming.
+        """Merge each node's code by node id, from its saved, local and incoming code.
 
-        The local code is that of the local node with the same id, wherever it is now; a node
-        renamed alike on both sides, or the trigger renamed locally, counts as the same node.
-        The result goes to the incoming node's file, or to the local file when only the local
-        side renamed the node. A file another local node or no node still holds there is
-        merged against as a conflict, never overwritten. A file no incoming node takes is
-        removed only when its node moved or is unedited, and is otherwise left for validation.
+        `claim` finds each node's local file and `plan` the files the result goes to. A file
+        there that another live local node or no node still holds is merged against as a
+        conflict, never overwritten.
 
         Returns:
             The function files left with merge conflicts.
         """
-
-        def path_of(node: OutboundCampaignNode) -> str:
-            return os.path.join(self.root_path, node.function_file)
 
         def tidy(code: str) -> str:
             return Function.format_resource(code, "function.py") if format and code else code
@@ -1258,101 +1261,69 @@ class AgentStudioProject:
         def unedited(code: str, saved: Optional[OutboundCampaignNode]) -> bool:
             return saved is not None and code in (saved.code, tidy(saved.code))
 
-        files: dict[str, str] = local["files"]
-        owners: dict[str, Optional[str]] = {path: None for path in files}
-        owners.update({path: resource_id for resource_id, path in local["kept"].items()})
-        new_nodes = {path: node_type for path, node_type in local["new"]}
+        claimed = claim(incoming_nodes, original_nodes, local, self.root_path)
+        targets = plan(incoming_nodes, original_nodes, claimed, self.root_path, force)
+        claimants = {path: node_id for node_id, path in claimed.items()}
 
-        claimed: dict[str, str] = {
-            resource_id: local["kept"][resource_id]
-            for resource_id in incoming_nodes
-            if resource_id in local["kept"]
-        }
-        for resource_id, node in incoming_nodes.items():
-            if resource_id in claimed:
-                continue
-            target = path_of(node)
-            taken = set(claimed.values())
-            if target in new_nodes and target not in taken:
-                claimed[resource_id] = target
-            elif node.data.get("type") == "trigger" and resource_id in original_nodes:
-                folder = campaign_folder_of(target)
-                triggers = [
-                    path
-                    for path, node_type in new_nodes.items()
-                    if node_type == "trigger"
-                    and campaign_folder_of(path) == folder
-                    and path not in taken
-                ]
-                if len(triggers) == 1:
-                    claimed[resource_id] = triggers[0]
-
-        targets: dict[str, str] = {}
-        for resource_id, node in incoming_nodes.items():
-            target = path_of(node)
-            original = original_nodes.get(resource_id)
-            local_path = claimed.get(resource_id)
-            if (
-                local_path
-                and original is not None
-                and node.function_file == original.function_file
-                and local_path != target
-            ):
-                target = local_path
-            targets[resource_id] = target
-
-        claimants = {path: resource_id for resource_id, path in claimed.items()}
-
-        def leaving(path: str, resource_id: str) -> bool:
+        def free_for(path: str, node_id: str) -> bool:
             if path in claimants:
                 other = claimants[path]
-                return other == resource_id or targets[other] != path
-            holder = owners.get(path)
-            if path in new_nodes or holder is None:
+                return other == node_id or path not in targets[other]
+            holder = local.holder(path)
+            if path in local.new or holder is None:
                 return False
-            return unedited(files[path], original_nodes.get(holder))
+            return holder not in incoming_nodes and unedited(
+                local.files[path], original_nodes.get(holder)
+            )
 
         results: dict[str, str] = {}
         conflicts = []
-        for resource_id, node in incoming_nodes.items():
-            target = targets[resource_id]
-            original = original_nodes.get(resource_id)
+        for node_id, node in incoming_nodes.items():
+            original = original_nodes.get(node_id)
             if force:
-                results[target] = node.code
-                continue
-            if resource_id in claimed:
-                local_code: Optional[str] = files.get(claimed[resource_id], "")
-            elif original is not None and node.campaign_id in renamed_away:
-                local_code = original.code
+                merged = node.code
             else:
-                local_code = None
-            if original is None and local_code is None:
-                merged = tidy(node.code)
-            else:
-                merged = utils.merge_strings(
-                    tidy(original.code) if original is not None else "",
-                    tidy(local_code or ""),
-                    tidy(node.code),
-                )
-            if target in files and not leaving(target, resource_id):
-                existing = files[target]
-                if existing != merged:
-                    merged = utils.merge_strings("", existing, merged)
-            results[target] = merged
-            if resource_utils.contains_merge_conflict(merged):
-                conflicts.append(target)
+                if node_id in claimed:
+                    local_code: Optional[str] = local.files.get(claimed[node_id], "")
+                elif original is not None and node.campaign_id in renamed_away:
+                    local_code = original.code
+                else:
+                    local_code = None
+                if original is None and local_code is None:
+                    merged = tidy(node.code)
+                else:
+                    merged = utils.merge_strings(
+                        tidy(original.code) if original is not None else "",
+                        tidy(local_code or ""),
+                        tidy(node.code),
+                    )
+            for path in targets[node_id]:
+                code = merged
+                if not force and path in local.files and not free_for(path, node_id):
+                    holder = original_nodes.get(local.holder(path) or "")
+                    if local.files[path] != code:
+                        code = utils.merge_strings(
+                            tidy(holder.code) if holder is not None else "",
+                            local.files[path],
+                            code,
+                        )
+                if path in results and results[path] != code:
+                    code = utils.merge_strings("", results[path], code)
+                results[path] = code
+                if resource_utils.contains_merge_conflict(code) and path not in conflicts:
+                    conflicts.append(path)
 
         for path, code in results.items():
             if code:
-                if files.get(path) != code:
+                if local.files.get(path) != code:
                     Resource.save_to_file(code, path)
             elif os.path.isfile(path):
                 os.remove(path)
 
-        for path, code in files.items():
+        for path, code in local.files.items():
             if path in results or not os.path.isfile(path):
                 continue
-            holder = owners.get(path)
+            holder = local.holder(path)
             if (
                 force
                 or path in claimants
@@ -1387,49 +1358,65 @@ class AgentStudioProject:
         renamed_away: set[str] = set()
         stranded: dict[str, str] = {}
         local_code = self._scan_local_campaign_code()
-        snapshot = self._snapshot_campaigns()
-        try:
-            if not force:
-                original_resources, renamed_away, moved, stranded = (
-                    self._follow_remote_campaign_renames(original_resources, incoming_resources)
-                )
-                local_code = self._follow_local_campaign_code(local_code, moved)
-            files_with_conflicts = self._merge_pulled_resources(
-                original_resources,
-                incoming_resources,
-                force,
-                format,
-                on_save,
-                original_slim_resources=original_slim_resources,
-                incoming_slim_resources=incoming_slim_resources,
-                renamed_away=renamed_away,
-                local_code=local_code,
+        if not force:
+            original_resources, renamed_away, moved, stranded = (
+                self._follow_remote_campaign_renames(original_resources, incoming_resources)
             )
-            self._gather_stranded_function_files(stranded)
-        except BaseException:
-            self._restore_campaigns(snapshot)
-            raise
-        finally:
-            if snapshot:
-                shutil.rmtree(snapshot, ignore_errors=True)
+            local_code = self._follow_local_campaign_code(local_code, moved)
+        files_with_conflicts = self._merge_pulled_resources(
+            original_resources,
+            incoming_resources,
+            force,
+            format,
+            on_save,
+            original_slim_resources=original_slim_resources,
+            incoming_slim_resources=incoming_slim_resources,
+            renamed_away=renamed_away,
+            local_code=local_code,
+        )
+        self._gather_stranded_function_files(stranded)
         return files_with_conflicts
 
-    def _snapshot_campaigns(self) -> Optional[str]:
-        """Copy `outbound_campaigns/` aside, so a failed pull can put it back whole."""
-        campaigns_path = os.path.join(self.root_path, CAMPAIGNS_DIR)
-        if not os.path.isdir(campaigns_path):
-            return None
-        snapshot = tempfile.mkdtemp(prefix="poly-campaigns-")
-        shutil.copytree(campaigns_path, os.path.join(snapshot, CAMPAIGNS_DIR))
-        return snapshot
+    @contextmanager
+    def _restore_campaigns_on_failure(self) -> Iterator[None]:
+        """Put `outbound_campaigns/` back as it was if the block fails or is interrupted.
 
-    def _restore_campaigns(self, snapshot: Optional[str]) -> None:
+        The copy lives under `_gen/`, inside the project, so restoring it is a rename. It is
+        removed only once the block succeeds or the restore does.
+        """
         campaigns_path = os.path.join(self.root_path, CAMPAIGNS_DIR)
-        if os.path.isdir(campaigns_path):
-            shutil.rmtree(campaigns_path)
-        if snapshot:
-            shutil.copytree(os.path.join(snapshot, CAMPAIGNS_DIR), campaigns_path)
+        backup: Optional[str] = None
+        complete = False
+        try:
+            if os.path.isdir(campaigns_path):
+                backup = tempfile.mkdtemp(prefix="pull-backup-", dir=self._backup_root())
+                shutil.copytree(campaigns_path, os.path.join(backup, CAMPAIGNS_DIR))
+            complete = True
+            yield
+        except BaseException:
+            if complete:
+                self._restore_campaigns(backup)
+            elif backup:
+                shutil.rmtree(backup, ignore_errors=True)
+            raise
+        if backup:
+            shutil.rmtree(backup, ignore_errors=True)
+
+    def _backup_root(self) -> str:
+        path = os.path.join(self.root_path, os.path.dirname(STATUS_FILE))
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def _restore_campaigns(self, backup: Optional[str]) -> None:
+        campaigns_path = os.path.join(self.root_path, CAMPAIGNS_DIR)
         MultiResourceYamlResource._file_cache.clear()
+        if os.path.isdir(campaigns_path):
+            replaced = tempfile.mkdtemp(prefix="pull-replaced-", dir=self._backup_root())
+            os.replace(campaigns_path, os.path.join(replaced, CAMPAIGNS_DIR))
+            shutil.rmtree(replaced, ignore_errors=True)
+        if backup:
+            os.replace(os.path.join(backup, CAMPAIGNS_DIR), campaigns_path)
+            shutil.rmtree(backup, ignore_errors=True)
 
     def _merge_pulled_resources(
         self,
@@ -2258,7 +2245,12 @@ class AgentStudioProject:
         reverted_files = []
         resource_mappings = self._make_resource_mappings(self.resources)
         all_files = not file_paths
-        current_code_paths = {} if all_files else self._current_campaign_code_paths()
+        campaigns_path = os.path.join(self.root_path, CAMPAIGNS_DIR, "")
+        current_code_paths = (
+            self._scan_local_campaign_code().kept
+            if not all_files and any(path.startswith(campaigns_path) for path in file_paths)
+            else {}
+        )
         MultiResourceYamlResource._file_cache.clear()
         try:
             for resource in self.all_resources:
@@ -2268,7 +2260,11 @@ class AgentStudioProject:
                 elif isinstance(resource, OutboundCampaignNode):
                     code_paths = {
                         os.path.join(self.root_path, resource.function_file),
-                        *current_code_paths.get(resource.resource_id, ()),
+                        *(
+                            [current_code_paths[resource.resource_id]]
+                            if resource.resource_id in current_code_paths
+                            else []
+                        ),
                     }
                     for code_path in sorted(code_paths & set(file_paths)):
                         if resource.code:
@@ -2291,15 +2287,6 @@ class AgentStudioProject:
             MultiResourceYamlResource._file_cache.clear()
 
         return reverted_files
-
-    def _current_campaign_code_paths(self) -> dict[str, list[str]]:
-        """Return the function file each local campaign node reads now, by node id."""
-        new, kept, _ = self.find_new_kept_deleted(self.discover_local_resources())
-        paths: dict[str, list[str]] = {}
-        for mapping in new + kept:
-            if mapping.resource_type is OutboundCampaignNode:
-                paths.setdefault(mapping.resource_id, []).append(self._campaign_code_path(mapping))
-        return paths
 
     @staticmethod
     def _campaign_code_path(mapping: ResourceMapping) -> str:
