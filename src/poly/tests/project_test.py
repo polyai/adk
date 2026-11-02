@@ -9746,16 +9746,246 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual((affected, errors), ([trigger_file], []))
         self.assertEqual(self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE)
 
-    def test_failed_pull_moves_renamed_campaign_folders_back(self):
-        with patch.object(
-            AgentStudioProject, "_merge_pulled_resources", side_effect=RuntimeError("boom")
-        ):
-            with self.assertRaises(RuntimeError):
-                self.project.pull_project(projection_json=_campaign_projection(name="Monthly"))
+    def _tree(self) -> dict[str, str]:
+        tree = {}
+        for directory, _, names in os.walk(os.path.join(self.root, "outbound_campaigns")):
+            for name in names:
+                path = os.path.join(directory, name)
+                with open(path, encoding="utf-8") as file:
+                    tree[os.path.relpath(path, self.root)] = file.read()
+        return tree
 
-        self.assertTrue(os.path.isfile(os.path.join(self.folder, "campaign.yaml")))
-        self.assertFalse(os.path.exists(os.path.join(self.root, "outbound_campaigns", "monthly")))
+    def test_failed_pull_puts_campaign_files_back_as_they_were(self):
+        before = self._tree()
+        projection = _campaign_projection(name="Monthly", trigger_code="def map_contacts():\n    2\n")
+
+        with patch.object(
+            AgentStudioProject,
+            "_gather_stranded_function_files",
+            side_effect=KeyboardInterrupt,
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                self.project.pull_project(projection_json=projection)
+
+        self.assertEqual(self._tree(), before)
         self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def _rename_locally(self, old: str, new: str) -> dict:
+        data = self._yaml()
+        self._node(data, old)["name"] = new
+        for node in data["nodes"]:
+            for key in ("defaultRoute",):
+                if node.get(key) == old:
+                    node[key] = new
+            for route in node.get("routes") or []:
+                if route.get("next") == old:
+                    route["next"] = new
+        self._write_yaml(data)
+        old_path = os.path.join(self.folder, "functions", f"{resource_utils.clean_name(old)}.py")
+        if os.path.exists(old_path):
+            shutil.move(
+                old_path,
+                os.path.join(self.folder, "functions", f"{resource_utils.clean_name(new)}.py"),
+            )
+        return data
+
+    def test_node_renamed_alike_on_both_sides_keeps_its_code(self):
+        self._pull_with_call_code()
+        self._rename_locally("First call", "Dial")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._projection_from_state({"call-1": "Dial"})
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._read("reminders", "functions", "dial.py"), self.CALL_CODE)
+        success, message, _ = self.project.push_project(dry_run=True)
+        self.assertEqual((success, message), (False, "No changes detected"))
+
+    def test_node_renamed_alike_with_different_code_on_both_sides_conflicts(self):
+        self._pull_with_call_code()
+        self._rename_locally("First call", "Dial")
+        self._write_function("dial", self.CALL_CODE + "    # local\n")
+        projection = self._projection_from_state({"call-1": "Dial"})
+        self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
+            self.CALL_CODE + "    # remote\n"
+        )
+
+        conflicts, _ = self.project.pull_project(projection_json=projection)
+
+        dial = os.path.join(self.folder, "functions", "dial.py")
+        self.assertIn(dial, conflicts)
+        self.assertIn("# local", self._read("reminders", "functions", "dial.py"))
+        self.assertIn("# remote", self._read("reminders", "functions", "dial.py"))
+
+    def test_local_trigger_rename_takes_a_remote_code_edit(self):
+        self._rename_locally("Trigger", "Start")
+        remote_code = self.TRIGGER_CODE + "    # remote\n"
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=_campaign_projection(trigger_code=remote_code)
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.folder, "functions"))), ["start.py"])
+        self.assertEqual(self._read("reminders", "functions", "start.py"), remote_code)
+
+    def test_node_added_on_both_sides_under_one_name_conflicts_on_its_code(self):
+        spare = {
+            "name": "Spare",
+            "type": "end",
+            "exitReason": "spare",
+            "writebackEnabled": False,
+            "function": {"name": "spare", "description": ""},
+        }
+        data = self._yaml()
+        data["nodes"].append(spare)
+        self._write_yaml(data)
+        self._write_function("spare", "def spare(outbound_contact, outbound_campaign):\n    1\n")
+        projection = self._projection_with(
+            {
+                "id": "end-2",
+                "label": "Spare",
+                "position": {"x": 0, "y": 600},
+                "data": {
+                    "type": "end",
+                    "exitReason": "spare",
+                    "writebackEnabled": False,
+                    "function": {
+                        "name": "spare",
+                        "description": "",
+                        "code": "def spare(outbound_contact, outbound_campaign):\n    2\n",
+                    },
+                },
+            }
+        )
+
+        conflicts, _ = self.project.pull_project(projection_json=projection)
+
+        spare_file = os.path.join(self.folder, "functions", "spare.py")
+        self.assertIn(spare_file, conflicts)
+        code = self._read("reminders", "functions", "spare.py")
+        self.assertIn("    1", code)
+        self.assertIn("    2", code)
+
+    def test_folder_move_blocked_by_a_local_campaign_conflicts_on_its_code(self):
+        monthly = os.path.join(self.root, "outbound_campaigns", "monthly")
+        self._write_yaml(
+            {
+                "name": "Monthly",
+                "settings": {},
+                "nodes": [
+                    {
+                        "name": "Trigger",
+                        "type": "trigger",
+                        "function": {"name": "map_contacts", "description": ""},
+                        "routes": [],
+                    }
+                ],
+            },
+            monthly,
+        )
+        self._write_function("trigger", "def map_contacts(contacts, outbound_campaign):\n    9\n", monthly)
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=_campaign_projection(name="Monthly")
+        )
+
+        self.assertIn(os.path.join(monthly, "functions", "trigger.py"), conflicts)
+        code = self._read("monthly", "functions", "trigger.py")
+        self.assertIn("    9", code)
+        self.assertIn("return {}", code)
+
+    def test_renamed_node_taking_a_removed_edited_node_file_conflicts(self):
+        self._pull_with_call_code()
+        self._write_function("first_call", self.CALL_CODE + "    # local\n")
+        projection = self._projection_from_state({"trigger-1": "First call"})
+        nodes = self._entity(projection)["nodes"]
+        nodes["ids"].remove("call-1")
+        nodes["entities"].pop("call-1")
+        nodes["entities"]["trigger-1"]["data"]["routes"] = []
+
+        conflicts, _ = self.project.pull_project(projection_json=projection)
+
+        first_call = os.path.join(self.folder, "functions", "first_call.py")
+        self.assertIn(first_call, conflicts)
+        code = self._read("reminders", "functions", "first_call.py")
+        self.assertIn("# local", code)
+        self.assertIn("map_contacts", code)
+
+    def test_format_pull_removes_the_unedited_file_of_a_removed_node(self):
+        unformatted = "def call_args(outbound_contact,outbound_campaign):\n  return {}\n"
+        projection = _campaign_projection()
+        self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
+            unformatted
+        )
+        self._pull_into_new_project(projection)
+        self._write_function("first_call", self.CALL_CODE)
+        removed = self._projection_from_state()
+        nodes = self._entity(removed)["nodes"]
+        nodes["ids"].remove("call-1")
+        nodes["entities"].pop("call-1")
+        nodes["entities"]["trigger-1"]["data"]["routes"] = []
+
+        self.project.pull_project(projection_json=removed, format=True)
+
+        self.assertEqual(os.listdir(os.path.join(self.folder, "functions")), ["trigger.py"])
+
+    def test_environment_pull_removes_function_files_no_node_owns(self):
+        self._write_function("stray", "x = 1\n")
+        incoming = deepcopy(self.project.resources)
+        with (
+            patch.object(
+                AgentStudioProject, "get_remote_resources_by_name", return_value=(incoming, [])
+            ),
+            patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock),
+        ):
+            self.project.pull_project_from_env("sandbox")
+
+        self.assertEqual(os.listdir(os.path.join(self.folder, "functions")), ["trigger.py"])
+
+    def test_code_merge_by_saved_local_and_remote_code(self):
+        """Each row: saved code, local code (None: no file), remote code, then the outcome."""
+        a = "def call_args(outbound_contact, outbound_campaign):\n    return 'a'\n"
+        b = a.replace("'a'", "'b'")
+        c = a.replace("'a'", "'c'")
+        rows = [
+            (a, a, a, a, False),
+            (a, b, a, b, False),
+            (a, a, b, b, False),
+            (a, b, b, b, False),
+            (a, b, c, None, True),
+            (a, None, a, None, False),
+            (a, None, b, None, True),
+            ("", b, "", b, False),
+            ("", "", b, b, False),
+        ]
+        for saved, local, remote, expected, conflict in rows:
+            with self.subTest(saved=saved, local=local, remote=remote):
+                projection = _campaign_projection()
+                call = self._entity(projection)["nodes"]["entities"]["call-1"]
+                call["data"]["function"]["code"] = saved
+                self._pull_into_new_project(projection)
+                path = os.path.join(self.folder, "functions", "first_call.py")
+                if local is None:
+                    if os.path.exists(path):
+                        os.remove(path)
+                else:
+                    self._write_function("first_call", local)
+                incoming = self._projection_from_state()
+                self._entity(incoming)["nodes"]["entities"]["call-1"]["data"]["function"][
+                    "code"
+                ] = remote
+                self._entity(incoming)["name"] = "Reminders"
+                self._entity(incoming)["description"] = "pulled"
+
+                conflicts, _ = self.project.pull_project(projection_json=incoming)
+
+                self.assertEqual(path in conflicts, conflict)
+                if expected is not None:
+                    self.assertEqual(self._read("reminders", "functions", "first_call.py"), expected)
+                elif not conflict:
+                    self.assertFalse(os.path.exists(path))
 
     def test_remote_node_rename_carries_a_local_code_edit_to_the_new_file(self):
         edited = self.TRIGGER_CODE + "\n\ndef helper():\n    pass\n"
