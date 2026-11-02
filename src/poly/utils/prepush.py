@@ -287,6 +287,7 @@ def group_outbound_campaign_changes(
     new_resources: ResourceMap,
     updated_resources: ResourceMap,
     deleted_resources: ResourceMap,
+    pre_push_updated_resources: ResourceMap,
     post_push_new_resources: ResourceMap,
 ) -> None:
     """Finish the campaign changes in place.
@@ -303,6 +304,7 @@ def group_outbound_campaign_changes(
     pair_replaced_campaign_triggers(
         state, new_resources, updated_resources, deleted_resources, post_push_new_resources
     )
+    relabel_campaign_nodes_first(updated_resources, pre_push_updated_resources)
     prune_cascade_deleted_campaign_nodes(deleted_resources)
 
 
@@ -507,8 +509,27 @@ def pair_replaced_campaign_triggers(
         heir = _campaign_nodes(new_resources, campaign_id).get(saved_label)
         if heir is not None:
             new_resources[OutboundCampaignNode].pop(heir.resource_id)
+            heir.position = None
             post_push_new_resources.setdefault(OutboundCampaignNode, {})[heir.resource_id] = heir
     _prune_empty((new_resources, updated_resources, deleted_resources), (OutboundCampaignNode,))
+
+
+def relabel_campaign_nodes_first(
+    updated_resources: ResourceMap, pre_push_updated_resources: ResourceMap
+) -> None:
+    """Send the updates that change a kept node's label before anything is created.
+
+    Agent Studio refuses a label another node still has, and a label a kept node is giving up,
+    such as one pull had to rename, may be the label of a node created in the same push. No
+    other node can hold the new label: local names are unique and pull never reuses a label.
+    """
+    updated_nodes = updated_resources.get(OutboundCampaignNode, {})
+    for resource_id, node in list(updated_nodes.items()):
+        if node.saved_label is not None and node.saved_label != node.name:
+            pre_push_updated_resources.setdefault(OutboundCampaignNode, {})[resource_id] = (
+                updated_nodes.pop(resource_id)
+            )
+    _prune_empty((updated_resources,), (OutboundCampaignNode,))
 
 
 def _triggers_by_campaign(changes: ResourceMap) -> dict[str, list[OutboundCampaignNode]]:

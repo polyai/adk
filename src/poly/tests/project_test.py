@@ -8722,6 +8722,98 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(commands[0][1]["label"], "Start")
         self.assertRegex(summary[1][1], r"^end-")
         self.assertEqual(commands[1][1]["node"]["label"], "Trigger")
+        self.assertEqual(commands[1][1]["node"]["position"], {"x": 400.0})
+
+    def test_new_node_taking_the_renamed_trigger_name_is_placed_after_its_parent(self):
+        self._rename_trigger("Start")
+        data = self._yaml()
+        self._node(data, "Start")["routes"].append({"next": "Trigger"})
+        data["nodes"].append(
+            {"name": "Trigger", "type": "end", "exitReason": "spare", "writebackEnabled": False}
+        )
+        self._write_yaml(data)
+
+        create = next(payload for kind, payload in self._push() if kind.endswith("create_node"))
+
+        self.assertEqual(create["node"]["label"], "Trigger")
+        self.assertEqual(create["node"]["position"], {"x": 400.0})
+
+    def _assert_no_create_takes_a_held_label(
+        self, commands: list[tuple[str, dict]], labels: dict[str, str]
+    ) -> None:
+        """Replay the commands against Agent Studio's labels by node id."""
+        labels = dict(labels)
+        for command_type, payload in commands:
+            if command_type == "outbound_campaign_delete_node":
+                labels.pop(payload["nodeId"])
+            elif command_type == "outbound_campaign_update_node":
+                labels[payload["nodeId"]] = payload["label"]
+            elif command_type == "outbound_campaign_create_node":
+                label = payload["node"]["label"]
+                self.assertNotIn(label, labels.values(), f"{label} is still held")
+                labels[payload["node"]["id"]] = label
+
+    def _pull_with_extra_end(self, label: str) -> None:
+        projection = _campaign_projection()
+        campaign = projection["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-ONE"]
+        campaign["nodes"]["ids"].append("end-2")
+        campaign["nodes"]["entities"]["end-2"] = {
+            "id": "end-2",
+            "position": {"x": 0, "y": 600},
+            "label": label,
+            "data": {"type": "end", "exitReason": "other", "writebackEnabled": False},
+        }
+        self._pull_into_new_project(projection)
+
+    def test_label_freed_by_a_pull_rename_is_free_before_a_create_takes_it(self):
+        self._pull_with_extra_end("end")
+        data = self._yaml()
+        self.assertEqual([node["name"] for node in data["nodes"]][-1], "end 2")
+        data["nodes"] = [node for node in data["nodes"] if node["name"] != "End"]
+        data["nodes"].append(
+            {"name": "end", "type": "end", "exitReason": "done", "writebackEnabled": False}
+        )
+        self._node(data, "First call")["defaultRoute"] = "end"
+        self._write_yaml(data)
+
+        commands = self._push()
+
+        self.assertEqual(
+            self._summary(commands)[:3],
+            [
+                ("outbound_campaign_update_node", "end-2"),
+                ("outbound_campaign_delete_node", "end-1"),
+                ("outbound_campaign_create_node", self._summary(commands)[2][1]),
+            ],
+        )
+        self.assertEqual(commands[0][1]["label"], "end 2")
+        self._assert_no_create_takes_a_held_label(
+            commands,
+            {"trigger-1": "Trigger", "call-1": "First call", "end-1": "End", "end-2": "end"},
+        )
+
+    def test_retyping_one_of_two_nodes_sharing_a_label_frees_it_first(self):
+        self._pull_with_extra_end("End")
+        data = self._yaml()
+        index = data["nodes"].index(self._node(data, "End"))
+        data["nodes"][index] = {
+            "name": "End",
+            "type": "wait",
+            "amount": 1,
+            "unit": "days",
+            "next": "End 2",
+        }
+        self._write_yaml(data)
+
+        commands = self._push()
+
+        self.assertEqual(self._summary(commands)[0], ("outbound_campaign_update_node", "end-2"))
+        self.assertEqual(commands[0][1]["label"], "End 2")
+        self.assertIn(("outbound_campaign_delete_node", "end-1"), self._summary(commands))
+        self._assert_no_create_takes_a_held_label(
+            commands,
+            {"trigger-1": "Trigger", "call-1": "First call", "end-1": "End", "end-2": "End"},
+        )
 
     def test_changing_a_node_type_replaces_it_under_a_new_id(self):
         """Agent Studio refuses to change a node's type, so the node is replaced."""
@@ -8916,9 +9008,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(conflicts, [])
         self.assertEqual([node["name"] for node in self._yaml()["nodes"]], ["Wait"])
         errors = "\n".join(self.project.validate_project())
-        self.assertIn(
-            os.path.join("outbound_campaigns", "reminders", "campaign.yaml"), errors
-        )
+        self.assertIn(os.path.join("outbound_campaigns", "reminders", "campaign.yaml"), errors)
         self.assertIn("If the campaign was deleted or archived in Agent Studio", errors)
         success, message, commands = self.project.push_project(dry_run=True)
         self.assertFalse(success)
