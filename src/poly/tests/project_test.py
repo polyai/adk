@@ -9896,7 +9896,8 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertIn("    9", code)
         self.assertIn("return {}", code)
 
-    def test_renamed_node_taking_a_removed_edited_node_file_conflicts(self):
+    def test_renamed_node_taking_a_removed_edited_node_file_keeps_the_edit(self):
+        """The edit merges against the removed node's saved code, so it is never dropped."""
         self._pull_with_call_code()
         self._write_function("first_call", self.CALL_CODE + "    # local\n")
         projection = self._projection_from_state({"trigger-1": "First call"})
@@ -9907,8 +9908,6 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         conflicts, _ = self.project.pull_project(projection_json=projection)
 
-        first_call = os.path.join(self.folder, "functions", "first_call.py")
-        self.assertIn(first_call, conflicts)
         code = self._read("reminders", "functions", "first_call.py")
         self.assertIn("# local", code)
         self.assertIn("map_contacts", code)
@@ -9986,6 +9985,107 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                     self.assertEqual(self._read("reminders", "functions", "first_call.py"), expected)
                 elif not conflict:
                     self.assertFalse(os.path.exists(path))
+
+    def test_force_pull_after_a_local_trigger_rename_restores_the_trigger_code(self):
+        for format in (False, True):
+            with self.subTest(format=format):
+                self._pull_into_new_project(_campaign_projection())
+                self._rename_locally("Trigger", "Start")
+
+                self.project.pull_project(
+                    projection_json=_campaign_projection(), force=True, format=format
+                )
+
+                self.assertEqual(os.listdir(os.path.join(self.folder, "functions")), ["trigger.py"])
+                self.assertEqual(
+                    self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE
+                )
+                self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def _conflict_a_topic(self) -> None:
+        topics = os.path.join(self.root, "topics")
+        os.makedirs(topics, exist_ok=True)
+        with open(os.path.join(topics, "faq.yaml"), "w", encoding="utf-8") as file:
+            file.write("<<<<<<< local\nname: a\n=======\nname: b\n>>>>>>> remote\n")
+
+    def test_revert_of_a_campaign_file_works_beside_an_unrelated_conflict(self):
+        self._conflict_a_topic()
+        self._write_function("trigger", self.TRIGGER_CODE + "    # local\n")
+        trigger_file = os.path.join(self.folder, "functions", "trigger.py")
+
+        self.project.revert_changes([trigger_file])
+
+        self.assertEqual(self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE)
+
+    def test_revert_of_a_conflicted_function_file_restores_it(self):
+        self._write_function("trigger", "<<<<<<<\na\n=======\nb\n>>>>>>>\n")
+        trigger_file = os.path.join(self.folder, "functions", "trigger.py")
+
+        self.project.revert_changes([trigger_file])
+
+        self.assertEqual(self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE)
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_call_code_never_merges_into_a_local_trigger_at_its_path(self):
+        """Locally First call became Dial, and Trigger became First call."""
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse):
+                self._pull_with_call_code()
+                self._rename_locally("First call", "Dial")
+                self._rename_locally("Trigger", "First call")
+                projection = self._projection_from_state()
+                entity = self._entity(projection)
+                entity["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
+                    self.CALL_CODE + "    # remote\n"
+                )
+                if reverse:
+                    entity["nodes"]["ids"].reverse()
+
+                conflicts, _ = self.project.pull_project(projection_json=projection)
+
+                self.assertEqual(self._read("reminders", "functions", "dial.py"), self.CALL_CODE)
+                first_call = self._read("reminders", "functions", "first_call.py")
+                self.assertIn("map_contacts", first_call)
+                self.assertIn(os.path.join(self.folder, "functions", "first_call.py"), conflicts)
+
+    def test_trigger_renamed_differently_on_each_side_keeps_both_files(self):
+        self._rename_locally("Trigger", "Start")
+
+        self.project.pull_project(
+            projection_json=self._projection_from_state({"trigger-1": "Begin"})
+        )
+
+        self.assertEqual(self._read("reminders", "functions", "start.py"), self.TRIGGER_CODE)
+        self.assertEqual(self._read("reminders", "functions", "begin.py"), self.TRIGGER_CODE)
+
+    def test_interrupted_cleanup_after_a_pull_puts_campaign_files_back(self):
+        before = self._tree()
+        projection = _campaign_projection(name="Monthly", trigger_code="def map_contacts():\n    2\n")
+
+        with patch.object(OutboundCampaign, "remove_empty_files", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.project.pull_project(projection_json=projection)
+
+        self.assertEqual(self._tree(), before)
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(
+            [name for name in os.listdir(os.path.join(self.root, "_gen")) if "pull-" in name], []
+        )
+
+    def test_one_conflicted_campaign_file_leaves_the_others_followed(self):
+        self._pull_two_campaigns("Reminders", "Renewals")
+        renewals = os.path.join(self.root, "outbound_campaigns", "renewals")
+        with open(os.path.join(renewals, "campaign.yaml"), "w", encoding="utf-8") as file:
+            file.write("<<<<<<<\nname: a\n=======\nname: b\n>>>>>>>\n")
+        self._rename_locally("Trigger", "Start")
+
+        local = self.project._scan_local_campaign_code()
+
+        self.assertEqual(local.new, {os.path.join(self.folder, "functions", "start.py"): "trigger"})
+        self.assertNotIn("CMPGN-ONE:trigger-1", local.kept)
+        self.assertEqual(
+            local.kept["CMPGN-TWO:trigger-1"], os.path.join(renewals, "functions", "trigger.py")
+        )
 
     def test_remote_node_rename_carries_a_local_code_edit_to_the_new_file(self):
         edited = self.TRIGGER_CODE + "\n\ndef helper():\n    pass\n"

@@ -7,7 +7,7 @@ import os
 import re
 import zoneinfo
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Optional
+from typing import Any, Callable, ClassVar, Optional
 
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf import outbound_campaigns_pb2 as campaigns_pb2
@@ -1202,6 +1202,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     """
 
     top_level_name = NODES_KEY
+    _names_cache: ClassVar[tuple] = (None, 0, {})
 
     campaign_folder: str = ""
     data: dict = field(default_factory=dict)
@@ -1340,13 +1341,26 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         cls, resource_mappings: Optional[list[ResourceMapping]], path: Optional[str]
     ) -> dict[str, str]:
         folder = campaign_folder_of(path or "")
-        if not folder:
+        if not folder or not resource_mappings:
             return {}
-        return {
-            mapping.resource_id.split(":", 1)[-1]: mapping.resource_name
-            for mapping in resource_mappings or []
-            if mapping.resource_type is cls and campaign_folder_of(mapping.file_path) == folder
-        }
+        return dict(cls._names_by_folder(resource_mappings).get(folder, {}))
+
+    @classmethod
+    def _names_by_folder(
+        cls, resource_mappings: list[ResourceMapping]
+    ) -> dict[str, dict[str, str]]:
+        """Group the node names in `resource_mappings` by campaign folder, once per list."""
+        cached, size, grouped = cls._names_cache
+        if cached is resource_mappings and size == len(resource_mappings):
+            return grouped
+        grouped = {}
+        for mapping in resource_mappings:
+            if mapping.resource_type is cls:
+                grouped.setdefault(campaign_folder_of(mapping.file_path), {})[
+                    mapping.resource_id.split(":", 1)[-1]
+                ] = mapping.resource_name
+        cls._names_cache = (resource_mappings, len(resource_mappings), grouped)
+        return grouped
 
     @classmethod
     def to_pretty_dict(
