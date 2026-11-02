@@ -36,7 +36,7 @@ To rename a campaign, change `name` and rename the folder to match. The campaign
 | `name` | Yes | The campaign's name, under 256 characters. |
 | `description` | No | Text under 1024 characters, or empty for none. |
 | `settings` | No | The campaign's settings (below). Fields left out take their defaults. |
-| `nodes` | Yes | The campaign's nodes (below), in any order you like. |
+| `nodes` | No | The campaign's nodes (below), in any order you like. |
 
 ### Settings
 
@@ -45,7 +45,7 @@ To rename a campaign, change `name` and rename the folder to match. The campaign
 | `startDate`, `endDate` | ISO dates the campaign runs between. |
 | `fromNumber`, `smsFromNumber` | Numbers calls and texts come from. |
 | `defaultVariant` | Name of the variant the campaign's calls use. |
-| `country` | ISO 3166-1 alpha-2 code, e.g. `US`. Required to publish. |
+| `country` | ISO 3166-1 alpha-2 code in capitals, e.g. `US`. Required to publish. |
 | `useCase` | `transactional` or `marketing`. Required to publish. |
 | `dailyContactLimit` | Most times a contact is reached per day. Defaults to `3`. |
 | `voiceDispatchLimits`, `smsDispatchLimits` | `maxConcurrent`, `perHour` and `perDay` caps. |
@@ -135,7 +135,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 - The folder name matches the campaign's name.
 - Settings have the right types and allowed values:
     - `useCase` is `transactional` or `marketing`, and limits are positive whole numbers.
-    - `country` is a real ISO 3166-1 alpha-2 code.
+    - `country` is a real ISO 3166-1 alpha-2 code, in capitals.
     - `defaultTimezone` is a valid IANA time zone.
     - `endDate` is not before `startDate`.
     - `contactWindow` has at least one day, its times are `HH:mm`, and it ends after it starts.

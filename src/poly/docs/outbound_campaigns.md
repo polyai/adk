@@ -24,13 +24,13 @@ The folder name is the campaign's name, lowercased with punctuation replaced by 
   - **startDate**, **endDate**: ISO dates; the end can't be before the start.
   - **fromNumber**, **smsFromNumber**: Numbers calls and texts come from.
   - **defaultVariant**: Name of the variant the campaign's calls use.
-  - **country**: ISO 3166-1 alpha-2 code (e.g. `US`). Required to publish.
+  - **country**: ISO 3166-1 alpha-2 code in capitals (e.g. `US`). Required to publish.
   - **useCase**: `transactional` or `marketing`. Required to publish.
   - **dailyContactLimit**: Most times a contact is reached per day.
   - **voiceDispatchLimits**, **smsDispatchLimits**: `maxConcurrent`, `perHour`, `perDay`.
   - **defaultTimezone**: IANA time zone, used when a contact has none.
   - **contactWindow**: `daysOfWeek` (at least one of `monday` .. `sunday`), `startTime` and `endTime` as `"HH:mm"` in the contact's time zone, ending after it starts.
-- **nodes**: List of nodes, in any order. Each has a **name**, unique in the campaign, a **type**, and that type's fields (below). Nodes refer to each other by name. Names are compared ignoring case and punctuation, so when Agent Studio has nodes named `Call` and `call`, a pull numbers the second one, as in `call 2`. A node Agent Studio has with no name, or with a name another node has, is named on pull and shows as changed until your next push sends that name. Positions on the Agent Studio canvas are not in the file: a node keeps its position, and a new node is placed next to the node that routes to it.
+- **nodes**: Optional list of nodes, in any order. Each has a **name**, unique in the campaign, a **type**, and that type's fields (below). Nodes refer to each other by name. Names are compared ignoring case and punctuation, so when Agent Studio has nodes named `Call` and `call`, a pull numbers the second one, as in `call 2`. A node Agent Studio has with no name, or with a name another node has, is named on pull and shows as changed until your next push sends that name. Positions on the Agent Studio canvas are not in the file: a node keeps its position, and a new node is placed next to the node that routes to it.
 
 A node's name is its identity. Renaming the trigger keeps its id and history. Renaming any other node, or changing its `type`, deletes it and creates a new one with a new id and history; rename its `.py` file to match.
 

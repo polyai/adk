@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import zoneinfo
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Optional
 
 import poly.resources.resource_utils as utils
@@ -221,6 +221,7 @@ def normalise_settings(settings: Any) -> Any:
     if not isinstance(settings, dict):
         return settings
     settings = {**SETTINGS_DEFAULTS, **settings}
+    settings.update({key: None for key, value in settings.items() if value == ""})
     for key in ("voiceDispatchLimits", "smsDispatchLimits"):
         limits = settings.get(key)
         if isinstance(limits, dict):
@@ -548,6 +549,7 @@ class OutboundCampaign(MultiResourceYamlResource):
     node_entries: Any = field(default=None, init=False, repr=False, compare=False)
     unknown_keys: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
     had_trigger: bool = field(default=False, init=False, repr=False, compare=False)
+    saved_identity: Optional[tuple] = field(default=None, init=False, repr=False, compare=False)
 
     @property
     def folder(self) -> str:
@@ -579,7 +581,13 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     @classmethod
     def from_yaml_dict(
-        cls, yaml_dict: dict, resource_id: str, name: str = "", had_trigger: bool = False, **kwargs
+        cls,
+        yaml_dict: dict,
+        resource_id: str,
+        name: str = "",
+        had_trigger: bool = False,
+        known_identity: Optional[tuple] = None,
+        **kwargs,
     ) -> "OutboundCampaign":
         yaml_dict = _strip_strings(_plain(yaml_dict or {}))
         campaign = cls(
@@ -589,6 +597,7 @@ class OutboundCampaign(MultiResourceYamlResource):
             settings=normalise_settings(yaml_dict.get("settings")),
         )
         campaign.had_trigger = had_trigger
+        campaign.saved_identity = known_identity
         return campaign
 
     @classmethod
@@ -739,12 +748,19 @@ class OutboundCampaign(MultiResourceYamlResource):
         campaign.unknown_keys = sorted(set(top) - {*CAMPAIGN_KEYS, NODES_KEY})
         return campaign
 
-    @staticmethod
-    def discover_resources(base_path: str) -> list[str]:
-        return [
-            os.path.join(_campaign_file(base_path, folder), CAMPAIGN_KEY)
-            for folder in _campaign_folders_on_disk(base_path)
-        ]
+    @classmethod
+    def discover_resources(cls, base_path: str) -> list[str]:
+        discovered = []
+        for folder in _campaign_folders_on_disk(base_path):
+            path = _campaign_file(base_path, folder)
+            try:
+                cls._get_top_level_data(path)
+            except utils.MergeConflictError:
+                raise
+            except Exception:
+                pass
+            discovered.append(os.path.join(path, CAMPAIGN_KEY))
+        return discovered
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         errors = self.validation_errors(resource_mappings)
@@ -811,6 +827,11 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     def build_delete_proto(self) -> campaigns_pb2.OutboundCampaign_Delete:
         return campaigns_pb2.OutboundCampaign_Delete(id=self.resource_id)
+
+    @property
+    def identity(self) -> tuple:
+        """The name and description, the fields an `outbound_campaign_update` sends."""
+        return (self.name, self.description)
 
     def settings_change(self) -> "OutboundCampaignSettings":
         """Return the settings as a change to send. Settings are always sent whole."""
@@ -896,10 +917,10 @@ def _settings_errors(settings: Any) -> list[str]:
     if isinstance(start, str) and isinstance(end, str) and end < start:
         errors.append("Setting 'endDate' can't be before 'startDate'.")
     country = settings.get("country")
-    if country is not None and (
-        not isinstance(country, str) or country.strip().upper() not in COUNTRY_CODES
-    ):
-        errors.append("Setting 'country' must be an ISO 3166-1 alpha-2 country code, e.g. US.")
+    if country is not None and country not in COUNTRY_CODES:
+        errors.append(
+            "Setting 'country' must be an ISO 3166-1 alpha-2 country code in capitals, e.g. US."
+        )
     timezone = settings.get("defaultTimezone")
     if isinstance(timezone, str) and TIMEZONES and timezone.lower() not in TIMEZONES:
         errors.append(f"Setting 'defaultTimezone' must be an IANA time zone, not '{timezone}'.")
@@ -1151,6 +1172,8 @@ class OutboundCampaignNode(MultiResourceYamlResource):
 
     saved_type: Optional[str] = field(default=None, init=False, repr=False, compare=False)
     saved_label: Optional[str] = field(default=None, init=False, repr=False, compare=False)
+    saved_data: Optional[dict] = field(default=None, init=False, repr=False, compare=False)
+    saved_code: Optional[str] = field(default=None, init=False, repr=False, compare=False)
     campaign_has_trigger: bool = field(default=False, init=False, repr=False, compare=False)
 
     @property
@@ -1172,6 +1195,11 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             NODES_KEY,
             utils.clean_name(self.name, lowercase=False),
         )
+
+    @property
+    def platform_name(self) -> str:
+        """The label Agent Studio has for the node: its name, unless pull had to rename it."""
+        return self.name if self.platform_label is None else self.platform_label
 
     @property
     def function_file(self) -> str:
@@ -1226,6 +1254,8 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         known_position: Optional[dict] = None,
         known_type: Optional[str] = None,
         known_label: Optional[str] = None,
+        known_data: Optional[dict] = None,
+        known_code: Optional[str] = None,
         **kwargs,
     ) -> "OutboundCampaignNode":
         yaml_dict = _strip_strings(_plain(yaml_dict or {}))
@@ -1238,6 +1268,8 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         )
         node.saved_type = known_type
         node.saved_label = known_label
+        node.saved_data = known_data
+        node.saved_code = known_code
         return node
 
     @classmethod
@@ -1361,7 +1393,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             errors.append("The trigger can't change type unless another node becomes the trigger.")
         if len(self.name) > 256:
             errors.append("The name must be under 256 characters.")
-        if resource_mappings is not None and isinstance(self.data, dict):
+        if resource_mappings is not None and isinstance(self.data, dict) and self._routes_changed():
             known = self._names_by_id(resource_mappings, self.file_path)
             errors.extend(
                 f"'{target}' is not a node in this campaign."
@@ -1377,12 +1409,29 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             and isinstance(function.get("name"), str)
             and PYTHONIC_NAME.fullmatch(function["name"])
             and parameters
+            and self._function_changed()
         ):
             error = def_line_error(function["name"], self.code, parameters)
             if error:
                 errors.append(f"{self.function_file}: {error}.")
         if errors:
             raise ValueError("; ".join(errors))
+
+    def _routes_changed(self) -> bool:
+        return self.saved_data is None or route_targets(self.data) != route_targets(self.saved_data)
+
+    def _function_changed(self) -> bool:
+        """Agent Studio checks the `def` line only when the code or its contract changes."""
+        if self.saved_data is None or self.code != self.saved_code:
+            return True
+        saved_function = self.saved_data.get("function") or {}
+        return (self.data.get("function") or {}).get("name") != saved_function.get(
+            "name"
+        ) or function_parameters(self.data) != function_parameters(self.saved_data)
+
+    def is_same_file_entry(self, saved: "OutboundCampaignNode") -> bool:
+        """Whether only the function code, which lives in its own file, differs from `saved`."""
+        return replace(self, code=saved.code).compute_hash() == saved.compute_hash()
 
     def _position_proto(self) -> campaigns_pb2.Position:
         position = self.position or {}
@@ -1424,7 +1473,8 @@ class OutboundCampaignFunction(Resource):
     """A node's function code in `functions/<node name>.py`.
 
     Pull writes it and the node reads it, so an edit shows up as a change to the node. It is
-    never sent on its own.
+    never sent on its own. Its id is its node's, so a pull that renames the node or the
+    campaign moves the file and merges it instead of replacing it.
     """
 
     campaign_folder: str = ""
@@ -1432,15 +1482,9 @@ class OutboundCampaignFunction(Resource):
     code: str = ""
 
     @staticmethod
-    def id_for(campaign_folder: str, stem: str) -> str:
-        """Return the status-file id for a node's function file."""
-        return f"{campaign_folder}/{stem}"
-
-    @classmethod
-    def id_from_path(cls, file_path: str) -> str:
-        """Return the status-file id for the function file at `file_path`."""
-        stem = os.path.splitext(os.path.basename(file_path))[0]
-        return cls.id_for(campaign_folder_of(file_path), stem)
+    def stem_from_path(file_path: str) -> str:
+        """Return the stem of the function file at `file_path`."""
+        return os.path.splitext(os.path.basename(file_path))[0]
 
     @property
     def file_path(self) -> str:
@@ -1470,7 +1514,7 @@ class OutboundCampaignFunction(Resource):
                 continue
             stem = function_file_stem(node.name)
             resource = cls(
-                resource_id=cls.id_for(node.campaign_folder, stem),
+                resource_id=node.resource_id,
                 name=stem,
                 campaign_folder=node.campaign_folder,
                 stem=stem,
@@ -1483,7 +1527,7 @@ class OutboundCampaignFunction(Resource):
     def read_local_resource(
         cls, file_path: str, resource_id: str, resource_name: str, **kwargs
     ) -> "OutboundCampaignFunction":
-        stem = os.path.splitext(os.path.basename(file_path))[0]
+        stem = cls.stem_from_path(file_path)
         return cls(
             resource_id=resource_id,
             name=stem,
