@@ -472,7 +472,8 @@ def node_names(nodes: list[dict]) -> dict[str, str]:
     """Return each platform node's name by id: its label, or a default for its type.
 
     Labels are kept as they are when present and unique. A node without one, or whose label
-    another node already has, gets its type's default name, numbered if that is taken too.
+    another node already has, gets that label numbered, or its type's default name when the
+    label is only punctuation or symbols.
     """
     names: dict[str, str] = {}
     taken: set[str] = set()
@@ -485,7 +486,11 @@ def node_names(nodes: list[dict]) -> dict[str, str]:
         else:
             unnamed.append((node, label))
     for node, label in unnamed:
-        base = label or DEFAULT_NODE_NAMES.get((node.get("data") or {}).get("type"), "Node")
+        base = (
+            label
+            if utils.clean_name(label)
+            else DEFAULT_NODE_NAMES.get((node.get("data") or {}).get("type"), "Node")
+        )
         name, number = base, 2
         while utils.clean_name(name) in taken:
             name, number = f"{base} {number}", number + 1
@@ -542,6 +547,7 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     node_entries: Any = field(default=None, init=False, repr=False, compare=False)
     unknown_keys: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
+    on_platform: bool = field(default=False, init=False, repr=False, compare=False)
 
     @property
     def folder(self) -> str:
@@ -573,15 +579,17 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     @classmethod
     def from_yaml_dict(
-        cls, yaml_dict: dict, resource_id: str, name: str = "", **kwargs
+        cls, yaml_dict: dict, resource_id: str, name: str = "", on_platform: bool = False, **kwargs
     ) -> "OutboundCampaign":
         yaml_dict = _strip_strings(_plain(yaml_dict or {}))
-        return cls(
+        campaign = cls(
             resource_id=resource_id,
             name=yaml_dict.get("name") or "",
             description=yaml_dict.get("description"),
             settings=normalise_settings(yaml_dict.get("settings")),
         )
+        campaign.on_platform = on_platform
+        return campaign
 
     @classmethod
     def _top_level(cls, file_path: str) -> dict:
@@ -720,7 +728,7 @@ class OutboundCampaign(MultiResourceYamlResource):
         )
         folder = campaign_folder_of(file_path)
         expected = utils.clean_name(campaign.name)
-        if folder != expected and not folder.startswith(f"{expected}-"):
+        if expected and folder != expected and not folder.startswith(f"{expected}-"):
             raise ValueError(
                 f"Campaign folder name does not match campaign name '{campaign.name}'. "
                 f"{folder} != {expected}"
@@ -747,7 +755,12 @@ class OutboundCampaign(MultiResourceYamlResource):
         """Return every problem the platform would reject, so `validate` can report them all at once."""
         errors: list[str] = []
         if not isinstance(self.name, str) or not self.name.strip():
-            errors.append("Name is required.")
+            errors.append(
+                "Name is required. If the campaign was deleted or archived in Agent Studio, "
+                "name it to create it again, or delete its folder."
+                if self.node_entries
+                else "Name is required."
+            )
         elif len(self.name) > 256:
             errors.append("Name must be under 256 characters.")
         if self.description is not None:
@@ -759,6 +772,15 @@ class OutboundCampaign(MultiResourceYamlResource):
             errors.append(f"Unknown fields: {', '.join(self.unknown_keys)}.")
         errors.extend(_settings_errors(self.settings))
         errors.extend(_node_entry_errors(self.node_entries))
+        if (
+            self.on_platform
+            and isinstance(self.node_entries, (list, type(None)))
+            and not _has_trigger(self.node_entries)
+        ):
+            errors.append(
+                "The campaign needs its trigger node: rename or replace the trigger rather than "
+                "delete it."
+            )
 
         variant_id = self.settings.get(VARIANT_ID_KEY) if isinstance(self.settings, dict) else None
         if variant_id and resource_mappings is not None:
@@ -845,6 +867,12 @@ def _node_entry_errors(entries: Any) -> list[str]:
     if triggers > 1:
         errors.append("A campaign can have only one trigger node.")
     return errors
+
+
+def _has_trigger(entries: Optional[list]) -> bool:
+    return any(
+        isinstance(entry, dict) and entry.get("type") == "trigger" for entry in entries or []
+    )
 
 
 def _settings_errors(settings: Any) -> list[str]:
@@ -1109,7 +1137,8 @@ class OutboundCampaignNode(MultiResourceYamlResource):
 
     The id is `<campaign id>:<node id>`. Routes name the nodes they lead to. The position is
     kept from the last pull, as a flow step's is, and the function code lives in
-    `functions/<node name>.py`.
+    `functions/<node name>.py`. `platform_label` is set only when pull named the node other than
+    Agent Studio's label, so the saved hash differs and the next push sends the name.
     """
 
     top_level_name = NODES_KEY
@@ -1118,6 +1147,9 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     data: dict = field(default_factory=dict)
     position: Optional[dict] = None
     code: str = ""
+    platform_label: Optional[str] = field(default=None, repr=False, compare=False)
+
+    saved_type: Optional[str] = field(default=None, init=False, repr=False, compare=False)
 
     @property
     def campaign_id(self) -> str:
@@ -1169,9 +1201,10 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         return {"name": self.name, **self.data}
 
     def compute_hash(self) -> str:
-        return utils.compute_hash_from_dict(
-            {"node": _strip_strings(self.to_yaml_dict()), "code": self.code}
-        )
+        node = self.to_yaml_dict()
+        if self.platform_label is not None:
+            node["name"] = self.platform_label
+        return utils.compute_hash_from_dict({"node": _strip_strings(node), "code": self.code})
 
     @classmethod
     def from_yaml_dict(
@@ -1180,16 +1213,19 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         resource_id: str,
         name: str = "",
         known_position: Optional[dict] = None,
+        known_type: Optional[str] = None,
         **kwargs,
     ) -> "OutboundCampaignNode":
         yaml_dict = _strip_strings(_plain(yaml_dict or {}))
         node_name = yaml_dict.pop("name", None) or name
-        return cls(
+        node = cls(
             resource_id=resource_id,
             name=node_name,
             data=normalise_node_data(yaml_dict),
             position=known_position,
         )
+        node.saved_type = known_type
+        return node
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "OutboundCampaignNode"]:
@@ -1201,13 +1237,16 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             names = node_names(platform_nodes)
             for platform_node in platform_nodes:
                 data = platform_node.get("data") or {}
+                name = names[platform_node["id"]]
+                label = platform_node.get("label") or ""
                 node = cls(
                     resource_id=f"{campaign['id']}:{platform_node['id']}",
-                    name=names[platform_node["id"]],
+                    name=name,
                     campaign_folder=folders[campaign["id"]],
                     data=_strip_strings(normalise_node_data(data, from_platform=True)),
                     position=_normalise_position(platform_node.get("position")),
                     code=(data.get("function") or {}).get("code") or "",
+                    platform_label=None if label == name else label,
                 )
                 nodes[node.resource_id] = node
         return nodes
@@ -1298,6 +1337,10 @@ class OutboundCampaignNode(MultiResourceYamlResource):
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         errors = node_data_errors(self.data, self.function_file)
+        if self.saved_type == "trigger" and (
+            not isinstance(self.data, dict) or self.data.get("type") != "trigger"
+        ):
+            errors.append("The trigger can't change type. Add a node of the new type instead.")
         if len(self.name) > 256:
             errors.append("The name must be under 256 characters.")
         if resource_mappings is not None and isinstance(self.data, dict):

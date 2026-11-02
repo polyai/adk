@@ -2347,12 +2347,15 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == OutboundCampaign:
+            additional_kwargs["on_platform"] = isinstance(original_resource, OutboundCampaign)
+
         if resource_class == OutboundCampaignNode:
-            additional_kwargs["known_position"] = (
-                original_resource.position
-                if isinstance(original_resource, OutboundCampaignNode)
-                else None
+            saved_node = (
+                original_resource if isinstance(original_resource, OutboundCampaignNode) else None
             )
+            additional_kwargs["known_position"] = saved_node.position if saved_node else None
+            additional_kwargs["known_type"] = saved_node.data.get("type") if saved_node else None
 
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):

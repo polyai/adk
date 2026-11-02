@@ -10,6 +10,7 @@ Copyright PolyAI Limited
 """
 
 import copy
+import uuid
 from typing import Callable, TypeAlias
 
 from poly.resources import (
@@ -290,12 +291,15 @@ def group_outbound_campaign_changes(
     """Finish the campaign changes in place.
 
     Function files have no command of their own: an edit to one already shows as a change to
-    its node. A renamed folder keeps its campaign's id and its nodes' ids, and deleting a
-    campaign deletes its nodes with it.
+    its node. A renamed folder keeps its campaign's id and its nodes' ids, a node that changes
+    type is replaced, a renamed trigger keeps its id, and deleting a campaign deletes its nodes
+    with it.
     """
     for changes in (new_resources, updated_resources, deleted_resources):
         changes.pop(OutboundCampaignFunction, None)
     pair_renamed_campaigns(state, new_resources, updated_resources, deleted_resources)
+    replace_retyped_campaign_nodes(state, new_resources, updated_resources, deleted_resources)
+    pair_replaced_campaign_triggers(state, new_resources, updated_resources, deleted_resources)
     prune_cascade_deleted_campaign_nodes(deleted_resources)
 
 
@@ -379,18 +383,116 @@ def _carry_campaign_ids(
     saved_nodes = _campaign_nodes(deleted_resources, old_id)
     new_nodes = _campaign_nodes(new_resources, new_id)
     carried_ids = {node.node_id: saved_nodes[name].node_id for name, node in new_nodes.items()}
-    state_nodes = state.setdefault(OutboundCampaignNode, {})
     for name, node in new_nodes.items():
-        saved = saved_nodes[name]
         node.data = map_route_targets(node.data, lambda target: carried_ids.get(target, target))
-        new_resources[OutboundCampaignNode].pop(node.resource_id)
-        deleted_resources[OutboundCampaignNode].pop(saved.resource_id)
-        state_nodes.pop(node.resource_id, None)
-        node.resource_id = saved.resource_id
-        node.position = saved.position
-        state_nodes[node.resource_id] = node
-        if node.compute_hash() != saved.compute_hash():
+        _carry_node_id(
+            state, new_resources, updated_resources, deleted_resources, node, saved_nodes[name]
+        )
+
+
+def _carry_node_id(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+    node: OutboundCampaignNode,
+    saved: OutboundCampaignNode,
+) -> None:
+    new_resources[OutboundCampaignNode].pop(node.resource_id)
+    deleted_resources[OutboundCampaignNode].pop(saved.resource_id)
+    state_nodes = state.setdefault(OutboundCampaignNode, {})
+    state_nodes.pop(node.resource_id, None)
+    node.resource_id = saved.resource_id
+    node.position = saved.position
+    state_nodes[node.resource_id] = node
+    if node.compute_hash() != saved.compute_hash():
+        updated_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
+
+
+def _remap_campaign_routes(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    campaign_id: str,
+    node_ids: dict[str, str],
+) -> None:
+    for node in _campaign_nodes(state, campaign_id).values():
+        data = map_route_targets(node.data, lambda target: node_ids.get(target, target))
+        if data == node.data:
+            continue
+        node.data = data
+        if node.resource_id not in new_resources.get(OutboundCampaignNode, {}):
             updated_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
+
+
+def replace_retyped_campaign_nodes(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+) -> None:
+    """Push a node whose type changed as a delete and a create under a new id.
+
+    Agent Studio refuses to change a node's type, so the node is replaced as a rename would
+    replace it, and the routes leading to it follow it to its new id. The trigger is left alone:
+    validation refuses changing its type.
+    """
+    updated_nodes = updated_resources.get(OutboundCampaignNode, {})
+    for resource_id, node in list(updated_nodes.items()):
+        node_type = node.data.get("type")
+        if node.saved_type in (None, "trigger", node_type):
+            continue
+        updated_nodes.pop(resource_id)
+        deleted_resources.setdefault(OutboundCampaignNode, {})[resource_id] = copy.copy(node)
+        old_node_id = node.node_id
+        state_nodes = state.setdefault(OutboundCampaignNode, {})
+        state_nodes.pop(resource_id, None)
+        node.resource_id = f"{node.campaign_id}:{node_type}-{uuid.uuid4()}"
+        node.saved_type = None
+        state_nodes[node.resource_id] = node
+        new_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
+        _remap_campaign_routes(
+            state,
+            new_resources,
+            updated_resources,
+            node.campaign_id,
+            {old_node_id: node.node_id},
+        )
+    _prune_empty((updated_resources,), (OutboundCampaignNode,))
+
+
+def pair_replaced_campaign_triggers(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+) -> None:
+    """Push a campaign's one deleted trigger and one new trigger as an update of the old one.
+
+    Agent Studio refuses to delete a campaign's only trigger, so a renamed or replaced trigger
+    takes the old trigger's id and position, and the routes leading to it follow.
+    """
+    new_triggers = _triggers_by_campaign(new_resources)
+    deleted_triggers = _triggers_by_campaign(deleted_resources)
+    for campaign_id, triggers in new_triggers.items():
+        saved_triggers = deleted_triggers.get(campaign_id, [])
+        if len(triggers) != 1 or len(saved_triggers) != 1:
+            continue
+        [node], [saved] = triggers, saved_triggers
+        new_node_id = node.node_id
+        _carry_node_id(state, new_resources, updated_resources, deleted_resources, node, saved)
+        _remap_campaign_routes(
+            state, new_resources, updated_resources, campaign_id, {new_node_id: node.node_id}
+        )
+    _prune_empty((new_resources, updated_resources, deleted_resources), (OutboundCampaignNode,))
+
+
+def _triggers_by_campaign(changes: ResourceMap) -> dict[str, list[OutboundCampaignNode]]:
+    triggers: dict[str, list[OutboundCampaignNode]] = {}
+    for node in changes.get(OutboundCampaignNode, {}).values():
+        if isinstance(node, OutboundCampaignNode) and node.data.get("type") == "trigger":
+            triggers.setdefault(node.campaign_id, []).append(node)
+    return triggers
 
 
 def prune_cascade_deleted_campaign_nodes(deleted_resources: ResourceMap) -> None:
