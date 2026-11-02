@@ -109,7 +109,7 @@ poly campaign test 'Appointment reminders' --phone +15550100 --start-node 'Remin
 
 | Flag | Description |
 |---|---|
-| `--contact` | JSON file with the test contact: `phone`, `firstName`, `lastName`, `externalId`, `metadata`. |
+| `--contact` | JSON file with the test contact: `phone`, `firstName`, `lastName`, `externalId`, `metadata`. Other keys are refused; put other columns in `metadata`. |
 | `--phone` | Number to call and text. |
 | `--first-name`, `--last-name` | The contact's name. |
 | `--external-id` | The contact's id in your own system. |

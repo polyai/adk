@@ -14,8 +14,10 @@ from poly.output.json_output import json_print, json_progress
 
 LIFECYCLE_ACTIONS = {
     "publish": (
-        "Publish the campaign's draft to live and start it.",
-        "Publish campaign '{name}' to live? It starts contacting people.",
+        "Publish the campaign's draft to live. It starts contacting people unless the "
+        "campaign is paused.",
+        "Publish campaign '{name}' to live? It starts contacting people unless the campaign is "
+        "paused.",
         "Published campaign '{name}'.",
     ),
     "pause": (
@@ -161,7 +163,7 @@ class CampaignCommand(BaseCommand):
             type=str,
             default=None,
             help="JSON file with the test contact: phone, firstName, lastName, externalId, "
-            "metadata.",
+            "metadata. Other columns go in metadata.",
         )
         test_parser.add_argument("--phone", type=str, default=None, help="Number to call/text.")
         test_parser.add_argument("--first-name", type=str, default=None, help="First name.")
@@ -667,7 +669,7 @@ class CampaignCommand(BaseCommand):
 
         started = cls._call(
             output_json,
-            lambda: project.start_campaign_test(name, contact, body=body),
+            lambda: project.start_campaign_test(name, body),
             interrupted=project.campaign_test_unconfirmed(
                 "You stopped the command while the step was starting",
                 campaign.name,
@@ -714,7 +716,7 @@ class CampaignCommand(BaseCommand):
                 )
             if done:
                 success("Test step finished.")
-            else:
+            elif not cls._stopped_at_error(step.get("result")):
                 error(failure)
         if not done:
             sys.exit(1)

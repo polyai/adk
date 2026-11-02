@@ -7257,7 +7257,7 @@ class CampaignCommandTest(unittest.TestCase):
                 confirm.assert_not_called()
                 self.assertEqual(
                     error.call_args.args[0],
-                    f"Campaign '{self.CAMPAIGN}' is not on main, or is already archived. A "
+                    f"No campaign named '{self.CAMPAIGN}' on main, or it is already archived. A "
                     "campaign made on a branch must be merged first. Campaigns on main: none.",
                 )
         self.request.assert_not_called()
@@ -7308,8 +7308,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertEqual(exit.exception.code, 1)
         success.assert_not_called()
         messages = [call.args[0] for call in error.call_args_list]
-        self.assertIn("FunctionFailed at Reminder call", messages)
-        self.assertEqual(messages[-1], "Test step stopped at an error: FunctionFailed.")
+        self.assertEqual(messages, ["FunctionFailed at Reminder call"])
 
     def test_json_test_writes_the_run_to_stderr_when_the_step_starts(self):
         """With --json, the step and run reach stderr before waiting, in case the wait is cut."""
@@ -7949,6 +7948,153 @@ class CampaignCommandTest(unittest.TestCase):
         with patch("poly.output.console.warning") as warning:
             CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN)
         warning.assert_called_once_with("Your branch no longer exists, so this ran on main.")
+
+    def test_unreadable_answers_after_sending_are_unconfirmed(self):
+        """A body cut off or not JSON, on a start or a live change, may follow the change."""
+        cut_off = requests.exceptions.ChunkedEncodingError("Connection broken")
+        not_json = make_mock_response(202, content=b"queued")
+        for case, answer in {"cut off": cut_off, "not json": not_json}.items():
+            with self.subTest(case=case, command="test"):
+                output = self._start_test_after(answer)
+
+                self.assertTrue(output["unconfirmed"])
+                self.assertIn("answer could not be read", output["error"])
+
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        for case, answer in {
+            "cut off": cut_off,
+            "not json": make_mock_response(200, content=b"ok"),
+        }.items():
+            with self.subTest(case=case, command="resume"):
+                self.post.side_effect = [answer]
+
+                with self.assertRaises(SystemExit):
+                    CampaignCommand.campaign_lifecycle(
+                        TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+                    )
+
+                self.assertTrue(self._output()["unconfirmed"])
+                self.assertIn("may have gone through", self._output()["error"])
+
+    def test_refusals_are_plain_failures(self):
+        """A 4xx refusal was not acted on, so it is a plain failure."""
+        output = self._start_test_after(
+            self._platform_error(422, "VALIDATION_FAILED", "Invalid test contact")
+        )
+
+        self.assertNotIn("unconfirmed", output)
+        self.assertEqual(
+            output["error"], f"Could not test campaign '{self.CAMPAIGN}': Invalid test contact"
+        )
+
+    def test_test_contact_keys_the_platform_drops_are_refused(self):
+        """Preview's import shape is refused for a test, before anything is sent."""
+        with (
+            patch("questionary.confirm") as confirm,
+            self.assertRaises(SystemExit) as exit,
+        ):
+            CampaignCommand.campaign_test(
+                TEST_DIR,
+                self.CAMPAIGN,
+                contact_file='{"phone": "+15550100", "first_name": "Ada", "plan": "gold"}',
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        confirm.assert_not_called()
+        self.request.assert_not_called()
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_test(
+                TEST_DIR,
+                self.CAMPAIGN,
+                contact_file='{"phone": "+15550100", "first_name": "Ada", "plan": "gold"}',
+                output_json=True,
+            )
+        self.assertEqual(
+            self._output()["error"],
+            "The test contact has keys the platform doesn't take: first_name, plan. Use phone, "
+            "firstName, lastName, externalId and metadata, and put other columns in metadata.",
+        )
+
+    def test_lifecycle_refusal_drops_the_command_prefix(self):
+        """The command batch's "[command 1: …]" prefix is not shown."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = self._platform_error(
+            409,
+            "CAMPAIGN_LIFECYCLE_REFUSED",
+            f"[command 1: outboundCampaignArchiveDefinition ({self.CAMPAIGN_ID})] The campaign "
+            "could not be archived. Refresh to see its current status",
+        )
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "archive", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(
+            self._output()["error"],
+            f"Could not archive campaign '{self.CAMPAIGN}': The campaign could not be archived. "
+            "Run `poly pull` on main to see its current status",
+        )
+
+    def test_live_campaign_missing_on_main_lists_main_campaigns(self):
+        """A name main lacks lists main's campaigns, whatever the branch holds."""
+        from poly.resources import OutboundCampaign
+
+        live = dataclasses.replace(
+            self.project.resources[OutboundCampaign][self.CAMPAIGN_ID], name="Live reminders"
+        )
+        self._on_branch({OutboundCampaign: {self.CAMPAIGN_ID: live}})
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "pause", "Nope", force=True, output_json=True
+            )
+
+        self.assertEqual(
+            self._output()["error"],
+            "No campaign named 'Nope' on main, or it is already archived. A campaign made on a "
+            "branch must be merged first. Campaigns on main: Live reminders.",
+        )
+
+    def test_validate_checks_the_branch_once(self):
+        """The branch is looked up once per command, not again for the request."""
+        self.project.branch_id = "BRANCH-1"
+        check = patch.object(
+            self.project.api_handler.sync_client, "assert_branch_exists", return_value="BRANCH-1"
+        ).start()
+        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
+
+        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+
+        check.assert_called_once()
+        self.assertNotIn("branch", self._output())
+
+    def test_poll_through_a_broken_proxy_or_tls_ends_at_once(self):
+        """A proxy or TLS failure while polling will not pass, so the wait ends with the run."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        for failure in (
+            requests.exceptions.ProxyError("proxy refused"),
+            requests.exceptions.SSLError("bad certificate"),
+        ):
+            with self.subTest(failure=type(failure).__name__):
+                self.request.reset_mock()
+                self.request.side_effect = [
+                    make_mock_response(
+                        202, {"step_id": "TSTEP-1", "status": "queued", "run": run}
+                    ),
+                    failure,
+                ]
+
+                with patch("poly.project.time.sleep") as sleep, self.assertRaises(SystemExit):
+                    CampaignCommand.campaign_test(
+                        TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
+                    )
+
+                sleep.assert_not_called()
+                self.assertEqual(self.request.call_count, 2)
+                output = self._output()
+                self.assertEqual((output["step_id"], output["run"]), ("TSTEP-1", run))
 
     def test_parsed_command_line_reaches_validate(self):
         """`poly campaign validate <name> --json` is wired through the parser to the handler."""

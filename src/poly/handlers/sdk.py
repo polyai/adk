@@ -702,7 +702,7 @@ class SourcererSDK:
             SourcererAPIError: If the API request fails or no commands in queue
         """
         if not self._command_queue:
-            raise SourcererAPIError("No commands in queue to send")
+            raise CommandBatchNotSent("No commands in queue to send")
 
         try:
             # Create command batch from queued commands
@@ -733,9 +733,9 @@ class SourcererSDK:
             for i, cmd in enumerate(command_batch.commands):
                 logger.debug(f"  - Command {i}: type={cmd.type}, id={cmd.command_id}")
                 if not cmd.type:
-                    raise SourcererAPIError(f"Command {i} has no type")
+                    raise CommandBatchNotSent(f"Command {i} has no type")
                 if not cmd.command_id:
-                    raise SourcererAPIError(f"Command {i} has no command_id")
+                    raise CommandBatchNotSent(f"Command {i} has no command_id")
 
             # Serialize the protobuf message to bytes
             try:
@@ -751,7 +751,7 @@ class SourcererSDK:
 
             except Exception as e:
                 logger.exception(f"✗ Protobuf serialization failed: {e}")
-                raise SourcererAPIError(f"Failed to serialize command batch: {e}")
+                raise CommandBatchNotSent(f"Failed to serialize command batch: {e}")
 
             url = self._get_command_batch_url(branch_id)
             logger.info(f"Sending to URL: {url}")
@@ -769,7 +769,10 @@ class SourcererSDK:
             try:
                 response_data = response.json()
             except (ValueError, json.JSONDecodeError):
-                raise SourcererAPIError(f"Failed to parse response: {response.text}")
+                raise SourcererAPIError(
+                    f"Failed to parse response: {response.text}",
+                    status_code=response.status_code,
+                )
 
             if response_data.get("error"):
                 raise SourcererAPIError(

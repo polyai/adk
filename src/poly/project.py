@@ -8,6 +8,7 @@ import copy
 import json
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -83,6 +84,9 @@ MAX_TEST_RUN_NAME_LENGTH = 120
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
+
+
+TEST_CONTACT_KEYS = frozenset({"phone", "firstName", "lastName", "externalId", "metadata"})
 
 
 class CampaignOutcomeUnconfirmed(SourcererAPIError):
@@ -4009,16 +4013,14 @@ class AgentStudioProject:
         main too: the local copy may be stale.
 
         Raises:
-            ValueError: if main has no campaign by that name (saying so when the current
-                branch has one), or several.
+            ValueError: if main has no campaign by that name, or several.
         """
         live = list(self._campaign_resources(live=True).get(OutboundCampaign, {}).values())
         if campaign := self._match_campaign(name, live):
             return campaign
-        local = self.get_campaign(name)
         known = ", ".join(sorted(campaign.name for campaign in live)) or "none"
         raise ValueError(
-            f"Campaign '{local.name}' is not on main, or is already archived. A campaign made on "
+            f"No campaign named '{name}' on main, or it is already archived. A campaign made on "
             f"a branch must be merged first. Campaigns on main: {known}."
         )
 
@@ -4053,7 +4055,7 @@ class AgentStudioProject:
     def _campaign_error(
         action: str, campaign: OutboundCampaign, error: SourcererAPIError
     ) -> SourcererAPIError:
-        reason = error.server_message or str(error)
+        reason = re.sub(r"^\[command [^\]]*\] ", "", error.server_message or "") or str(error)
         if not error.server_message and error.status_code:
             try:
                 reason = f"HTTP {error.status_code} {HTTPStatus(error.status_code).phrase}"
@@ -4185,6 +4187,13 @@ class AgentStudioProject:
     ) -> dict[str, Any]:
         if not isinstance(contact, dict) or not isinstance(contact.get("phone"), str):
             raise ValueError("The test contact needs a phone number.")
+        unknown = sorted(set(contact) - TEST_CONTACT_KEYS)
+        if unknown:
+            raise ValueError(
+                f"The test contact has keys the platform doesn't take: {', '.join(unknown)}. "
+                "Use phone, firstName, lastName, externalId and metadata, and put other columns "
+                "in metadata."
+            )
         outcome = self._send_outcome(send_result, send_state)
         if outcome is not None and run is None:
             raise ValueError(
@@ -4222,43 +4231,39 @@ class AgentStudioProject:
         send_result: Optional[str] = None,
         send_state: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        """Check a test step's inputs as `start_campaign_test` would, without starting it.
-
-        Returns:
-            The step's request body, to pass to `start_campaign_test` as `body`.
-
-        Raises:
-            ValueError: as `start_campaign_test` does.
-        """
-        campaign = self.get_live_campaign(name)
-        return self._campaign_test_body(campaign, contact, start_node, run, send_result, send_state)
-
-    def start_campaign_test(
-        self,
-        name: str,
-        contact: dict[str, Any],
-        start_node: Optional[str] = None,
-        run: Optional[dict[str, str]] = None,
-        send_result: Optional[str] = None,
-        send_state: Optional[dict[str, Any]] = None,
-        body: Optional[dict[str, Any]] = None,
-    ) -> dict[str, Any]:
-        """Start one real test step of the live campaign, which calls and texts `contact`.
+        """Check a test step's inputs and build its request body, without starting it.
 
         A first step takes neither `start_node` (a node's name or id) nor `run`; a later step
         needs both, from the step before it. Carrying on from a call or text, `send_result` and
         `send_state` say what it reported. `start_node` is named as the node is on main, which
-        the test runs. `body`, from `check_campaign_test`, stands in for those step inputs.
+        the test runs. `contact` takes phone, firstName, lastName, externalId and metadata.
+
+        Returns:
+            The step's request body, to pass to `start_campaign_test`.
 
         Raises:
-            ValueError: if the contact has no phone, the step inputs don't fit together, main
-                does not have the campaign, or `start_node` names no node of it on main.
+            ValueError: if the contact has no phone or keys the platform doesn't take, the step
+                inputs don't fit together, main does not have the campaign, or `start_node`
+                names no node of it on main.
         """
         campaign = self.get_live_campaign(name)
-        if body is None:
-            body = self._campaign_test_body(
-                campaign, contact, start_node, run, send_result, send_state
-            )
+        return self._campaign_test_body(campaign, contact, start_node, run, send_result, send_state)
+
+    def start_campaign_test(self, name: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Start one real test step of the live campaign, which calls and texts its contact.
+
+        Args:
+            name: The campaign's name or folder, as main has it.
+            body: The step's request body, from `check_campaign_test`.
+
+        Raises:
+            ValueError: if main does not have the campaign.
+            CampaignOutcomeUnconfirmed: if the platform's answer leaves it unclear whether the
+                step started.
+            SourcererAPIError: if the platform refuses the step.
+        """
+        campaign = self.get_live_campaign(name)
+        phone = (body.get("contact") or {}).get("phone")
         try:
             return self.api_handler.start_outbound_campaign_test_step(campaign.resource_id, body)
         except SourcererAPIError as e:
@@ -4266,9 +4271,7 @@ class AgentStudioProject:
                 "test",
                 campaign,
                 e,
-                lambda reason: self.campaign_test_unconfirmed(
-                    reason, campaign.name, contact.get("phone")
-                ),
+                lambda reason: self.campaign_test_unconfirmed(reason, campaign.name, phone),
             ) from e
 
     @classmethod
@@ -4294,9 +4297,7 @@ class AgentStudioProject:
         if isinstance(error, CommandBatchNotSent):
             return None
         cause = error.__cause__
-        if isinstance(cause, requests.exceptions.ReadTimeout):
-            return "The platform did not answer in time"
-        if isinstance(cause, requests.exceptions.ConnectionError) and not isinstance(
+        if isinstance(
             cause,
             (
                 requests.exceptions.ConnectTimeout,
@@ -4304,20 +4305,29 @@ class AgentStudioProject:
                 requests.exceptions.SSLError,
             ),
         ):
+            return None
+        if isinstance(cause, requests.exceptions.ConnectionError):
             reason = cause.args[0] if cause.args else None
-            if not isinstance(
+            if isinstance(
                 getattr(reason, "reason", reason), urllib3.exceptions.ConnectTimeoutError
             ):
+                return None
+        if isinstance(cause, requests.exceptions.ReadTimeout):
+            return "The platform did not answer in time"
+        status = error.status_code
+        if status is None:
+            if isinstance(cause, requests.exceptions.ConnectionError):
                 return "The connection dropped before the platform answered"
-        if error.status_code in (500, 502, 504):
-            return f"The platform could not confirm it (HTTP {error.status_code})"
-        if not test_start and error.status_code == 409 and error.error_code == "CONFLICT":
-            return "The platform could not confirm it"
-        if error.error_code == "HERMES_UNAVAILABLE" and not (
-            test_start and error.status_code == 503
-        ):
-            return "The platform could not confirm it"
-        return None
+            return "The platform's answer could not be read"
+        if status < 400:
+            return "The platform's answer could not be read"
+        if status < 500:
+            if not test_start and status == 409 and error.error_code == "CONFLICT":
+                return "The platform could not confirm it"
+            return None
+        if test_start and status == 503:
+            return None
+        return f"The platform could not confirm it (HTTP {status})"
 
     @staticmethod
     def campaign_test_unconfirmed(reason: str, campaign_name: str, phone: Any) -> str:
@@ -4375,7 +4385,12 @@ class AgentStudioProject:
                     campaign.resource_id, step_id
                 )
             except SourcererAPIError as e:
-                if not (e.status_code is None or e.status_code >= 500 or e.status_code == 429):
+                refused = not (
+                    e.status_code is None or e.status_code >= 500 or e.status_code == 429
+                )
+                if refused or isinstance(
+                    e.__cause__, (requests.exceptions.ProxyError, requests.exceptions.SSLError)
+                ):
                     raise self._campaign_error("test", campaign, e) from e
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:

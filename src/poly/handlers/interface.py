@@ -124,6 +124,7 @@ class AgentStudioInterface:
         self.region = region
         self.account_id = account_id
         self.project_id = project_id
+        self._remote_branch: Optional[str] = None
         if region and account_id and project_id:
             self.sync_client = SyncClientHandler(region, account_id, project_id, branch_id)
 
@@ -589,14 +590,14 @@ class AgentStudioInterface:
 
     def validate_outbound_campaign(self, campaign_id: str) -> dict[str, Any]:
         """Validate a campaign on the current branch."""
-        self.sync_client.assert_branch_exists()
+        self.ensure_remote_branch()
         return PlatformAPIHandler.validate_outbound_campaign(
             self.region, self.account_id, self.project_id, self.branch_id, campaign_id
         )
 
     def dry_run_outbound_campaign(self, campaign_id: str, body: dict[str, Any]) -> dict[str, Any]:
         """Dry-run a campaign on the current branch. Nothing is sent or stored."""
-        self.sync_client.assert_branch_exists()
+        self.ensure_remote_branch()
         return PlatformAPIHandler.dry_run_outbound_campaign(
             self.region, self.account_id, self.project_id, self.branch_id, campaign_id, body
         )
@@ -616,8 +617,13 @@ class AgentStudioInterface:
         )
 
     def ensure_remote_branch(self) -> str:
-        """Return the branch campaign checks run on: this one, or main if it no longer exists."""
-        return self.sync_client.assert_branch_exists()
+        """Return the branch campaign checks run on: this one, or main if it no longer exists.
+
+        Checks the platform once per interface, for the campaign checks only.
+        """
+        if self._remote_branch is None or self._remote_branch != self.branch_id:
+            self._remote_branch = self.sync_client.assert_branch_exists()
+        return self._remote_branch
 
     def send_outbound_campaign_lifecycle(self, command_type: str, campaign_id: str) -> None:
         """Send a publish, pause, resume or archive command for a campaign to main."""

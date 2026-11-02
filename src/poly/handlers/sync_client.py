@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from poly.handlers.platform_api import OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
 from poly.handlers.protobuf.commands_pb2 import Command
-from poly.handlers.sdk import SourcererAPIError, SourcererSDK
+from poly.handlers.sdk import CommandBatchNotSent, SourcererAPIError, SourcererSDK
 
 logger = logging.getLogger(__name__)
 
@@ -539,7 +539,7 @@ class SyncClientHandler:
             SourcererAPIError: if commands are already queued for the branch, or main refuses it.
         """
         if self.sdk.get_queue_size():
-            raise SourcererAPIError("Commands are queued for the branch; push them first.")
+            raise CommandBatchNotSent("Commands are queued for the branch; push them first.")
         command.metadata.CopyFrom(self.sdk.create_metadata())
         command.command_id = str(uuid.uuid4())
         logger.info(f"Sending {command.type} to main")
