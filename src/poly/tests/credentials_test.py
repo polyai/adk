@@ -252,6 +252,16 @@ class AccountKeyCredentialTest(_CredentialsTestCase):
         self.assertIsNone(load_account_key_credential("studio"))
         self.write_credentials({"account_keys": {"studio": {"account_id": "acc-1"}}})
         self.assertIsNone(load_account_key_credential("studio"))
+        self.write_credentials({"account_keys": {"studio": {"key": "sk-x"}}})
+        self.assertIsNone(load_account_key_credential("studio"))
+
+    def test_load_tolerates_a_missing_name(self):
+        self.write_credentials({"account_keys": {"studio": {"key": "sk-x", "account_id": "acc-1"}}})
+
+        self.assertEqual(
+            load_account_key_credential("studio"),
+            {"key": "sk-x", "account_id": "acc-1", "name": None},
+        )
         self.write_credentials("{not json")
         self.assertIsNone(load_account_key_credential("studio"))
 

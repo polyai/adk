@@ -312,7 +312,9 @@ class SetupCommand(BaseCommand):
                     sys.exit(1)
 
             if stored_account:
-                success(f"Account API key: existing '{stored_account['name']}' key kept.")
+                success(
+                    f"Account API key: existing '{stored_account['name'] or 'stored'}' key kept."
+                )
                 run.identify(stored_account["account_id"])
                 return region, stored_account["account_id"], stored_account["key"]
 

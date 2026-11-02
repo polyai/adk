@@ -86,8 +86,8 @@ def load_account_key_credential(region: str) -> Optional[dict]:
     """The stored account API key entry for `region`, if any.
 
     Returns:
-        A dict with ``key``, ``account_id`` and ``name``, or None when the file has
-        no usable entry for `region`. Never raises.
+        A dict with ``key``, ``account_id`` and ``name`` (``name`` may be None), or
+        None when the file has no usable entry for `region`. Never raises.
     """
     account_keys = _read_credentials_file("It will be ignored when looking for the API key.").get(
         ACCOUNT_KEYS_FIELD
@@ -95,9 +95,9 @@ def load_account_key_credential(region: str) -> Optional[dict]:
     if not isinstance(account_keys, dict):
         return None
     entry = account_keys.get(region)
-    if not isinstance(entry, dict) or not entry.get("key"):
+    if not isinstance(entry, dict) or not entry.get("key") or not entry.get("account_id"):
         return None
-    return entry
+    return {"key": entry["key"], "account_id": entry["account_id"], "name": entry.get("name")}
 
 
 def load_api_key_from_credential_file(region: str) -> Optional[str]:
