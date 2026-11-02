@@ -1,9 +1,10 @@
-"""Client for the PolyAI Posthog tenant, used for feature flags in the PolyAI ADK CLI.
+"""Client for the PolyAI Posthog tenant: feature flags and analytics events for the ADK CLI.
 
 Copyright PolyAI Limited
 """
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 POSTHOG_HOST = "https://eu.i.posthog.com"
@@ -17,6 +18,9 @@ NON_PROD_REGIONS = frozenset({"dev", "staging"})
 FEATURE_FLAGS_REQUEST_TIMEOUT_SECONDS = 1
 # Events are sent inline (sync mode), so this bounds how long a command waits on one.
 CAPTURE_REQUEST_TIMEOUT_SECONDS = 3
+# Either variable set to anything suppresses every analytics event. DO_NOT_TRACK is the
+# cross-tool convention (https://consoledonottrack.com); POLY_NO_TELEMETRY is ours.
+TELEMETRY_OPT_OUT_ENV_VARS = ("POLY_NO_TELEMETRY", "DO_NOT_TRACK")
 logger = logging.getLogger(__name__)
 
 
@@ -69,21 +73,59 @@ def get_posthog_client(region: str) -> Posthog:
     return client
 
 
-def capture_event(region: str, event: str, properties: dict, distinct_id: str) -> None:
+def telemetry_disabled() -> bool:
+    """Whether the user has opted out of analytics events via the environment.
+
+    Feature flags are unaffected: they read configuration, they do not report usage.
+    """
+    return any(os.environ.get(name) for name in TELEMETRY_OPT_OUT_ENV_VARS)
+
+
+def capture_event(region: str | None, event: str, properties: dict, distinct_id: str) -> bool:
     """Send an analytics event to PostHog. Fire-and-forget: never raises.
 
     Args:
-        region: The region whose PostHog project the event should land in.
+        region: The region whose PostHog project the event should land in. ``None``
+            (region not chosen yet) lands in the production project.
         event: The event name.
         properties: Event properties.
         distinct_id: The PostHog distinct id to attach the event to.
+
+    Returns:
+        True if the event was handed to the client, False if it was suppressed by
+        the opt-out or the client raised. Callers can use a False to stop sending
+        further events in a run rather than wait on every timeout.
     """
+    if telemetry_disabled():
+        logger.debug("Telemetry opt-out set; not sending event=%s", event)
+        return False
     try:
-        get_posthog_client(region).capture(
+        get_posthog_client(region or "").capture(
             event=event, distinct_id=distinct_id, properties=properties
         )
     except Exception as exc:
         logger.warning(f"PostHog event capture failed event={event}", exc_info=exc)
+        return False
+    return True
+
+
+def alias_identity(region: str | None, anonymous_id: str, distinct_id: str) -> bool:
+    """Link an anonymous id to a known identity in PostHog. Fire-and-forget: never raises.
+
+    Events sent under ``anonymous_id`` before sign-in then count towards
+    ``distinct_id`` (the account id) in funnels.
+
+    Returns:
+        True if the alias was handed to the client, False otherwise.
+    """
+    if telemetry_disabled():
+        return False
+    try:
+        get_posthog_client(region or "").alias(previous_id=anonymous_id, distinct_id=distinct_id)
+    except Exception as exc:
+        logger.warning("PostHog alias failed", exc_info=exc)
+        return False
+    return True
 
 
 def get_user_identity() -> str:

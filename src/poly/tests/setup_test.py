@@ -1,7 +1,8 @@
-"""Tests for the onboarding flow: ``poly setup``, skill installation, and auth.
+"""Tests for the onboarding flow: ``poly setup``, skill installation, auth, and telemetry.
 
-Covers ``poly.cli_commands.setup``, ``poly.cli_commands.skills``, and the
-region/API-key-activation behaviour of ``poly.cli_commands.auth``.
+Covers ``poly.cli_commands.setup``, ``poly.cli_commands.skills``, the
+region/API-key-activation behaviour of ``poly.cli_commands.auth``, and the
+``poly.setup`` modules (caller detection and the setup events).
 
 Copyright PolyAI Limited
 """
@@ -28,6 +29,12 @@ from poly.cli_commands.skills import (
     node_gate_reason,
     update_skills,
 )
+from poly.setup.agents import (
+    detect_entry,
+    detect_installed_agents,
+    detect_invoking_agent,
+)
+from poly.setup.telemetry import SetupRun, StepResult, detect_mode
 
 
 def _parse_setup_args(argv: list[str]):
@@ -35,6 +42,19 @@ def _parse_setup_args(argv: list[str]):
     cli = AgentStudioCLI()
     cli.register_commands()
     return cli._create_parser().parse_args(argv)
+
+
+def _silence_telemetry(test: unittest.TestCase) -> MagicMock:
+    """Keep a full ``setup()`` run off the network; returns the capture mock."""
+    capture = patch("poly.setup.telemetry.capture_event", return_value=True).start()
+    patch("poly.setup.telemetry.alias_identity", return_value=True).start()
+    test.addCleanup(patch.stopall)
+    return capture
+
+
+def _events(capture: MagicMock, name: str) -> list[dict]:
+    """The properties of every captured event called ``name``, in order."""
+    return [call.args[2] for call in capture.call_args_list if call.args[1] == name]
 
 
 class NodeGateReasonTest(unittest.TestCase):
@@ -233,7 +253,7 @@ class SetupAuthStepTest(unittest.TestCase):
         self.mock_select_region.return_value = "studio"
         self.mock_credentials = patch("poly.cli_commands.setup.any_credentials_exist").start()
         self.mock_credentials.return_value = False
-        self.addCleanup(patch.stopall)
+        self.capture = _silence_telemetry(self)
 
     def _run_setup(self, **kwargs) -> None:
         """Run setup with the skills step disabled unless a test opts in."""
@@ -291,7 +311,7 @@ class SetupSkillsStepTest(unittest.TestCase):
         self.mock_gate.return_value = None
         self.mock_install = patch("poly.cli_commands.setup.install_skills").start()
         self.mock_install.return_value = True
-        self.addCleanup(patch.stopall)
+        self.capture = _silence_telemetry(self)
 
     def _run_setup(self, **kwargs) -> None:
         """Run setup with authentication disabled so only the skills step runs."""
@@ -507,6 +527,346 @@ class SetupProjectStepTest(unittest.TestCase):
         self.mock_create.assert_not_called()
         self.mock_init.assert_not_called()
         self.assertEqual(os.listdir(self.base_path), [])
+
+
+class SetupTelemetryWiringTest(unittest.TestCase):
+    """Tests that a ``poly setup`` run emits the started, per-step and completed events.
+
+    Runs the full sequence in a throwaway directory under an unrecognised shell
+    with the skills step skipped, so the outcomes are deterministic.
+    """
+
+    def setUp(self):
+        self.base_path = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.base_path, True)
+        patch.dict(os.environ, {"SHELL": "/bin/unrecognised-shell"}).start()
+        self.mock_signin = patch("poly.cli_commands.setup._signin", return_value="jwt").start()
+        self.mock_save_key = patch("poly.cli_commands.setup._authenticate_and_save_key").start()
+        self.mock_save_key.return_value = {"acc-1": "Acme"}
+        patch("poly.cli_commands.setup.any_credentials_exist", return_value=False).start()
+        self.mock_stdin = patch("sys.stdin").start()
+        self.mock_stdin.isatty.return_value = True
+        self.mock_select = patch("questionary.select").start()
+        self.mock_select.return_value.ask.return_value = "skip"
+        patch("poly.setup.telemetry.detect_installed_agents", return_value=["cursor"]).start()
+        patch("poly.setup.telemetry.has_node", return_value=False).start()
+        # The suite itself may run under a coding agent; pin the caller facts.
+        patch("poly.setup.telemetry.detect_invoking_agent", return_value="none").start()
+        self.capture = _silence_telemetry(self)
+        self.alias = patch("poly.setup.telemetry.alias_identity", return_value=True).start()
+
+    def _run_setup(self, **kwargs) -> None:
+        kwargs.setdefault("skip_skills", True)
+        kwargs.setdefault("region", "studio")
+        SetupCommand.setup(base_path=self.base_path, **kwargs)
+
+    def test_started_event_carries_the_machine_facts_and_no_arguments(self):
+        """setup_started names the entry, OS, version, agents and prior state only."""
+        self._run_setup()
+
+        [started] = _events(self.capture, "setup_started")
+        self.assertEqual(
+            set(started),
+            {
+                "entry",
+                "os",
+                "adk_version",
+                "invoking_agent",
+                "agents_detected",
+                "had_credentials",
+                "has_node",
+                "mode",
+            },
+        )
+        self.assertEqual(started["agents_detected"], ["cursor"])
+        self.assertFalse(started["had_credentials"])
+        self.assertFalse(started["has_node"])
+        self.assertEqual(started["mode"], "human")
+
+    def test_every_step_reports_an_outcome_in_order(self):
+        """A fresh sign-in with everything else skipped or declined records each step."""
+        self._run_setup()
+
+        steps = [(e["step"], e["outcome"]) for e in _events(self.capture, "setup_step")]
+        self.assertEqual(
+            steps,
+            [
+                ("signin", "done"),
+                ("credentials", "done"),
+                ("completion", "skipped"),
+                ("skills", "skipped"),
+                ("project", "declined"),
+            ],
+        )
+        for event in _events(self.capture, "setup_step"):
+            self.assertIsInstance(event["duration_ms"], int)
+            self.assertNotIn("error_class", event)
+
+    def test_existing_credentials_report_both_auth_steps_as_skipped(self):
+        """The auth skip still records signin and credentials, so funnels stay comparable."""
+        with patch("poly.cli_commands.setup.any_credentials_exist", return_value=True):
+            self._run_setup()
+
+        steps = [(e["step"], e["outcome"]) for e in _events(self.capture, "setup_step")]
+        self.assertEqual(steps[:2], [("signin", "skipped"), ("credentials", "skipped")])
+        [started] = _events(self.capture, "setup_started")
+        self.assertTrue(started["had_credentials"])
+
+    def test_single_account_sign_in_switches_identity_to_the_account(self):
+        """Events before sign-in use an anonymous id; after it, the account id, aliased."""
+        self._run_setup()
+
+        distinct_ids = [call.args[3] for call in self.capture.call_args_list]
+        self.assertTrue(distinct_ids[0].startswith("anon:"))
+        self.assertEqual(distinct_ids[-1], "acc-1")
+        self.alias.assert_called_once_with("studio", distinct_ids[0], "acc-1")
+
+    def test_multiple_accounts_keep_the_run_anonymous(self):
+        """Without a resolved account the PAT path cannot pick one, so no alias is sent."""
+        self.mock_save_key.return_value = {"acc-1": "Acme", "acc-2": "Globex"}
+
+        self._run_setup()
+
+        self.alias.assert_not_called()
+        self.assertTrue(all(c.args[3].startswith("anon:") for c in self.capture.call_args_list))
+
+    def test_completed_event_lists_done_steps_and_the_project_choice(self):
+        """setup_completed summarises the run for the funnel's last tile."""
+        self._run_setup()
+
+        [completed] = _events(self.capture, "setup_completed")
+        self.assertEqual(completed["steps_done"], ["signin", "credentials"])
+        self.assertEqual(completed["project"], "declined")
+        self.assertIsInstance(completed["duration_ms"], int)
+
+    def test_created_project_is_reported_as_created(self):
+        """Choosing 'create' marks the project step done with the created detail."""
+        self.mock_select.return_value.ask.return_value = "create"
+        with patch("poly.cli_commands.setup.ProjectCommand.create_project"):
+            self._run_setup()
+
+        [completed] = _events(self.capture, "setup_completed")
+        self.assertEqual(completed["project"], "created")
+        self.assertIn("project", completed["steps_done"])
+
+    def test_sign_in_failure_records_the_step_as_failed_and_propagates(self):
+        """A failing step is reported with its error class; no completed event follows."""
+        self.mock_signin.side_effect = RuntimeError("device flow timed out")
+
+        with self.assertRaises(RuntimeError):
+            self._run_setup()
+
+        [signin] = _events(self.capture, "setup_step")
+        self.assertEqual(signin["outcome"], "failed")
+        self.assertEqual(signin["error_class"], "RuntimeError")
+        self.assertEqual(_events(self.capture, "setup_completed"), [])
+
+    def test_no_event_carries_a_key_value_or_a_path(self):
+        """Key values, file paths and command arguments must never leave the machine."""
+        self._run_setup()
+
+        for call in self.capture.call_args_list:
+            flat = str(call.args[2])
+            self.assertNotIn(self.base_path, flat)
+            self.assertNotIn("jwt", flat)
+            self.assertNotIn("~/", flat)
+
+
+class DetectInvokingAgentTest(unittest.TestCase):
+    """Tests for agents.detect_invoking_agent, the env-marker lookup."""
+
+    def test_no_marker_means_no_agent(self):
+        self.assertEqual(detect_invoking_agent({}), "none")
+
+    def test_each_marker_names_its_agent(self):
+        """Every known marker maps to its canonical agent name."""
+        cases = {"CLAUDECODE": "claude-code", "CURSOR_AGENT": "cursor", "CODEX_SANDBOX": "codex"}
+        for marker, agent in cases.items():
+            with self.subTest(marker=marker):
+                self.assertEqual(detect_invoking_agent({marker: "1"}), agent)
+
+    def test_empty_marker_counts_as_unset(self):
+        self.assertEqual(detect_invoking_agent({"CLAUDECODE": ""}), "none")
+
+
+class DetectInstalledAgentsTest(unittest.TestCase):
+    """Tests for agents.detect_installed_agents, which looks for config directories."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home, True)
+        patch("poly.setup.agents.shutil.which", return_value=None).start()
+        patch("poly.setup.agents.platform.system", return_value="Linux").start()
+        self.addCleanup(patch.stopall)
+
+    def test_empty_home_finds_nothing(self):
+        self.assertEqual(detect_installed_agents(self.home), [])
+
+    def test_config_directories_identify_agents_in_a_fixed_order(self):
+        """Directories are reported in one order whatever order they were created in."""
+        (self.home / ".codex").mkdir()
+        (self.home / ".claude").mkdir()
+        (self.home / ".config" / "Claude").mkdir(parents=True)
+
+        self.assertEqual(
+            detect_installed_agents(self.home), ["claude-code", "codex", "claude-desktop"]
+        )
+
+    def test_claude_binary_on_path_counts_without_a_directory(self):
+        with patch("poly.setup.agents.shutil.which", return_value="/usr/local/bin/claude"):
+            self.assertEqual(detect_installed_agents(self.home), ["claude-code"])
+
+    def test_claude_desktop_uses_the_macos_application_support_directory(self):
+        (self.home / "Library" / "Application Support" / "Claude").mkdir(parents=True)
+        with patch("poly.setup.agents.platform.system", return_value="Darwin"):
+            self.assertEqual(detect_installed_agents(self.home), ["claude-desktop"])
+
+
+class DetectEntryTest(unittest.TestCase):
+    """Tests for agents.detect_entry, which tells a uvx run from an installed poly."""
+
+    def test_uv_cache_prefix_is_uvx(self):
+        with patch("poly.setup.agents.sys.prefix", "/home/u/.cache/uv/archive-v0/abc123"):
+            self.assertEqual(detect_entry(), "uvx")
+
+    def test_windows_uv_cache_prefix_is_uvx(self):
+        prefix = "C:\\Users\\u\\AppData\\Local\\uv\\cache\\archive-v0\\abc123"
+        with patch("poly.setup.agents.sys.prefix", prefix):
+            self.assertEqual(detect_entry(), "uvx")
+
+    def test_tool_install_prefix_is_poly(self):
+        with patch("poly.setup.agents.sys.prefix", "/home/u/.local/share/uv/tools/polyai-adk"):
+            self.assertEqual(detect_entry(), "poly")
+
+
+class DetectModeTest(unittest.TestCase):
+    """Tests for telemetry.detect_mode."""
+
+    def test_terminal_without_agent_marker_is_human(self):
+        with (
+            patch("poly.setup.telemetry.detect_invoking_agent", return_value="none"),
+            patch("sys.stdin") as stdin,
+        ):
+            stdin.isatty.return_value = True
+            self.assertEqual(detect_mode(), "human")
+
+    def test_agent_marker_is_agent_even_on_a_terminal(self):
+        with (
+            patch("poly.setup.telemetry.detect_invoking_agent", return_value="claude-code"),
+            patch("sys.stdin") as stdin,
+        ):
+            stdin.isatty.return_value = True
+            self.assertEqual(detect_mode(), "agent")
+
+    def test_piped_stdin_is_agent(self):
+        with (
+            patch("poly.setup.telemetry.detect_invoking_agent", return_value="none"),
+            patch("sys.stdin") as stdin,
+        ):
+            stdin.isatty.return_value = False
+            self.assertEqual(detect_mode(), "agent")
+
+
+class SetupRunTest(unittest.TestCase):
+    """Tests for telemetry.SetupRun, the per-invocation event recorder."""
+
+    def setUp(self):
+        self.capture = patch("poly.setup.telemetry.capture_event", return_value=True).start()
+        self.alias = patch("poly.setup.telemetry.alias_identity", return_value=True).start()
+        self.addCleanup(patch.stopall)
+        self.run = SetupRun(region="studio", mode="agent")
+
+    def test_step_defaults_to_done_and_times_the_block(self):
+        with self.run.step("verify"):
+            pass
+
+        [event] = _events(self.capture, "setup_step")
+        self.assertEqual(event["step"], "verify")
+        self.assertEqual(event["outcome"], "done")
+        self.assertGreaterEqual(event["duration_ms"], 0)
+
+    def test_step_records_skipped_declined_and_explicit_failures(self):
+        """The block fills in the outcome; explicit failures carry their class."""
+        with self.run.step("a") as step:
+            step.skipped()
+        with self.run.step("b") as step:
+            step.declined()
+        with self.run.step("c") as step:
+            step.failed("npx_failed")
+
+        outcomes = [(e["step"], e["outcome"]) for e in _events(self.capture, "setup_step")]
+        self.assertEqual(outcomes, [("a", "skipped"), ("b", "declined"), ("c", "failed")])
+        self.assertEqual(_events(self.capture, "setup_step")[2]["error_class"], "npx_failed")
+
+    def test_system_exit_inside_a_step_is_recorded_and_re_raised(self):
+        """Commands exit with sys.exit(1) on failure; that must still be a failed step."""
+        with self.assertRaises(SystemExit):
+            with self.run.step("credentials"):
+                raise SystemExit(1)
+
+        [event] = _events(self.capture, "setup_step")
+        self.assertEqual(event["outcome"], "failed")
+        self.assertEqual(event["error_class"], "SystemExit")
+
+    def test_identify_aliases_once_and_switches_the_distinct_id(self):
+        anonymous = self.run.distinct_id
+
+        self.run.identify("acc-1")
+        self.run.identify("acc-1")
+        with self.run.step("x"):
+            pass
+
+        self.alias.assert_called_once_with("studio", anonymous, "acc-1")
+        self.assertEqual(self.capture.call_args.args[3], "acc-1")
+
+    def test_identify_with_no_account_is_a_no_op(self):
+        anonymous = self.run.distinct_id
+
+        self.run.identify("")
+
+        self.alias.assert_not_called()
+        self.assertEqual(self.run.distinct_id, anonymous)
+
+    def test_first_failed_send_disables_the_rest_of_the_run(self):
+        """One timeout must not become one per event on a bad network."""
+        self.capture.return_value = False
+
+        with self.run.step("a"):
+            pass
+        with self.run.step("b"):
+            pass
+        self.run.completed()
+
+        self.assertEqual(self.capture.call_count, 1)
+
+    def test_completed_reports_done_steps_and_the_project_detail(self):
+        with self.run.step("signin"):
+            pass
+        with self.run.step("skills") as step:
+            step.skipped()
+        with self.run.step("project") as step:
+            step.done("connected")
+
+        self.run.completed()
+
+        [completed] = _events(self.capture, "setup_completed")
+        self.assertEqual(completed["steps_done"], ["signin", "project"])
+        self.assertEqual(completed["project"], "connected")
+
+    def test_completed_omits_project_when_the_step_had_no_detail(self):
+        with self.run.step("project") as step:
+            step.skipped()
+
+        self.run.completed()
+
+        [completed] = _events(self.capture, "setup_completed")
+        self.assertNotIn("project", completed)
+
+    def test_helpers_without_a_step_record_still_work(self):
+        """The setup helpers accept no record when called on their own."""
+        result = StepResult()
+        result.skipped("because")
+        self.assertEqual((result.outcome, result.detail), ("skipped", "because"))
 
 
 class SetupArgumentParsingTest(unittest.TestCase):
