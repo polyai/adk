@@ -39,6 +39,50 @@ class QueueCommand(unittest.TestCase):
         handler._sdk.add_command_to_queue.assert_called_once_with(command)
 
 
+class SendCommandToMain(unittest.TestCase):
+    """Tests for SyncClientHandler.send_command_to_main."""
+
+    def _handler(self, *outcomes):
+        handler = build_handler()
+        handler._sdk.get_queue_size.return_value = 0
+        handler._sdk.create_metadata.return_value = Command().metadata
+        handler._sdk.send_command_batch.side_effect = list(outcomes)
+        return handler
+
+    def test_sequence_mismatch_is_sent_once_more(self):
+        """Main moving on between reading its sequence and sending is retried once."""
+        mismatch = SourcererAPIError("moved", status_code=409, error_code="SEQUENCE_MISMATCH")
+        handler = self._handler(mismatch, {"success": True})
+
+        result = handler.send_command_to_main(Command(type="outbound_campaign_pause"))
+
+        self.assertEqual(result, {"success": True})
+        self.assertEqual(handler._sdk.send_command_batch.call_count, 2)
+        for call in handler._sdk.send_command_batch.call_args_list:
+            self.assertEqual(call.kwargs, {"branch_id": "main", "timeout": 30})
+        handler._sdk.clear_queue.assert_called_once()
+
+    def test_second_sequence_mismatch_is_raised(self):
+        """Only one retry: a second mismatch reaches the caller."""
+        mismatch = SourcererAPIError("moved", status_code=409, error_code="SEQUENCE_MISMATCH")
+        handler = self._handler(mismatch, mismatch)
+
+        with self.assertRaises(SourcererAPIError):
+            handler.send_command_to_main(Command(type="outbound_campaign_pause"))
+
+        self.assertEqual(handler._sdk.send_command_batch.call_count, 2)
+
+    def test_other_refusals_are_not_retried(self):
+        """Any other refusal is raised straight away."""
+        refused = SourcererAPIError("no", status_code=409, error_code="CAMPAIGN_LIFECYCLE_REFUSED")
+        handler = self._handler(refused)
+
+        with self.assertRaises(SourcererAPIError):
+            handler.send_command_to_main(Command(type="outbound_campaign_pause"))
+
+        handler._sdk.send_command_batch.assert_called_once()
+
+
 class SendQueuedCommands(unittest.TestCase):
     """Tests for SyncClientHandler.send_queued_commands."""
 

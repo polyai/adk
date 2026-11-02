@@ -96,7 +96,7 @@ A preview keeps nothing between steps. Each step prints the flags to carry on wi
 
 Run one step of a test of the live campaign, and wait for it to finish. It calls and texts the test contact for real. The first step starts at the trigger. To carry on, pass the `--start-node` and the run it printed. After a call or a text, also say how it went with `--result`; after a wait, carry on from the node it printed.
 
-The run is printed as soon as the step starts, so it is not lost if waiting fails or you stop it; the step carries on regardless. A poll that fails with no response, a stalled connection or a server error is retried three times. Node names are matched as they are on `main`, which the test runs, even from another branch. A step that stops at a failed node exits `1`.
+The run is printed as soon as the step starts, so it is not lost if waiting fails or you stop it; the step carries on regardless. A poll that fails with no response, a stalled connection or a server error is retried three times. Node names are matched as they are on `main`, which the test runs, even from another branch. A step that stops at a failed node exits `1`. If the platform is slow to answer the start, the step may still have started: check the campaign's tests in Agent Studio before you run `test` again.
 
 Examples:
 

@@ -145,6 +145,8 @@ poly deployments list             # what is deployed where
 
 **Never run `poly campaign publish`, `pause`, `resume`, `archive` or `test` unless the user explicitly asks** — they act on the live campaign, `test` calls or texts a real person, and `--json` skips the confirmation. `poly campaign validate` and `preview` are safe: nothing is sent.
 
+`poly campaign test --json` writes a progress line (the step id and run) to stderr before its result, so parse stdout only.
+
 ## Rules and gotchas
 
 - Never edit anything under `_gen/` — generated stubs.

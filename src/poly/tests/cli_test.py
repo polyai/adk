@@ -6447,6 +6447,7 @@ class CampaignCommandTest(unittest.TestCase):
     )
 
     def setUp(self):
+        from poly.handlers.interface import AgentStudioInterface
         from poly.handlers.sdk import SourcererSDK
         from poly.project import AgentStudioProject
         from poly.tests.project_test import PROJECT_DATA
@@ -6469,6 +6470,11 @@ class CampaignCommandTest(unittest.TestCase):
             return_value=True,
         ).start()
         self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.pull_main = patch.object(
+            AgentStudioInterface,
+            "pull_branch_resources",
+            side_effect=lambda *_: (self.project.resources, []),
+        ).start()
         patch("poly.cli_commands.campaign.load_project", return_value=self.project).start()
         self.json_print = patch("poly.cli_commands.campaign.json_print").start()
         self.shared_json_print = patch("poly.cli_commands.shared.json_print").start()
@@ -7334,6 +7340,97 @@ class CampaignCommandTest(unittest.TestCase):
             )
 
         self.assertTrue(self._output()["success"])
+
+    def test_start_that_times_out_says_the_step_may_have_started(self):
+        """A start the platform is slow to answer may still call, so it is not called a failure."""
+        self.request.side_effect = requests.ReadTimeout("read timed out")
+
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_test(
+                TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        error = self._output()["error"]
+        self.assertIn("may have started and may call or text +15550100", error)
+        self.assertIn("Check the campaign's tests in Agent Studio", error)
+        self.assertNotIn("Could not test", error)
+        self.assertEqual(self.request.call_count, 1)
+        self.assertEqual(self.request.call_args.kwargs["timeout"], (10, 300))
+
+    def test_polls_that_fail_stop_at_the_timeout(self):
+        """Retries never wait past --timeout."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        self._respond(
+            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
+            *[make_mock_response(503, content=b"Service Unavailable") for _ in range(4)],
+        )
+
+        with patch("poly.project.time.sleep") as sleep, self.assertRaises(SystemExit):
+            CampaignCommand.campaign_test(
+                TEST_DIR, self.CAMPAIGN, phone="+15550100", timeout=0, output_json=True
+            )
+
+        self.assertEqual(self.request.call_count, 2)
+        sleep.assert_not_called()
+        self.assertEqual(self._output()["run"], run)
+
+    def test_main_is_read_once_per_command_even_on_main(self):
+        """Live checks read main's projection, not the local copy, and only once."""
+        self.post.return_value = make_mock_response(200, {"success": True})
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+
+        CampaignCommand.campaign_lifecycle(
+            TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
+        )
+
+        self.pull_main.assert_called_once_with("main")
+
+    def test_main_that_cannot_be_read_gives_the_platform_message(self):
+        """A failed read of main reads like the other campaign errors, not a raw error body."""
+        from poly.handlers.sdk import SourcererAPIError
+
+        self.pull_main.side_effect = None
+        self.pull_main.return_value = None
+        cause = SourcererAPIError(
+            "API Error 503: {'error': 'Try again shortly', 'error_code': 'X'}",
+            status_code=503,
+            error_code="X",
+            server_message="Try again shortly",
+        )
+
+        def fail(*_):
+            raise ValueError(f"API error: {cause}") from cause
+
+        self.pull_main.side_effect = fail
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(
+            self._output()["error"], "Could not read the campaigns on main: Try again shortly"
+        )
+
+    def test_branch_changes_forget_what_main_held(self):
+        """Switching, merging and pushing clear the copy of main, which may have moved on."""
+        project = self.project
+        attempts = {
+            "switch": lambda: project.switch_branch("other", force=True, keep_files=True),
+            "merge": lambda: project.merge_branch("message"),
+            "push": lambda: project.push_project(force=True),
+        }
+        patch.object(project.api_handler, "get_branches", side_effect=RuntimeError).start()
+        patch.object(project, "load_project", side_effect=RuntimeError).start()
+        for name, attempt in attempts.items():
+            with self.subTest(name=name):
+                project._main_resources = {}
+
+                with self.assertRaises((ValueError, RuntimeError)):
+                    attempt()
+
+                self.assertIsNone(project._main_resources)
 
     def test_parsed_command_line_reaches_validate(self):
         """`poly campaign validate <name> --json` is wired through the parser to the handler."""

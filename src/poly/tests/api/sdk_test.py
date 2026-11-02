@@ -460,6 +460,13 @@ class SendCommandBatchToBranch(unittest.TestCase):
         self.assertEqual(batch.last_known_sequence, 4)
         self.assertEqual(self.sdk.get_queue_size(), 0)
 
+    def test_timeout_reaches_the_request(self):
+        self.post.return_value = make_mock_response(200, json_body={"success": True})
+
+        self.sdk.send_command_batch(branch_id="main", timeout=30)
+
+        self.assertEqual(self.post.call_args.kwargs["timeout"], 30)
+
     def test_command_batch_answered_200_with_an_error_raises(self):
         """The command-batch route can refuse with a 200 body that carries the error."""
         self.post.return_value = make_mock_response(

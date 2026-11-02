@@ -19,6 +19,7 @@ from functools import cached_property
 from pathlib import PurePath
 from typing import Any, Optional, TypeAlias
 
+import requests
 from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
@@ -1329,6 +1330,7 @@ class AgentStudioProject:
                 - String message.
                 - List of commands serialized to protobuf.
         """
+        self._main_resources = None
 
         if not dry_run:
             # If force, load latest version of the project
@@ -2766,6 +2768,7 @@ class AgentStudioProject:
             ValueError: If the options conflict, there are uncommitted changes without force
                 or keep_files, or the branch doesn't exist and can't be created.
         """
+        self._main_resources = None
         if keep_files and (force or format):
             raise ValueError("--keep-files cannot be combined with --force or --format.")
         if source_branch_name is not None and not create:
@@ -3244,6 +3247,7 @@ class AgentStudioProject:
             list[dict[str, str]]: A list of conflicts
             list[dict[str, str]]: A list of errors
         """
+        self._main_resources = None
         branches = self.api_handler.get_branches()
         branch_meta = {meta["branchId"]: meta for meta in branches.values()}
         current_branch_meta = branch_meta.get(self.branch_id)
@@ -3754,17 +3758,21 @@ class AgentStudioProject:
         return names
 
     def _campaign_resources(self, live: bool) -> ResourceMap:
-        if not live or self.branch_id == "main":
+        if not live:
             return self.resources
         if self._main_resources is None:
-            self._main_resources, _ = self.api_handler.pull_branch_resources("main")
+            try:
+                self._main_resources, _ = self.api_handler.pull_branch_resources("main")
+            except ValueError as e:
+                reason = getattr(e.__cause__, "server_message", None) or str(e)
+                raise ValueError(f"Could not read the campaigns on main: {reason}") from e
         return self._main_resources
 
     def get_live_campaign(self, name: str) -> OutboundCampaign:
         """Return the pushed campaign with this name or folder name, checking main has it.
 
         Tests and the lifecycle commands act on main, so a campaign made on a branch must be
-        merged first. Fetches main's projection once when not on main.
+        merged first. Fetches main's projection once, on main too: the local copy may be stale.
 
         Raises:
             ValueError: as `get_campaign` does, or if main does not have the campaign.
@@ -3785,7 +3793,7 @@ class AgentStudioProject:
         Args:
             campaign: The campaign.
             live: Name the nodes as they are on main, which a test runs, rather than as they
-                are on the current branch. Fetches main's projection once when not on main.
+                are locally. Fetches main's projection once, on main too.
 
         Raises:
             ValueError: if `live` and main's projection cannot be fetched.
@@ -3984,6 +3992,13 @@ class AgentStudioProject:
         try:
             return self.api_handler.start_outbound_campaign_test_step(campaign.resource_id, body)
         except SourcererAPIError as e:
+            if isinstance(e.__cause__, requests.exceptions.ReadTimeout):
+                raise SourcererAPIError(
+                    f"The platform did not answer in time, so the test step of campaign "
+                    f"'{campaign.name}' may have started and may call or text "
+                    f"{contact.get('phone')}. Check the campaign's tests in Agent Studio before "
+                    "running `poly campaign test` again."
+                ) from e
             raise self._campaign_error("test", campaign, e) from e
 
     def wait_for_campaign_test_step(
@@ -4013,11 +4028,12 @@ class AgentStudioProject:
                 )
             except SourcererAPIError as e:
                 transient = e.status_code is None or e.status_code >= 500
-                if not transient or failures >= retries:
+                remaining = deadline - time.monotonic()
+                if not transient or failures >= retries or remaining <= 0:
                     raise self._campaign_error("test", campaign, e) from e
                 failures += 1
                 logger.info(f"Polling test step {step_id} failed, retrying: {e}")
-                time.sleep(2 ** (failures - 1))
+                time.sleep(min(2 ** (failures - 1), remaining))
                 continue
             failures = 0
             if step.get("status") not in ("queued", "running"):

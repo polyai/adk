@@ -79,6 +79,7 @@ FUNCTION_EXECUTE_URL = (
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
 OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT = 30
+OUTBOUND_CAMPAIGN_TEST_START_TIMEOUT = (10, 300)
 OUTBOUND_CAMPAIGN_URL = (
     "/adk/v1/accounts/{account_id}/projects/{project_id}/branches/{branch_id}"
     "/outbound-campaigns/{path}"
@@ -135,7 +136,7 @@ class PlatformAPIHandler:
         files: ty.Optional[dict] = None,
         response_format: str = "json",
         use_jupiter_api: bool = False,
-        timeout: ty.Optional[float] = None,
+        timeout: ty.Optional[ty.Union[float, tuple[float, float]]] = None,
     ) -> dict:
         """Make a request to the Platform API.
 
@@ -152,8 +153,8 @@ class PlatformAPIHandler:
             response_format (str): How to parse the response. "json" (default)
                 or "yaml".
             use_jupiter_api (bool): Whether to use the Jupiter API.
-            timeout (float | None): Seconds to wait for the server to connect and to send
-                data. None waits forever.
+            timeout (float | tuple[float, float] | None): Seconds to wait for the server to
+                connect and to send data, or a (connect, read) pair. None waits forever.
 
         Returns:
             dict: The parsed response.
@@ -1826,6 +1827,7 @@ class PlatformAPIHandler:
         segments: tuple[str, ...],
         method: str = "POST",
         data: ty.Optional[dict] = None,
+        timeout: ty.Union[float, tuple[float, float]] = OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT,
     ) -> dict:
         endpoint = OUTBOUND_CAMPAIGN_URL.format(
             account_id=account_id,
@@ -1835,7 +1837,7 @@ class PlatformAPIHandler:
         )
         try:
             return PlatformAPIHandler.make_request(
-                region, endpoint, method, data=data, timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
+                region, endpoint, method, data=data, timeout=timeout
             )
         except requests.exceptions.RequestException as e:
             raise SourcererAPIError.from_request_error(e) from e
@@ -1880,10 +1882,17 @@ class PlatformAPIHandler:
         """Start a real test step of the live campaign, on main.
 
         Raises:
-            SourcererAPIError: with the platform's status, error code and message.
+            SourcererAPIError: with the platform's status, error code and message. After a
+                read timeout, raised from the `requests.ReadTimeout`: the step may have started.
         """
         return PlatformAPIHandler._outbound_campaign_request(
-            region, account_id, project_id, "main", (campaign_id, "test-steps"), data=body
+            region,
+            account_id,
+            project_id,
+            "main",
+            (campaign_id, "test-steps"),
+            data=body,
+            timeout=OUTBOUND_CAMPAIGN_TEST_START_TIMEOUT,
         )
 
     @staticmethod
