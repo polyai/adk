@@ -1,6 +1,7 @@
 """Setup command: one-command onboarding for the ADK.
 
-Runs the full first-run sequence — authentication, shell completion, AI agent
+Runs the full first-run sequence — one sign-in that mints both the ADK key and
+the account API key, the ``POLY_API_KEY`` export, shell completion, AI agent
 skills, and project setup — skipping any step that is already done, so it is
 safe to re-run at any time. Each run reports start, per-step outcome and
 completion to PostHog unless the user opted out (see ``poly.setup.telemetry``).
@@ -10,19 +11,51 @@ Copyright PolyAI Limited
 
 import logging
 import os
+import sys
+import time
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from pathlib import Path
 
-from poly.cli_commands.auth import _authenticate_and_save_key, _select_region, _signin
+import requests
+
+from poly.auth.account_key import (
+    DEFAULT_KEY_NAME,
+    SETUP_KEY_NAME,
+    key_name_for_region,
+    mint_account_key,
+    resolve_account_id,
+    wait_for_key_active,
+)
+from poly.cli_commands.auth import (
+    _authenticate_and_save_key,
+    _select_region,
+    _signin,
+    authorise_or_explain,
+)
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.project import InitCommand, ProjectCommand
-from poly.cli_commands.shared import REGION_CHOICES, region_type
+from poly.cli_commands.shared import REGION_CHOICES, pick_account, region_type
 from poly.cli_commands.skills import install_skills, node_gate_reason
+from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS
+from poly.handlers.interface import AgentStudioInterface
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE
 from poly.setup.telemetry import SetupRun, StepResult, detect_mode
-from poly.utils import any_credentials_exist
+from poly.utils import apikey_session
+from poly.utils.credentials import (
+    CREDENTIALS_FILE_PATH,
+    any_credentials_exist,
+    load_account_key_credential,
+    regions_with_stored_keys,
+    retrieve_api_key,
+    save_account_key_credential,
+)
+from poly.utils.env_profile import EnvVarConflict, detect_profile, read_env_var, write_env_var
 
 logger = logging.getLogger(__name__)
+
+# Value for the X-Poly-Source header on the account-key calls setup makes.
+SETUP_SOURCE = "setup"
+ACCOUNT_KEY_ENV_VAR = "POLY_API_KEY"
 
 # Marks lines 'poly setup' added to a shell rc file, so re-runs can detect them.
 COMPLETION_MARKER = "# Added by 'poly setup'"
@@ -51,11 +84,13 @@ class SetupCommand(BaseCommand):
             help="Set up the ADK: auth, shell completion, AI skills, and a project",
             description=(
                 "Set up everything the ADK needs in one command.\n\n"
-                "Runs four steps, each skipped automatically if already done:\n"
-                "  1. Authentication (browser sign-in, saves an API key)\n"
-                "  2. Shell completion for bash/zsh/fish\n"
-                "  3. AI agent skills, installed into detected coding agents\n"
-                "  4. Project setup (create a new project or connect an existing one)\n\n"
+                "Runs five steps, each skipped automatically if already done:\n"
+                "  1. Authentication: one browser sign-in that saves an ADK key for the CLI\n"
+                "     and an account API key for the PolyAI APIs and MCPs\n"
+                "  2. POLY_API_KEY exported to your shell profile (asks first)\n"
+                "  3. Shell completion for bash/zsh/fish\n"
+                "  4. AI agent skills, installed into detected coding agents\n"
+                "  5. Project setup (create a new project or connect an existing one)\n\n"
                 "Examples:\n"
                 "  poly setup\n"
                 "  poly setup --region us\n"
@@ -69,6 +104,16 @@ class SetupCommand(BaseCommand):
             choices=REGION_CHOICES,
             default=None,
             help="Region to sign in to. If omitted, you will be prompted to select one.",
+        )
+        setup_parser.add_argument(
+            "--account-id",
+            type=str,
+            default=None,
+            help=(
+                "Account to scope the account API key to. With more than one account and"
+                " no --account-id, a terminal shows a picker; otherwise setup stops and"
+                " lists the accounts so you can re-run with one of them."
+            ),
         )
         setup_parser.add_argument(
             "--base-path",
@@ -114,6 +159,7 @@ class SetupCommand(BaseCommand):
         cls.setup(
             base_path=args.base_path,
             region=args.region,
+            account_id=args.account_id,
             skip_auth=args.skip_auth,
             skip_skills=args.skip_skills,
             agents=args.agents,
@@ -126,6 +172,7 @@ class SetupCommand(BaseCommand):
         cls,
         base_path: str,
         region: str | None = None,
+        account_id: str | None = None,
         skip_auth: bool = False,
         skip_skills: bool = False,
         agents: list[str] | None = None,
@@ -137,53 +184,247 @@ class SetupCommand(BaseCommand):
 
         print_welcome_message()
         plain(
-            "This will set up authentication, shell completion, AI agent skills,"
-            " and a project. Steps that are already done are skipped."
+            "This will set up authentication, POLY_API_KEY, shell completion, AI agent"
+            " skills, and a project. Steps that are already done are skipped."
         )
         plain("")
 
-        had_credentials = any_credentials_exist()
         run = SetupRun(region=region, mode=detect_mode())
-        run.started(had_credentials=had_credentials)
+        run.started(had_credentials=any_credentials_exist())
 
-        # --- 1. Authentication: sign in, then fetch or create the key ---
-        if skip_auth or had_credentials:
-            if skip_auth:
-                info("Authentication: skipped (--skip-auth).")
-            else:
-                success("Authentication: existing credentials found — skipping.")
+        # --- 1. Authentication: one sign-in, both credentials ---
+        if skip_auth:
+            info("Authentication: skipped (--skip-auth).")
             with run.step("signin") as step:
                 step.skipped()
             with run.step("credentials") as step:
                 step.skipped()
+            account_key = None
         else:
-            with run.step("signin"):
-                if region is None:
-                    region = _select_region()
-                run.region = region
-                jwt_access_token = _signin(region)
-            with run.step("credentials"):
-                accounts = _authenticate_and_save_key(jwt_access_token, region=region)
-                # The PAT path does not pick an account; with exactly one there is no
-                # ambiguity. Multi-account runs stay anonymous until the credentials
-                # step resolves one.
-                if len(accounts) == 1:
-                    run.identify(next(iter(accounts)))
+            region, account_key = cls._authenticate(region, account_id, run)
 
-        # --- 2. Shell completion ---
+        # --- 2. POLY_API_KEY in the shell profile ---
+        with run.step("environment") as step:
+            cls._export_account_key(account_key, region, step)
+
+        # --- 3. Shell completion ---
         with run.step("completion") as step:
             cls._install_completion(step)
 
-        # --- 3. AI agent skills ---
+        # --- 4. AI agent skills ---
         with run.step("skills") as step:
             cls._install_skills(skip_skills, agents, dev, global_install, step)
 
-        # --- 4. Project setup ---
+        # --- 5. Project setup ---
         with run.step("project") as step:
             cls._setup_project(base_path, region, step)
 
         run.completed()
         success("Setup complete.")
+
+    @classmethod
+    def _authenticate(
+        cls, region: str | None, account_id: str | None, run: SetupRun
+    ) -> tuple[str, str | None]:
+        """Make sure `region` holds both an ADK key and an account API key.
+
+        Signs in at most once, reusing the sign-in ``poly apikey`` keeps when it is
+        still valid, and mints only what is missing: a developer who already has an
+        ADK key from ``poly login`` gains the account key without a second browser
+        round trip. On studio the sign-in uses the GitHub-only client, the
+        self-serve door; other regions keep their standard client.
+
+        Args:
+            region: The region to set up, or None to infer it from the stored ADK
+                key when there is exactly one, else to ask.
+            account_id: The account to scope the account key to, or None to resolve
+                it (polling, or a picker at a terminal).
+            run: The telemetry run; records the ``signin`` and ``credentials`` steps
+                and switches identity to the account id once known.
+
+        Returns:
+            The region used, and the account API key (None only if the account
+            step could not produce one).
+        """
+        from poly.output.console import console, error, info, mask_api_key, success, warning
+
+        if region is None:
+            stored = regions_with_stored_keys()
+            region = stored[0] if len(stored) == 1 else _select_region()
+        run.region = region
+
+        try:
+            retrieve_api_key(region)
+            has_adk_key = True
+        except ValueError:
+            has_adk_key = False
+        stored_account = load_account_key_credential(region)
+
+        if has_adk_key and stored_account:
+            success(f"Authentication: ADK key and account API key found for {region} — skipping.")
+            with run.step("signin") as step:
+                step.skipped()
+            with run.step("credentials") as step:
+                step.skipped()
+            run.identify(stored_account["account_id"])
+            return region, stored_account["key"]
+
+        with run.step("signin"):
+            jwt_token, sign_in_reused = cls._sign_in_or_reuse(region)
+
+        with run.step("credentials"):
+            api = AgentStudioInterface()
+            while True:
+                try:
+                    if has_adk_key:
+                        success(f"ADK key: existing credential for {region} kept.")
+                        authorise_or_explain(
+                            api,
+                            region,
+                            jwt_token,
+                            self_serve_hint="run `poly setup --region studio`",
+                        )
+                    else:
+                        _authenticate_and_save_key(jwt_token, region=region)
+                    break
+                except requests.HTTPError as e:
+                    # A kept sign-in can be revoked before it expires: drop it and sign
+                    # in once more. A fresh sign-in that is refused is a real error.
+                    unauthorised = e.response is not None and e.response.status_code == 401
+                    if not (sign_in_reused and unauthorised):
+                        raise
+                    apikey_session.clear(region)
+                    info("Your kept sign-in was refused; signing in again.")
+                    jwt_token, sign_in_reused = cls._sign_in_or_reuse(region, reuse=False)
+                except ValueError as e:
+                    error(str(e))
+                    sys.exit(1)
+
+            if stored_account:
+                success(f"Account API key: existing '{stored_account['name']}' key kept.")
+                run.identify(stored_account["account_id"])
+                return region, stored_account["key"]
+
+            try:
+                account_id = resolve_account_id(
+                    api,
+                    region,
+                    jwt_token,
+                    account_id,
+                    source=SETUP_SOURCE,
+                    pick=pick_account if sys.stdin.isatty() else None,
+                )
+                api_key, reused, key_name = mint_account_key(
+                    api,
+                    region,
+                    jwt_token,
+                    account_id,
+                    key_name_for_region(SETUP_KEY_NAME, region),
+                    source=SETUP_SOURCE,
+                    also_reuse=[key_name_for_region(DEFAULT_KEY_NAME, region)],
+                )
+            except ValueError as e:
+                error(str(e))
+                sys.exit(1)
+            save_account_key_credential(region, api_key, account_id, key_name)
+            success(
+                f"Account API key: {'reusing' if reused else 'created'} '{key_name}'"
+                f" ({mask_api_key(api_key)}), saved to {CREDENTIALS_FILE_PATH}."
+            )
+            with console.status("[info]Verifying the account API key is active...[/info]"):
+                if not wait_for_key_active(api, region, api_key):
+                    warning(
+                        "The account API key was saved but is not active yet."
+                        " If your next call fails, wait a moment and retry."
+                    )
+            run.identify(account_id)
+        return region, api_key
+
+    @classmethod
+    def _sign_in_or_reuse(cls, region: str, reuse: bool = True) -> tuple[str, bool]:
+        """A JWT for `region`: the kept sign-in if still valid, else a fresh device flow.
+
+        A fresh sign-in is kept for later runs, like ``poly apikey`` does.
+
+        Args:
+            region: The region to sign in to.
+            reuse: Whether a kept sign-in may be used; False after one was refused.
+
+        Returns:
+            The token, and whether it was reused rather than freshly obtained.
+        """
+        from poly.output.console import info
+
+        session = apikey_session.load(region) if reuse else None
+        if session is not None:
+            minutes_ago = max(0, int(time.time() - session.saved_at) // 60)
+            info(f"Reusing your sign-in from {minutes_ago} minutes ago.")
+            return session.token, True
+        if region == "studio":
+            info("Sign in with GitHub to create or open your Studio account.")
+        token = _signin(region, auth_details=APIKEY_AUTH_DETAILS if region == "studio" else None)
+        apikey_session.save(region, token)
+        return token, False
+
+    @classmethod
+    def _export_account_key(
+        cls, api_key: str | None, region: str | None, step: StepResult | None = None
+    ) -> None:
+        """Write ``POLY_API_KEY`` to the shell profile, after its own confirmation.
+
+        Never folded into another confirmation: the profile is the developer's file.
+        Skips when the value is already there, when there is no key to write, or
+        when nobody can answer the prompt.
+
+        Args:
+            api_key: The account API key, or None when the auth step was skipped.
+            region: The region the key belongs to, for the hint on how to retry.
+            step: Telemetry record for this step, filled in with the outcome.
+        """
+        import questionary
+
+        from poly.output.console import info, success, warning
+
+        step = step or StepResult()
+        if api_key is None:
+            info(f"{ACCOUNT_KEY_ENV_VAR}: skipped (no account API key this run).")
+            step.skipped()
+            return
+
+        target = detect_profile()
+        if read_env_var(ACCOUNT_KEY_ENV_VAR) == api_key:
+            success(f"{ACCOUNT_KEY_ENV_VAR}: already set in {target.path} — skipping.")
+            step.skipped()
+            return
+
+        retry_hint = f"Run 'poly apikey --region {region}' later to export it."
+        if not sys.stdin.isatty():
+            info(f"{ACCOUNT_KEY_ENV_VAR}: not exported (not an interactive terminal). {retry_hint}")
+            step.skipped()
+            return
+
+        confirmed = questionary.confirm(
+            f"Add one line to {target.path} exporting {ACCOUNT_KEY_ENV_VAR}?", default=True
+        ).ask()
+        if not confirmed:
+            info(f"{ACCOUNT_KEY_ENV_VAR}: not exported. {retry_hint}")
+            step.declined()
+            return
+
+        try:
+            target, masked_line = write_env_var(ACCOUNT_KEY_ENV_VAR, api_key)
+        except EnvVarConflict as e:
+            warning(
+                f"{ACCOUNT_KEY_ENV_VAR}: {e} Run 'poly apikey --region {region} --force'"
+                " to replace it."
+            )
+            step.failed("EnvVarConflict")
+            return
+        success(f"{ACCOUNT_KEY_ENV_VAR}: wrote to {target.path}: {masked_line}")
+        if target.shell == "powershell":
+            info(f"Open a new terminal to pick up {ACCOUNT_KEY_ENV_VAR}.")
+        else:
+            info(f"Open a new terminal, or run `source {target.path}`, to pick it up.")
 
     @classmethod
     def _install_completion(cls, step: StepResult | None = None) -> None:

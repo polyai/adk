@@ -135,10 +135,14 @@ class HappyPath(ApiKeyTestCase):
 
     def test_reuse_path_does_not_create_new_key(self):
         """A matching existing key is reused instead of creating a new one."""
-        with patch("poly.cli_commands.apikey.select_reusable_api_key", return_value="sk-existing"):
-            ApiKeyCommand.apikey(region="studio")
+        self.mocks["list_keys"].return_value = [
+            {"key": "sk-existing", "active": True, "policies": [{"name": "cli-generated-key"}]}
+        ]
+
+        ApiKeyCommand.apikey(region="studio")
 
         self.mocks["create_key"].assert_not_called()
+        self.mocks["write_env"].assert_called_once_with("POLY_API_KEY", "sk-existing", force=False)
 
     def test_account_id_flag_skips_the_poll(self):
         """--account-id bypasses polling GET /jupiter/v2/accounts entirely."""

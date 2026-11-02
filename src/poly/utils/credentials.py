@@ -25,28 +25,79 @@ _REGION_TO_KEY_SUFFIX: dict[str, str] = {
 
 CREDENTIALS_FILE_PATH = os.path.join(POLY_HOME_DIR, "credentials.json")
 
+# Account API keys (for the PolyAI APIs and MCPs) live under this field, keyed by
+# region, so they are never confused with the ADK keys stored at the top level.
+ACCOUNT_KEYS_FIELD = "account_keys"
 
-def save_api_key_credential_file(api_key: str, region: str) -> None:
-    """Save the API key to a credential file in the user's home directory."""
-    credentials = {}
-    if os.path.isfile(CREDENTIALS_FILE_PATH):
-        with open(CREDENTIALS_FILE_PATH, "r", encoding="utf-8") as f:
-            try:
-                credentials = json.load(f)
-            except json.JSONDecodeError:
-                logger.warning(
-                    f"Could not parse existing credentials file at {CREDENTIALS_FILE_PATH!r}. "
-                    "It will be overwritten with the new API key."
-                )
 
-    credentials[region] = api_key
+def _read_credentials_file(on_error: str) -> dict:
+    """The parsed credentials file, or ``{}`` if it is absent or does not parse.
 
+    Args:
+        on_error: What the warning says will happen to an unparseable file.
+    """
+    if not os.path.isfile(CREDENTIALS_FILE_PATH):
+        return {}
+    with open(CREDENTIALS_FILE_PATH, "r", encoding="utf-8") as f:
+        try:
+            credentials = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning(
+                f"Could not parse credentials file at {CREDENTIALS_FILE_PATH!r}. {on_error}"
+            )
+            return {}
+    return credentials if isinstance(credentials, dict) else {}
+
+
+def _write_credentials_file(credentials: dict) -> None:
+    """Write the credentials file, readable and writeable only by the user."""
     os.makedirs(os.path.dirname(CREDENTIALS_FILE_PATH), exist_ok=True)
     with open(CREDENTIALS_FILE_PATH, "w", encoding="utf-8") as f:
         json.dump(credentials, f, indent=4)
-
-    # Set file permissions to be readable/writeable only by the user
     os.chmod(CREDENTIALS_FILE_PATH, 0o600)
+
+
+def save_api_key_credential_file(api_key: str, region: str) -> None:
+    """Save the ADK key for `region` to the credential file in the user's home directory."""
+    credentials = _read_credentials_file("It will be overwritten with the new API key.")
+    credentials[region] = api_key
+    _write_credentials_file(credentials)
+
+
+def save_account_key_credential(region: str, api_key: str, account_id: str, key_name: str) -> None:
+    """Save an account API key for `region` beside the ADK keys, replacing any stored one.
+
+    Args:
+        region: The region the key belongs to.
+        api_key: The account API key. Never logged.
+        account_id: The account the key is scoped to.
+        key_name: The name the key carries on the platform.
+    """
+    credentials = _read_credentials_file("It will be overwritten with the new API key.")
+    account_keys = credentials.get(ACCOUNT_KEYS_FIELD)
+    if not isinstance(account_keys, dict):
+        account_keys = {}
+    account_keys[region] = {"key": api_key, "account_id": account_id, "name": key_name}
+    credentials[ACCOUNT_KEYS_FIELD] = account_keys
+    _write_credentials_file(credentials)
+
+
+def load_account_key_credential(region: str) -> Optional[dict]:
+    """The stored account API key entry for `region`, if any.
+
+    Returns:
+        A dict with ``key``, ``account_id`` and ``name``, or None when the file has
+        no usable entry for `region`. Never raises.
+    """
+    account_keys = _read_credentials_file("It will be ignored when looking for the API key.").get(
+        ACCOUNT_KEYS_FIELD
+    )
+    if not isinstance(account_keys, dict):
+        return None
+    entry = account_keys.get(region)
+    if not isinstance(entry, dict) or not entry.get("key"):
+        return None
+    return entry
 
 
 def load_api_key_from_credential_file(region: str) -> Optional[str]:
@@ -81,7 +132,7 @@ _ACCOUNT_API_KEY_ENV_VAR = "POLY_API_KEY"
 _CREDENTIALS_FILE_DISPLAY_PATH = "~/.poly/credentials.json"
 
 
-def _regions_with_stored_keys() -> list[str]:
+def regions_with_stored_keys() -> list[str]:
     """Regions that hold an ADK key in the credential file or a per-region env var.
 
     Ordered as in ``_REGION_TO_KEY_SUFFIX``. A credential file that does not
@@ -120,7 +171,7 @@ def _missing_key_message(region: Optional[str] = None) -> str:
             f" {_CREDENTIALS_FILE_DISPLAY_PATH}.",
             f"Run `poly login --region {shown}` to sign in to that region.",
         ]
-        others = [region_display_name(r) for r in _regions_with_stored_keys() if r != region]
+        others = [region_display_name(r) for r in regions_with_stored_keys() if r != region]
         if others:
             suggestion = (
                 f"`--region {others[0]}`" if len(others) == 1 else "`--region <one of those>`"

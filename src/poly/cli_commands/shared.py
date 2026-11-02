@@ -510,3 +510,29 @@ def is_newer_version(candidate: str, current: str) -> bool:
         return Version(candidate) > Version(current)
     except InvalidVersion:
         return False
+
+
+def pick_account(accounts: list[dict]) -> str:
+    """Ask which account to use, with the same picker `poly project create` uses.
+
+    Args:
+        accounts: Raw account records with at least an ``id``.
+
+    Raises:
+        ValueError: The picker was cancelled.
+    """
+    import questionary
+
+    choices = [
+        questionary.Choice(title=f"{a.get('name') or 'unnamed'} ({a['id']})", value=a["id"])
+        for a in accounts
+    ]
+    chosen = questionary.select(
+        "Select Account",
+        choices=choices,
+        use_search_filter=True,
+        use_jk_keys=False,
+    ).ask()
+    if not chosen:
+        raise ValueError("No account selected.")
+    return chosen

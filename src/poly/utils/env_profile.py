@@ -114,6 +114,27 @@ def write_env_var(name: str, value: str, *, force: bool = False) -> tuple[Profil
     return _write_env_var_unix(name, value, force=force)
 
 
+def read_env_var(name: str) -> Optional[str]:
+    """The value `name` is persisted with, or None if the profile does not set it.
+
+    Reads the same place `write_env_var` writes: the detected profile file, or the
+    user's registry environment block on Windows. The live process environment is
+    not consulted, so this answers "has it been written", not "is it set now".
+    """
+    if _is_windows():
+        return _get_windows_registry_backend().read(name)
+    target = detect_profile()
+    if not target.path.exists():
+        return None
+    pattern = _existing_line_pattern(target.shell, name)
+    value: Optional[str] = None
+    for line in target.path.read_text(encoding="utf-8").splitlines():
+        match = pattern.match(line)
+        if match:
+            value = _strip_quotes(match.group(1))
+    return value
+
+
 def _format_line(shell: str, name: str, value: str) -> str:
     """Render the export line for the given shell dialect."""
     if shell == "fish":

@@ -12,8 +12,13 @@ from unittest.mock import patch
 from poly.utils import credentials
 from poly.utils.credentials import (
     _missing_key_message,
+    any_credentials_exist,
+    load_account_key_credential,
     raise_if_no_credentials,
+    regions_with_stored_keys,
     retrieve_api_key,
+    save_account_key_credential,
+    save_api_key_credential_file,
 )
 
 
@@ -210,3 +215,59 @@ class RaiseIfNoCredentialsTest(_CredentialsTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AccountKeyCredentialTest(_CredentialsTestCase):
+    """Tests for the account API key stored beside the ADK keys."""
+
+    def test_save_stores_the_entry_under_account_keys_and_keeps_adk_keys(self):
+        """The account key never lands in a region's ADK slot."""
+        self.write_credentials({"studio": "adk-key"})
+
+        save_account_key_credential("studio", "sk-acct", "acc-1", "setup-key")
+
+        with open(self.credentials_path, encoding="utf-8") as f:
+            stored = json.load(f)
+        self.assertEqual(stored["studio"], "adk-key")
+        self.assertEqual(
+            stored["account_keys"]["studio"],
+            {"key": "sk-acct", "account_id": "acc-1", "name": "setup-key"},
+        )
+        self.assertEqual(os.stat(self.credentials_path).st_mode & 0o777, 0o600)
+
+    def test_save_replaces_the_region_entry_and_leaves_other_regions(self):
+        save_account_key_credential("studio", "sk-old", "acc-1", "setup-key")
+        save_account_key_credential("us-1", "sk-us", "acc-2", "setup-key-us-1")
+        save_account_key_credential("studio", "sk-new", "acc-1", "cli-generated-key")
+
+        self.assertEqual(load_account_key_credential("studio")["key"], "sk-new")
+        self.assertEqual(load_account_key_credential("studio")["name"], "cli-generated-key")
+        self.assertEqual(load_account_key_credential("us-1")["account_id"], "acc-2")
+
+    def test_load_returns_none_when_absent_or_malformed(self):
+        self.assertIsNone(load_account_key_credential("studio"))
+        self.write_credentials({"studio": "adk-key"})
+        self.assertIsNone(load_account_key_credential("studio"))
+        self.write_credentials({"account_keys": {"studio": "not-a-dict"}})
+        self.assertIsNone(load_account_key_credential("studio"))
+        self.write_credentials({"account_keys": {"studio": {"account_id": "acc-1"}}})
+        self.assertIsNone(load_account_key_credential("studio"))
+        self.write_credentials("{not json")
+        self.assertIsNone(load_account_key_credential("studio"))
+
+    def test_adk_key_lookups_ignore_the_account_keys_field(self):
+        """A file holding only an account key is not an ADK credential."""
+        save_account_key_credential("studio", "sk-acct", "acc-1", "setup-key")
+
+        self.assertFalse(any_credentials_exist())
+        self.assertEqual(regions_with_stored_keys(), [])
+        with self.assertRaises(ValueError):
+            retrieve_api_key("studio")
+
+    def test_adk_key_save_keeps_the_account_keys_field(self):
+        save_account_key_credential("studio", "sk-acct", "acc-1", "setup-key")
+
+        save_api_key_credential_file("adk-key", region="studio")
+
+        self.assertEqual(retrieve_api_key("studio"), "adk-key")
+        self.assertEqual(load_account_key_credential("studio")["key"], "sk-acct")
