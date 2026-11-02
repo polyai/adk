@@ -57,6 +57,8 @@ Every node except `wait` has a **function** with a `name` (a Python name) and a 
 - `writeback` with `target: csv`: `outbound_contacts`, `outbound_campaign`
 - any other node: `outbound_contact`, `outbound_campaign`
 
+Every file in `functions/` must belong to a node with a function. A pull keeps the file of a node removed in Agent Studio if you had edited it: delete the file, or add the node back, before you push.
+
 ## Example
 
 ```yaml
