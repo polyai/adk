@@ -912,6 +912,7 @@ class SetupArgumentParsingTest(unittest.TestCase):
             ["setup", "--base-path", base_path, "--skip-auth", "--dev", "-g", "--agent", "cursor"]
         )
 
+        _silence_telemetry(self)
         with patch.dict(os.environ, {"SHELL": "/bin/unrecognised-shell"}):
             SetupCommand.run(args)
 
