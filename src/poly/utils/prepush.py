@@ -25,7 +25,6 @@ from poly.resources import (
     Function,
     FunctionStep,
     OutboundCampaign,
-    OutboundCampaignFunction,
     OutboundCampaignNode,
     OutboundCampaignSettings,
     Resource,
@@ -293,13 +292,10 @@ def group_outbound_campaign_changes(
 ) -> None:
     """Finish the campaign changes in place.
 
-    Function files have no command of their own: an edit to one already shows as a change to
-    its node. A renamed folder keeps its campaign's id and its nodes' ids, a node that changes
+    A renamed folder keeps its campaign's id and its nodes' ids, a node that changes
     type is replaced, a renamed trigger keeps its id, and deleting a campaign deletes its nodes
     with it.
     """
-    for changes in (new_resources, updated_resources, deleted_resources):
-        changes.pop(OutboundCampaignFunction, None)
     pair_renamed_campaigns(state, new_resources, updated_resources, deleted_resources)
     replace_retyped_campaign_nodes(state, new_resources, updated_resources, deleted_resources)
     pair_replaced_campaign_triggers(

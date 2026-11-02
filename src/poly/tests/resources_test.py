@@ -91,7 +91,6 @@ from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
 from poly.resources.outbound_campaign import (
     TIMEZONES,
     OutboundCampaign,
-    OutboundCampaignFunction,
     OutboundCampaignNode,
     OutboundCampaignSettings,
     def_line_error,
@@ -15042,12 +15041,9 @@ class OutboundCampaignTests(unittest.TestCase):
                 for node in OutboundCampaignNode.from_projection(projection).values()
             )
         )
-        self.assertEqual(
-            list(OutboundCampaignFunction.from_projection(projection)), ["CMPGN-ONE:trigger-1"]
-        )
 
     def test_from_projection_without_campaigns_pulls_nothing(self):
-        for resource_type in (OutboundCampaign, OutboundCampaignNode, OutboundCampaignFunction):
+        for resource_type in (OutboundCampaign, OutboundCampaignNode):
             with self.subTest(resource_type=resource_type.__name__):
                 self.assertEqual(resource_type.from_projection({}), {})
 
@@ -15114,13 +15110,11 @@ class OutboundCampaignTests(unittest.TestCase):
 
         campaigns = OutboundCampaign.from_projection(projection)
         nodes = OutboundCampaignNode.from_projection(projection)
-        functions = OutboundCampaignFunction.from_projection(projection)
 
         self.assertEqual(
             [campaign.folder for campaign in campaigns.values()], ["reminders", "reminders-two"]
         )
         self.assertEqual(nodes["CMPGN-TWO:end-1"].campaign_folder, "reminders-two")
-        self.assertEqual(list(functions), ["CMPGN-ONE:trigger-1", "CMPGN-TWO:trigger-1"])
         self.assertEqual(
             len({resource.file_path for resource in (*campaigns.values(), *nodes.values())}), 8
         )
@@ -15242,7 +15236,7 @@ class OutboundCampaignTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             _write_campaign(root, campaign, nodes.values(), mappings)
             code_path = os.path.join(root, trigger.function_file)
-            os.makedirs(os.path.dirname(code_path))
+            os.makedirs(os.path.dirname(code_path), exist_ok=True)
             with open(code_path, "w", encoding="utf-8") as file:
                 file.write("def map_contacts(contacts, outbound_campaign):\n    pass\n")
 
@@ -15493,15 +15487,39 @@ class OutboundCampaignTests(unittest.TestCase):
             trigger.validate(resource_mappings=None)
 
     def test_function_file_needs_its_node(self):
-        nodes = _campaign_nodes()
-        function = OutboundCampaignFunction(
-            resource_id="reminders/gone", name="gone", campaign_folder="reminders", stem="gone"
-        )
+        campaign, nodes = _campaign(), _campaign_nodes()
+        with tempfile.TemporaryDirectory() as root:
+            _write_campaign(root, campaign, nodes.values(), _node_mappings(nodes))
+            for stem in ("gone", "first_call"):
+                with open(
+                    os.path.join(root, "outbound_campaigns", "reminders", "functions", f"{stem}.py"),
+                    "w",
+                    encoding="utf-8",
+                ) as file:
+                    file.write("")
+            read = OutboundCampaign.read_local_resource(
+                os.path.join(root, campaign.file_path), "CMPGN-ONE", "Reminders"
+            )
+            MultiResourceYamlResource._file_cache.clear()
 
+        self.assertEqual(read.orphan_function_files, ["gone.py"])
         with self.assertRaisesRegex(ValueError, "functions/gone.py has no node of that name"):
-            function.validate(resource_mappings=_node_mappings(nodes))
-        function.stem = "first_call"
-        function.validate(resource_mappings=_node_mappings(nodes))
+            read.validate(resource_mappings=[])
+
+    def test_node_save_writes_its_code_and_delete_removes_it(self):
+        campaign, nodes = _campaign(), _campaign_nodes()
+        trigger = nodes["CMPGN-ONE:trigger-1"]
+        with tempfile.TemporaryDirectory() as root:
+            _write_campaign(root, campaign, nodes.values(), _node_mappings(nodes))
+            code_path = os.path.join(root, trigger.function_file)
+            with open(code_path, encoding="utf-8") as file:
+                written = file.read()
+            OutboundCampaignNode.delete_resource(os.path.join(root, trigger.file_path))
+            removed = not os.path.exists(code_path)
+            MultiResourceYamlResource._file_cache.clear()
+
+        self.assertEqual(written, trigger.code)
+        self.assertTrue(removed)
 
     def test_default_variant_is_shown_by_name_and_read_back_as_its_id(self):
         campaign = _campaign()

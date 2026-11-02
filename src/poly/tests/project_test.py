@@ -114,6 +114,7 @@ class InitProjectOnSaveTest(unittest.TestCase):
         self.mock_write_cache = patch.object(
             MultiResourceYamlResource, "write_cache_to_file"
         ).start()
+        self.mock_save_code = patch.object(OutboundCampaignNode, "save_code").start()
 
     def tearDown(self):
         patch.stopall()
@@ -8511,7 +8512,10 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def _push_for_real(self) -> tuple[bool, str]:
         """Push without a dry run, with Agent Studio accepting every command."""
-        handler = patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock).start()
+        self._handler_patch = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        )
+        handler = self._handler_patch.start()
         handler.queue_resources = MagicMock(return_value=[])
         handler.send_queued_commands = MagicMock(return_value=True)
         handler.pull_resources.return_value = (deepcopy(self.project.resources), [], {})
@@ -9396,6 +9400,214 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def _read(self, *parts: str) -> str:
         with open(os.path.join(self.root, "outbound_campaigns", *parts), encoding="utf-8") as file:
             return file.read()
+
+    def _projection_from_state(
+        self, labels: Optional[dict[str, str]] = None, names: Optional[dict[str, str]] = None
+    ) -> dict:
+        """The saved state as Agent Studio would serve it, with nodes and campaigns renamed."""
+        labels, names = labels or {}, names or {}
+        entities = {}
+        for campaign_id, campaign in self.project.resources[OutboundCampaign].items():
+            nodes = [
+                node
+                for node in self.project.resources[OutboundCampaignNode].values()
+                if node.campaign_id == campaign_id
+            ]
+            entities[campaign_id] = {
+                "id": campaign_id,
+                "name": names.get(campaign_id, campaign.name),
+                "description": campaign.description,
+                "settings": campaign.settings,
+                "nodes": {
+                    "ids": [node.node_id for node in nodes],
+                    "entities": {
+                        node.node_id: {
+                            "id": node.node_id,
+                            "label": labels.get(node.node_id, node.platform_name),
+                            "position": node.position or {"x": 0, "y": 0},
+                            "data": {
+                                **node.data,
+                                **(
+                                    {"function": {**node.data["function"], "code": node.code}}
+                                    if node.data.get("function")
+                                    else {}
+                                ),
+                            },
+                        }
+                        for node in nodes
+                    },
+                },
+                "archived": False,
+            }
+        return {
+            "outboundCampaigns": {
+                "outboundCampaigns": {"ids": list(entities), "entities": entities}
+            }
+        }
+
+    def _assert_pushed_code_survives_a_remote_rename(
+        self, folder: str, node_name: str, new_label: str
+    ) -> None:
+        """After a push, a local code edit merges into the file of a node renamed remotely."""
+        success, message = self._push_for_real()
+        self.assertTrue(success, message)
+        self._handler_patch.stop()
+        node = next(
+            node
+            for node in self.project.resources[OutboundCampaignNode].values()
+            if node.name == node_name
+        )
+        stem = resource_utils.clean_name(node_name)
+        old_path = os.path.join(self.root, "outbound_campaigns", folder, "functions", f"{stem}.py")
+        with open(old_path, encoding="utf-8") as file:
+            self.assertEqual(file.read(), node.code)
+        edited = node.code + "\n\ndef local_helper():\n    pass\n"
+        with open(old_path, "w", encoding="utf-8") as file:
+            file.write(edited)
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._projection_from_state({node.node_id: new_label})
+        )
+
+        new_stem = resource_utils.clean_name(new_label)
+        self.assertEqual(conflicts, [])
+        self.assertFalse(os.path.exists(old_path))
+        self.assertEqual(self._read(folder, "functions", f"{new_stem}.py"), edited)
+        renamed = self.project.resources[OutboundCampaignNode][node.resource_id]
+        self.assertEqual(renamed.name, new_label)
+        self.assertEqual(renamed.code, node.code)
+        _, modified, new, deleted = self.project.project_status()
+        self.assertEqual(
+            modified,
+            [os.path.join(self.root, "outbound_campaigns", folder, "functions", f"{new_stem}.py")],
+        )
+        self.assertEqual((new, deleted), ([], []))
+
+    def test_code_follows_a_remote_rename_after_a_pushed_campaign_rename(self):
+        self._rename_campaign("Monthly reminders", "monthly_reminders")
+        self._assert_pushed_code_survives_a_remote_rename("monthly_reminders", "Trigger", "Begin")
+
+    def test_code_follows_a_remote_rename_after_a_pushed_trigger_rename(self):
+        self._rename_trigger("Start")
+        self._assert_pushed_code_survives_a_remote_rename("reminders", "Start", "Begin")
+
+    def test_code_follows_a_remote_rename_after_a_pushed_retype(self):
+        data = self._yaml()
+        index = data["nodes"].index(self._node(data, "First call"))
+        data["nodes"][index] = {
+            "name": "First call",
+            "type": "sms",
+            "function": {"name": "sms_args", "description": ""},
+            "messageTemplate": "Hi",
+            "defaultRoute": "End",
+        }
+        self._write_yaml(data)
+        self._write_function(
+            "first_call", "def sms_args(outbound_contact, outbound_campaign):\n    return {}\n"
+        )
+        self._assert_pushed_code_survives_a_remote_rename("reminders", "First call", "Text")
+
+    def test_code_follows_a_remote_rename_after_a_pushed_case_only_rename(self):
+        data = self._yaml()
+        self._node(data, "First call")["name"] = "First Call"
+        self._node(data, "Trigger")["routes"] = [{"next": "First Call"}]
+        self._write_yaml(data)
+        self._write_function(
+            "first_call", "def call_args(outbound_contact, outbound_campaign):\n    return {}\n"
+        )
+        self._assert_pushed_code_survives_a_remote_rename("reminders", "First Call", "Second")
+
+    def _pull_two_campaigns(self, first: str, second: str) -> None:
+        projection = _campaign_projection(name=first, trigger_code="def map_contacts(a, b):\n    1\n")
+        other = _campaign_projection(
+            campaign_id="CMPGN-TWO", name=second, trigger_code="def map_contacts(a, b):\n    2\n"
+        )
+        campaigns = projection["outboundCampaigns"]["outboundCampaigns"]
+        campaigns["ids"].append("CMPGN-TWO")
+        campaigns["entities"]["CMPGN-TWO"] = other["outboundCampaigns"]["outboundCampaigns"][
+            "entities"
+        ]["CMPGN-TWO"]
+        self._pull_into_new_project(projection)
+
+    def test_campaign_taking_an_archived_campaign_folder_takes_none_of_its_files(self):
+        self._pull_two_campaigns("Reminders", "Reminders")
+        projection = self._projection_from_state()
+        projection["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-ONE"][
+            "archived"
+        ] = True
+
+        conflicts, _ = self.project.pull_project(projection_json=projection)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            sorted(os.listdir(os.path.join(self.root, "outbound_campaigns"))), ["reminders"]
+        )
+        self.assertEqual(
+            self._read("reminders", "functions", "trigger.py"), "def map_contacts(a, b):\n    2\n"
+        )
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_campaigns_swapping_names_keep_their_own_files(self):
+        self._pull_two_campaigns("Reminders", "Renewals")
+        self._write_function("trigger", "def map_contacts(a, b):\n    1 + 1\n")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._projection_from_state(
+                names={"CMPGN-ONE": "Renewals", "CMPGN-TWO": "Reminders"}
+            )
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            self._read("renewals", "functions", "trigger.py"), "def map_contacts(a, b):\n    1 + 1\n"
+        )
+        self.assertEqual(
+            self._read("reminders", "functions", "trigger.py"), "def map_contacts(a, b):\n    2\n"
+        )
+        self.assertEqual(resource_utils.load_yaml(self._read("renewals", "campaign.yaml"))["name"], "Renewals")
+        _, modified, new, deleted = self.project.project_status()
+        self.assertEqual(
+            modified, [os.path.join(self.root, "outbound_campaigns", "renewals", "functions", "trigger.py")]
+        )
+        self.assertEqual((new, deleted), ([], []))
+
+    def test_campaign_renamed_locally_and_remotely_is_a_conflict_in_the_new_folder(self):
+        self._rename_campaign("Renewals", "renewals")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=_campaign_projection(name="Monthly")
+        )
+
+        monthly = os.path.join(self.root, "outbound_campaigns", "monthly")
+        self.assertEqual(conflicts, [os.path.join(monthly, "campaign.yaml")])
+        self.assertEqual(self._read("monthly", "functions", "trigger.py"), self.TRIGGER_CODE)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "outbound_campaigns", "renewals", "functions", "trigger.py")))
+        with self.assertRaises(Exception):
+            self.project.push_project(dry_run=True)
+
+    def test_retyped_node_with_a_legacy_def_line_fails_validation(self):
+        """A retype is pushed as a create, and Agent Studio checks the def line on create."""
+        projection = _campaign_projection()
+        self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
+            "def call_args(contact):\n    return {}\n"
+        )
+        self._pull_into_new_project(projection)
+        data = self._yaml()
+        index = data["nodes"].index(self._node(data, "First call"))
+        data["nodes"][index] = {
+            "name": "First call",
+            "type": "sms",
+            "function": {"name": "call_args", "description": ""},
+            "messageTemplate": "Hi",
+            "defaultRoute": "End",
+        }
+        self._write_yaml(data)
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertEqual(commands, [])
+        self.assertIn("call_args must take exactly", message)
 
     def test_remote_node_rename_carries_a_local_code_edit_to_the_new_file(self):
         edited = self.TRIGGER_CODE + "\n\ndef helper():\n    pass\n"
