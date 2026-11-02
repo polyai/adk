@@ -11,7 +11,7 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
@@ -55,7 +55,12 @@ from poly.resources import (
     TestCase,
     Topic,
 )
-from poly.resources.outbound_campaign import campaign_folder_of, route_targets
+from poly.resources.outbound_campaign import (
+    CAMPAIGNS_DIR,
+    campaign_folder_of,
+    function_file_stem,
+    route_targets,
+)
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
     RESOURCE_NAME_TO_CLASS,
@@ -1002,6 +1007,47 @@ class AgentStudioProject:
 
         return files_with_conflicts, progress_offset
 
+    def _follow_remote_campaign_renames(
+        self, original_resources: ResourceMap, incoming_resources: ResourceMap
+    ) -> ResourceMap:
+        """Move each campaign folder Agent Studio renamed, so local edits merge in place.
+
+        Returns the original resources as if they had been pulled into the new folders. A
+        folder is left where it is when the new one already exists.
+        """
+        moves: dict[str, str] = {}
+        incoming_campaigns = incoming_resources.get(OutboundCampaign, {})
+        for campaign_id, campaign in original_resources.get(OutboundCampaign, {}).items():
+            incoming = incoming_campaigns.get(campaign_id)
+            if incoming is None or incoming.folder == campaign.folder:
+                continue
+            old_path = os.path.join(self.root_path, CAMPAIGNS_DIR, campaign.folder)
+            new_path = os.path.join(self.root_path, CAMPAIGNS_DIR, incoming.folder)
+            if not os.path.isdir(old_path) or os.path.exists(new_path):
+                continue
+            shutil.move(old_path, new_path)
+            moves[campaign.folder] = incoming.folder
+        if not moves:
+            return original_resources
+
+        followed = dict(original_resources)
+        followed[OutboundCampaign] = {
+            resource_id: replace(campaign, folder_name=moves[campaign.folder])
+            if campaign.folder in moves
+            else campaign
+            for resource_id, campaign in original_resources.get(OutboundCampaign, {}).items()
+        }
+        for resource_type in (OutboundCampaignNode, OutboundCampaignFunction):
+            if resource_type not in original_resources:
+                continue
+            followed[resource_type] = {
+                resource_id: replace(resource, campaign_folder=moves[resource.campaign_folder])
+                if resource.campaign_folder in moves
+                else resource
+                for resource_id, resource in original_resources.get(resource_type, {}).items()
+            }
+        return followed
+
     def _update_pulled_resources(
         self,
         original_resources: ResourceMap,
@@ -1026,6 +1072,11 @@ class AgentStudioProject:
             return []
 
         files_with_conflicts = []
+
+        if not force:
+            original_resources = self._follow_remote_campaign_renames(
+                original_resources, incoming_resources
+            )
 
         # Generate resource mappings
         incoming_resource_mappings: list[ResourceMapping] = (
@@ -1799,6 +1850,11 @@ class AgentStudioProject:
                 continue
 
             modified = local_resource.is_modified(original_hash)
+            if modified and isinstance(local_resource, OutboundCampaignNode):
+                saved_node = self.resources.get(OutboundCampaignNode, {}).get(
+                    local_resource.resource_id
+                )
+                modified = saved_node is None or not local_resource.is_same_file_entry(saved_node)
             if modified:
                 modified_files.append(kept_local_resource_mapping.file_path)
 
@@ -2356,6 +2412,11 @@ class AgentStudioProject:
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
         if resource_class == OutboundCampaign:
+            additional_kwargs["known_identity"] = (
+                original_resource.identity
+                if isinstance(original_resource, OutboundCampaign)
+                else None
+            )
             additional_kwargs["had_trigger"] = any(
                 node.campaign_id == resource.resource_id and node.data.get("type") == "trigger"
                 for node in self.resources.get(OutboundCampaignNode, {}).values()
@@ -2367,13 +2428,9 @@ class AgentStudioProject:
             )
             additional_kwargs["known_position"] = saved_node.position if saved_node else None
             additional_kwargs["known_type"] = saved_node.data.get("type") if saved_node else None
-            additional_kwargs["known_label"] = None
-            if saved_node:
-                additional_kwargs["known_label"] = (
-                    saved_node.name
-                    if saved_node.platform_label is None
-                    else saved_node.platform_label
-                )
+            additional_kwargs["known_label"] = saved_node.platform_name if saved_node else None
+            additional_kwargs["known_data"] = saved_node.data if saved_node else None
+            additional_kwargs["known_code"] = saved_node.code if saved_node else None
 
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):
@@ -2599,7 +2656,7 @@ class AgentStudioProject:
                         )
                         resource_id = f"{campaign_id}:{node_id}"
                     elif resource_type == OutboundCampaignFunction:
-                        resource_id = OutboundCampaignFunction.id_from_path(file_path)
+                        resource_id = f"{campaign_folder_of(file_path)}/{resource_name}"
                     elif parent_resource:
                         resource_id = parent_resource.resource_id
                     else:
@@ -2653,7 +2710,28 @@ class AgentStudioProject:
             )
             deleted_resource_mappings.append(resource_mapping)
 
+        self._key_new_function_files_by_node(new_resource_mappings, kept_resource_mappings)
         return new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
+
+    @staticmethod
+    def _key_new_function_files_by_node(
+        new_resource_mappings: list[ResourceMapping],
+        kept_resource_mappings: list[ResourceMapping],
+    ) -> None:
+        """Give each new campaign function file its node's id, as pull does."""
+        node_ids = {
+            (campaign_folder_of(mapping.file_path), function_file_stem(mapping.resource_name)): (
+                mapping.resource_id
+            )
+            for mapping in new_resource_mappings + kept_resource_mappings
+            if mapping.resource_type is OutboundCampaignNode
+        }
+        for mapping in new_resource_mappings:
+            if mapping.resource_type is OutboundCampaignFunction:
+                mapping.resource_id = node_ids.get(
+                    (campaign_folder_of(mapping.file_path), mapping.resource_name),
+                    mapping.resource_id,
+                )
 
     @staticmethod
     def generate_uuid(resource_type: type[Resource]) -> str:

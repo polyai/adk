@@ -15043,7 +15043,7 @@ class OutboundCampaignTests(unittest.TestCase):
             )
         )
         self.assertEqual(
-            list(OutboundCampaignFunction.from_projection(projection)), ["reminders/trigger"]
+            list(OutboundCampaignFunction.from_projection(projection)), ["CMPGN-ONE:trigger-1"]
         )
 
     def test_from_projection_without_campaigns_pulls_nothing(self):
@@ -15120,7 +15120,7 @@ class OutboundCampaignTests(unittest.TestCase):
             [campaign.folder for campaign in campaigns.values()], ["reminders", "reminders-two"]
         )
         self.assertEqual(nodes["CMPGN-TWO:end-1"].campaign_folder, "reminders-two")
-        self.assertEqual(list(functions), ["reminders/trigger", "reminders-two/trigger"])
+        self.assertEqual(list(functions), ["CMPGN-ONE:trigger-1", "CMPGN-TWO:trigger-1"])
         self.assertEqual(
             len({resource.file_path for resource in (*campaigns.values(), *nodes.values())}), 8
         )
@@ -15372,6 +15372,7 @@ class OutboundCampaignTests(unittest.TestCase):
         cases = {
             "can't be before 'startDate'": {"startDate": "2026-02-01", "endDate": "2026-01-31"},
             "must be an ISO 3166-1": {"country": "XX"},
+            "in capitals": {"country": "gb"},
             "needs at least one day": {"contactWindow": {**window, "daysOfWeek": []}},
             'as "HH:mm"': {"contactWindow": {**window, "startTime": "9am"}},
             "must end after it starts": {"contactWindow": {**window, "endTime": "08:00"}},
@@ -15391,13 +15392,23 @@ class OutboundCampaignTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be an IANA time zone"):
             campaign.validate(resource_mappings=[])
 
+    def test_blank_text_settings_are_read_as_unset(self):
+        """Agent Studio returns a blank setting as null, so a blank must not count as a change."""
+        campaign = OutboundCampaign.from_yaml_dict(
+            {"name": "Reminders", "settings": {"fromNumber": "", "country": "US"}}, "CMPGN-ONE"
+        )
+
+        self.assertIsNone(campaign.settings["fromNumber"])
+        settings = MessageToDict(campaign.settings_change().build_update_proto())["settings"]
+        self.assertNotIn("fromNumber", settings)
+
     def test_validate_accepts_settings_the_platform_accepts(self):
         campaign = _campaign()
         campaign.settings = {
             **campaign.settings,
             "startDate": "2026-01-01",
             "endDate": "2026-01-01",
-            "country": "gb",
+            "country": "GB",
             "contactWindow": {"daysOfWeek": ["friday"], "startTime": "08:30", "endTime": "20:00"},
         }
 
