@@ -1258,7 +1258,7 @@ class AgentStudioProject:
             updated_resources,
             new_state,
         )
-        self._assign_campaign_positions(new_resources, new_state)
+        self._assign_campaign_positions(new_state, new_resources, post_changes.new)
 
         # Queue new/updated/deleted resources
         commands = self.api_handler.get_queued_commands()
@@ -1504,10 +1504,12 @@ class AgentStudioProject:
         return True, "Resources pushed successfully.", commands
 
     @staticmethod
-    def _assign_campaign_positions(new_resources: ResourceMap, new_state: ResourceMap) -> None:
+    def _assign_campaign_positions(new_state: ResourceMap, *new_resources: ResourceMap) -> None:
         """Lay out the new nodes of each campaign around the nodes it already has."""
         campaign_ids = {
-            node.campaign_id for node in new_resources.get(OutboundCampaignNode, {}).values()
+            node.campaign_id
+            for changes in new_resources
+            for node in changes.get(OutboundCampaignNode, {}).values()
         }
         for campaign_id in campaign_ids:
             nodes = [
@@ -1685,7 +1687,12 @@ class AgentStudioProject:
         )
         prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
         prepush.group_outbound_campaign_changes(
-            state, new_resources, updated_resources, deleted_resources, post_push_new_resources
+            state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            pre_push_updated_resources,
+            post_push_new_resources,
         )
         prepush.fix_orphaned_variables(
             state,
@@ -2359,6 +2366,13 @@ class AgentStudioProject:
             )
             additional_kwargs["known_position"] = saved_node.position if saved_node else None
             additional_kwargs["known_type"] = saved_node.data.get("type") if saved_node else None
+            additional_kwargs["known_label"] = None
+            if saved_node:
+                additional_kwargs["known_label"] = (
+                    saved_node.name
+                    if saved_node.platform_label is None
+                    else saved_node.platform_label
+                )
 
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):

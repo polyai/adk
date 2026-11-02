@@ -1150,6 +1150,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     platform_label: Optional[str] = field(default=None, repr=False, compare=False)
 
     saved_type: Optional[str] = field(default=None, init=False, repr=False, compare=False)
+    saved_label: Optional[str] = field(default=None, init=False, repr=False, compare=False)
     campaign_has_trigger: bool = field(default=False, init=False, repr=False, compare=False)
 
     @property
@@ -1224,6 +1225,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         name: str = "",
         known_position: Optional[dict] = None,
         known_type: Optional[str] = None,
+        known_label: Optional[str] = None,
         **kwargs,
     ) -> "OutboundCampaignNode":
         yaml_dict = _strip_strings(_plain(yaml_dict or {}))
@@ -1235,6 +1237,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             position=known_position,
         )
         node.saved_type = known_type
+        node.saved_label = known_label
         return node
 
     @classmethod
