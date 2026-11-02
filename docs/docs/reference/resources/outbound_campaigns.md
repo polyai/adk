@@ -68,7 +68,7 @@ Each node has a `name`, unique in the campaign, and a `type` with that type's fi
 
 `next`, `defaultNext` and `defaultRoute` name the node a contact moves to next. A call or text always moves to its `defaultRoute`; put a `conditional` after it to branch on how it went. Flow fields hold a [flow](./flows.md)'s name.
 
-Every node except `wait` has a `function` with a `name` (a valid Python name) and a `description`. Its code goes in the node's `.py` file, whose `def` line takes exactly the parameters the node is called with:
+Every node except `wait` and `end` has a `function`, and an `end` node may have one. A function has a `name` (a valid Python name) and a `description`. Its code goes in the node's `.py` file, whose `def` line takes exactly the parameters the node is called with:
 
 | Node | Parameters |
 |---|---|

@@ -818,11 +818,18 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     def is_modified(self, other_hash: str) -> bool:
         """Treat an unreadable node list or a stray function file as a change, for validation."""
-        return (
-            super().is_modified(other_hash)
-            or bool(_node_entry_errors(self.node_entries))
-            or bool(self.orphan_function_files)
-        )
+        return self.is_entry_modified(other_hash) or bool(self.orphan_function_files)
+
+    def is_entry_modified(self, other_hash: str) -> bool:
+        """Whether the campaign's keys in its file changed, or its node list can't be read."""
+        return super().is_modified(other_hash) or bool(_node_entry_errors(self.node_entries))
+
+    def orphan_function_paths(self, base_path: str) -> list[str]:
+        """The paths of the function files in the campaign's folder that no node owns."""
+        return [
+            os.path.join(base_path, CAMPAIGNS_DIR, self.folder, FUNCTIONS_DIR, file_name)
+            for file_name in self.orphan_function_files
+        ]
 
     def build_create_proto(self) -> campaigns_pb2.OutboundCampaign_Create:
         return campaigns_pb2.OutboundCampaign_Create(
@@ -1406,6 +1413,12 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     def read_local_resource(
         cls, file_path: str, resource_id: str, resource_name: str, **kwargs
     ) -> "OutboundCampaignNode":
+        """Read the node's entry and its code.
+
+        Raises:
+            MergeConflictError: if the code has conflict markers, unless `allow_code_conflict`.
+        """
+        allow_code_conflict = kwargs.pop("allow_code_conflict", False)
         node: OutboundCampaignNode = super().read_local_resource(
             file_path, resource_id=resource_id, resource_name=resource_name, **kwargs
         )
@@ -1416,6 +1429,8 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         )
         if os.path.isfile(code_path):
             node.code = Resource.read_from_file(code_path)
+            if not allow_code_conflict and utils.contains_merge_conflict(node.code):
+                raise utils.MergeConflictError(code_path)
         top = cls._get_top_level_data(true_file_path)
         entries = top.get(NODES_KEY) if isinstance(top, dict) else None
         node.campaign_has_trigger = _has_trigger(entries if isinstance(entries, list) else None)
