@@ -30,9 +30,9 @@ The folder name is the campaign's name, lowercased with punctuation replaced by 
   - **voiceDispatchLimits**, **smsDispatchLimits**: `maxConcurrent`, `perHour`, `perDay`.
   - **defaultTimezone**: IANA time zone, used when a contact has none.
   - **contactWindow**: `daysOfWeek` (at least one of `monday` .. `sunday`), `startTime` and `endTime` as `"HH:mm"` in the contact's time zone, ending after it starts.
-- **nodes**: List of nodes, in any order. Each has a **name**, unique in the campaign, a **type**, and that type's fields (below). Nodes refer to each other by name. Positions on the Agent Studio canvas are not in the file: a node keeps its position, and a new node is placed next to the node that routes to it.
+- **nodes**: List of nodes, in any order. Each has a **name**, unique in the campaign, a **type**, and that type's fields (below). Nodes refer to each other by name. Names are compared ignoring case and punctuation, so when Agent Studio has nodes named `Call` and `call`, a pull numbers the second one, as in `call 2`. Positions on the Agent Studio canvas are not in the file: a node keeps its position, and a new node is placed next to the node that routes to it.
 
-A node's name is its identity. Renaming a node deletes it and creates a new one with a new history; rename its `.py` file to match.
+A node's name is its identity. Renaming the trigger keeps its id and history. Renaming any other node, or changing its `type`, deletes it and creates a new one with a new id and history; rename its `.py` file to match.
 
 ### Node types
 
@@ -46,7 +46,7 @@ A node's name is its identity. Renaming a node deletes it and creates a new one 
 | `writeback` | `target` (`api`, `csv`), `function`, `next` |
 | `end` | `exitReason`, `writebackEnabled`, `function` (optional) |
 
-`next`, `defaultNext` and `defaultRoute` name the node a contact moves to. A call or text always moves to its `defaultRoute`; put a `conditional` after it to branch on how it went. Flow fields hold a flow's name. At most one node is a `trigger`.
+`next`, `defaultNext` and `defaultRoute` name the node a contact moves to. A call or text always moves to its `defaultRoute`; put a `conditional` after it to branch on how it went. Flow fields hold a flow's name. At most one node is a `trigger`. A campaign already in Agent Studio must keep its trigger, and the trigger can't change type: rename or replace it rather than delete it.
 
 ### Functions
 

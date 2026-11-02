@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import dataclasses
 import datetime
 import json
 import os
@@ -15073,6 +15074,30 @@ class OutboundCampaignTests(unittest.TestCase):
             {"end-a": "End 2", "end-b": "End", "sms-a": "Text", "sms-b": "text 2"},
         )
 
+    def test_labels_with_nothing_to_name_a_file_by_get_default_names(self):
+        """Such a label would leave the node nameless in its file and stop every push."""
+        nodes = [
+            {"id": "call-a", "label": "📞", "position": {}, "data": {"type": "call"}},
+            {"id": "wait-a", "label": "→", "position": {}, "data": {"type": "wait"}},
+            {"id": "end-a", "label": "?", "position": {}, "data": {"type": "end"}},
+            {"id": "end-b", "label": "End", "position": {}, "data": {"type": "end"}},
+        ]
+
+        self.assertEqual(
+            node_names(nodes),
+            {"call-a": "Voice call", "wait-a": "Wait", "end-a": "End 2", "end-b": "End"},
+        )
+
+    def test_nodes_from_projection_remember_a_label_pull_did_not_keep(self):
+        """The saved hash then differs from the file, so the next push sends the name."""
+        nodes = _campaign_nodes()
+
+        self.assertEqual(nodes["CMPGN-ONE:end-1"].platform_label, "")
+        self.assertIsNone(nodes["CMPGN-ONE:call-1"].platform_label)
+        end = nodes["CMPGN-ONE:end-1"]
+        named = dataclasses.replace(end, platform_label=None)
+        self.assertNotEqual(end.compute_hash(), named.compute_hash())
+
     def test_call_and_sms_routes_from_the_platform_are_dropped(self):
         """Calls and texts route only by defaultRoute; the platform still sends empty routes."""
         call = _campaign_nodes()["CMPGN-ONE:call-1"]
@@ -15316,6 +15341,22 @@ class OutboundCampaignTests(unittest.TestCase):
                 campaign.node_entries = entries
                 with self.assertRaisesRegex(ValueError, re.escape(message)):
                     campaign.validate(resource_mappings=[])
+
+    def test_validate_requires_a_trigger_only_in_a_campaign_on_the_platform(self):
+        campaign = _campaign()
+        campaign.node_entries = [{"name": "End", "type": "end"}]
+
+        campaign.validate(resource_mappings=[])
+        campaign.on_platform = True
+        with self.assertRaisesRegex(ValueError, "rename or replace the trigger rather than"):
+            campaign.validate(resource_mappings=[])
+
+    def test_node_validate_refuses_a_trigger_changing_type(self):
+        end = _campaign_nodes()["CMPGN-ONE:end-1"]
+        end.saved_type = "trigger"
+
+        with self.assertRaisesRegex(ValueError, "The trigger can't change type."):
+            end.validate(resource_mappings=None)
 
     def test_validate_reports_unknown_top_level_fields(self):
         campaign = _campaign()

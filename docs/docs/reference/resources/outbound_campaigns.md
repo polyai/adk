@@ -54,7 +54,7 @@ To rename a campaign, change `name` and rename the folder to match. The campaign
 
 ### Nodes
 
-Each node has a `name`, unique in the campaign, and a `type` with that type's fields. Nodes refer to each other by name. A node's function code lives in `functions/{node_name}.py`, with the name lowercased and punctuation replaced by `_`.
+Each node has a `name`, unique in the campaign, and a `type` with that type's fields. Nodes refer to each other by name. A node's function code lives in `functions/{node_name}.py`, with the name lowercased and punctuation replaced by `_`. Names are compared ignoring case and punctuation, so when Agent Studio has nodes named `Call` and `call`, a pull numbers the second one, as in `call 2`.
 
 | Type | Fields |
 |---|---|
@@ -83,7 +83,7 @@ Node positions on the Agent Studio canvas are not in the file. A node keeps its 
 
 !!! warning "Renaming a node"
 
-    A node's name is its identity in your files. Renaming one deletes the node and creates a new one, which starts its history again. Rename its `.py` file to match.
+    A node's name is its identity in your files. Renaming the trigger keeps its id and history. Renaming any other node, or changing its `type`, deletes the node and creates a new one with a new id, which starts its history again. Rename its `.py` file to match.
 
 ### Example
 
@@ -140,7 +140,8 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
     - `endDate` is not before `startDate`.
     - `contactWindow` has at least one day, its times are `HH:mm`, and it ends after it starts.
 - `nodes` is a list, every node has a name, and names are unique in the campaign, ignoring case and punctuation.
-- There is at most one `trigger` node.
+- There is at most one `trigger` node, and a campaign already in Agent Studio keeps one: rename or replace its trigger rather than delete it.
+- The trigger doesn't change `type`.
 - Each node has a known `type`, its required fields, allowed values, and no fields its type doesn't have.
 - `voicemailScript` and `voicemailWhen` are set when `voicemailEnabled` is true.
 - Every route names a node in the campaign.
@@ -152,7 +153,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 
 - Run [`poly campaign validate`](../cli/campaign.md#poly-campaign-validate) and `poly campaign preview` after every push, before you publish.
 - Name nodes after what they do, like `Reminder call`, so routes read clearly.
-- Keep node names stable: renaming a node gives it a new identity and history.
+- Keep node names stable: renaming a node other than the trigger gives it a new identity and history.
 - Make a campaign on a branch, merge it, then publish it from `main`.
 
 ## Related pages
