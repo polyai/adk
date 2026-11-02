@@ -8723,6 +8723,9 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertRegex(summary[1][1], r"^end-")
         self.assertEqual(commands[1][1]["node"]["label"], "Trigger")
         self.assertEqual(commands[1][1]["node"]["position"], {"x": 400.0})
+        self._assert_no_command_takes_a_held_label(
+            commands, {"trigger-1": "Trigger", "call-1": "First call", "end-1": "End"}
+        )
 
     def test_new_node_taking_the_renamed_trigger_name_is_placed_after_its_parent(self):
         self._rename_trigger("Start")
@@ -8738,7 +8741,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(create["node"]["label"], "Trigger")
         self.assertEqual(create["node"]["position"], {"x": 400.0})
 
-    def _assert_no_create_takes_a_held_label(
+    def _assert_no_command_takes_a_held_label(
         self, commands: list[tuple[str, dict]], labels: dict[str, str]
     ) -> None:
         """Replay the commands against Agent Studio's labels by node id."""
@@ -8746,15 +8749,19 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         for command_type, payload in commands:
             if command_type == "outbound_campaign_delete_node":
                 labels.pop(payload["nodeId"])
-            elif command_type == "outbound_campaign_update_node":
-                labels[payload["nodeId"]] = payload["label"]
+                continue
+            if command_type == "outbound_campaign_update_node":
+                node_id, label = payload["nodeId"], payload["label"]
             elif command_type == "outbound_campaign_create_node":
-                label = payload["node"]["label"]
-                self.assertNotIn(label, labels.values(), f"{label} is still held")
-                labels[payload["node"]["id"]] = label
+                node_id, label = payload["node"]["id"], payload["node"]["label"]
+            else:
+                continue
+            held = [other for other, value in labels.items() if value == label and other != node_id]
+            self.assertEqual(held, [], f"{command_type} {node_id}: '{label}' is still held")
+            labels[node_id] = label
 
-    def _pull_with_extra_end(self, label: str) -> None:
-        projection = _campaign_projection()
+    def _pull_with_extra_end(self, label: str, end_label: str = "End") -> None:
+        projection = _campaign_projection(end_label=end_label)
         campaign = projection["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-ONE"]
         campaign["nodes"]["ids"].append("end-2")
         campaign["nodes"]["entities"]["end-2"] = {
@@ -8781,15 +8788,63 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(
             self._summary(commands)[:3],
             [
-                ("outbound_campaign_update_node", "end-2"),
                 ("outbound_campaign_delete_node", "end-1"),
+                ("outbound_campaign_update_node", "end-2"),
                 ("outbound_campaign_create_node", self._summary(commands)[2][1]),
             ],
         )
-        self.assertEqual(commands[0][1]["label"], "end 2")
-        self._assert_no_create_takes_a_held_label(
+        self.assertEqual(commands[1][1]["label"], "end 2")
+        self._assert_no_command_takes_a_held_label(
             commands,
             {"trigger-1": "Trigger", "call-1": "First call", "end-1": "End", "end-2": "end"},
+        )
+
+    def _respell_follow_up(self, keep_the_other: bool) -> list[tuple[str, dict]]:
+        self._pull_with_extra_end("Follow-up", end_label="Follow up")
+        data = self._yaml()
+        self.assertEqual(
+            [node["name"] for node in data["nodes"]][-2:], ["Follow up", "Follow-up 2"]
+        )
+        if not keep_the_other:
+            data["nodes"] = [node for node in data["nodes"] if node["name"] != "Follow-up 2"]
+        self._node(data, "Follow up")["name"] = "Follow-up"
+        self._node(data, "First call")["defaultRoute"] = "Follow-up"
+        self._write_yaml(data)
+        commands = self._push()
+        self._assert_no_command_takes_a_held_label(
+            commands,
+            {
+                "trigger-1": "Trigger",
+                "call-1": "First call",
+                "end-1": "Follow up",
+                "end-2": "Follow-up",
+            },
+        )
+        return commands
+
+    def test_relabel_taking_a_deleted_node_label_goes_after_the_delete(self):
+        commands = self._respell_follow_up(keep_the_other=False)
+
+        self.assertEqual(
+            self._summary(commands),
+            [
+                ("outbound_campaign_delete_node", "end-2"),
+                ("outbound_campaign_update_node", "end-1"),
+            ],
+        )
+
+    def test_node_giving_up_a_label_is_relabelled_before_the_node_taking_it(self):
+        commands = self._respell_follow_up(keep_the_other=True)
+
+        self.assertEqual(
+            [
+                (kind, node_id, payload["label"])
+                for (kind, node_id), (_, payload) in zip(self._summary(commands), commands)
+            ],
+            [
+                ("outbound_campaign_update_node", "end-2", "Follow-up 2"),
+                ("outbound_campaign_update_node", "end-1", "Follow-up"),
+            ],
         )
 
     def test_retyping_one_of_two_nodes_sharing_a_label_frees_it_first(self):
@@ -8807,10 +8862,15 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         commands = self._push()
 
-        self.assertEqual(self._summary(commands)[0], ("outbound_campaign_update_node", "end-2"))
-        self.assertEqual(commands[0][1]["label"], "End 2")
-        self.assertIn(("outbound_campaign_delete_node", "end-1"), self._summary(commands))
-        self._assert_no_create_takes_a_held_label(
+        self.assertEqual(
+            self._summary(commands)[:2],
+            [
+                ("outbound_campaign_delete_node", "end-1"),
+                ("outbound_campaign_update_node", "end-2"),
+            ],
+        )
+        self.assertEqual(commands[1][1]["label"], "End 2")
+        self._assert_no_command_takes_a_held_label(
             commands,
             {"trigger-1": "Trigger", "call-1": "First call", "end-1": "End", "end-2": "End"},
         )
@@ -8941,6 +9001,9 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             commands[1][1]["data"]["trigger"]["routes"], [{"targetNodeId": summary[2][1]}]
         )
         self.assertEqual(commands[2][1]["node"]["label"], "Trigger")
+        self._assert_no_command_takes_a_held_label(
+            commands, {"trigger-1": "Trigger", "call-1": "First call", "end-1": "End"}
+        )
 
     def test_folder_and_trigger_renamed_together_keep_every_id(self):
         data = self._rename_campaign("Monthly reminders", "monthly_reminders")

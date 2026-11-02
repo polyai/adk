@@ -288,6 +288,7 @@ def group_outbound_campaign_changes(
     updated_resources: ResourceMap,
     deleted_resources: ResourceMap,
     pre_push_updated_resources: ResourceMap,
+    pre_push_deleted_resources: ResourceMap,
     post_push_new_resources: ResourceMap,
 ) -> None:
     """Finish the campaign changes in place.
@@ -304,7 +305,9 @@ def group_outbound_campaign_changes(
     pair_replaced_campaign_triggers(
         state, new_resources, updated_resources, deleted_resources, post_push_new_resources
     )
-    relabel_campaign_nodes_first(updated_resources, pre_push_updated_resources)
+    relabel_campaign_nodes_first(
+        updated_resources, deleted_resources, pre_push_updated_resources, pre_push_deleted_resources
+    )
     prune_cascade_deleted_campaign_nodes(deleted_resources)
 
 
@@ -515,21 +518,56 @@ def pair_replaced_campaign_triggers(
 
 
 def relabel_campaign_nodes_first(
-    updated_resources: ResourceMap, pre_push_updated_resources: ResourceMap
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+    pre_push_updated_resources: ResourceMap,
+    pre_push_deleted_resources: ResourceMap,
 ) -> None:
     """Send the updates that change a kept node's label before anything is created.
 
     Agent Studio refuses a label another node still has, and a label a kept node is giving up,
-    such as one pull had to rename, may be the label of a node created in the same push. No
-    other node can hold the new label: local names are unique and pull never reuses a label.
+    such as one pull had to rename, may be the label of a node created in the same push. So
+    the campaign's node deletes go first, and a node giving up a label is relabelled before the
+    node taking it.
     """
     updated_nodes = updated_resources.get(OutboundCampaignNode, {})
-    for resource_id, node in list(updated_nodes.items()):
-        if node.saved_label is not None and node.saved_label != node.name:
-            pre_push_updated_resources.setdefault(OutboundCampaignNode, {})[resource_id] = (
-                updated_nodes.pop(resource_id)
+    relabelled = {
+        resource_id: node
+        for resource_id, node in updated_nodes.items()
+        if node.saved_label is not None and node.saved_label != node.name
+    }
+    if not relabelled:
+        return
+    for resource_id in relabelled:
+        updated_nodes.pop(resource_id)
+
+    campaign_ids = {node.campaign_id for node in relabelled.values()}
+    deleted_nodes = deleted_resources.get(OutboundCampaignNode, {})
+    for resource_id, node in list(deleted_nodes.items()):
+        if (
+            isinstance(node, OutboundCampaignNode)
+            and node.campaign_id in campaign_ids
+            and node.data.get("type") != "trigger"
+        ):
+            pre_push_deleted_resources.setdefault(OutboundCampaignNode, {})[resource_id] = (
+                deleted_nodes.pop(resource_id)
             )
-    _prune_empty((updated_resources,), (OutboundCampaignNode,))
+
+    holders = {(node.campaign_id, node.saved_label): node for node in relabelled.values()}
+    ordered: dict[str, OutboundCampaignNode] = {}
+
+    def place(node: OutboundCampaignNode, visiting: set[str]) -> None:
+        if node.resource_id in ordered or node.resource_id in visiting:
+            return
+        holder = holders.get((node.campaign_id, node.name))
+        if holder is not None and holder is not node:
+            place(holder, visiting | {node.resource_id})
+        ordered[node.resource_id] = node
+
+    for node in relabelled.values():
+        place(node, set())
+    pre_push_updated_resources.setdefault(OutboundCampaignNode, {}).update(ordered)
+    _prune_empty((updated_resources, deleted_resources), (OutboundCampaignNode,))
 
 
 def _triggers_by_campaign(changes: ResourceMap) -> dict[str, list[OutboundCampaignNode]]:
