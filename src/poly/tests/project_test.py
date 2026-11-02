@@ -9609,6 +9609,154 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(commands, [])
         self.assertIn("call_args must take exactly", message)
 
+    CALL_CODE = "def call_args(outbound_contact, outbound_campaign):\n    return {}\n"
+
+    def _pull_with_call_code(self) -> None:
+        projection = _campaign_projection()
+        self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
+            self.CALL_CODE
+        )
+        self._pull_into_new_project(projection)
+
+    def test_node_recreated_remotely_under_the_same_name_takes_its_code(self):
+        for code in (self.CALL_CODE, self.CALL_CODE + "\n# changed\n"):
+            with self.subTest(code=code):
+                self._pull_with_call_code()
+                projection = self._projection_from_state()
+                nodes = self._entity(projection)["nodes"]
+                call = nodes["entities"].pop("call-1")
+                call["id"] = "call-2"
+                call["data"]["function"]["code"] = code
+                nodes["entities"]["call-2"] = call
+                nodes["ids"] = [node_id if node_id != "call-1" else "call-2" for node_id in nodes["ids"]]
+                nodes["entities"]["trigger-1"]["data"]["routes"] = [{"targetNodeId": "call-2"}]
+
+                conflicts, _ = self.project.pull_project(projection_json=projection)
+
+                self.assertEqual(conflicts, [])
+                self.assertEqual(self._read("reminders", "functions", "first_call.py"), code)
+                self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_chained_remote_renames_move_each_node_code_to_its_new_file(self):
+        for force in (False, True):
+            with self.subTest(force=force):
+                self._pull_with_call_code()
+                projection = self._projection_from_state(
+                    {"trigger-1": "First call", "call-1": "Dial"}
+                )
+
+                conflicts, _ = self.project.pull_project(projection_json=projection, force=force)
+
+                self.assertEqual(conflicts, [])
+                self.assertEqual(
+                    sorted(os.listdir(os.path.join(self.folder, "functions"))),
+                    ["dial.py", "first_call.py"],
+                )
+                self.assertEqual(
+                    self._read("reminders", "functions", "first_call.py"), self.TRIGGER_CODE
+                )
+                self.assertEqual(self._read("reminders", "functions", "dial.py"), self.CALL_CODE)
+                self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_code_conflict_from_a_pull_is_listed_and_stops_the_push(self):
+        self._write_function("trigger", self.TRIGGER_CODE + "    # local\n")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=_campaign_projection(trigger_code=self.TRIGGER_CODE + "    # remote\n")
+        )
+
+        trigger_file = os.path.join(self.folder, "functions", "trigger.py")
+        self.assertEqual(conflicts, [trigger_file])
+        self.assertEqual(self.project.project_status()[0], [trigger_file])
+        with self.assertRaises(resource_utils.MergeConflictError):
+            self.project.push_project(dry_run=True)
+
+    def test_force_pull_removes_function_files_no_node_owns(self):
+        data = self._yaml()
+        data["nodes"].append(
+            {
+                "name": "Spare",
+                "type": "end",
+                "exitReason": "spare",
+                "writebackEnabled": False,
+                "function": {"name": "spare", "description": ""},
+            }
+        )
+        self._write_yaml(data)
+        self._write_function("spare", "def spare(outbound_contact, outbound_campaign):\n    pass\n")
+        self._write_function("stray", "x = 1\n")
+        local_only = os.path.join(self.root, "outbound_campaigns", "local_only")
+        self._write_function("start", "x = 2\n", local_only)
+
+        self.project.pull_project(projection_json=_campaign_projection(), force=True)
+
+        self.assertEqual(os.listdir(os.path.join(self.folder, "functions")), ["trigger.py"])
+        self.assertFalse(os.path.exists(local_only))
+        self.assertEqual(self.project.validate_project(), [])
+
+    def test_revert_by_entry_or_by_code_file_reverts_only_that(self):
+        data = self._yaml()
+        self._node(data, "Trigger")["sourceType"] = "api"
+        self._write_yaml(data)
+        self._write_function("trigger", "def map_contacts(outbound_campaign, sync):\n    pass\n")
+        trigger_file = os.path.join(self.folder, "functions", "trigger.py")
+        trigger_entry = os.path.join(self.folder, "campaign.yaml", "nodes", "Trigger")
+
+        self.project.revert_changes([trigger_entry])
+
+        self.assertEqual(self._node(self._yaml(), "Trigger")["sourceType"], "csv")
+        self.assertIn("sync", self._read("reminders", "functions", "trigger.py"))
+
+        self.project.revert_changes([trigger_file])
+
+        self.assertEqual(self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE)
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_stray_function_file_shows_as_new_and_fails_validation(self):
+        self._write_function("stray", "x = 1\n")
+        stray = os.path.join(self.folder, "functions", "stray.py")
+
+        self.assertEqual(self.project.project_status(), ([], [], [stray], []))
+        self.assertIn("+x = 1", self.project.get_diffs()[os.path.relpath(stray, self.root)])
+        self.assertIn(
+            "functions/stray.py has no node of that name", "\n".join(self.project.validate_project())
+        )
+
+    def test_blocked_folder_move_leaves_no_function_files_without_a_campaign(self):
+        self._write_function("stray", "x = 1\n")
+        monthly = os.path.join(self.root, "outbound_campaigns", "monthly")
+        self._write_yaml({"name": "Monthly", "settings": {}, "nodes": []}, monthly)
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=_campaign_projection(name="Monthly")
+        )
+
+        self.assertEqual(conflicts, [os.path.join(monthly, "campaign.yaml")])
+        self.assertFalse(os.path.exists(self.folder))
+        self.assertEqual(
+            sorted(os.listdir(os.path.join(monthly, "functions"))), ["stray.py", "trigger.py"]
+        )
+
+    def test_format_includes_campaign_function_files(self):
+        self._write_function("trigger", "def map_contacts(contacts,outbound_campaign):\n  return {}\n")
+        trigger_file = os.path.join(self.folder, "functions", "trigger.py")
+
+        affected, errors = self.project.format_files([trigger_file])
+
+        self.assertEqual((affected, errors), ([trigger_file], []))
+        self.assertEqual(self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE)
+
+    def test_failed_pull_moves_renamed_campaign_folders_back(self):
+        with patch.object(
+            AgentStudioProject, "_merge_pulled_resources", side_effect=RuntimeError("boom")
+        ):
+            with self.assertRaises(RuntimeError):
+                self.project.pull_project(projection_json=_campaign_projection(name="Monthly"))
+
+        self.assertTrue(os.path.isfile(os.path.join(self.folder, "campaign.yaml")))
+        self.assertFalse(os.path.exists(os.path.join(self.root, "outbound_campaigns", "monthly")))
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
     def test_remote_node_rename_carries_a_local_code_edit_to_the_new_file(self):
         edited = self.TRIGGER_CODE + "\n\ndef helper():\n    pass\n"
         self._write_function("trigger", edited)
