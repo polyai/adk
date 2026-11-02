@@ -208,7 +208,7 @@ class CampaignCommand(BaseCommand):
 
     @staticmethod
     def _add_name(parser: ArgumentParser) -> None:
-        parser.add_argument("name", type=str, help="The campaign's name.")
+        parser.add_argument("name", type=str, help="The campaign's name or folder.")
 
     @staticmethod
     def _add_field(parser: ArgumentParser, help_text: str) -> None:
@@ -303,11 +303,15 @@ class CampaignCommand(BaseCommand):
         sys.exit(exit_code)
 
     @classmethod
-    def _call(cls, output_json: bool, action: Callable[[], Any]) -> Any:
+    def _call(cls, output_json: bool, run: Callable[[], Any], **details: Any) -> Any:
+        from poly.project import CampaignOutcomeUnconfirmed
+
         try:
-            return action()
+            return run()
+        except CampaignOutcomeUnconfirmed as e:
+            cls._fail(str(e), output_json, **details, unconfirmed=True)
         except (ValueError, SourcererAPIError, TimeoutError) as e:
-            cls._fail(str(e), output_json)
+            cls._fail(str(e), output_json, **details)
 
     @staticmethod
     def _read_json(value: str, what: str) -> Any:
@@ -358,10 +362,13 @@ class CampaignCommand(BaseCommand):
 
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
-        result = cls._call(output_json, lambda: project.validate_campaign(name))
+        result = cls._call(output_json, lambda: project.validate_campaign(name), campaign=name)
         valid = bool(result.get("valid"))
         if output_json:
-            json_print({"success": valid, "campaign": name, "result": result})
+            outcome = {"success": valid, "campaign": name, "result": result}
+            if not valid:
+                outcome["error"] = f"Campaign '{name}' is not valid."
+            json_print(outcome)
             if not valid:
                 sys.exit(1)
             return
@@ -423,6 +430,32 @@ class CampaignCommand(BaseCommand):
     def _stopped_at_error(result: Optional[dict[str, Any]]) -> bool:
         return (result or {}).get("stop_reason") == "error"
 
+    @classmethod
+    def _preview_failure(cls, result: dict[str, Any]) -> Optional[str]:
+        if cls._stopped_at_error(result):
+            failure = result.get("error") or {}
+            return f"The preview stopped at an error: {failure.get('error') or 'unknown'}."
+        if result.get("stop_reason") == "step_cap":
+            return "The path hit the step cap, which usually means the campaign loops."
+        return None
+
+    @classmethod
+    def _test_failure(cls, step: dict[str, Any]) -> Optional[str]:
+        status = step.get("status")
+        failure = (step.get("error") or {}).get("error")
+        if status == "done":
+            if not cls._stopped_at_error(step.get("result")):
+                return None
+            failure = ((step.get("result") or {}).get("error") or {}).get("error")
+            return "Test step stopped at an error" + (f": {failure}." if failure else ".")
+        if status == "interrupted":
+            return (
+                "Test step was interrupted"
+                + (f" ({failure})" if failure else "")
+                + ". A call or text may already have gone out."
+            )
+        return f"Test step {status}" + (f": {failure}." if failure else ".")
+
     @staticmethod
     def _carry_on_flags(
         result: dict[str, Any],
@@ -468,6 +501,7 @@ class CampaignCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Dry-run a made-up contact through a campaign and print the steps. Nothing is sent."""
+        from poly.output.console import error
 
         def build_inputs() -> tuple[dict, Optional[dict], dict, Optional[dict]]:
             contact = cls._read_json(contact_file, "--contact") if contact_file else {}
@@ -484,7 +518,7 @@ class CampaignCommand(BaseCommand):
             previous_send = cls._read_json(last_send, "--last-send") if last_send else None
             return contact, outputs, cls._parse_fields(send_state or []), previous_send
 
-        contact, outputs, state, previous_send = cls._call(output_json, build_inputs)
+        contact, outputs, state, previous_send = cls._call(output_json, build_inputs, campaign=name)
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
         result = cls._call(
@@ -499,17 +533,23 @@ class CampaignCommand(BaseCommand):
                 ask_branches=ask_branches,
                 last_send=previous_send,
             ),
+            campaign=name,
         )
-        failed = cls._stopped_at_error(result)
+        failure = cls._preview_failure(result)
         if output_json:
-            json_print({"success": not failed, "campaign": name, "result": result})
+            outcome = {"success": failure is None, "campaign": name, "result": result}
+            if failure:
+                outcome["error"] = failure
+            json_print(outcome)
         else:
             cls._print_steps(
                 cls._node_labels(project, name),
                 result,
                 {"last-send": result.get("last_send")},
             )
-        if failed:
+            if result.get("stop_reason") == "step_cap":
+                error(failure)
+        if failure:
             sys.exit(1)
 
     @classmethod
@@ -549,6 +589,8 @@ class CampaignCommand(BaseCommand):
                 if value:
                     contact[key] = value
             if fields:
+                if not isinstance(contact.get("metadata") or {}, dict):
+                    raise ValueError("--contact's metadata must be a JSON object to add --field.")
                 contact["metadata"] = {
                     **(contact.get("metadata") or {}),
                     **cls._parse_fields(fields),
@@ -558,17 +600,21 @@ class CampaignCommand(BaseCommand):
                 raise ValueError("--run must be a JSON object.")
             return contact, previous_run, cls._parse_fields(send_state or [])
 
-        contact, previous_run, state = cls._call(output_json, build_inputs)
+        contact, previous_run, state = cls._call(output_json, build_inputs, campaign=name)
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
-        campaign = cls._call(output_json, lambda: project.get_live_campaign(name))
+        campaign = cls._call(output_json, lambda: project.get_live_campaign(name), campaign=name)
         step_inputs = {
             "start_node": start_node,
             "run": previous_run,
             "send_result": send_result,
             "send_state": state,
         }
-        cls._call(output_json, lambda: project.check_campaign_test(name, contact, **step_inputs))
+        cls._call(
+            output_json,
+            lambda: project.check_campaign_test(name, contact, **step_inputs),
+            campaign=name,
+        )
 
         if not output_json and not force:
             if not questionary.confirm(
@@ -584,6 +630,7 @@ class CampaignCommand(BaseCommand):
             started = cls._call(
                 output_json,
                 lambda: project.start_campaign_test(name, contact, **step_inputs),
+                campaign=name,
             )
         except KeyboardInterrupt:
             cls._fail(
@@ -595,6 +642,7 @@ class CampaignCommand(BaseCommand):
                 output_json,
                 exit_code=130,
                 campaign=name,
+                unconfirmed=True,
             )
         step_id, run_started = started.get("step_id"), started.get("run")
         if output_json:
@@ -618,13 +666,18 @@ class CampaignCommand(BaseCommand):
             cls._fail(
                 f"Stopped waiting for test step {step_id}. The step carries on.",
                 output_json,
+                exit_code=130,
                 campaign=name,
                 step_id=step_id,
                 run=run_started,
             )
-        done = step.get("status") == "done" and not cls._stopped_at_error(step.get("result"))
+        failure = cls._test_failure(step)
+        done = failure is None
         if output_json:
-            json_print({"success": done, "campaign": name, "test_step": step})
+            outcome = {"success": done, "campaign": name, "test_step": step}
+            if failure:
+                outcome["error"] = failure
+            json_print(outcome)
         else:
             if step.get("result"):
                 cls._print_steps(
@@ -634,11 +687,8 @@ class CampaignCommand(BaseCommand):
                 )
             if done:
                 success("Test step finished.")
-            elif step.get("status") == "done":
-                error("Test step stopped at an error.")
             else:
-                failure = (step.get("error") or {}).get("error")
-                error(f"Test step {step.get('status')}" + (f": {failure}" if failure else "."))
+                error(failure)
         if not done:
             sys.exit(1)
 
@@ -659,7 +709,7 @@ class CampaignCommand(BaseCommand):
         _, prompt, done_message = LIFECYCLE_ACTIONS[action]
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
-        campaign = cls._call(output_json, lambda: project.get_live_campaign(name))
+        campaign = cls._call(output_json, lambda: project.get_live_campaign(name), campaign=name)
         if not output_json and not force:
             if not questionary.confirm(
                 prompt.format(name=campaign.name), default=False, auto_enter=False
@@ -669,7 +719,7 @@ class CampaignCommand(BaseCommand):
 
         method = getattr(project, f"{action}_campaign")
         try:
-            cls._call(output_json, lambda: method(name))
+            cls._call(output_json, lambda: method(name), campaign=name, action=action)
         except KeyboardInterrupt:
             cls._fail(
                 project.campaign_change_unconfirmed(
@@ -679,6 +729,7 @@ class CampaignCommand(BaseCommand):
                 exit_code=130,
                 campaign=name,
                 action=action,
+                unconfirmed=True,
             )
         if output_json:
             json_print({"success": True, "campaign": name, "action": action})

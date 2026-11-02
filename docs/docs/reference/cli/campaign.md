@@ -19,13 +19,15 @@ Every subcommand takes the campaign's name (or its folder name) and acts on the 
 
 Outbound campaigns must be turned on for the project; otherwise every subcommand exits `1` and says so.
 
+With `--json`, every `"success": false` result carries a short `error`, and `campaign`.
+
 Two campaigns can share a name. Each then has its own folder, such as `reminders-abcd1234`; name the campaign by its folder.
 
 `--field` and `--state` values are read as JSON when they parse as JSON, so `age=30`, `booked=true` and `note=null` give a number, a boolean and `null`. Any other value, such as `plan=gold`, is kept as a string. `--contact`, `--run`, `--last-send` and `--sample-outputs` take a JSON file or JSON written inline.
 
 | Argument | Description |
 |---|---|
-| `name` | The campaign's name, or its folder name. |
+| `name` | The campaign's name or folder. |
 
 ## `poly campaign validate`
 
@@ -37,7 +39,7 @@ Examples:
 poly campaign validate 'Appointment reminders'
 ~~~
 
-Exits `1` when the campaign is not valid. Warnings do not fail it.
+Exits `1` when the campaign is not valid, with an `error` beside the `result` in `--json`. Warnings do not fail it.
 
 `--json` output shape:
 
@@ -67,7 +69,7 @@ poly campaign preview 'Appointment reminders' --contact contact.json --sample-ou
 poly campaign preview 'Appointment reminders' --phone +15550100 --start-node 'Reminder call' --result no_answer
 ~~~
 
-A preview keeps nothing between steps. Each step prints the flags to carry on with, including `--last-send` when the step left a call or a text: pass it back, so that the next step's conditions and templates read it as `journey.last_send`.
+A preview exits `1` when the path stops at a failed node (`stop_reason` is `error`) or hits the step cap (`step_cap`), which usually means the campaign loops. A preview keeps nothing between steps. Each step prints the flags to carry on with, including `--last-send` when the step left a call or a text: pass it back, so that the next step's conditions and templates read it as `journey.last_send`.
 
 | Flag | Description |
 |---|---|
@@ -96,7 +98,7 @@ A preview keeps nothing between steps. Each step prints the flags to carry on wi
 
 Run one step of a test of the live campaign, and wait for it to finish. It calls and texts the test contact for real. The first step starts at the trigger. To carry on, pass the `--start-node` and the run it printed. After a call or a text, also say how it went with `--result`; after a wait, carry on from the node it printed.
 
-The run is printed as soon as the step starts, so it is not lost if waiting fails or you stop it; the step carries on regardless. A poll that fails with no response, a stalled connection or a server error is retried three times. Node names are matched as they are on `main`, which the test runs, even from another branch. A step that stops at a failed node exits `1`. If the platform is slow to answer the start, the step may still have started: check the campaign's tests in Agent Studio before you run `test` again.
+The run is printed as soon as the step starts; the step carries on if you stop waiting. Node names are matched as they are on `main`, which the test runs, even from another branch. A step that fails, is interrupted or stops at a failed node exits `1`. An interrupted step may already have called or texted.
 
 Examples:
 
@@ -119,11 +121,13 @@ poly campaign test 'Appointment reminders' --phone +15550100 --start-node 'Remin
 | `--timeout` | Seconds to wait for the step. Defaults to `600`. |
 | `--force` | Run without confirmation. Implied by `--json`. |
 
-The inputs are checked before you are asked to confirm, including that `main` has the campaign. The lifecycle commands make the same check.
-
 !!! warning "This contacts a real phone"
 
     `poly campaign test` runs the live campaign and calls or texts the number you give it.
+
+!!! warning "A start that is not confirmed may still call"
+
+    If the platform does not confirm the start, for example because the connection dropped or you stopped the command, the step may still have started. The error says so, and `--json` adds `"unconfirmed": true`. Check the campaign's tests in Agent Studio before you run `test` again.
 
 `--json` output shape:
 
@@ -147,7 +151,7 @@ With `--json`, as soon as the step starts, one line goes to stderr with the step
 {"step_id": "TSTEP-...", "run": {"contact_id": "...", "enrolment_id": "...", "graph_hash": "..."}}
 ~~~
 
-The result goes to stdout once the step stops. `success` is `false` when the step failed, or finished by stopping at a failed node (`result.stop_reason` is `error`). If waiting for the step fails or times out, the error carries the step and its run:
+The result goes to stdout once the step stops, with an `error` when `success` is `false`. If waiting for the step fails or times out, the error carries the step and its run:
 
 ~~~json
 {
@@ -261,4 +265,4 @@ poly campaign archive 'Appointment reminders'
 
 !!! warning "These commands act on live"
 
-    `publish`, `pause`, `resume` and `archive` change what the live campaign does straight away. Each asks for confirmation unless you pass `--force` or `--json`. If the platform does not answer in time, or you stop the command while it is sending, the change may still have gone through: check the campaign's status in Agent Studio, or with `poly pull` on main, before sending it again.
+    `publish`, `pause`, `resume` and `archive` change what the live campaign does straight away. Each asks for confirmation unless you pass `--force` or `--json`. If the platform does not confirm the change, for example because the connection dropped or you stopped the command, it may still have gone through: the error says so, and `--json` adds `"unconfirmed": true`. Check the campaign's status in Agent Studio, or with `poly pull` on main, before sending it again.

@@ -163,6 +163,10 @@ poly audio-cache bulk-delete --ids id1,id2 --json
 poly audio-cache synthesize <entry_id> --text "Hello" --json
 poly functions execute <function_name> --args '{"x": 1}' --json
 poly functions validate --json
+poly campaign validate 'Appointment reminders' --json
+poly campaign preview 'Appointment reminders' --phone +15550100 --json
+poly campaign test 'Appointment reminders' --phone +15550100 --json
+poly campaign pause 'Appointment reminders' --json
 poly apikey --region studio --json
 ~~~
 

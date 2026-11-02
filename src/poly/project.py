@@ -16,10 +16,12 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
+from http import HTTPStatus
 from pathlib import PurePath
 from typing import Any, Optional, TypeAlias
 
 import requests
+import urllib3
 from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
@@ -78,6 +80,10 @@ MAX_TEST_RUN_NAME_LENGTH = 120
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
+
+
+class CampaignOutcomeUnconfirmed(SourcererAPIError):
+    """A campaign test start or live change got no clear answer, so it may have happened."""
 
 
 @dataclass
@@ -3797,8 +3803,8 @@ class AgentStudioProject:
             OutboundCampaign, {}
         ):
             raise ValueError(
-                f"Campaign '{campaign.name}' is not on main yet. Merge the branch it was made "
-                "on first."
+                f"Campaign '{campaign.name}' is not on main, or is already archived. A campaign "
+                "made on a branch must be merged first."
             )
         return campaign
 
@@ -3833,7 +3839,13 @@ class AgentStudioProject:
     def _campaign_error(
         action: str, campaign: OutboundCampaign, error: SourcererAPIError
     ) -> SourcererAPIError:
-        reason = (error.server_message or str(error)).replace(campaign.resource_id, campaign.name)
+        reason = error.server_message or str(error)
+        if not error.server_message and error.status_code:
+            try:
+                reason = f"HTTP {error.status_code} {HTTPStatus(error.status_code).phrase}"
+            except ValueError:
+                reason = f"HTTP {error.status_code}"
+        reason = reason.replace(campaign.resource_id, campaign.name)
         message = f"Could not {action} campaign '{campaign.name}': {reason}"
         if not error.server_message:
             if error.error_code == "CAMPAIGNS_KEY_MISSING" or error.status_code == 412:
@@ -3918,6 +3930,11 @@ class AgentStudioProject:
         if start_node:
             body["startNodeId"] = self._campaign_node_id(campaign, start_node)
         if outcome := self._send_outcome(send_result, send_state):
+            if not start_node:
+                raise ValueError(
+                    "Only a step that carries on from a node can say how a call or text went. "
+                    "Give the node to carry on from too."
+                )
             body["sendOutcome"] = outcome
         if ask_branches is not None:
             body["askBranches"] = ask_branches
@@ -4007,13 +4024,36 @@ class AgentStudioProject:
         try:
             return self.api_handler.start_outbound_campaign_test_step(campaign.resource_id, body)
         except SourcererAPIError as e:
-            if isinstance(e.__cause__, requests.exceptions.ReadTimeout):
-                raise SourcererAPIError(
-                    self.campaign_test_unconfirmed(
-                        "The platform did not answer in time", campaign.name, contact.get("phone")
-                    )
+            reason = self._unconfirmed_reason(e, test_start=True)
+            if reason:
+                raise CampaignOutcomeUnconfirmed(
+                    self.campaign_test_unconfirmed(reason, campaign.name, contact.get("phone")),
+                    status_code=e.status_code,
+                    error_code=e.error_code,
+                    server_message=e.server_message,
                 ) from e
             raise self._campaign_error("test", campaign, e) from e
+
+    @staticmethod
+    def _unconfirmed_reason(error: SourcererAPIError, test_start: bool = False) -> Optional[str]:
+        cause = error.__cause__
+        if isinstance(cause, requests.exceptions.ReadTimeout):
+            return "The platform did not answer in time"
+        if isinstance(cause, requests.exceptions.ConnectionError) and not isinstance(
+            cause, requests.exceptions.ConnectTimeout
+        ):
+            reason = cause.args[0] if cause.args else None
+            if not isinstance(
+                getattr(reason, "reason", reason), urllib3.exceptions.ConnectTimeoutError
+            ):
+                return "The connection dropped before the platform answered"
+        if error.status_code in (502, 504):
+            return f"The platform could not confirm it (HTTP {error.status_code})"
+        if error.error_code == "HERMES_UNAVAILABLE" and not (
+            test_start and error.status_code == 503
+        ):
+            return "The platform could not confirm it"
+        return None
 
     @staticmethod
     def campaign_test_unconfirmed(reason: str, campaign_name: str, phone: Any) -> str:
@@ -4071,7 +4111,7 @@ class AgentStudioProject:
                     campaign.resource_id, step_id
                 )
             except SourcererAPIError as e:
-                transient = e.status_code is None or e.status_code >= 500
+                transient = e.status_code is None or e.status_code >= 500 or e.status_code == 429
                 remaining = deadline - time.monotonic()
                 if not transient or failures >= retries or remaining <= 0:
                     raise self._campaign_error("test", campaign, e) from e
@@ -4094,11 +4134,13 @@ class AgentStudioProject:
         try:
             self.api_handler.send_outbound_campaign_lifecycle(command_type, campaign.resource_id)
         except SourcererAPIError as e:
-            if isinstance(e.__cause__, requests.exceptions.ReadTimeout):
-                raise SourcererAPIError(
-                    self.campaign_change_unconfirmed(
-                        "The platform did not answer in time", action, campaign.name
-                    )
+            reason = self._unconfirmed_reason(e)
+            if reason:
+                raise CampaignOutcomeUnconfirmed(
+                    self.campaign_change_unconfirmed(reason, action, campaign.name),
+                    status_code=e.status_code,
+                    error_code=e.error_code,
+                    server_message=e.server_message,
                 ) from e
             raise self._campaign_error(action, campaign, e) from e
 
