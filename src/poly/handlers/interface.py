@@ -615,6 +615,10 @@ class AgentStudioInterface:
             self.region, self.account_id, self.project_id, campaign_id, step_id
         )
 
+    def ensure_remote_branch(self) -> str:
+        """Return the branch campaign checks run on: this one, or main if it no longer exists."""
+        return self.sync_client.assert_branch_exists()
+
     def send_outbound_campaign_lifecycle(self, command_type: str, campaign_id: str) -> None:
         """Send a publish, pause, resume or archive command for a campaign to main."""
         message_type = LIFECYCLE_COMMANDS[command_type]

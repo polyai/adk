@@ -78,6 +78,10 @@ class SourcererAPIError(Exception):
         )
 
 
+class CommandBatchNotSent(SourcererAPIError):
+    """A command batch failed before it was sent, so nothing it holds was applied."""
+
+
 class SourcererSDK:
     """SDK for interacting with the Sourcerer API"""
 
@@ -534,12 +538,15 @@ class SourcererSDK:
                 error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
-    def fetch_last_known_sequence_number(self, branch_id: Optional[str] = None) -> int:
+    def fetch_last_known_sequence_number(
+        self, branch_id: Optional[str] = None, timeout: Optional[float] = None
+    ) -> int:
         """Get the sequence number from the API.
 
         Args:
             branch_id (Optional[str]): The branch ID to fetch the sequence number for.
                 Defaults to the current branch if not provided.
+            timeout (Optional[float]): Seconds to wait for an answer. None waits forever.
 
         Returns:
             The sequence number as an integer.
@@ -551,19 +558,11 @@ class SourcererSDK:
             branch_id = self.branch_id
         try:
             url = f"{self._get_branches_url()}/{branch_id}/sequence"
-            response = self.session.get(url)
+            response = self.session.get(url, timeout=timeout)
             response.raise_for_status()
             return int(response.json()["lastKnownSequence"])
         except requests.exceptions.RequestException as e:
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except (ValueError, KeyError):
-                    error_msg = f"API request failed: {e}"
-            else:
-                error_msg = f"Request failed: {e}"
-            raise SourcererAPIError(error_msg) from e
+            raise SourcererAPIError.from_request_error(e) from e
 
     def fetch_projection(
         self,
@@ -691,13 +690,15 @@ class SourcererSDK:
         Args:
             branch_id: The branch to send the batch to, with its sequence number fetched
                 afresh. When given, the projection is not refetched.
-            timeout: Seconds to wait for the batch to be answered. None waits forever.
+            timeout: Seconds to wait for the sequence number, when `branch_id` is given, and
+                for the batch to be answered. None waits forever.
 
         Returns:
             The current branch's refetched projection, or the API's response when
             `branch_id` is given.
 
         Raises:
+            CommandBatchNotSent: If the sequence number of `branch_id` could not be read.
             SourcererAPIError: If the API request fails or no commands in queue
         """
         if not self._command_queue:
@@ -708,11 +709,20 @@ class SourcererSDK:
             command_batch = CommandBatch()
             command_batch.commands.extend(self._command_queue)
 
-            command_batch.last_known_sequence = (
-                self.get_last_known_sequence()
-                if branch_id is None
-                else self.fetch_last_known_sequence_number(branch_id)
-            )
+            if branch_id is None:
+                command_batch.last_known_sequence = self.get_last_known_sequence()
+            else:
+                try:
+                    command_batch.last_known_sequence = self.fetch_last_known_sequence_number(
+                        branch_id, timeout=timeout
+                    )
+                except SourcererAPIError as e:
+                    raise CommandBatchNotSent(
+                        f"Could not read the sequence of {branch_id}, so nothing was sent: {e}",
+                        status_code=e.status_code,
+                        error_code=e.error_code,
+                        server_message=e.server_message,
+                    ) from e
 
             # Validate the command batch before sending
             logger.debug("Command batch validation:")

@@ -15,11 +15,11 @@ poly campaign preview 'Appointment reminders' --phone +15550100
 poly campaign publish 'Appointment reminders'
 ~~~
 
-Every subcommand takes the campaign's name (or its folder name) and acts on the campaign as pushed, not on your local files: run [`poly push`](./push.md) first. `validate` and `preview` use your current branch. `test`, `publish`, `pause`, `resume` and `archive` act on the live campaign on `main`, whatever branch you are on, so a campaign made on a branch must be merged first.
+Every subcommand takes the campaign's name (or its folder name) and acts on the campaign as pushed, not on your local files: run [`poly push`](./push.md) first. `validate` and `preview` use your current branch; if it no longer exists, they use `main`, say so, and add `"branch": "main"` to the `--json` output. `test`, `publish`, `pause`, `resume` and `archive` act on the live campaign on `main`, whatever branch you are on, and take its name as `main` has it, so a campaign made on a branch must be merged first.
 
 Outbound campaigns must be turned on for the project; otherwise every subcommand exits `1` and says so.
 
-With `--json`, every `"success": false` result carries a short `error`, and `campaign`.
+With `--json`, every `"success": false` result carries a short `error`. Once the project is loaded, it also carries `campaign`.
 
 Two campaigns can share a name. Each then has its own folder, such as `reminders-abcd1234`; name the campaign by its folder.
 
@@ -98,7 +98,7 @@ A preview exits `1` when the path stops at a failed node (`stop_reason` is `erro
 
 Run one step of a test of the live campaign, and wait for it to finish. It calls and texts the test contact for real. The first step starts at the trigger. To carry on, pass the `--start-node` and the run it printed. After a call or a text, also say how it went with `--result`; after a wait, carry on from the node it printed.
 
-The run is printed as soon as the step starts; the step carries on if you stop waiting. Node names are matched as they are on `main`, which the test runs, even from another branch. A step that fails, is interrupted or stops at a failed node exits `1`. An interrupted step may already have called or texted.
+The run is printed as soon as the step starts; the step carries on if you stop waiting. Node names are matched as they are on `main`, which the test runs, even from another branch. A step that fails, is interrupted, stops at a failed node or hits the step cap exits `1`. An interrupted step may already have called or texted.
 
 Examples:
 

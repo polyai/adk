@@ -258,7 +258,8 @@ class MergeBranch(unittest.TestCase):
         sdk.merge_branch(deployment_message="msg")
 
         session.get.assert_called_once_with(
-            "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/branch-1/sequence"
+            "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/branch-1/sequence",
+            timeout=None,
         )
         payload = session.post.call_args.kwargs["json"]
         self.assertEqual(payload["expectedBranchLastKnownSequence"], 1751)
@@ -448,12 +449,13 @@ class SendCommandBatchToBranch(unittest.TestCase):
     def test_sends_to_the_branch_with_its_own_sequence(self):
         self.post.return_value = make_mock_response(200, json_body={"success": True})
 
-        response = self.sdk.send_command_batch(branch_id="main")
+        response = self.sdk.send_command_batch(branch_id="main", timeout=30)
 
         self.assertEqual(response, {"success": True})
         self.assertIn("/branches/main/command-batch", self.post.call_args.args[0])
         self.session.get.assert_called_once_with(
-            "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/main/sequence"
+            "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/main/sequence",
+            timeout=30,
         )
         batch = CommandBatch()
         batch.ParseFromString(self.post.call_args.kwargs["data"])

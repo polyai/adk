@@ -30,7 +30,7 @@ from poly.call.session import CallSession
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
-from poly.handlers.sdk import SourcererAPIError
+from poly.handlers.sdk import CommandBatchNotSent, SourcererAPIError
 from poly.migration_utils import (
     MigrationFlag,
     get_all_migration_flags,
@@ -3825,6 +3825,15 @@ class AgentStudioProject:
             ValueError: if no campaign matches, several do, or it exists only in local files.
         """
         campaigns = list(self.resources.get(OutboundCampaign, {}).values())
+        if campaign := self._match_campaign(name, campaigns):
+            return campaign
+        if name in self._local_campaign_names():
+            raise ValueError(f"Campaign '{name}' has not been pushed yet. Run `poly push` first.")
+        known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
+        raise ValueError(f"No campaign named '{name}'. Campaigns: {known}.")
+
+    @staticmethod
+    def _match_campaign(name: str, campaigns: list[OutboundCampaign]) -> Optional[OutboundCampaign]:
         for matches in (
             lambda campaign: campaign.name == name,
             lambda campaign: campaign.folder == name,
@@ -3839,10 +3848,7 @@ class AgentStudioProject:
                     f"More than one campaign is named '{name}'. Name it by its folder "
                     f"instead: {folders}."
                 )
-        if name in self._local_campaign_names():
-            raise ValueError(f"Campaign '{name}' has not been pushed yet. Run `poly push` first.")
-        known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
-        raise ValueError(f"No campaign named '{name}'. Campaigns: {known}.")
+        return None
 
     def _local_campaign_names(self) -> list[str]:
         names = []
@@ -3868,23 +3874,25 @@ class AgentStudioProject:
         return self._main_resources
 
     def get_live_campaign(self, name: str) -> OutboundCampaign:
-        """Return the pushed campaign with this name or folder name, checking main has it.
+        """Return the campaign on main with this name or folder name, as main has it.
 
-        Tests and the lifecycle commands act on main, so a campaign made on a branch must be
-        merged first. Fetches main's projection once, on main too: the local copy may be stale.
+        Tests and the lifecycle commands act on main, so the name is matched against main's
+        campaigns, whatever the current branch calls them. Fetches main's projection once, on
+        main too: the local copy may be stale.
 
         Raises:
-            ValueError: as `get_campaign` does, or if main does not have the campaign.
+            ValueError: if main has no campaign by that name (saying so when the current
+                branch has one), or several.
         """
-        campaign = self.get_campaign(name)
-        if campaign.resource_id not in self._campaign_resources(live=True).get(
-            OutboundCampaign, {}
-        ):
-            raise ValueError(
-                f"Campaign '{campaign.name}' is not on main, or is already archived. A campaign "
-                "made on a branch must be merged first."
-            )
-        return campaign
+        live = list(self._campaign_resources(live=True).get(OutboundCampaign, {}).values())
+        if campaign := self._match_campaign(name, live):
+            return campaign
+        local = self.get_campaign(name)
+        known = ", ".join(sorted(campaign.name for campaign in live)) or "none"
+        raise ValueError(
+            f"Campaign '{local.name}' is not on main, or is already archived. A campaign made on "
+            f"a branch must be merged first. Campaigns on main: {known}."
+        )
 
     def campaign_node_names(self, campaign: OutboundCampaign, live: bool = False) -> dict[str, str]:
         """Return the names of a pushed campaign's nodes, by node id.
@@ -3924,6 +3932,11 @@ class AgentStudioProject:
             except ValueError:
                 reason = f"HTTP {error.status_code}"
         reason = reason.replace(campaign.resource_id, campaign.name)
+        if error.error_code == "CAMPAIGN_LIFECYCLE_REFUSED":
+            reason = reason.replace(
+                "Refresh to see its current status",
+                "Run `poly pull` on main to see its current status",
+            )
         message = f"Could not {action} campaign '{campaign.name}': {reason}"
         if not error.server_message:
             if error.error_code == "CAMPAIGNS_KEY_MISSING" or error.status_code == 412:
@@ -3940,6 +3953,16 @@ class AgentStudioProject:
             server_message=error.server_message,
         )
 
+    def campaign_branch_is_gone(self) -> bool:
+        """Whether the current branch no longer exists remotely, so campaign checks use main.
+
+        `validate_campaign` and `preview_campaign` then run on main.
+        """
+        local_branch = self.branch_id
+        return (
+            local_branch not in (None, "main") and self.api_handler.ensure_remote_branch() == "main"
+        )
+
     def validate_campaign(self, name: str) -> dict[str, Any]:
         """Check the campaign as pushed to the current branch; returns its errors and warnings."""
         campaign = self.get_campaign(name)
@@ -3952,6 +3975,8 @@ class AgentStudioProject:
     def _send_outcome(
         send_result: Optional[str], send_state: Optional[dict[str, Any]]
     ) -> Optional[dict[str, Any]]:
+        if send_result == "":
+            raise ValueError("A result can't be empty. Leave it out for none.")
         if send_result is None and not send_state:
             return None
         return {"result": send_result, "state": dict(send_state or {})}
@@ -4068,14 +4093,17 @@ class AgentStudioProject:
         run: Optional[dict[str, str]] = None,
         send_result: Optional[str] = None,
         send_state: Optional[dict[str, Any]] = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         """Check a test step's inputs as `start_campaign_test` would, without starting it.
+
+        Returns:
+            The step's request body, to pass to `start_campaign_test` as `body`.
 
         Raises:
             ValueError: as `start_campaign_test` does.
         """
         campaign = self.get_live_campaign(name)
-        self._campaign_test_body(campaign, contact, start_node, run, send_result, send_state)
+        return self._campaign_test_body(campaign, contact, start_node, run, send_result, send_state)
 
     def start_campaign_test(
         self,
@@ -4085,48 +4113,78 @@ class AgentStudioProject:
         run: Optional[dict[str, str]] = None,
         send_result: Optional[str] = None,
         send_state: Optional[dict[str, Any]] = None,
+        body: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Start one real test step of the live campaign, which calls and texts `contact`.
 
         A first step takes neither `start_node` (a node's name or id) nor `run`; a later step
         needs both, from the step before it. Carrying on from a call or text, `send_result` and
         `send_state` say what it reported. `start_node` is named as the node is on main, which
-        the test runs.
+        the test runs. `body`, from `check_campaign_test`, stands in for those step inputs.
 
         Raises:
             ValueError: if the contact has no phone, the step inputs don't fit together, main
                 does not have the campaign, or `start_node` names no node of it on main.
         """
         campaign = self.get_live_campaign(name)
-        body = self._campaign_test_body(campaign, contact, start_node, run, send_result, send_state)
+        if body is None:
+            body = self._campaign_test_body(
+                campaign, contact, start_node, run, send_result, send_state
+            )
         try:
             return self.api_handler.start_outbound_campaign_test_step(campaign.resource_id, body)
         except SourcererAPIError as e:
-            reason = self._unconfirmed_reason(e, test_start=True)
-            if reason:
-                raise CampaignOutcomeUnconfirmed(
-                    self.campaign_test_unconfirmed(reason, campaign.name, contact.get("phone")),
-                    status_code=e.status_code,
-                    error_code=e.error_code,
-                    server_message=e.server_message,
-                ) from e
-            raise self._campaign_error("test", campaign, e) from e
+            raise self._campaign_send_error(
+                "test",
+                campaign,
+                e,
+                lambda reason: self.campaign_test_unconfirmed(
+                    reason, campaign.name, contact.get("phone")
+                ),
+            ) from e
+
+    @classmethod
+    def _campaign_send_error(
+        cls,
+        action: str,
+        campaign: OutboundCampaign,
+        error: SourcererAPIError,
+        unconfirmed: Callable[[str], str],
+    ) -> SourcererAPIError:
+        reason = cls._unconfirmed_reason(error, test_start=action == "test")
+        if reason is None:
+            return cls._campaign_error(action, campaign, error)
+        return CampaignOutcomeUnconfirmed(
+            unconfirmed(reason),
+            status_code=error.status_code,
+            error_code=error.error_code,
+            server_message=error.server_message,
+        )
 
     @staticmethod
     def _unconfirmed_reason(error: SourcererAPIError, test_start: bool = False) -> Optional[str]:
+        if isinstance(error, CommandBatchNotSent):
+            return None
         cause = error.__cause__
         if isinstance(cause, requests.exceptions.ReadTimeout):
             return "The platform did not answer in time"
         if isinstance(cause, requests.exceptions.ConnectionError) and not isinstance(
-            cause, requests.exceptions.ConnectTimeout
+            cause,
+            (
+                requests.exceptions.ConnectTimeout,
+                requests.exceptions.ProxyError,
+                requests.exceptions.SSLError,
+            ),
         ):
             reason = cause.args[0] if cause.args else None
             if not isinstance(
                 getattr(reason, "reason", reason), urllib3.exceptions.ConnectTimeoutError
             ):
                 return "The connection dropped before the platform answered"
-        if error.status_code in (502, 504):
+        if error.status_code in (500, 502, 504):
             return f"The platform could not confirm it (HTTP {error.status_code})"
+        if not test_start and error.status_code == 409 and error.error_code == "CONFLICT":
+            return "The platform could not confirm it"
         if error.error_code == "HERMES_UNAVAILABLE" and not (
             test_start and error.status_code == 503
         ):
@@ -4169,18 +4227,18 @@ class AgentStudioProject:
         step_id: str,
         timeout: float = 600,
         poll_interval: float = 5,
-        retries: int = 3,
     ) -> dict[str, Any]:
         """Poll a test step until it stops running and return it.
 
-        A poll that fails for a reason that may pass (no response, or a 5xx) is retried up to
-        `retries` times in a row, with a growing pause.
+        A poll that fails for a reason that may pass (no response, a 5xx or a 429) is retried
+        until `timeout`, with a pause that grows up to `poll_interval`.
 
         Raises:
-            TimeoutError: if it is still queued or running after `timeout` seconds.
-            SourcererAPIError: if a poll fails, after any retries.
+            TimeoutError: if it is still queued or running after `timeout` seconds, or polls
+                kept failing until then.
+            SourcererAPIError: if a poll is refused.
         """
-        campaign = self.get_campaign(name)
+        campaign = self.get_live_campaign(name)
         deadline = time.monotonic() + timeout
         failures = 0
         while True:
@@ -4189,13 +4247,19 @@ class AgentStudioProject:
                     campaign.resource_id, step_id
                 )
             except SourcererAPIError as e:
-                transient = e.status_code is None or e.status_code >= 500 or e.status_code == 429
-                remaining = deadline - time.monotonic()
-                if not transient or failures >= retries or remaining <= 0:
+                if not (e.status_code is None or e.status_code >= 500 or e.status_code == 429):
                     raise self._campaign_error("test", campaign, e) from e
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    unreachable = f"HTTP {e.status_code}" if e.status_code else "no answer"
+                    raise TimeoutError(
+                        f"Stopped waiting for test step {step_id} of campaign '{campaign.name}' "
+                        f"after {timeout:g} seconds: the platform could not be reached "
+                        f"({unreachable}). The step carries on."
+                    ) from e
                 failures += 1
                 logger.info(f"Polling test step {step_id} failed, retrying: {e}")
-                time.sleep(min(2 ** (failures - 1), remaining))
+                time.sleep(min(2 ** (failures - 1), poll_interval, remaining))
                 continue
             failures = 0
             if step.get("status") not in ("queued", "running"):
@@ -4212,15 +4276,12 @@ class AgentStudioProject:
         try:
             self.api_handler.send_outbound_campaign_lifecycle(command_type, campaign.resource_id)
         except SourcererAPIError as e:
-            reason = self._unconfirmed_reason(e)
-            if reason:
-                raise CampaignOutcomeUnconfirmed(
-                    self.campaign_change_unconfirmed(reason, action, campaign.name),
-                    status_code=e.status_code,
-                    error_code=e.error_code,
-                    server_message=e.server_message,
-                ) from e
-            raise self._campaign_error(action, campaign, e) from e
+            raise self._campaign_send_error(
+                action,
+                campaign,
+                e,
+                lambda reason: self.campaign_change_unconfirmed(reason, action, campaign.name),
+            ) from e
 
     def publish_campaign(self, name: str) -> None:
         """Publish the campaign on live, so it starts contacting people."""

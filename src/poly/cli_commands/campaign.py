@@ -246,7 +246,17 @@ class CampaignCommand(BaseCommand):
 
     @classmethod
     def run(cls, args: Namespace) -> None:
-        """Dispatch to the chosen `campaign` subcommand."""
+        """Dispatch to the chosen `campaign` subcommand, keeping stdout JSON under `--json`."""
+        try:
+            cls._dispatch(args)
+        except KeyboardInterrupt:
+            if not args.json:
+                raise
+            json_print({"success": False, "error": "Stopped.", "campaign": args.name})
+            sys.exit(130)
+
+    @classmethod
+    def _dispatch(cls, args: Namespace) -> None:
         if args.campaign_subcommand == "validate":
             cls.campaign_validate(args.path, args.name, output_json=args.json)
         elif args.campaign_subcommand == "preview":
@@ -303,15 +313,28 @@ class CampaignCommand(BaseCommand):
         sys.exit(exit_code)
 
     @classmethod
-    def _call(cls, output_json: bool, run: Callable[[], Any], **details: Any) -> Any:
+    def _call(
+        cls,
+        output_json: bool,
+        operation: Callable[[], Any],
+        interrupted: Optional[str] = None,
+        interrupted_unconfirmed: bool = False,
+        **details: Any,
+    ) -> Any:
         from poly.project import CampaignOutcomeUnconfirmed
 
         try:
-            return run()
+            return operation()
         except CampaignOutcomeUnconfirmed as e:
             cls._fail(str(e), output_json, **details, unconfirmed=True)
         except (ValueError, SourcererAPIError, TimeoutError) as e:
             cls._fail(str(e), output_json, **details)
+        except KeyboardInterrupt:
+            if interrupted is None:
+                raise
+            if interrupted_unconfirmed:
+                details["unconfirmed"] = True
+            cls._fail(interrupted, output_json, exit_code=130, **details)
 
     @staticmethod
     def _read_json(value: str, what: str) -> Any:
@@ -344,7 +367,8 @@ class CampaignCommand(BaseCommand):
     @staticmethod
     def _node_labels(project: Any, name: str, live: bool = False) -> dict[str, str]:
         try:
-            return project.campaign_node_names(project.get_campaign(name), live=live)
+            campaign = project.get_live_campaign(name) if live else project.get_campaign(name)
+            return project.campaign_node_names(campaign, live=live)
         except (ValueError, SourcererAPIError):
             return {}
 
@@ -356,16 +380,27 @@ class CampaignCommand(BaseCommand):
         return text
 
     @classmethod
+    def _branch_note(cls, project: Any, name: str, output_json: bool) -> dict[str, str]:
+        from poly.output.console import warning
+
+        if not cls._call(output_json, project.campaign_branch_is_gone, campaign=name):
+            return {}
+        if not output_json:
+            warning("Your branch no longer exists, so this ran on main.")
+        return {"branch": "main"}
+
+    @classmethod
     def campaign_validate(cls, base_path: str, name: str, output_json: bool = False) -> None:
         """Validate a pushed campaign on the current branch and report its issues. Exits 1 if invalid."""
         from poly.output.console import error, success, warning
 
         project = load_project(base_path, output_json=output_json)
-        require_outbound_campaigns_enabled(project, output_json=output_json)
+        require_outbound_campaigns_enabled(project, output_json=output_json, campaign=name)
+        branch = cls._branch_note(project, name, output_json)
         result = cls._call(output_json, lambda: project.validate_campaign(name), campaign=name)
         valid = bool(result.get("valid"))
         if output_json:
-            outcome = {"success": valid, "campaign": name, "result": result}
+            outcome = {"success": valid, "campaign": name, **branch, "result": result}
             if not valid:
                 outcome["error"] = f"Campaign '{name}' is not valid."
             json_print(outcome)
@@ -444,6 +479,8 @@ class CampaignCommand(BaseCommand):
         status = step.get("status")
         failure = (step.get("error") or {}).get("error")
         if status == "done":
+            if (step.get("result") or {}).get("stop_reason") == "step_cap":
+                return "Test step hit the step cap, which usually means the campaign loops."
             if not cls._stopped_at_error(step.get("result")):
                 return None
             failure = ((step.get("result") or {}).get("error") or {}).get("error")
@@ -520,7 +557,8 @@ class CampaignCommand(BaseCommand):
 
         contact, outputs, state, previous_send = cls._call(output_json, build_inputs, campaign=name)
         project = load_project(base_path, output_json=output_json)
-        require_outbound_campaigns_enabled(project, output_json=output_json)
+        require_outbound_campaigns_enabled(project, output_json=output_json, campaign=name)
+        branch = cls._branch_note(project, name, output_json)
         result = cls._call(
             output_json,
             lambda: project.preview_campaign(
@@ -537,7 +575,7 @@ class CampaignCommand(BaseCommand):
         )
         failure = cls._preview_failure(result)
         if output_json:
-            outcome = {"success": failure is None, "campaign": name, "result": result}
+            outcome = {"success": failure is None, "campaign": name, **branch, "result": result}
             if failure:
                 outcome["error"] = failure
             json_print(outcome)
@@ -602,17 +640,18 @@ class CampaignCommand(BaseCommand):
 
         contact, previous_run, state = cls._call(output_json, build_inputs, campaign=name)
         project = load_project(base_path, output_json=output_json)
-        require_outbound_campaigns_enabled(project, output_json=output_json)
+        require_outbound_campaigns_enabled(project, output_json=output_json, campaign=name)
         campaign = cls._call(output_json, lambda: project.get_live_campaign(name), campaign=name)
-        step_inputs = {
-            "start_node": start_node,
-            "run": previous_run,
-            "send_result": send_result,
-            "send_state": state,
-        }
-        cls._call(
+        body = cls._call(
             output_json,
-            lambda: project.check_campaign_test(name, contact, **step_inputs),
+            lambda: project.check_campaign_test(
+                name,
+                contact,
+                start_node=start_node,
+                run=previous_run,
+                send_result=send_result,
+                send_state=state,
+            ),
             campaign=name,
         )
 
@@ -626,24 +665,17 @@ class CampaignCommand(BaseCommand):
                 warning("Aborted.")
                 sys.exit(0)
 
-        try:
-            started = cls._call(
-                output_json,
-                lambda: project.start_campaign_test(name, contact, **step_inputs),
-                campaign=name,
-            )
-        except KeyboardInterrupt:
-            cls._fail(
-                project.campaign_test_unconfirmed(
-                    "You stopped the command while the step was starting",
-                    campaign.name,
-                    contact.get("phone"),
-                ),
-                output_json,
-                exit_code=130,
-                campaign=name,
-                unconfirmed=True,
-            )
+        started = cls._call(
+            output_json,
+            lambda: project.start_campaign_test(name, contact, body=body),
+            interrupted=project.campaign_test_unconfirmed(
+                "You stopped the command while the step was starting",
+                campaign.name,
+                contact.get("phone"),
+            ),
+            interrupted_unconfirmed=True,
+            campaign=name,
+        )
         step_id, run_started = started.get("step_id"), started.get("run")
         if output_json:
             json_progress({"step_id": step_id, "run": run_started})
@@ -658,19 +690,14 @@ class CampaignCommand(BaseCommand):
                 step_id=step_id,
                 run=run_started,
             )
-        try:
-            step = project.wait_for_campaign_test_step(name, step_id, timeout=timeout)
-        except (ValueError, SourcererAPIError, TimeoutError) as e:
-            cls._fail(str(e), output_json, campaign=name, step_id=step_id, run=run_started)
-        except KeyboardInterrupt:
-            cls._fail(
-                f"Stopped waiting for test step {step_id}. The step carries on.",
-                output_json,
-                exit_code=130,
-                campaign=name,
-                step_id=step_id,
-                run=run_started,
-            )
+        step = cls._call(
+            output_json,
+            lambda: project.wait_for_campaign_test_step(name, step_id, timeout=timeout),
+            interrupted=f"Stopped waiting for test step {step_id}. The step carries on.",
+            campaign=name,
+            step_id=step_id,
+            run=run_started,
+        )
         failure = cls._test_failure(step)
         done = failure is None
         if output_json:
@@ -708,7 +735,7 @@ class CampaignCommand(BaseCommand):
 
         _, prompt, done_message = LIFECYCLE_ACTIONS[action]
         project = load_project(base_path, output_json=output_json)
-        require_outbound_campaigns_enabled(project, output_json=output_json)
+        require_outbound_campaigns_enabled(project, output_json=output_json, campaign=name)
         campaign = cls._call(output_json, lambda: project.get_live_campaign(name), campaign=name)
         if not output_json and not force:
             if not questionary.confirm(
@@ -718,19 +745,16 @@ class CampaignCommand(BaseCommand):
                 sys.exit(0)
 
         method = getattr(project, f"{action}_campaign")
-        try:
-            cls._call(output_json, lambda: method(name), campaign=name, action=action)
-        except KeyboardInterrupt:
-            cls._fail(
-                project.campaign_change_unconfirmed(
-                    "You stopped the command while it was being sent", action, campaign.name
-                ),
-                output_json,
-                exit_code=130,
-                campaign=name,
-                action=action,
-                unconfirmed=True,
-            )
+        cls._call(
+            output_json,
+            lambda: method(name),
+            interrupted=project.campaign_change_unconfirmed(
+                "You stopped the command while it was being sent", action, campaign.name
+            ),
+            interrupted_unconfirmed=True,
+            campaign=name,
+            action=action,
+        )
         if output_json:
             json_print({"success": True, "campaign": name, "action": action})
         else:
