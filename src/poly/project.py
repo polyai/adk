@@ -1692,6 +1692,7 @@ class AgentStudioProject:
             updated_resources,
             deleted_resources,
             pre_push_updated_resources,
+            pre_push_deleted_resources,
             post_push_new_resources,
         )
         prepush.fix_orphaned_variables(
