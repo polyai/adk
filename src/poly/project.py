@@ -3750,6 +3750,32 @@ class AgentStudioProject:
                 continue
         return names
 
+    def _campaign_resources(self, live: bool) -> ResourceMap:
+        if not live or self.branch_id == "main":
+            return self.resources
+        if self._main_resources is None:
+            self._main_resources, _ = self.api_handler.pull_branch_resources("main")
+        return self._main_resources
+
+    def get_live_campaign(self, name: str) -> OutboundCampaign:
+        """Return the pushed campaign with this name or folder name, checking main has it.
+
+        Tests and the lifecycle commands act on main, so a campaign made on a branch must be
+        merged first. Fetches main's projection once when not on main.
+
+        Raises:
+            ValueError: as `get_campaign` does, or if main does not have the campaign.
+        """
+        campaign = self.get_campaign(name)
+        if campaign.resource_id not in self._campaign_resources(live=True).get(
+            OutboundCampaign, {}
+        ):
+            raise ValueError(
+                f"Campaign '{campaign.name}' is not on main yet. Merge the branch it was made "
+                "on first."
+            )
+        return campaign
+
     def campaign_node_names(self, campaign: OutboundCampaign, live: bool = False) -> dict[str, str]:
         """Return the names of a pushed campaign's nodes, by node id.
 
@@ -3757,28 +3783,18 @@ class AgentStudioProject:
             campaign: The campaign.
             live: Name the nodes as they are on main, which a test runs, rather than as they
                 are on the current branch. Fetches main's projection once when not on main.
+
+        Raises:
+            ValueError: if `live` and main's projection cannot be fetched.
         """
-        resources = self.resources
-        if live and self.branch_id != "main":
-            if self._main_resources is None:
-                main_handler = AgentStudioInterface(
-                    self.region, self.account_id, self.project_id, "main"
-                )
-                self._main_resources, _, _ = main_handler.pull_resources()
-            resources = self._main_resources
         return {
             node.node_id: node.name
-            for node in resources.get(OutboundCampaignNode, {}).values()
+            for node in self._campaign_resources(live).get(OutboundCampaignNode, {}).values()
             if node.campaign_id == campaign.resource_id
         }
 
     def _campaign_node_id(self, campaign: OutboundCampaign, node: str, live: bool = False) -> str:
         names = self.campaign_node_names(campaign, live=live)
-        if live and not names:
-            raise ValueError(
-                f"Campaign '{campaign.name}' is not on main yet. Merge the branch it was made "
-                "on first."
-            )
         if node in names:
             return node
         ids = {resource_utils.clean_name(name): node_id for node_id, name in names.items()}
@@ -3937,7 +3953,7 @@ class AgentStudioProject:
         Raises:
             ValueError: as `start_campaign_test` does.
         """
-        campaign = self.get_campaign(name)
+        campaign = self.get_live_campaign(name)
         self._campaign_test_body(campaign, contact, start_node, run, send_result, send_state)
 
     def start_campaign_test(
@@ -3957,10 +3973,10 @@ class AgentStudioProject:
         the test runs.
 
         Raises:
-            ValueError: if the contact has no phone, the step inputs don't fit together, or
-                `start_node` names no node of the campaign on main.
+            ValueError: if the contact has no phone, the step inputs don't fit together, main
+                does not have the campaign, or `start_node` names no node of it on main.
         """
-        campaign = self.get_campaign(name)
+        campaign = self.get_live_campaign(name)
         body = self._campaign_test_body(campaign, contact, start_node, run, send_result, send_state)
         try:
             return self.api_handler.start_outbound_campaign_test_step(campaign.resource_id, body)
@@ -4011,7 +4027,7 @@ class AgentStudioProject:
             time.sleep(poll_interval)
 
     def _send_campaign_lifecycle(self, action: str, command_type: str, name: str) -> None:
-        campaign = self.get_campaign(name)
+        campaign = self.get_live_campaign(name)
         try:
             self.api_handler.send_outbound_campaign_lifecycle(command_type, campaign.resource_id)
         except SourcererAPIError as e:

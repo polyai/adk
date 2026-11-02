@@ -78,6 +78,7 @@ FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT = 30
 OUTBOUND_CAMPAIGN_URL = (
     "/adk/v1/accounts/{account_id}/projects/{project_id}/branches/{branch_id}"
     "/outbound-campaigns/{path}"
@@ -134,6 +135,7 @@ class PlatformAPIHandler:
         files: ty.Optional[dict] = None,
         response_format: str = "json",
         use_jupiter_api: bool = False,
+        timeout: ty.Optional[float] = None,
     ) -> dict:
         """Make a request to the Platform API.
 
@@ -150,6 +152,8 @@ class PlatformAPIHandler:
             response_format (str): How to parse the response. "json" (default)
                 or "yaml".
             use_jupiter_api (bool): Whether to use the Jupiter API.
+            timeout (float | None): Seconds to wait for the server to connect and to send
+                data. None waits forever.
 
         Returns:
             dict: The parsed response.
@@ -180,6 +184,7 @@ class PlatformAPIHandler:
             allow_redirects=False,
             files=files,
             data=json.dumps(data) if data and not files else None,
+            timeout=timeout,
         )
 
         logger.debug(
@@ -1829,7 +1834,9 @@ class PlatformAPIHandler:
             path="/".join(quote(segment, safe="") for segment in segments),
         )
         try:
-            return PlatformAPIHandler.make_request(region, endpoint, method, data=data)
+            return PlatformAPIHandler.make_request(
+                region, endpoint, method, data=data, timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
+            )
         except requests.exceptions.RequestException as e:
             raise SourcererAPIError.from_request_error(e) from e
         except ValueError as e:

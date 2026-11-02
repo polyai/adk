@@ -10,7 +10,7 @@ from typing import Any, Callable, Optional
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project, require_outbound_campaigns_enabled
 from poly.handlers.sdk import SourcererAPIError
-from poly.output.json_output import json_print
+from poly.output.json_output import json_print, json_progress
 
 LIFECYCLE_ACTIONS = {
     "publish": (
@@ -420,6 +420,10 @@ class CampaignCommand(BaseCommand):
             plain(f"note: {note}")
 
     @staticmethod
+    def _stopped_at_error(result: Optional[dict[str, Any]]) -> bool:
+        return (result or {}).get("stop_reason") == "error"
+
+    @staticmethod
     def _carry_on_flags(
         result: dict[str, Any],
         labels: dict[str, str],
@@ -496,7 +500,7 @@ class CampaignCommand(BaseCommand):
                 last_send=previous_send,
             ),
         )
-        failed = result.get("stop_reason") == "error"
+        failed = cls._stopped_at_error(result)
         if output_json:
             json_print({"success": not failed, "campaign": name, "result": result})
         else:
@@ -557,7 +561,7 @@ class CampaignCommand(BaseCommand):
         contact, previous_run, state = cls._call(output_json, build_inputs)
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
-        campaign = cls._call(output_json, lambda: project.get_campaign(name))
+        campaign = cls._call(output_json, lambda: project.get_live_campaign(name))
         step_inputs = {
             "start_node": start_node,
             "run": previous_run,
@@ -581,9 +585,19 @@ class CampaignCommand(BaseCommand):
             lambda: project.start_campaign_test(name, contact, **step_inputs),
         )
         step_id, run_started = started.get("step_id"), started.get("run")
-        if not output_json:
+        if output_json:
+            json_progress({"step_id": step_id, "run": run_started})
+        else:
             info(f"Started test step {step_id} of campaign '{campaign.name}'.")
             info(f"Run: {shlex.quote(json.dumps(run_started))}")
+        if not step_id:
+            cls._fail(
+                "The test step started, but the platform did not say which step it is.",
+                output_json,
+                campaign=name,
+                step_id=step_id,
+                run=run_started,
+            )
         try:
             step = project.wait_for_campaign_test_step(name, step_id, timeout=timeout)
         except (ValueError, SourcererAPIError, TimeoutError) as e:
@@ -596,7 +610,7 @@ class CampaignCommand(BaseCommand):
                 step_id=step_id,
                 run=run_started,
             )
-        done = step.get("status") == "done"
+        done = step.get("status") == "done" and not cls._stopped_at_error(step.get("result"))
         if output_json:
             json_print({"success": done, "campaign": name, "test_step": step})
         else:
@@ -608,6 +622,8 @@ class CampaignCommand(BaseCommand):
                 )
             if done:
                 success("Test step finished.")
+            elif step.get("status") == "done":
+                error("Test step stopped at an error.")
             else:
                 failure = (step.get("error") or {}).get("error")
                 error(f"Test step {step.get('status')}" + (f": {failure}" if failure else "."))
@@ -631,7 +647,7 @@ class CampaignCommand(BaseCommand):
         _, prompt, done_message = LIFECYCLE_ACTIONS[action]
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json)
-        campaign = cls._call(output_json, lambda: project.get_campaign(name))
+        campaign = cls._call(output_json, lambda: project.get_live_campaign(name))
         if not output_json and not force:
             if not questionary.confirm(
                 prompt.format(name=campaign.name), default=False, auto_enter=False

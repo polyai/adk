@@ -96,7 +96,7 @@ A preview keeps nothing between steps. Each step prints the flags to carry on wi
 
 Run one step of a test of the live campaign, and wait for it to finish. It calls and texts the test contact for real. The first step starts at the trigger. To carry on, pass the `--start-node` and the run it printed. After a call or a text, also say how it went with `--result`; after a wait, carry on from the node it printed.
 
-The run is printed as soon as the step starts, so it is not lost if waiting fails or you stop it; the step carries on regardless. A poll that fails with no response or a server error is retried three times. Node names are matched as they are on `main`, which the test runs, even from another branch.
+The run is printed as soon as the step starts, so it is not lost if waiting fails or you stop it; the step carries on regardless. A poll that fails with no response, a stalled connection or a server error is retried three times. Node names are matched as they are on `main`, which the test runs, even from another branch. A step that stops at a failed node exits `1`.
 
 Examples:
 
@@ -119,7 +119,7 @@ poly campaign test 'Appointment reminders' --phone +15550100 --start-node 'Remin
 | `--timeout` | Seconds to wait for the step. Defaults to `600`. |
 | `--force` | Run without confirmation. Implied by `--json`. |
 
-The inputs are checked before you are asked to confirm.
+The inputs are checked before you are asked to confirm, including that `main` has the campaign. The lifecycle commands make the same check.
 
 !!! warning "This contacts a real phone"
 
@@ -141,7 +141,13 @@ The inputs are checked before you are asked to confirm.
 }
 ~~~
 
-If waiting for the step fails or times out, the error carries the step and its run:
+With `--json`, as soon as the step starts, one line goes to stderr with the step and its run, so a caller that is stopped before the step finishes still has them:
+
+~~~json
+{"step_id": "TSTEP-...", "run": {"contact_id": "...", "enrolment_id": "...", "graph_hash": "..."}}
+~~~
+
+The result goes to stdout once the step stops. `success` is `false` when the step failed, or finished by stopping at a failed node (`result.stop_reason` is `error`). If waiting for the step fails or times out, the error carries the step and its run:
 
 ~~~json
 {
