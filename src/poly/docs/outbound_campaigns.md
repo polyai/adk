@@ -14,7 +14,7 @@ outbound_campaigns/
       {node_name}.py     # code of that node's function, only when it has code
 ```
 
-The folder name is the campaign's name, lowercased with punctuation replaced by `_`. A second campaign with the same name gets the end of its id added, as in `reminders-a1b2c3d4`. Renaming a campaign means changing `name` and renaming the folder to match; the campaign keeps its identity.
+The folder name is the campaign's name, lowercased with punctuation replaced by `_`. A second campaign with the same name gets the end of its id added, as in `reminders-a1b2c3d4`. Renaming a campaign means changing `name` and renaming the folder to match. The campaign keeps its identity only when its nodes keep their names and types (the trigger may be renamed too); otherwise the push replaces it with a new campaign, so rename the folder in a push of its own.
 
 ## campaign.yaml
 
@@ -30,7 +30,7 @@ The folder name is the campaign's name, lowercased with punctuation replaced by 
   - **voiceDispatchLimits**, **smsDispatchLimits**: `maxConcurrent`, `perHour`, `perDay`.
   - **defaultTimezone**: IANA time zone, used when a contact has none.
   - **contactWindow**: `daysOfWeek` (at least one of `monday` .. `sunday`), `startTime` and `endTime` as `"HH:mm"` in the contact's time zone, ending after it starts.
-- **nodes**: List of nodes, in any order. Each has a **name**, unique in the campaign, a **type**, and that type's fields (below). Nodes refer to each other by name. Names are compared ignoring case and punctuation, so when Agent Studio has nodes named `Call` and `call`, a pull numbers the second one, as in `call 2`. Positions on the Agent Studio canvas are not in the file: a node keeps its position, and a new node is placed next to the node that routes to it.
+- **nodes**: List of nodes, in any order. Each has a **name**, unique in the campaign, a **type**, and that type's fields (below). Nodes refer to each other by name. Names are compared ignoring case and punctuation, so when Agent Studio has nodes named `Call` and `call`, a pull numbers the second one, as in `call 2`. A node Agent Studio has with no name, or with a name another node has, is named on pull and shows as changed until your next push sends that name. Positions on the Agent Studio canvas are not in the file: a node keeps its position, and a new node is placed next to the node that routes to it.
 
 A node's name is its identity. Renaming the trigger keeps its id and history. Renaming any other node, or changing its `type`, deletes it and creates a new one with a new id and history; rename its `.py` file to match.
 
@@ -46,7 +46,7 @@ A node's name is its identity. Renaming the trigger keeps its id and history. Re
 | `writeback` | `target` (`api`, `csv`), `function`, `next` |
 | `end` | `exitReason`, `writebackEnabled`, `function` (optional) |
 
-`next`, `defaultNext` and `defaultRoute` name the node a contact moves to. A call or text always moves to its `defaultRoute`; put a `conditional` after it to branch on how it went. Flow fields hold a flow's name. At most one node is a `trigger`. A campaign already in Agent Studio must keep its trigger, and the trigger can't change type: rename or replace it rather than delete it.
+`next`, `defaultNext` and `defaultRoute` name the node a contact moves to. A call or text always moves to its `defaultRoute`; put a `conditional` after it to branch on how it went. Flow fields hold a flow's name. At most one node is a `trigger`. A campaign that has a trigger in Agent Studio must keep one: rename or replace it rather than delete it. The trigger changes type only when another node becomes the trigger in the same push.
 
 ### Functions
 

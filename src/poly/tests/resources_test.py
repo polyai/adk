@@ -15342,12 +15342,12 @@ class OutboundCampaignTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, re.escape(message)):
                     campaign.validate(resource_mappings=[])
 
-    def test_validate_requires_a_trigger_only_in_a_campaign_on_the_platform(self):
+    def test_validate_requires_a_trigger_only_in_a_campaign_that_had_one(self):
         campaign = _campaign()
         campaign.node_entries = [{"name": "End", "type": "end"}]
 
         campaign.validate(resource_mappings=[])
-        campaign.on_platform = True
+        campaign.had_trigger = True
         with self.assertRaisesRegex(ValueError, "rename or replace the trigger rather than"):
             campaign.validate(resource_mappings=[])
 
@@ -15357,6 +15357,8 @@ class OutboundCampaignTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "The trigger can't change type."):
             end.validate(resource_mappings=None)
+        end.campaign_has_trigger = True
+        end.validate(resource_mappings=None)
 
     def test_validate_reports_unknown_top_level_fields(self):
         campaign = _campaign()
