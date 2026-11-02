@@ -489,7 +489,7 @@ def pair_replaced_campaign_triggers(
     deleted_resources: ResourceMap,
     post_push_new_resources: ResourceMap,
 ) -> None:
-    """Push a campaign's one deleted trigger and one new trigger as an update of the old one.
+    """Push a campaign's one new trigger as an update of a deleted one, by name if one matches.
 
     Agent Studio refuses to delete a campaign's only trigger, so a renamed or replaced trigger
     takes the old trigger's id and position, and the routes leading to it follow. A new node
@@ -500,15 +500,19 @@ def pair_replaced_campaign_triggers(
     deleted_triggers = _triggers_by_campaign(deleted_resources)
     for campaign_id, triggers in new_triggers.items():
         saved_triggers = deleted_triggers.get(campaign_id, [])
-        if len(triggers) != 1 or len(saved_triggers) != 1:
+        if len(triggers) != 1 or not saved_triggers:
             continue
-        [node], [saved] = triggers, saved_triggers
+        [node] = triggers
+        saved = next(
+            (trigger for trigger in saved_triggers if trigger.name == node.name), saved_triggers[0]
+        )
         new_node_id = node.node_id
         _carry_node_id(state, new_resources, updated_resources, deleted_resources, node, saved)
         _remap_campaign_routes(
             state, new_resources, updated_resources, campaign_id, {new_node_id: node.node_id}
         )
         saved_label = saved.name if saved.platform_label is None else saved.platform_label
+        node.saved_label = saved_label
         heir = _campaign_nodes(new_resources, campaign_id).get(saved_label)
         if heir is not None:
             new_resources[OutboundCampaignNode].pop(heir.resource_id)
@@ -544,24 +548,22 @@ def relabel_campaign_nodes_first(
     campaign_ids = {node.campaign_id for node in relabelled.values()}
     deleted_nodes = deleted_resources.get(OutboundCampaignNode, {})
     for resource_id, node in list(deleted_nodes.items()):
-        if (
-            isinstance(node, OutboundCampaignNode)
-            and node.campaign_id in campaign_ids
-            and node.data.get("type") != "trigger"
-        ):
+        if isinstance(node, OutboundCampaignNode) and node.campaign_id in campaign_ids:
             pre_push_deleted_resources.setdefault(OutboundCampaignNode, {})[resource_id] = (
                 deleted_nodes.pop(resource_id)
             )
 
-    holders = {(node.campaign_id, node.saved_label): node for node in relabelled.values()}
+    holders: dict[tuple[str, str], list[OutboundCampaignNode]] = {}
+    for node in relabelled.values():
+        holders.setdefault((node.campaign_id, node.saved_label.strip()), []).append(node)
     ordered: dict[str, OutboundCampaignNode] = {}
 
     def place(node: OutboundCampaignNode, visiting: set[str]) -> None:
         if node.resource_id in ordered or node.resource_id in visiting:
             return
-        holder = holders.get((node.campaign_id, node.name))
-        if holder is not None and holder is not node:
-            place(holder, visiting | {node.resource_id})
+        for holder in holders.get((node.campaign_id, node.name.strip()), []):
+            if holder is not node:
+                place(holder, visiting | {node.resource_id})
         ordered[node.resource_id] = node
 
     for node in relabelled.values():
