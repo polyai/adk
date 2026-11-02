@@ -25,7 +25,7 @@ outbound_campaigns/
 
 Optional. The folder name is the campaign's name, lowercased, with punctuation replaced by `_`. Agent Studio allows two campaigns with the same name, so a second one gets the end of its id added to its folder, as in `reminders-a1b2c3d4`.
 
-To rename a campaign, change `name` and rename the folder to match. The campaign keeps its identity, contacts and history.
+To rename a campaign, change `name` and rename the folder to match. The campaign keeps its identity, contacts and history only when its nodes keep their names and types, though the trigger may be renamed too. Otherwise the push deletes the campaign and creates a new one, so rename the folder in a push of its own.
 
 ## What a campaign contains
 
@@ -54,7 +54,7 @@ To rename a campaign, change `name` and rename the folder to match. The campaign
 
 ### Nodes
 
-Each node has a `name`, unique in the campaign, and a `type` with that type's fields. Nodes refer to each other by name. A node's function code lives in `functions/{node_name}.py`, with the name lowercased and punctuation replaced by `_`. Names are compared ignoring case and punctuation, so when Agent Studio has nodes named `Call` and `call`, a pull numbers the second one, as in `call 2`.
+Each node has a `name`, unique in the campaign, and a `type` with that type's fields. Nodes refer to each other by name. A node's function code lives in `functions/{node_name}.py`, with the name lowercased and punctuation replaced by `_`. Names are compared ignoring case and punctuation, so when Agent Studio has nodes named `Call` and `call`, a pull numbers the second one, as in `call 2`. A node Agent Studio has with no name, or with a name another node has, is named on pull and shows as changed until your next push sends that name.
 
 | Type | Fields |
 |---|---|
@@ -140,8 +140,8 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
     - `endDate` is not before `startDate`.
     - `contactWindow` has at least one day, its times are `HH:mm`, and it ends after it starts.
 - `nodes` is a list, every node has a name, and names are unique in the campaign, ignoring case and punctuation.
-- There is at most one `trigger` node, and a campaign already in Agent Studio keeps one: rename or replace its trigger rather than delete it.
-- The trigger doesn't change `type`.
+- There is at most one `trigger` node, and a campaign that has a trigger in Agent Studio keeps one: rename or replace its trigger rather than delete it.
+- The trigger changes `type` only when another node becomes the trigger in the same push.
 - Each node has a known `type`, its required fields, allowed values, and no fields its type doesn't have.
 - `voicemailScript` and `voicemailWhen` are set when `voicemailEnabled` is true.
 - Every route names a node in the campaign.

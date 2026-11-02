@@ -1685,7 +1685,7 @@ class AgentStudioProject:
         )
         prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
         prepush.group_outbound_campaign_changes(
-            state, new_resources, updated_resources, deleted_resources
+            state, new_resources, updated_resources, deleted_resources, post_push_new_resources
         )
         prepush.fix_orphaned_variables(
             state,
@@ -2348,7 +2348,10 @@ class AgentStudioProject:
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
         if resource_class == OutboundCampaign:
-            additional_kwargs["on_platform"] = isinstance(original_resource, OutboundCampaign)
+            additional_kwargs["had_trigger"] = any(
+                node.campaign_id == resource.resource_id and node.data.get("type") == "trigger"
+                for node in self.resources.get(OutboundCampaignNode, {}).values()
+            )
 
         if resource_class == OutboundCampaignNode:
             saved_node = (

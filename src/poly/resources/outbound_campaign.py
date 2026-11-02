@@ -547,7 +547,7 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     node_entries: Any = field(default=None, init=False, repr=False, compare=False)
     unknown_keys: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
-    on_platform: bool = field(default=False, init=False, repr=False, compare=False)
+    had_trigger: bool = field(default=False, init=False, repr=False, compare=False)
 
     @property
     def folder(self) -> str:
@@ -579,7 +579,7 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     @classmethod
     def from_yaml_dict(
-        cls, yaml_dict: dict, resource_id: str, name: str = "", on_platform: bool = False, **kwargs
+        cls, yaml_dict: dict, resource_id: str, name: str = "", had_trigger: bool = False, **kwargs
     ) -> "OutboundCampaign":
         yaml_dict = _strip_strings(_plain(yaml_dict or {}))
         campaign = cls(
@@ -588,7 +588,7 @@ class OutboundCampaign(MultiResourceYamlResource):
             description=yaml_dict.get("description"),
             settings=normalise_settings(yaml_dict.get("settings")),
         )
-        campaign.on_platform = on_platform
+        campaign.had_trigger = had_trigger
         return campaign
 
     @classmethod
@@ -773,7 +773,7 @@ class OutboundCampaign(MultiResourceYamlResource):
         errors.extend(_settings_errors(self.settings))
         errors.extend(_node_entry_errors(self.node_entries))
         if (
-            self.on_platform
+            self.had_trigger
             and isinstance(self.node_entries, (list, type(None)))
             and not _has_trigger(self.node_entries)
         ):
@@ -1150,6 +1150,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     platform_label: Optional[str] = field(default=None, repr=False, compare=False)
 
     saved_type: Optional[str] = field(default=None, init=False, repr=False, compare=False)
+    campaign_has_trigger: bool = field(default=False, init=False, repr=False, compare=False)
 
     @property
     def campaign_id(self) -> str:
@@ -1199,6 +1200,15 @@ class OutboundCampaignNode(MultiResourceYamlResource):
 
     def to_yaml_dict(self) -> dict:
         return {"name": self.name, **self.data}
+
+    def get_diff(self, other_resource: Resource) -> str:
+        """Diff from Agent Studio's label when pull named the node differently."""
+        if self.platform_label is None or not other_resource:
+            return super().get_diff(other_resource)
+        saved = utils.dump_yaml(
+            _strip_strings({**self.to_yaml_dict(), "name": self.platform_label})
+        )
+        return utils.get_diff(saved, other_resource.raw)
 
     def compute_hash(self) -> str:
         node = self.to_yaml_dict()
@@ -1310,6 +1320,9 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         )
         if os.path.isfile(code_path):
             node.code = Resource.read_from_file(code_path)
+        top = cls._get_top_level_data(true_file_path)
+        entries = top.get(NODES_KEY) if isinstance(top, dict) else None
+        node.campaign_has_trigger = _has_trigger(entries if isinstance(entries, list) else None)
         return node
 
     @classmethod
@@ -1337,10 +1350,12 @@ class OutboundCampaignNode(MultiResourceYamlResource):
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         errors = node_data_errors(self.data, self.function_file)
-        if self.saved_type == "trigger" and (
-            not isinstance(self.data, dict) or self.data.get("type") != "trigger"
+        if (
+            self.saved_type == "trigger"
+            and not self.campaign_has_trigger
+            and (not isinstance(self.data, dict) or self.data.get("type") != "trigger")
         ):
-            errors.append("The trigger can't change type. Add a node of the new type instead.")
+            errors.append("The trigger can't change type unless another node becomes the trigger.")
         if len(self.name) > 256:
             errors.append("The name must be under 256 characters.")
         if resource_mappings is not None and isinstance(self.data, dict):
