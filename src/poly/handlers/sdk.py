@@ -16,6 +16,7 @@ from http import HTTPStatus
 from typing import Any, Optional
 
 import requests
+import urllib3
 
 from poly.utils import retrieve_api_key
 
@@ -80,6 +81,41 @@ class SourcererAPIError(Exception):
 
 class CommandBatchNotSent(SourcererAPIError):
     """A command batch failed before it was sent, so nothing it holds was applied."""
+
+
+def request_outcome(error: SourcererAPIError) -> Optional[str]:
+    """Say how far a failed request got, as far as the transport shows.
+
+    Args:
+        error: The failure, raised from the `requests` exception when there was one.
+
+    Returns:
+        "not_sent" if it never reached the platform: a batch failed before sending, a
+        connection that never opened, a proxy or TLS failure. "timed_out" if the platform
+        did not answer in time, "dropped" if the connection broke after it was made, or
+        None if the transport says nothing and the status must decide.
+    """
+    if isinstance(error, CommandBatchNotSent):
+        return "not_sent"
+    cause = error.__cause__
+    if isinstance(
+        cause,
+        (
+            requests.exceptions.ConnectTimeout,
+            requests.exceptions.ProxyError,
+            requests.exceptions.SSLError,
+        ),
+    ):
+        return "not_sent"
+    if isinstance(cause, requests.exceptions.ConnectionError):
+        reason = cause.args[0] if cause.args else None
+        if isinstance(getattr(reason, "reason", reason), urllib3.exceptions.ConnectTimeoutError):
+            return "not_sent"
+    if isinstance(cause, requests.exceptions.ReadTimeout):
+        return "timed_out"
+    if error.status_code is None and isinstance(cause, requests.exceptions.ConnectionError):
+        return "dropped"
+    return None
 
 
 class InterruptedBeforeSending(KeyboardInterrupt):

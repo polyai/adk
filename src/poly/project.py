@@ -23,7 +23,6 @@ from pathlib import PurePath
 from typing import Any, Optional, TypeAlias
 
 import requests
-import urllib3
 from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
@@ -32,7 +31,7 @@ from poly.call.session import CallSession
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
-from poly.handlers.sdk import CommandBatchNotSent, SourcererAPIError
+from poly.handlers.sdk import SourcererAPIError, request_outcome
 from poly.migration_utils import (
     MigrationFlag,
     get_all_migration_flags,
@@ -4301,7 +4300,12 @@ class AgentStudioProject:
         campaigns = list(self.resources.get(OutboundCampaign, {}).values())
         if campaign := self._match_campaign(name, campaigns):
             return campaign
-        if name in self._local_campaign_names():
+        local_folders = self._local_campaign_folders()
+        if (
+            name in local_folders.values()
+            or name in local_folders
+            or resource_utils.clean_name(name) in local_folders
+        ):
             raise ValueError(f"Campaign '{name}' has not been pushed yet. Run `poly push` first.")
         known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
         raise ValueError(
@@ -4327,17 +4331,18 @@ class AgentStudioProject:
                 )
         return None
 
-    def _local_campaign_names(self) -> list[str]:
-        names = []
+    def _local_campaign_folders(self) -> dict[str, Optional[str]]:
+        folders: dict[str, Optional[str]] = {}
         for file_path in OutboundCampaign.discover_resources(self.root_path):
+            folder = campaign_folder_of(file_path)
             try:
                 campaign_file = os.path.dirname(file_path)
-                names.append(
-                    resource_utils.load_yaml(Resource.read_from_file(campaign_file))["name"]
-                )
+                folders[folder] = resource_utils.load_yaml(Resource.read_from_file(campaign_file))[
+                    "name"
+                ]
             except (OSError, ValueError, KeyError, TypeError):
-                continue
-        return names
+                folders[folder] = None
+        return folders
 
     def _campaign_resources(self, live: bool) -> ResourceMap:
         if not live:
@@ -4407,9 +4412,11 @@ class AgentStudioProject:
             except ValueError:
                 reason = f"HTTP {error.status_code}"
         reason = reason.replace(campaign.resource_id, campaign.name)
+        if error.error_code == "CAMPAIGN_LIFECYCLE_REFUSED":
+            reason = re.sub(r"\s*Refresh to see its current status\.?", "", reason)
         message = f"Could not {action} campaign '{campaign.name}': {reason}"
         if error.error_code == "CAMPAIGN_LIFECYCLE_REFUSED":
-            message += "\nRun `poly pull` on main to see the campaign's current status."
+            message += "\nCheck the campaign's status in Agent Studio."
         if not error.server_message:
             if error.error_code == "CAMPAIGNS_KEY_MISSING" or error.status_code == 412:
                 message += (
@@ -4636,30 +4643,15 @@ class AgentStudioProject:
 
     @staticmethod
     def _unconfirmed_reason(error: SourcererAPIError, test_start: bool = False) -> Optional[str]:
-        if isinstance(error, CommandBatchNotSent):
+        outcome = request_outcome(error)
+        if outcome == "not_sent":
             return None
-        cause = error.__cause__
-        if isinstance(
-            cause,
-            (
-                requests.exceptions.ConnectTimeout,
-                requests.exceptions.ProxyError,
-                requests.exceptions.SSLError,
-            ),
-        ):
-            return None
-        if isinstance(cause, requests.exceptions.ConnectionError):
-            reason = cause.args[0] if cause.args else None
-            if isinstance(
-                getattr(reason, "reason", reason), urllib3.exceptions.ConnectTimeoutError
-            ):
-                return None
-        if isinstance(cause, requests.exceptions.ReadTimeout):
+        if outcome == "timed_out":
             return "The platform did not answer in time"
+        if outcome == "dropped":
+            return "The connection dropped before the platform answered"
         status = error.status_code
         if status is None:
-            if isinstance(cause, requests.exceptions.ConnectionError):
-                return "The connection dropped before the platform answered"
             return "The platform's answer could not be read"
         if status < 400:
             return "The platform's answer could not be read"
@@ -4700,10 +4692,15 @@ class AgentStudioProject:
             "pause": "send `poly campaign resume`",
             "resume": "send `poly campaign pause`",
         }.get(action)
+        resend = {
+            "resume": "Run `poly campaign resume` again: if it says the campaign is active, the "
+            "first resume went through.",
+            "archive": "Run `poly campaign archive` again: if it says the campaign is not on "
+            "main or is already archived, the first archive went through.",
+        }.get(action, f"Sending `poly campaign {action}` again is safe and settles it.")
         return (
             f"{reason}, so `poly campaign {action}` on campaign '{campaign_name}' may have gone "
-            "through, even if Agent Studio and `poly pull` still show the old status. Sending "
-            f"`poly campaign {action}` again is safe and settles it. "
+            f"through, even if Agent Studio still shows the old status. {resend} "
             + (
                 f"If you didn't want the change, {undo} instead."
                 if undo

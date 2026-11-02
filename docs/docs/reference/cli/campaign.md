@@ -77,7 +77,7 @@ A preview exits `1` when the path stops at a failed node (`stop_reason` is `erro
 | `--phone` | The contact's phone number. |
 | `--first-name` | The contact's first name. |
 | `--field` | Another contact column, as `KEY=VALUE`. Repeatable. |
-| `--sample-outputs` | JSON file of what each node's function returns, keyed by node name. |
+| `--sample-outputs` | JSON file of what each node's function returns, keyed by node name. For a condition node, give the branch to take: `{"Check reply": {"branch": "confirmed"}}`, or `{"branch": null}` for its default branch. |
 | `--start-node` | Name of the node to carry on from. Defaults to the trigger. |
 | `--result` | How the call or text at `--start-node` went, e.g. `no_answer` or `replied`. |
 | `--state` | A value that call or text reported back, as `KEY=VALUE`. Repeatable. |
@@ -265,4 +265,10 @@ poly campaign archive 'Appointment reminders'
 
 !!! warning "These commands act on live"
 
-    `publish`, `pause`, `resume` and `archive` change what the live campaign does straight away. Each asks for confirmation unless you pass `--force` or `--json`. If the platform does not confirm the change, for example because the connection dropped or you stopped the command, it may still have gone through, even if Agent Studio and `poly pull` still show the old status: the error says so, and `--json` adds `"unconfirmed": true`. Sending the same command again is safe and settles it, since a campaign already in the state asked for counts as done. If you didn't want the change, send the opposite command instead, such as `pause` after an unconfirmed `resume`.
+    `publish`, `pause`, `resume` and `archive` change what the live campaign does straight away. Each asks for confirmation unless you pass `--force` or `--json`. If the platform does not confirm the change, for example because the connection dropped or you stopped the command, it may still have gone through, even if Agent Studio still shows the old status: the error says so, and `--json` adds `"unconfirmed": true`. To settle it:
+
+    - `publish` and `pause`: send the same command again. That is safe, since a campaign already in the state asked for counts as done.
+    - `resume`: run it again. If it says the campaign is active, the first resume went through.
+    - `archive`: run it again. If it says the campaign is not on main or is already archived, the first archive went through.
+
+    If you didn't want the change, send the opposite command instead, such as `pause` after an unconfirmed `resume`. Archiving can't be undone.

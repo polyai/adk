@@ -200,7 +200,7 @@ class CampaignCommand(BaseCommand):
                     "Acts on the live campaign, on main, whatever branch you are on: a\n"
                     "campaign made on a branch must be merged first. Asks for confirmation\n"
                     "unless --force or --json is given. If the change is not confirmed,\n"
-                    "sending it again is safe and settles it.\n\n"
+                    "the error says how to settle it.\n\n"
                     "Examples:\n"
                     f"  poly campaign {action} 'Appointment reminders'\n"
                 ),
@@ -514,16 +514,20 @@ class CampaignCommand(BaseCommand):
         if stop_reason in ("call", "reply") and stopped_at:
             flags, after = [f"--start-node {node(stopped_at)}", "--result <how it went>"], ""
         elif stop_reason == "condition" and stopped_at:
+            label = json.dumps(labels.get(stopped_at, stopped_at))
             flags, after = (
-                [f"--start-node {node(stopped_at)}"],
-                ", with its branch in --sample-outputs",
+                [f"--start-node {node(stopped_at)}", "--sample-outputs <file>"],
+                f', with {{{label}: {{"branch": "<value>"}}}} in that file, or '
+                '{"branch": null} for the default branch',
             )
         elif stop_reason == "wait" and result.get("resume_node_id"):
             flags, after = [f"--start-node {node(result['resume_node_id'])}"], ""
         else:
             return None
         for flag, value in (values or {}).items():
-            if value is not None:
+            if value is True:
+                flags.append(f"--{flag}")
+            elif value is not None:
                 flags.append(f"--{flag} {shlex.quote(json.dumps(value))}")
         return " ".join(flags) + after
 
@@ -590,7 +594,10 @@ class CampaignCommand(BaseCommand):
             cls._print_steps(
                 cls._node_labels(project, name),
                 result,
-                {"last-send": result.get("last_send")},
+                {
+                    "last-send": result.get("last_send"),
+                    "ask-branches": True if ask_branches else None,
+                },
             )
             if result.get("stop_reason") == "step_cap":
                 error(failure)

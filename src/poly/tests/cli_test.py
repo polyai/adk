@@ -7,6 +7,7 @@ import dataclasses
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -6661,7 +6662,9 @@ class CampaignCommandTest(unittest.TestCase):
         cases = {
             "reply": "--start-node 'Reminder text' --result <how it went>",
             "call": "--start-node 'Reminder text' --result <how it went>",
-            "condition": "--start-node 'Reminder text', with its branch in --sample-outputs",
+            "condition": "--start-node 'Reminder text' --sample-outputs <file>, with "
+            '{"Reminder text": {"branch": "<value>"}} in that file, or {"branch": null} for the '
+            "default branch",
             "wait": "--start-node Wait",
             "end": None,
         }
@@ -7486,9 +7489,10 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertEqual(
             output["error"],
             "The platform did not answer in time, so `poly campaign resume` on campaign "
-            f"'{self.CAMPAIGN}' may have gone through, even if Agent Studio and `poly pull` "
-            "still show the old status. Sending `poly campaign resume` again is safe and "
-            "settles it. If you didn't want the change, send `poly campaign pause` instead.",
+            f"'{self.CAMPAIGN}' may have gone through, even if Agent Studio still shows the old "
+            "status. Run `poly campaign resume` again: if it says the campaign is active, the "
+            "first resume went through. If you didn't want the change, send `poly campaign "
+            "pause` instead.",
         )
         self.assertEqual(self.post.call_count, 1)
 
@@ -7505,7 +7509,7 @@ class CampaignCommandTest(unittest.TestCase):
         message = error.call_args.args[0]
         self.assertTrue(message.startswith("You stopped the command while it was being sent"))
         self.assertIn("may have gone through", message)
-        self.assertIn("Sending `poly campaign resume` again is safe", message)
+        self.assertIn("Run `poly campaign resume` again", message)
         self.assertIn("send `poly campaign pause` instead", message)
 
     def test_test_stopped_while_starting_says_the_step_may_have_started(self):
@@ -7826,9 +7830,8 @@ class CampaignCommandTest(unittest.TestCase):
 
         self.assertEqual(
             self._output()["error"],
-            f"Could not pause campaign '{self.CAMPAIGN}': The campaign could not be paused. "
-            "Refresh to see its current status\n"
-            "Run `poly pull` on main to see the campaign's current status.",
+            f"Could not pause campaign '{self.CAMPAIGN}': The campaign could not be paused.\n"
+            "Check the campaign's status in Agent Studio.",
         )
 
     def test_proxy_and_tls_failures_are_plain_failures(self):
@@ -8038,9 +8041,8 @@ class CampaignCommandTest(unittest.TestCase):
 
         self.assertEqual(
             self._output()["error"],
-            f"Could not archive campaign '{self.CAMPAIGN}': The campaign could not be archived. "
-            "Refresh to see its current status\n"
-            "Run `poly pull` on main to see the campaign's current status.",
+            f"Could not archive campaign '{self.CAMPAIGN}': The campaign could not be archived.\n"
+            "Check the campaign's status in Agent Studio.",
         )
 
     def test_live_campaign_missing_on_main_lists_main_campaigns(self):
@@ -8107,18 +8109,33 @@ class CampaignCommandTest(unittest.TestCase):
         from poly.project import AgentStudioProject
 
         cases = {
-            "publish": "send `poly campaign pause` to stop it contacting people instead.",
-            "pause": "send `poly campaign resume` instead.",
-            "resume": "send `poly campaign pause` instead.",
-            "archive": "Archiving can't be undone.",
+            "publish": (
+                "Sending `poly campaign publish` again is safe and settles it.",
+                "send `poly campaign pause` to stop it contacting people instead.",
+            ),
+            "pause": (
+                "Sending `poly campaign pause` again is safe and settles it.",
+                "send `poly campaign resume` instead.",
+            ),
+            "resume": (
+                "Run `poly campaign resume` again: if it says the campaign is active, the first "
+                "resume went through.",
+                "send `poly campaign pause` instead.",
+            ),
+            "archive": (
+                "Run `poly campaign archive` again: if it says the campaign is not on main or is "
+                "already archived, the first archive went through.",
+                "Archiving can't be undone.",
+            ),
         }
-        for action, ending in cases.items():
+        for action, (resend, ending) in cases.items():
             with self.subTest(action=action):
                 message = AgentStudioProject.campaign_change_unconfirmed("Gone", action, "X")
 
-                self.assertIn(f"Sending `poly campaign {action}` again is safe", message)
+                self.assertIn(resend, message)
                 self.assertTrue(message.endswith(ending), message)
-                self.assertNotIn("before sending it again", message)
+                self.assertIn("even if Agent Studio still shows the old status", message)
+                self.assertNotIn("poly pull", message)
 
     def test_ctrl_c_while_reading_main_is_a_plain_stop(self):
         """Ctrl+C before the batch is posted changed nothing, so it is not unconfirmed."""
@@ -8181,6 +8198,94 @@ class CampaignCommandTest(unittest.TestCase):
             "No route matched the outcome, so the path stopped there.",
             [call.args[0] for call in info.call_args_list],
         )
+
+    def test_lifecycle_refusal_without_the_refresh_sentence_still_gets_the_hint(self):
+        """The hint is added whether or not the platform's web-UI sentence is there."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = self._platform_error(
+            409, "CAMPAIGN_LIFECYCLE_REFUSED", "The campaign could not be paused"
+        )
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(
+            self._output()["error"],
+            f"Could not pause campaign '{self.CAMPAIGN}': The campaign could not be paused\n"
+            "Check the campaign's status in Agent Studio.",
+        )
+
+    def test_resending_a_change_that_went_through_gives_the_documented_reply(self):
+        """After an unconfirmed resume or archive that went through, the resend says so."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = self._platform_error(
+            422,
+            "VALIDATION_FAILED",
+            f"[command 1: outboundCampaignResume ({self.CAMPAIGN_ID})] Cannot resume campaign "
+            f"“{self.CAMPAIGN}” — it is active, not paused",
+        )
+
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertNotIn("unconfirmed", self._output())
+        self.assertIn("it is active", self._output()["error"])
+
+        self.project._main_resources = None
+        self.pull_main.side_effect = lambda *_: ({}, [])
+        self.post.reset_mock()
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "archive", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        self.post.assert_not_called()
+        self.assertIn("on main, or it is already archived", self._output()["error"])
+
+    def test_preview_sends_ask_branches_and_repeats_it_in_the_hint(self):
+        """--ask-branches reaches the body, and the condition hint keeps it."""
+        result = {
+            "steps": [],
+            "stopped_at": "cond-1",
+            "stop_reason": "condition",
+            "error": None,
+            "notes": [],
+        }
+        self._respond(make_mock_response(200, result))
+
+        with patch("poly.output.console.info") as info:
+            CampaignCommand.campaign_preview(
+                TEST_DIR, self.CAMPAIGN, phone="+15550100", ask_branches=True
+            )
+
+        self.assertTrue(self._request()[2]["askBranches"])
+        hint = next(call.args[0] for call in info.call_args_list if "Carry on" in call.args[0])
+        self.assertIn("--sample-outputs <file> --ask-branches,", hint)
+        self.assertIn('{"branch": null} for the default branch', hint)
+
+    def test_unpushed_campaign_named_by_folder_says_to_push(self):
+        """A local campaign not yet pushed is found by its folder, and the user told to push."""
+        folder = os.path.join(TEST_DIR, "outbound_campaigns", "new_reminders")
+        os.makedirs(folder)
+        self.addCleanup(shutil.rmtree, folder)
+        with open(os.path.join(folder, "campaign.yaml"), "w", encoding="utf-8") as file:
+            file.write("name: New reminders\n")
+
+        for value in ("new_reminders", "New reminders", "new-reminders"):
+            with self.subTest(value=value):
+                with self.assertRaises(SystemExit):
+                    CampaignCommand.campaign_validate(TEST_DIR, value, output_json=True)
+
+                self.assertEqual(
+                    self._output()["error"],
+                    f"Campaign '{value}' has not been pushed yet. Run `poly push` first.",
+                )
 
     def test_parsed_command_line_reaches_validate(self):
         """`poly campaign validate <name> --json` is wired through the parser to the handler."""
