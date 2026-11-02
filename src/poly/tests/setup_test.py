@@ -85,6 +85,7 @@ def _mock_auth(test: unittest.TestCase) -> dict[str, MagicMock]:
     api.list_account_api_keys_internal.return_value = []
     api.create_account_api_key_internal.return_value = {"key": "sk-minted"}
     api.get_accounts_with_key.return_value = {"acc-1": "Acme"}
+    api.get_projects_with_key.return_value = {"proj-1": "Agent One", "proj-2": "Agent Two"}
     prefix = "poly.cli_commands.setup."
     patchers = {
         "retrieve_api_key": patch(prefix + "retrieve_api_key", side_effect=ValueError("none")),
@@ -524,6 +525,84 @@ class SetupAuthStepTest(unittest.TestCase):
         self.m["write_env"].assert_called_once()
 
 
+class SetupVerifyStepTest(unittest.TestCase):
+    """Tests for SetupCommand._verify, the one call that proves the account key."""
+
+    def setUp(self):
+        self.m = _mock_auth(self)
+        self.step = StepResult()
+
+    def _verify(self, api_key="sk-minted", account_id="acc-1", skip_verify=False):
+        return SetupCommand._verify(api_key, "studio", account_id, skip_verify, self.step)
+
+    @patch("poly.output.console.success")
+    def test_calls_the_public_api_with_the_key_and_reports_the_account(self, mock_success):
+        self.assertTrue(self._verify())
+
+        self.m["api"].get_projects_with_key.assert_called_once_with("studio", "sk-minted", "acc-1")
+        message = mock_success.call_args[0][0]
+        self.assertIn("acc-1", message)
+        self.assertIn("2 agents", message)
+        self.assertRegex(message, r"\d+ ms")
+        self.assertEqual(self.step.outcome, "done")
+
+    @patch("poly.output.console.success")
+    def test_one_agent_is_singular(self, mock_success):
+        self.m["api"].get_projects_with_key.return_value = {"proj-1": "Agent One"}
+
+        self._verify()
+
+        self.assertIn("1 agent,", mock_success.call_args[0][0])
+
+    def test_skip_flag_makes_no_call(self):
+        self.assertIsNone(self._verify(skip_verify=True))
+
+        self.m["api"].get_projects_with_key.assert_not_called()
+        self.assertEqual(self.step.outcome, "skipped")
+
+    def test_no_key_makes_no_call(self):
+        self.assertIsNone(self._verify(api_key=None))
+
+        self.m["api"].get_projects_with_key.assert_not_called()
+        self.assertEqual(self.step.outcome, "skipped")
+
+    @patch("poly.output.console.error")
+    def test_refused_key_ends_the_run_before_any_write(self, mock_error):
+        self.m["api"].get_projects_with_key.side_effect = RuntimeError("401 Unauthorized")
+
+        with self.assertRaises(SystemExit) as ctx:
+            self._verify()
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("poly apikey --region studio", mock_error.call_args[0][0])
+        self.assertNotIn("sk-minted", mock_error.call_args[0][0])
+
+    @patch("poly.output.console.error")
+    def test_refused_key_in_a_full_run_writes_nothing_and_records_failed(self, mock_error):
+        """The profile and later steps are never reached with a key that does not work."""
+        base_path = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base_path, True)
+        patch.dict(os.environ, {"SHELL": "/bin/unrecognised-shell"}).start()
+        capture = _silence_telemetry(self)
+        self.m["api"].get_projects_with_key.side_effect = RuntimeError("401 Unauthorized")
+
+        with self.assertRaises(SystemExit):
+            SetupCommand.setup(base_path=base_path, region="studio", skip_skills=True)
+
+        self.m["write_env"].assert_not_called()
+        steps = [(e["step"], e["outcome"]) for e in _events(capture, "setup_step")]
+        self.assertEqual(steps[-1], ("verify", "failed"))
+        self.assertEqual(_events(capture, "setup_completed"), [])
+
+    def test_skip_verify_flag_is_parsed_and_forwarded(self):
+        args = _parse_setup_args(["setup", "--skip-verify"])
+
+        self.assertTrue(args.skip_verify)
+        with patch.object(SetupCommand, "setup") as mock_setup:
+            SetupCommand.run(args)
+        self.assertTrue(mock_setup.call_args.kwargs["skip_verify"])
+
+
 class SetupEnvironmentStepTest(unittest.TestCase):
     """Tests for SetupCommand._export_account_key, the confirmed POLY_API_KEY write."""
 
@@ -879,6 +958,7 @@ class SetupTelemetryWiringTest(unittest.TestCase):
             [
                 ("signin", "done"),
                 ("credentials", "done"),
+                ("verify", "done"),
                 ("environment", "done"),
                 ("completion", "skipped"),
                 ("skills", "skipped"),
@@ -928,8 +1008,11 @@ class SetupTelemetryWiringTest(unittest.TestCase):
         self._run_setup()
 
         [completed] = _events(self.capture, "setup_completed")
-        self.assertEqual(completed["steps_done"], ["signin", "credentials", "environment"])
+        self.assertEqual(
+            completed["steps_done"], ["signin", "credentials", "verify", "environment"]
+        )
         self.assertEqual(completed["project"], "declined")
+        self.assertTrue(completed["verify_ok"])
         self.assertIsInstance(completed["duration_ms"], int)
 
     def test_created_project_is_reported_as_created(self):

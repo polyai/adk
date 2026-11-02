@@ -333,6 +333,31 @@ class GetAccountsWithKey(unittest.TestCase):
             PlatformAPIHandler.get_accounts_with_key("studio", "explicit-key-123")
 
 
+class GetProjectsWithKey(unittest.TestCase):
+    """Tests for PlatformAPIHandler.get_projects_with_key, the setup verify call."""
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_authenticates_with_the_given_key_against_the_account_projects(self, mock_make_request):
+        mock_make_request.return_value = {
+            "projects": [{"id": "p1", "name": "Agent One"}, {"id": "p2"}]
+        }
+
+        projects = PlatformAPIHandler.get_projects_with_key("studio", "explicit-key-123", "acc-1")
+
+        self.assertEqual(projects, {"p1": "Agent One"})
+        args, kwargs = mock_make_request.call_args
+        self.assertEqual(args[:3], ("studio", "/adk/v1/accounts/acc-1/projects", "GET"))
+        self.assertEqual(kwargs["headers"]["X-API-KEY"], "explicit-key-123")
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "setup")
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_non_list_projects_raises_value_error(self, mock_make_request):
+        mock_make_request.return_value = {"projects": "nope"}
+
+        with self.assertRaises(ValueError):
+            PlatformAPIHandler.get_projects_with_key("studio", "explicit-key-123", "acc-1")
+
+
 class GetProjects(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_projects."""
 

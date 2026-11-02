@@ -84,13 +84,14 @@ class SetupCommand(BaseCommand):
             help="Set up the ADK: auth, shell completion, AI skills, and a project",
             description=(
                 "Set up everything the ADK needs in one command.\n\n"
-                "Runs five steps, each skipped automatically if already done:\n"
+                "Runs six steps, each skipped automatically if already done:\n"
                 "  1. Authentication: one browser sign-in that saves an ADK key for the CLI\n"
                 "     and an account API key for the PolyAI APIs and MCPs\n"
-                "  2. POLY_API_KEY exported to your shell profile (asks first)\n"
-                "  3. Shell completion for bash/zsh/fish\n"
-                "  4. AI agent skills, installed into detected coding agents\n"
-                "  5. Project setup (create a new project or connect an existing one)\n\n"
+                "  2. Verify: one timed call to the PolyAI API with the account key\n"
+                "  3. POLY_API_KEY exported to your shell profile (asks first)\n"
+                "  4. Shell completion for bash/zsh/fish\n"
+                "  5. AI agent skills, installed into detected coding agents\n"
+                "  6. Project setup (create a new project or connect an existing one)\n\n"
                 "Examples:\n"
                 "  poly setup\n"
                 "  poly setup --region us\n"
@@ -127,6 +128,11 @@ class SetupCommand(BaseCommand):
             help="Skip the authentication step.",
         )
         setup_parser.add_argument(
+            "--skip-verify",
+            action="store_true",
+            help="Skip the verification call made with the account API key.",
+        )
+        setup_parser.add_argument(
             "--skip-skills",
             action="store_true",
             help="Skip installing AI agent skills.",
@@ -161,6 +167,7 @@ class SetupCommand(BaseCommand):
             region=args.region,
             account_id=args.account_id,
             skip_auth=args.skip_auth,
+            skip_verify=args.skip_verify,
             skip_skills=args.skip_skills,
             agents=args.agents,
             dev=args.dev,
@@ -174,6 +181,7 @@ class SetupCommand(BaseCommand):
         region: str | None = None,
         account_id: str | None = None,
         skip_auth: bool = False,
+        skip_verify: bool = False,
         skip_skills: bool = False,
         agents: list[str] | None = None,
         dev: bool = False,
@@ -201,21 +209,25 @@ class SetupCommand(BaseCommand):
                 step.skipped()
             account_key = None
         else:
-            region, account_key = cls._authenticate(region, account_id, run)
+            region, account_id, account_key = cls._authenticate(region, account_id, run)
 
-        # --- 2. POLY_API_KEY in the shell profile ---
+        # --- 2. Verify: prove the account key before anything persistent uses it ---
+        with run.step("verify") as step:
+            run.verify_ok = cls._verify(account_key, region, account_id, skip_verify, step)
+
+        # --- 3. POLY_API_KEY in the shell profile ---
         with run.step("environment") as step:
             cls._export_account_key(account_key, region, step)
 
-        # --- 3. Shell completion ---
+        # --- 4. Shell completion ---
         with run.step("completion") as step:
             cls._install_completion(step)
 
-        # --- 4. AI agent skills ---
+        # --- 5. AI agent skills ---
         with run.step("skills") as step:
             cls._install_skills(skip_skills, agents, dev, global_install, step)
 
-        # --- 5. Project setup ---
+        # --- 6. Project setup ---
         with run.step("project") as step:
             cls._setup_project(base_path, region, step)
 
@@ -225,7 +237,7 @@ class SetupCommand(BaseCommand):
     @classmethod
     def _authenticate(
         cls, region: str | None, account_id: str | None, run: SetupRun
-    ) -> tuple[str, str | None]:
+    ) -> tuple[str, str | None, str | None]:
         """Make sure `region` holds both an ADK key and an account API key.
 
         Signs in at most once, reusing the sign-in ``poly apikey`` keeps when it is
@@ -243,8 +255,7 @@ class SetupCommand(BaseCommand):
                 and switches identity to the account id once known.
 
         Returns:
-            The region used, and the account API key (None only if the account
-            step could not produce one).
+            The region used, the account id and the account API key.
         """
         from poly.output.console import console, error, info, mask_api_key, success, warning
 
@@ -267,7 +278,7 @@ class SetupCommand(BaseCommand):
             with run.step("credentials") as step:
                 step.skipped()
             run.identify(stored_account["account_id"])
-            return region, stored_account["key"]
+            return region, stored_account["account_id"], stored_account["key"]
 
         with run.step("signin"):
             jwt_token, sign_in_reused = cls._sign_in_or_reuse(region)
@@ -303,7 +314,7 @@ class SetupCommand(BaseCommand):
             if stored_account:
                 success(f"Account API key: existing '{stored_account['name']}' key kept.")
                 run.identify(stored_account["account_id"])
-                return region, stored_account["key"]
+                return region, stored_account["account_id"], stored_account["key"]
 
             try:
                 account_id = resolve_account_id(
@@ -338,7 +349,64 @@ class SetupCommand(BaseCommand):
                         " If your next call fails, wait a moment and retry."
                     )
             run.identify(account_id)
-        return region, api_key
+        return region, account_id, api_key
+
+    @classmethod
+    def _verify(
+        cls,
+        api_key: str | None,
+        region: str | None,
+        account_id: str | None,
+        skip_verify: bool,
+        step: StepResult | None = None,
+    ) -> bool | None:
+        """Make one timed call to the public API with the account key and report it.
+
+        Proves the key before the shell profile or any agent config is written
+        with it. A refused call ends the run, because every later step would
+        persist a key that does not work.
+
+        Args:
+            api_key: The account API key, or None when the auth step was skipped.
+            region: The region the key belongs to.
+            account_id: The account the key is scoped to.
+            skip_verify: ``--skip-verify``.
+            step: Telemetry record for this step, filled in with the outcome.
+
+        Returns:
+            True when the call succeeded, None when it was skipped. Never False:
+            a failed call exits.
+        """
+        from poly.output.console import error, info, success
+
+        step = step or StepResult()
+        if skip_verify:
+            info("Verify: skipped (--skip-verify).")
+            step.skipped()
+            return None
+        if api_key is None or account_id is None:
+            info("Verify: skipped (no account API key this run).")
+            step.skipped()
+            return None
+
+        api = AgentStudioInterface()
+        started = time.monotonic()
+        try:
+            projects = api.get_projects_with_key(region, api_key, account_id)
+        except Exception as e:
+            error(
+                f"Verify: the account API key was refused by the {region} API ({e})."
+                " Nothing else has been written with it. Wait a moment and re-run"
+                " 'poly setup'; if it keeps failing, run 'poly apikey --region"
+                f" {region}' to mint a new key."
+            )
+            sys.exit(1)
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        success(
+            f"Verify: connected to account {account_id}, {len(projects)} agent"
+            f"{'' if len(projects) == 1 else 's'}, {elapsed_ms} ms."
+        )
+        return True
 
     @classmethod
     def _sign_in_or_reuse(cls, region: str, reuse: bool = True) -> tuple[str, bool]:
