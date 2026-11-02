@@ -144,9 +144,9 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 - The trigger changes `type` only when another node becomes the trigger in the same push.
 - Each node has a known `type`, its required fields, allowed values, and no fields its type doesn't have.
 - `voicemailScript` and `voicemailWhen` are set when `voicemailEnabled` is true.
-- Every route names a node in the campaign.
+- On a node that is new, changed type or had its routes changed, every route names a node in the campaign. Agent Studio keeps a route to a deleted node until you change it.
 - Function names are valid Python names, and `code` is not in the YAML.
-- Each function's `def` line is whole on one line and takes exactly the node's parameters.
+- On a node that is new, changed type, or had its code, function name or parameters changed, the function's `def` line is whole on one line and takes exactly the node's parameters.
 - Every file in `functions/` belongs to a node with a function.
 
 ## Best practices

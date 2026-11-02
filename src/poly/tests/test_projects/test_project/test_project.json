@@ -1618,22 +1618,6 @@
         "folder_name": "appointment_reminders"
       }
     },
-    "outbound_campaign_functions": {
-      "appointment_reminders/check_reply": {
-        "resource_id": "appointment_reminders/check_reply",
-        "name": "check_reply",
-        "campaign_folder": "appointment_reminders",
-        "stem": "check_reply",
-        "code": "def check_reply(outbound_contact: OutboundContact, outbound_campaign: OutboundCampaign):\n    if outbound_contact.metadata.get(\"confirmed\"):\n        return {\"branch\": \"confirmed\"}\n    return {\"branch\": None}\n"
-      },
-      "appointment_reminders/import_contacts": {
-        "resource_id": "appointment_reminders/import_contacts",
-        "name": "import_contacts",
-        "campaign_folder": "appointment_reminders",
-        "stem": "import_contacts",
-        "code": "def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):\n    return {\"contacts\": [\n        {\n            \"external_id\": row[\"id\"],\n            \"phone\": row[\"phone\"],\n            \"first_name\": row[\"first_name\"],\n            \"last_name\": row[\"last_name\"],\n            \"consent_given\": True,\n            \"consent_at\": row[\"consent_at\"],\n        }\n        for row in contacts\n    ]}\n"
-      }
-    },
     "outbound_campaign_nodes": {
       "CMPGN-TEST0001:trigger-1": {
         "resource_id": "CMPGN-TEST0001:trigger-1",

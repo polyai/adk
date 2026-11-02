@@ -46,11 +46,11 @@ A node's name is its identity. Renaming the trigger keeps its id and history. Re
 | `writeback` | `target` (`api`, `csv`), `function`, `next` |
 | `end` | `exitReason`, `writebackEnabled`, `function` (optional) |
 
-`next`, `defaultNext` and `defaultRoute` name the node a contact moves to. A call or text always moves to its `defaultRoute`; put a `conditional` after it to branch on how it went. Flow fields hold a flow's name. At most one node is a `trigger`. A campaign that has a trigger in Agent Studio must keep one: rename or replace it rather than delete it. The trigger changes type only when another node becomes the trigger in the same push.
+`next`, `defaultNext` and `defaultRoute` name the node a contact moves to; they are checked on a node that is new, changes type or whose routes change. A call or text always moves to its `defaultRoute`; put a `conditional` after it to branch on how it went. Flow fields hold a flow's name. At most one node is a `trigger`. A campaign that has a trigger in Agent Studio must keep one: rename or replace it rather than delete it. The trigger changes type only when another node becomes the trigger in the same push.
 
 ### Functions
 
-Every node except `wait` has a **function** with a `name` (a Python name) and a `description`; on an `end` node it is optional, and a webhook trigger runs none. Its code goes in `functions/{node_name}.py` (the name lowercased, punctuation replaced by `_`). The `def` line must be whole on one line and take exactly these parameters:
+Every node except `wait` has a **function** with a `name` (a Python name) and a `description`; on an `end` node it is optional, and a webhook trigger runs none. Its code goes in `functions/{node_name}.py` (the name lowercased, punctuation replaced by `_`). The `def` line must be whole on one line and take exactly these parameters, which is checked on a node that is new, changes type, or whose code, function name or parameters change:
 
 - `trigger` with `sourceType: csv`: `contacts`, `outbound_campaign`
 - `trigger` with `sourceType: api`: `outbound_campaign`, `sync`
