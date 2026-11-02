@@ -9,7 +9,7 @@ from typing import Any, Callable, Optional
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project, require_outbound_campaigns_enabled
-from poly.handlers.sdk import SourcererAPIError
+from poly.handlers.sdk import InterruptedBeforeSending, SourcererAPIError
 from poly.output.json_output import json_print, json_progress
 
 LIFECYCLE_ACTIONS = {
@@ -163,7 +163,7 @@ class CampaignCommand(BaseCommand):
             type=str,
             default=None,
             help="JSON file with the test contact: phone, firstName, lastName, externalId, "
-            "metadata. Other columns go in metadata.",
+            "metadata. Other keys are refused; put other columns in metadata.",
         )
         test_parser.add_argument("--phone", type=str, default=None, help="Number to call/text.")
         test_parser.add_argument("--first-name", type=str, default=None, help="First name.")
@@ -199,7 +199,8 @@ class CampaignCommand(BaseCommand):
                     f"{help_text}\n\n"
                     "Acts on the live campaign, on main, whatever branch you are on: a\n"
                     "campaign made on a branch must be merged first. Asks for confirmation\n"
-                    "unless --force or --json is given.\n\n"
+                    "unless --force or --json is given. If the change is not confirmed,\n"
+                    "sending it again is safe and settles it.\n\n"
                     "Examples:\n"
                     f"  poly campaign {action} 'Appointment reminders'\n"
                 ),
@@ -331,6 +332,8 @@ class CampaignCommand(BaseCommand):
             cls._fail(str(e), output_json, **details, unconfirmed=True)
         except (ValueError, SourcererAPIError, TimeoutError) as e:
             cls._fail(str(e), output_json, **details)
+        except InterruptedBeforeSending:
+            cls._fail("Stopped before anything was sent.", output_json, exit_code=130, **details)
         except KeyboardInterrupt:
             if interrupted is None:
                 raise
@@ -453,6 +456,8 @@ class CampaignCommand(BaseCommand):
                 plain(f"   exit reason: {step['exit_reason']}")
         stopped_at = labels.get(result.get("stopped_at"), result.get("stopped_at"))
         info(f"Stopped: {result.get('stop_reason')}" + (f" at {stopped_at}" if stopped_at else ""))
+        if result.get("stop_reason") == "no_route":
+            info("No route matched the outcome, so the path stopped there.")
         carry_on = cls._carry_on_flags(result, labels, carry_on_values)
         if carry_on:
             info(f"Carry on with: {carry_on}")
@@ -694,7 +699,9 @@ class CampaignCommand(BaseCommand):
             )
         step = cls._call(
             output_json,
-            lambda: project.wait_for_campaign_test_step(name, step_id, timeout=timeout),
+            lambda: project.wait_for_campaign_test_step(
+                name, step_id, timeout=timeout, phone=contact.get("phone")
+            ),
             interrupted=f"Stopped waiting for test step {step_id}. The step carries on.",
             campaign=name,
             step_id=step_id,

@@ -4148,7 +4148,10 @@ class AgentStudioProject:
         if name in self._local_campaign_names():
             raise ValueError(f"Campaign '{name}' has not been pushed yet. Run `poly push` first.")
         known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
-        raise ValueError(f"No campaign named '{name}'. Campaigns: {known}.")
+        raise ValueError(
+            f"No campaign named '{name}'. Campaigns: {known}. If it was made in Agent Studio or "
+            "pushed by someone else, run `poly pull` first."
+        )
 
     @staticmethod
     def _match_campaign(name: str, campaigns: list[OutboundCampaign]) -> Optional[OutboundCampaign]:
@@ -4248,12 +4251,9 @@ class AgentStudioProject:
             except ValueError:
                 reason = f"HTTP {error.status_code}"
         reason = reason.replace(campaign.resource_id, campaign.name)
-        if error.error_code == "CAMPAIGN_LIFECYCLE_REFUSED":
-            reason = reason.replace(
-                "Refresh to see its current status",
-                "Run `poly pull` on main to see its current status",
-            )
         message = f"Could not {action} campaign '{campaign.name}': {reason}"
+        if error.error_code == "CAMPAIGN_LIFECYCLE_REFUSED":
+            message += "\nRun `poly pull` on main to see the campaign's current status."
         if not error.server_message:
             if error.error_code == "CAMPAIGNS_KEY_MISSING" or error.status_code == 412:
                 message += (
@@ -4539,10 +4539,20 @@ class AgentStudioProject:
             action: `publish`, `pause`, `resume` or `archive`.
             campaign_name: The campaign's name.
         """
+        undo = {
+            "publish": "send `poly campaign pause` to stop it contacting people",
+            "pause": "send `poly campaign resume`",
+            "resume": "send `poly campaign pause`",
+        }.get(action)
         return (
             f"{reason}, so `poly campaign {action}` on campaign '{campaign_name}' may have gone "
-            "through. Check the campaign's status in Agent Studio, or with `poly pull` on main, "
-            "before sending it again."
+            "through, even if Agent Studio and `poly pull` still show the old status. Sending "
+            f"`poly campaign {action}` again is safe and settles it. "
+            + (
+                f"If you didn't want the change, {undo} instead."
+                if undo
+                else "Archiving can't be undone."
+            )
         )
 
     def wait_for_campaign_test_step(
@@ -4551,16 +4561,24 @@ class AgentStudioProject:
         step_id: str,
         timeout: float = 600,
         poll_interval: float = 5,
+        phone: Optional[str] = None,
     ) -> dict[str, Any]:
         """Poll a test step until it stops running and return it.
 
         A poll that fails for a reason that may pass (no response, a 5xx or a 429) is retried
         until `timeout`, with a pause that grows up to `poll_interval`.
 
+        Args:
+            name: The campaign's name or folder, as main has it.
+            step_id: The step `start_campaign_test` returned.
+            timeout: Seconds to wait for the step to stop running.
+            poll_interval: Seconds between polls.
+            phone: The number the step calls or texts, named if a poll is refused.
+
         Raises:
             TimeoutError: if it is still queued or running after `timeout` seconds, or polls
                 kept failing until then.
-            SourcererAPIError: if a poll is refused.
+            SourcererAPIError: if a poll is refused. The step may still have called or texted.
         """
         campaign = self.get_live_campaign(name)
         deadline = time.monotonic() + timeout
@@ -4577,7 +4595,17 @@ class AgentStudioProject:
                 if refused or isinstance(
                     e.__cause__, (requests.exceptions.ProxyError, requests.exceptions.SSLError)
                 ):
-                    raise self._campaign_error("test", campaign, e) from e
+                    reason = e.server_message or (
+                        f"HTTP {e.status_code}" if e.status_code else str(e)
+                    )
+                    raise SourcererAPIError(
+                        f"Could not check test step {step_id} of campaign '{campaign.name}' "
+                        f"({reason}); it may still have called or texted "
+                        f"{phone or 'the contact'}.",
+                        status_code=e.status_code,
+                        error_code=e.error_code,
+                        server_message=e.server_message,
+                    ) from e
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     unreachable = f"HTTP {e.status_code}" if e.status_code else "no answer"

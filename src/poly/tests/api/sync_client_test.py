@@ -51,7 +51,7 @@ class SendCommandToMain(unittest.TestCase):
 
     def test_sequence_mismatch_is_sent_once_more(self):
         """Main moving on between reading its sequence and sending is retried once."""
-        mismatch = SourcererAPIError("moved", status_code=409, error_code="SEQUENCE_MISMATCH")
+        mismatch = SourcererAPIError("moved", status_code=400, error_code="SEQUENCE_MISMATCH")
         handler = self._handler(mismatch, {"success": True})
 
         result = handler.send_command_to_main(Command(type="outbound_campaign_pause"))
@@ -64,7 +64,7 @@ class SendCommandToMain(unittest.TestCase):
 
     def test_second_sequence_mismatch_is_raised(self):
         """Only one retry: a second mismatch reaches the caller."""
-        mismatch = SourcererAPIError("moved", status_code=409, error_code="SEQUENCE_MISMATCH")
+        mismatch = SourcererAPIError("moved", status_code=400, error_code="SEQUENCE_MISMATCH")
         handler = self._handler(mismatch, mismatch)
 
         with self.assertRaises(SourcererAPIError):

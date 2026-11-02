@@ -6826,7 +6826,9 @@ class CampaignCommandTest(unittest.TestCase):
             CampaignCommand.campaign_validate(TEST_DIR, "Nope", output_json=True)
 
         self.assertEqual(
-            self._output()["error"], f"No campaign named 'Nope'. Campaigns: {self.CAMPAIGN}."
+            self._output()["error"],
+            f"No campaign named 'Nope'. Campaigns: {self.CAMPAIGN}. If it was made in Agent "
+            "Studio or pushed by someone else, run `poly pull` first.",
         )
         self.request.assert_not_called()
 
@@ -7484,8 +7486,9 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertEqual(
             output["error"],
             "The platform did not answer in time, so `poly campaign resume` on campaign "
-            f"'{self.CAMPAIGN}' may have gone through. Check the campaign's status in Agent "
-            "Studio, or with `poly pull` on main, before sending it again.",
+            f"'{self.CAMPAIGN}' may have gone through, even if Agent Studio and `poly pull` "
+            "still show the old status. Sending `poly campaign resume` again is safe and "
+            "settles it. If you didn't want the change, send `poly campaign pause` instead.",
         )
         self.assertEqual(self.post.call_count, 1)
 
@@ -7502,7 +7505,8 @@ class CampaignCommandTest(unittest.TestCase):
         message = error.call_args.args[0]
         self.assertTrue(message.startswith("You stopped the command while it was being sent"))
         self.assertIn("may have gone through", message)
-        self.assertIn("`poly pull` on main", message)
+        self.assertIn("Sending `poly campaign resume` again is safe", message)
+        self.assertIn("send `poly campaign pause` instead", message)
 
     def test_test_stopped_while_starting_says_the_step_may_have_started(self):
         """Ctrl+C while a step is starting warns that it may still call."""
@@ -7823,7 +7827,8 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertEqual(
             self._output()["error"],
             f"Could not pause campaign '{self.CAMPAIGN}': The campaign could not be paused. "
-            "Run `poly pull` on main to see its current status",
+            "Refresh to see its current status\n"
+            "Run `poly pull` on main to see the campaign's current status.",
         )
 
     def test_proxy_and_tls_failures_are_plain_failures(self):
@@ -8034,7 +8039,8 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertEqual(
             self._output()["error"],
             f"Could not archive campaign '{self.CAMPAIGN}': The campaign could not be archived. "
-            "Run `poly pull` on main to see its current status",
+            "Refresh to see its current status\n"
+            "Run `poly pull` on main to see the campaign's current status.",
         )
 
     def test_live_campaign_missing_on_main_lists_main_campaigns(self):
@@ -8095,6 +8101,86 @@ class CampaignCommandTest(unittest.TestCase):
                 self.assertEqual(self.request.call_count, 2)
                 output = self._output()
                 self.assertEqual((output["step_id"], output["run"]), ("TSTEP-1", run))
+
+    def test_unconfirmed_change_says_how_to_settle_or_undo_it(self):
+        """Each action's advice is to resend it, or send its opposite; archive can't be undone."""
+        from poly.project import AgentStudioProject
+
+        cases = {
+            "publish": "send `poly campaign pause` to stop it contacting people instead.",
+            "pause": "send `poly campaign resume` instead.",
+            "resume": "send `poly campaign pause` instead.",
+            "archive": "Archiving can't be undone.",
+        }
+        for action, ending in cases.items():
+            with self.subTest(action=action):
+                message = AgentStudioProject.campaign_change_unconfirmed("Gone", action, "X")
+
+                self.assertIn(f"Sending `poly campaign {action}` again is safe", message)
+                self.assertTrue(message.endswith(ending), message)
+                self.assertNotIn("before sending it again", message)
+
+    def test_ctrl_c_while_reading_main_is_a_plain_stop(self):
+        """Ctrl+C before the batch is posted changed nothing, so it is not unconfirmed."""
+        self.session.get.side_effect = KeyboardInterrupt
+
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 130)
+        self.post.assert_not_called()
+        self.assertEqual(
+            self._output(),
+            {
+                "success": False,
+                "error": "Stopped before anything was sent.",
+                "campaign": self.CAMPAIGN,
+                "action": "resume",
+            },
+        )
+
+    def test_poll_refused_says_the_step_may_still_have_called(self):
+        """A 4xx while polling comes after the step started, so it may still have called."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        self._respond(
+            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
+            self._platform_error(404, "TestStepNotFound", "Test step not found"),
+        )
+
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_test(
+                TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        output = self._output()
+        self.assertEqual(
+            output["error"],
+            f"Could not check test step TSTEP-1 of campaign '{self.CAMPAIGN}' (Test step not "
+            "found); it may still have called or texted +15550100.",
+        )
+        self.assertEqual((output["step_id"], output["run"]), ("TSTEP-1", run))
+
+    def test_preview_with_no_route_says_the_path_stopped(self):
+        """No route is a success, said plainly in the human output."""
+        result = {
+            "steps": [],
+            "stopped_at": "sms-1",
+            "stop_reason": "no_route",
+            "error": None,
+            "notes": [],
+        }
+        self._respond(make_mock_response(200, result))
+
+        with patch("poly.output.console.info") as info:
+            CampaignCommand.campaign_preview(TEST_DIR, self.CAMPAIGN, phone="+15550100")
+
+        self.assertIn(
+            "No route matched the outcome, so the path stopped there.",
+            [call.args[0] for call in info.call_args_list],
+        )
 
     def test_parsed_command_line_reaches_validate(self):
         """`poly campaign validate <name> --json` is wired through the parser to the handler."""
