@@ -1138,15 +1138,24 @@ class AgentStudioProject:
                     os.remove(path)
 
     def _move_campaign_folders(self, moves: list[tuple[str, str]]) -> None:
-        """Move campaign folders through temporary names, so any of them may swap."""
+        """Move campaign folders through a staging folder under `_gen/`, so any of them may swap.
+
+        Staging inside `outbound_campaigns/` would leave a folder there after a killed pull.
+        """
+        if not moves:
+            return
         campaigns_path = os.path.join(self.root_path, CAMPAIGNS_DIR)
-        staged = []
-        for number, (old, new) in enumerate(moves):
-            staging = os.path.join(campaigns_path, f".pull-{number}")
-            shutil.move(os.path.join(campaigns_path, old), staging)
-            staged.append((staging, new))
-        for staging, new in staged:
-            shutil.move(staging, os.path.join(campaigns_path, new))
+        staging_root = tempfile.mkdtemp(prefix="pull-moves-", dir=self._backup_root())
+        try:
+            staged = []
+            for number, (old, new) in enumerate(moves):
+                staging = os.path.join(staging_root, str(number))
+                shutil.move(os.path.join(campaigns_path, old), staging)
+                staged.append((staging, new))
+            for staging, new in staged:
+                shutil.move(staging, os.path.join(campaigns_path, new))
+        finally:
+            shutil.rmtree(staging_root, ignore_errors=True)
 
     def _gather_stranded_function_files(self, stranded: dict[str, str]) -> None:
         """Move function files left in a folder with no campaign to its campaign's new folder.
@@ -1260,8 +1269,9 @@ class AgentStudioProject:
         """Merge each node's code by node id, from its saved, local and incoming code.
 
         `claim` finds each node's local file and `plan` the files the result goes to. A file
-        there that another live local node or no node still holds is merged against as a
-        conflict, never overwritten.
+        there that another local node or no node still holds is merged against, never
+        overwritten: against the saved code of a node still live, and against nothing when
+        the node is gone, so an edit to a removed node's code always conflicts.
 
         Returns:
             The function files left with merge conflicts.
@@ -1312,7 +1322,8 @@ class AgentStudioProject:
             for path in targets[node_id]:
                 code = merged
                 if not force and path in local.files and not free_for(path, node_id):
-                    holder = original_nodes.get(local.holder(path) or "")
+                    holder_id = local.holder(path)
+                    holder = original_nodes.get(holder_id) if holder_id in incoming_nodes else None
                     if local.files[path] != code:
                         code = utils.merge_strings(
                             tidy(holder.code) if holder is not None else "",
@@ -2252,6 +2263,10 @@ class AgentStudioProject:
     def revert_changes(self, file_paths: list[str] = None) -> list[str]:
         """Revert changes in the project.
 
+        A campaign's `campaign.yaml`, given by its own path or reverted with everything, is
+        rewritten whole from the saved state, so nodes added locally and conflict markers left
+        by a pull go too.
+
         Args:
             file_paths (list[str]): List of specific files to revert. If None, revert all changes.
         """
@@ -2264,10 +2279,22 @@ class AgentStudioProject:
             if not all_files and any(path.startswith(campaigns_path) for path in file_paths)
             else {}
         )
+        saved_campaign_files = {
+            os.path.join(self.root_path, CAMPAIGNS_DIR, campaign.folder, CAMPAIGN_FILE)
+            for campaign in self.resources.get(OutboundCampaign, {}).values()
+        }
+        whole_files = saved_campaign_files if all_files else saved_campaign_files & set(file_paths)
         MultiResourceYamlResource._file_cache.clear()
         try:
+            for campaign_file in whole_files:
+                MultiResourceYamlResource._update_cache_after_write(campaign_file, {})
             for resource in self.all_resources:
                 path = resource.get_path(self.root_path)
+                campaign_file = (
+                    _parse_multi_resource_path(path)[0]
+                    if isinstance(resource, (OutboundCampaign, OutboundCampaignNode))
+                    else None
+                )
                 if isinstance(resource, OutboundCampaignNode) and all_files:
                     resource.save_code(self.root_path)
                 elif isinstance(resource, OutboundCampaignNode):
@@ -2285,7 +2312,8 @@ class AgentStudioProject:
                         elif os.path.isfile(code_path):
                             os.remove(code_path)
                         reverted_files.append(code_path)
-                if not all_files and path not in file_paths:
+                whole_file = not all_files and campaign_file in whole_files
+                if not all_files and path not in file_paths and not whole_file:
                     continue
 
                 resource.save(
@@ -2293,7 +2321,10 @@ class AgentStudioProject:
                     resource_mappings=resource_mappings,
                     save_to_cache=isinstance(resource, MultiResourceYamlResource),
                 )
-                reverted_files.append(path)
+                if not whole_file:
+                    reverted_files.append(path)
+                elif campaign_file not in reverted_files:
+                    reverted_files.append(campaign_file)
 
             MultiResourceYamlResource.write_cache_to_file()
         finally:

@@ -9588,6 +9588,33 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         )
         self.assertEqual((new, deleted), ([], []))
 
+    def test_swapping_folders_stages_nothing_inside_outbound_campaigns(self):
+        """A pull killed mid-swap must leave no folder there for the next pull to move into."""
+        self._pull_two_campaigns("Reminders", "Renewals")
+        campaigns_path = os.path.join(self.root, "outbound_campaigns")
+        seen: set[str] = set()
+        real_move = shutil.move
+
+        def move(source: str, target: str) -> str:
+            result = real_move(source, target)
+            seen.update(os.listdir(campaigns_path))
+            return result
+
+        with patch("poly.project.shutil.move", side_effect=move):
+            conflicts, _ = self.project.pull_project(
+                projection_json=self._projection_from_state(
+                    names={"CMPGN-ONE": "Renewals", "CMPGN-TWO": "Reminders"}
+                )
+            )
+
+        self.assertEqual(conflicts, [])
+        self.assertTrue(seen)
+        self.assertLessEqual(seen, {"reminders", "renewals"})
+        self.assertEqual(
+            [name for name in os.listdir(os.path.join(self.root, "_gen")) if name.startswith("pull-")],
+            [],
+        )
+
     def test_campaign_renamed_locally_and_remotely_is_a_conflict_in_the_new_folder(self):
         self._rename_campaign("Renewals", "renewals")
 
@@ -9727,6 +9754,41 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.project.revert_changes([trigger_file])
 
         self.assertEqual(self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE)
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def _pull_a_conflict_into_the_campaign_file(self) -> str:
+        data = self._yaml()
+        self._node(data, "Trigger")["ingestInterval"] = "hourly"
+        data["nodes"].append(
+            {"name": "Spare", "type": "end", "exitReason": "spare", "writebackEnabled": False}
+        )
+        self._write_yaml(data)
+        projection = _campaign_projection()
+        self._entity(projection)["nodes"]["entities"]["trigger-1"]["data"]["ingestInterval"] = (
+            "weekly"
+        )
+        conflicts, _ = self.project.pull_project(projection_json=projection)
+        campaign_file = os.path.join(self.folder, "campaign.yaml")
+        self.assertEqual(conflicts, [campaign_file])
+        self.assertEqual(self.project.project_status()[0], [campaign_file])
+        return campaign_file
+
+    def test_revert_of_a_campaign_file_restores_it_whole(self):
+        campaign_file = self._pull_a_conflict_into_the_campaign_file()
+
+        reverted = self.project.revert_changes([campaign_file])
+
+        self.assertEqual(reverted, [campaign_file])
+        self.assertNotIn("Spare", self._read("reminders", "campaign.yaml"))
+        self.assertEqual(self._node(self._yaml(), "Trigger")["ingestInterval"], "weekly")
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_revert_of_everything_restores_a_conflicted_campaign_file(self):
+        self._pull_a_conflict_into_the_campaign_file()
+
+        self.project.revert_changes()
+
+        self.assertNotIn("Spare", self._read("reminders", "campaign.yaml"))
         self.assertEqual(self.project.project_status(), ([], [], [], []))
 
     def test_stray_function_file_shows_as_new_and_fails_validation(self):
@@ -9913,8 +9975,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertIn("    9", code)
         self.assertIn("return {}", code)
 
-    def test_renamed_node_taking_a_removed_edited_node_file_keeps_the_edit(self):
-        """The edit merges against the removed node's saved code, so it is never dropped."""
+    def test_renamed_node_taking_a_removed_edited_node_file_conflicts(self):
         self._pull_with_call_code()
         self._write_function("first_call", self.CALL_CODE + "    # local\n")
         projection = self._projection_from_state({"trigger-1": "First call"})
@@ -9925,7 +9986,30 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         conflicts, _ = self.project.pull_project(projection_json=projection)
 
+        first_call = os.path.join(self.folder, "functions", "first_call.py")
+        self.assertIn(first_call, conflicts)
         code = self._read("reminders", "functions", "first_call.py")
+        self.assertTrue(resource_utils.contains_merge_conflict(code))
+        self.assertIn("# local", code)
+        self.assertIn("map_contacts", code)
+
+    def test_renamed_node_taking_a_locally_removed_edited_node_file_conflicts(self):
+        self._pull_with_call_code()
+        data = self._yaml()
+        data["nodes"].remove(self._node(data, "First call"))
+        self._write_yaml(data)
+        self._write_function("first_call", self.CALL_CODE + "    # local\n")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._projection_from_state(
+                {"trigger-1": "First call", "call-1": "Dial"}
+            )
+        )
+
+        first_call = os.path.join(self.folder, "functions", "first_call.py")
+        self.assertIn(first_call, conflicts)
+        code = self._read("reminders", "functions", "first_call.py")
+        self.assertTrue(resource_utils.contains_merge_conflict(code))
         self.assertIn("# local", code)
         self.assertIn("map_contacts", code)
 

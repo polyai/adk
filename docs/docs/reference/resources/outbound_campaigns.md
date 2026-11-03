@@ -27,6 +27,8 @@ Optional. The folder name is the campaign's name, lowercased, with punctuation r
 
 To rename a campaign, change `name` and rename the folder to match. The campaign keeps its identity, contacts and history only when its nodes keep their names and types, though the trigger may be renamed too. Otherwise the push deletes the campaign and creates a new one, so rename the folder in a push of its own.
 
+`poly revert outbound_campaigns/{campaign_name}/campaign.yaml` puts the whole file back as it was last pulled or pushed, including one a pull left with conflict markers.
+
 ## What a campaign contains
 
 ### Fields
@@ -147,7 +149,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 - On a node that is new, changed type or had its routes changed, every route names a node in the campaign. Agent Studio keeps a route to a deleted node until you change it.
 - Function names are valid Python names, and `code` is not in the YAML.
 - On a node that is new, changed type, or had its code, function name or parameters changed, the function's `def` line is whole on one line and takes exactly the node's parameters.
-- Every file in `functions/` belongs to a node with a function. A pull keeps the file of a node removed in Agent Studio if you had edited it: delete the file, or add the node back, before you push.
+- Every file in `functions/` belongs to a node with a function. A pull keeps the file of a node removed in Agent Studio if you had edited it: delete the file, or add the node back, before you push. If another node takes that file's name in the same pull, the file is left in conflict between your edit and that node's code.
 
 ## Best practices
 
