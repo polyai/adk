@@ -10104,6 +10104,18 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             local.kept["CMPGN-TWO:trigger-1"], os.path.join(renewals, "functions", "trigger.py")
         )
 
+    def test_one_invalid_campaign_file_leaves_the_others_followed(self):
+        self._pull_two_campaigns("Reminders", "Renewals")
+        renewals = os.path.join(self.root, "outbound_campaigns", "renewals")
+        with open(os.path.join(renewals, "campaign.yaml"), "w", encoding="utf-8") as file:
+            file.write("name: [unclosed\n")
+
+        local = self.project._scan_local_campaign_code()
+
+        self.assertEqual(
+            local.kept["CMPGN-TWO:trigger-1"], os.path.join(renewals, "functions", "trigger.py")
+        )
+
     def test_remote_node_rename_carries_a_local_code_edit_to_the_new_file(self):
         edited = self.TRIGGER_CODE + "\n\ndef helper():\n    pass\n"
         self._write_function("trigger", edited)

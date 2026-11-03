@@ -1189,7 +1189,7 @@ class AgentStudioProject:
                 continue
             try:
                 top = OutboundCampaignNode._get_top_level_data(campaign_file)
-            except (resource_utils.MergeConflictError, YAMLError):
+            except (ValueError, YAMLError):
                 for node_id, node in self.resources.get(OutboundCampaignNode, {}).items():
                     if node.campaign_folder == folder:
                         local.kept[node_id] = os.path.join(self.root_path, node.function_file)
