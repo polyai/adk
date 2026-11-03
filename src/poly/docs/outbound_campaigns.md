@@ -16,6 +16,8 @@ outbound_campaigns/
 
 The folder name is the campaign's name, lowercased with punctuation replaced by `_`. A second campaign with the same name gets the end of its id added, as in `reminders-a1b2c3d4`. Renaming a campaign means changing `name` and renaming the folder to match. The campaign keeps its identity only when its nodes keep their names and types (the trigger may be renamed too); otherwise the push replaces it with a new campaign, so rename the folder in a push of its own.
 
+`poly revert outbound_campaigns/{campaign_name}/campaign.yaml` puts the whole file back as it was last pulled or pushed, including one a pull left with conflict markers.
+
 ## campaign.yaml
 
 - **name**: Required, under 256 characters.
@@ -57,7 +59,7 @@ Every node except `wait` has a **function** with a `name` (a Python name) and a 
 - `writeback` with `target: csv`: `outbound_contacts`, `outbound_campaign`
 - any other node: `outbound_contact`, `outbound_campaign`
 
-Every file in `functions/` must belong to a node with a function. A pull keeps the file of a node removed in Agent Studio if you had edited it: delete the file, or add the node back, before you push.
+Every file in `functions/` must belong to a node with a function. A pull keeps the file of a node removed in Agent Studio if you had edited it: delete the file, or add the node back, before you push. If another node takes that file's name in the same pull, the file is left in conflict between your edit and that node's code.
 
 ## Example
 
