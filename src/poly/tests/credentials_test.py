@@ -5,6 +5,8 @@ Copyright PolyAI Limited
 
 import json
 import os
+import stat
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -233,7 +235,12 @@ class AccountKeyCredentialTest(_CredentialsTestCase):
             stored["account_keys"]["studio"],
             {"key": "sk-acct", "account_id": "acc-1", "name": "setup-key"},
         )
-        self.assertEqual(os.stat(self.credentials_path).st_mode & 0o777, 0o600)
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX file modes only")
+    def test_save_keeps_the_file_private(self):
+        save_account_key_credential("studio", "sk-acct", "acc-1", "setup-key")
+
+        self.assertEqual(stat.S_IMODE(os.stat(self.credentials_path).st_mode), 0o600)
 
     def test_save_replaces_the_region_entry_and_leaves_other_regions(self):
         save_account_key_credential("studio", "sk-old", "acc-1", "setup-key")
