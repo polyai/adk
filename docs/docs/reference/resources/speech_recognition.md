@@ -62,7 +62,9 @@ voice/speech_recognition/asr_settings.yaml
 
 They hold the voice channel's turn-taking settings, and apply to the whole voice channel. Individual flow steps can override barge-in, ASR provider, VAD, and LLM settings for a single turn — see [ASR override](./flows.md#asr-override) and [barge-in](./flows.md#barge-in) in the flows reference.
 
-Every section is optional. A section that is left out uses the platform default, and removing a section resets it on the next push.
+`speech_end_delay_ms` is optional: left out, it uses the platform default, and removing it resets it on the next push.
+
+`barge_in` is always in the file, and can't be removed: set `enabled: false` to turn barge-in off. Older projects that set barge-in with Agent Studio's earlier ASR setting pull `enabled` from that setting, and the first change you push to `barge_in` stores the whole section.
 
 ### Fields
 
@@ -181,6 +183,7 @@ corrections:
 ## Validation
 
 - `speech_end_delay_ms` must be a whole number between 200 and 1500.
+- `barge_in` can't be removed; set `enabled: false` instead.
 - `barge_in.max_per_call` can't be negative.
 - Keys inside a section must be ones listed above, so a misspelt key is an error rather than being ignored.
 - Each keyphrase must be non-empty, with a `level` of `default`, `boosted`, or `maximum`.
@@ -196,7 +199,7 @@ corrections:
 - use transcript corrections for common, repeated recognition errors
 - avoid overly broad regex rules that may alter normal input unexpectedly
 - change `speech_end_delay_ms` in small steps: lower values respond faster but cut off callers who pause mid-sentence
-- leave a section out unless you need a value other than the platform default
+- leave `speech_end_delay_ms` out unless you need a value other than the platform default
 
 !!! tip "Use the lightest possible intervention"
 

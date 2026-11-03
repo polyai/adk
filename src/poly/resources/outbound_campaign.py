@@ -18,7 +18,6 @@ from poly.resources.resource import (
     ResourceMapping,
     SubResource,
     _parse_multi_resource_path,
-    _strip_strings,
     register_resource,
 )
 from poly.resources.variant_attributes import Variant
@@ -592,7 +591,7 @@ class OutboundCampaign(MultiResourceYamlResource):
         known_identity: Optional[tuple] = None,
         **kwargs,
     ) -> "OutboundCampaign":
-        yaml_dict = _strip_strings(_plain(yaml_dict or {}))
+        yaml_dict = utils.strip_strings(_plain(yaml_dict or {}))
         campaign = cls(
             resource_id=resource_id,
             name=yaml_dict.get("name") or "",
@@ -687,9 +686,9 @@ class OutboundCampaign(MultiResourceYamlResource):
         return {
             campaign["id"]: cls(
                 resource_id=campaign["id"],
-                name=_strip_strings(campaign.get("name") or ""),
-                description=_strip_strings(campaign.get("description")),
-                settings=_strip_strings(normalise_settings(campaign.get("settings"))),
+                name=utils.strip_strings(campaign.get("name") or ""),
+                description=utils.strip_strings(campaign.get("description")),
+                settings=utils.strip_strings(normalise_settings(campaign.get("settings"))),
                 folder_name=folders[campaign["id"]],
             )
             for campaign in campaigns
@@ -1275,7 +1274,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         if self.platform_label is None or not other_resource:
             return super().get_diff(other_resource)
         saved = utils.dump_yaml(
-            _strip_strings({**self.to_yaml_dict(), "name": self.platform_label})
+            utils.strip_strings({**self.to_yaml_dict(), "name": self.platform_label})
         )
         return utils.get_diff(saved, other_resource.raw)
 
@@ -1283,7 +1282,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         node = self.to_yaml_dict()
         if self.platform_label is not None:
             node["name"] = self.platform_label
-        return utils.compute_hash_from_dict({"node": _strip_strings(node), "code": self.code})
+        return utils.compute_hash_from_dict({"node": utils.strip_strings(node), "code": self.code})
 
     @classmethod
     def from_yaml_dict(
@@ -1298,7 +1297,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         known_code: Optional[str] = None,
         **kwargs,
     ) -> "OutboundCampaignNode":
-        yaml_dict = _strip_strings(_plain(yaml_dict or {}))
+        yaml_dict = utils.strip_strings(_plain(yaml_dict or {}))
         node_name = yaml_dict.pop("name", None) or name
         node = cls(
             resource_id=resource_id,
@@ -1328,7 +1327,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
                     resource_id=f"{campaign['id']}:{platform_node['id']}",
                     name=name,
                     campaign_folder=folders[campaign["id"]],
-                    data=_strip_strings(normalise_node_data(data, from_platform=True)),
+                    data=utils.strip_strings(normalise_node_data(data, from_platform=True)),
                     position=_normalise_position(platform_node.get("position")),
                     code=(data.get("function") or {}).get("code") or "",
                     platform_label=None if label == name else label,

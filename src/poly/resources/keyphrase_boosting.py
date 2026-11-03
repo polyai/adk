@@ -124,6 +124,11 @@ class KeyphraseBoosting(MultiResourceYamlResource):
                     " / ".join(repr(s) for s in sorted(spellings)),
                 )
 
+    @classmethod
+    def _entry_key(cls, entry: dict) -> str:
+        """Return the clean name of a keyphrase entry, reading resolved scalars as text."""
+        return utils.clean_name(_as_text(entry.get(cls.resource_key)), lowercase=False)
+
     @property
     def file_path(self) -> str:
         path_safe_name = utils.clean_name(self.name, lowercase=False)

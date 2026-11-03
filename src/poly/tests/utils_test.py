@@ -12,10 +12,13 @@ import platform
 import re
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from importlib.metadata import requires
 from pathlib import Path
+from typing import Callable
+from unittest.mock import patch
 
 from packaging.requirements import Requirement
 from ruamel.yaml import YAML
@@ -32,6 +35,7 @@ from poly.resources import (
     ResourceMapping,
     SMSTemplate,
     Variable,
+    Variant,
     VariantAttribute,
 )
 from poly.resources.flows import (
@@ -1321,6 +1325,170 @@ class ReplaceResourceNamesWithIdsInDataTests(unittest.TestCase):
         self.assertEqual(result["prompt"], "Call {{ft:Flow Function}} and {{fn:function-1}}.")
 
 
+class MemoForMappingsTests(unittest.TestCase):
+    """Tests for memo_for_mappings and the tables built through it."""
+
+    @staticmethod
+    def _variant(resource_id: str, name: str) -> ResourceMapping:
+        return ResourceMapping(
+            resource_id=resource_id,
+            resource_type=Variant,
+            resource_name=name,
+            file_path=None,
+            flow_name=None,
+            resource_prefix=None,
+        )
+
+    def _counting_build(self) -> tuple[list[int], Callable[[], dict]]:
+        calls: list[int] = []
+
+        def build() -> dict:
+            calls.append(1)
+            return {"built": len(calls)}
+
+        return calls, build
+
+    def test_same_list_reuses_the_built_table(self):
+        """A second call with the same list returns the first table without rebuilding."""
+        mappings = [self._variant("v1", "one")]
+        calls, build = self._counting_build()
+
+        first = resource_utils.memo_for_mappings(mappings, "key", build)
+        second = resource_utils.memo_for_mappings(mappings, "key", build)
+
+        self.assertIs(first, second)
+        self.assertEqual(len(calls), 1)
+
+    def test_tables_are_kept_per_key(self):
+        """Different keys on the same list build and keep separate tables."""
+        mappings = [self._variant("v1", "one")]
+        calls, build = self._counting_build()
+
+        a = resource_utils.memo_for_mappings(mappings, "a", build)
+        b = resource_utils.memo_for_mappings(mappings, "b", build)
+
+        self.assertIsNot(a, b)
+        self.assertIs(resource_utils.memo_for_mappings(mappings, "a", build), a)
+        self.assertEqual(len(calls), 2)
+
+    def test_extending_the_list_invalidates(self):
+        """Appending to the list rebuilds the table on the next call."""
+        mappings = [self._variant("v1", "one")]
+        calls, build = self._counting_build()
+
+        first = resource_utils.memo_for_mappings(mappings, "key", build)
+        mappings.append(self._variant("v2", "two"))
+        second = resource_utils.memo_for_mappings(mappings, "key", build)
+
+        self.assertIsNot(first, second)
+        self.assertEqual(len(calls), 2)
+
+    def test_a_different_list_of_the_same_length_rebuilds(self):
+        """Only the same list object reuses a table, whatever its length."""
+        calls, build = self._counting_build()
+
+        resource_utils.memo_for_mappings([self._variant("v1", "one")], "key", build)
+        resource_utils.memo_for_mappings([self._variant("v2", "two")], "key", build)
+
+        self.assertEqual(len(calls), 2)
+
+    def test_empty_mappings_are_never_cached(self):
+        """An empty or missing list builds on every call."""
+        for mappings in ([], None):
+            with self.subTest(mappings=mappings):
+                calls, build = self._counting_build()
+                resource_utils.memo_for_mappings(mappings, "key", build)
+                resource_utils.memo_for_mappings(mappings, "key", build)
+                self.assertEqual(len(calls), 2)
+
+    def test_each_thread_keeps_its_own_table(self):
+        """A table built on another thread doesn't evict this thread's cached table."""
+        mappings = [self._variant("v1", "one")]
+        calls, build = self._counting_build()
+        mine = resource_utils.memo_for_mappings(mappings, "key", build)
+
+        thread = threading.Thread(
+            target=resource_utils.memo_for_mappings,
+            args=([self._variant("v2", "two")], "key", build),
+        )
+        thread.start()
+        thread.join()
+
+        self.assertIs(resource_utils.memo_for_mappings(mappings, "key", build), mine)
+        self.assertEqual(len(calls), 2)
+
+    def test_reference_swaps_match_the_unmemoised_lookup(self):
+        """Cached reference lookups give the same swaps for every flow scope and direction."""
+        mappings = list(ResourceMappingTests.TEST_RESOURCE_MAPPINGS)
+        prompt = (
+            "{{fn:Function 1}} {{fn:function-1}} {{ft:Flow Function}} "
+            "{{ft:flow-function-1}} {{ft:flow-function-2}} {{attr:customer_name}} "
+            "{{attr:attr-customer_name}} {{fn:unknown}}"
+        )
+        cases = [(flow, direction) for flow in (None, "flow_1", "flow_2") for direction in (True, False)]
+        expected = {
+            (flow, direction): resource_utils.build_reference_swapper(
+                list(mappings), flow, names_to_ids=direction
+            )(prompt)
+            for flow, direction in cases
+        }
+
+        real_build = resource_utils._build_reference_lookup
+        with patch.object(
+            resource_utils, "_build_reference_lookup", side_effect=real_build
+        ) as build:
+            for _ in range(2):
+                for flow, direction in cases:
+                    with self.subTest(flow=flow, names_to_ids=direction):
+                        swapped = resource_utils.build_reference_swapper(
+                            mappings, flow, names_to_ids=direction
+                        )(prompt)
+                        self.assertEqual(swapped, expected[(flow, direction)])
+
+        self.assertEqual(build.call_count, len(cases))
+        self.assertNotEqual(expected[("flow_1", True)], expected[("flow_2", True)])
+
+    def test_variant_name_clash_is_found_after_the_list_grows(self):
+        """Variant.validate sees a clashing variant appended after an earlier check."""
+        mappings = [self._variant("v1", "north"), self._variant("v2", "south")]
+        variant = Variant(resource_id="v1", name="north")
+
+        variant.validate(resource_mappings=mappings)
+        mappings.append(self._variant("v3", "north"))
+
+        with self.assertRaises(ValueError) as cm:
+            variant.validate(resource_mappings=mappings)
+        self.assertIn("Variant north already exists", str(cm.exception))
+
+    def test_variant_attribute_pretty_round_trip_uses_current_variants(self):
+        """to/from pretty dict map every variant, including one appended between calls."""
+        mappings = [self._variant("v1", "north")]
+        VariantAttribute.to_pretty_dict({"values": {"v1": "a"}}, resource_mappings=mappings)
+        mappings.append(self._variant("v2", "south"))
+
+        pretty = VariantAttribute.to_pretty_dict(
+            {"name": "colour", "values": {"v1": "a", "v2": "b"}}, resource_mappings=mappings
+        )
+        self.assertEqual(pretty["values"], {"north": "a", "south": "b"})
+        self.assertEqual(
+            VariantAttribute.from_pretty_dict(pretty, resource_mappings=mappings)["values"],
+            {"v1": "a", "v2": "b"},
+        )
+
+    def test_variant_attribute_validate_reports_missing_variants_by_name(self):
+        """VariantAttribute.validate checks against every variant in the current list."""
+        mappings = [self._variant("v1", "north")]
+        attribute = VariantAttribute(
+            resource_id="attr-1", name="colour", mappings={"v1": "red"}
+        )
+        attribute.validate(resource_mappings=mappings)
+        mappings.append(self._variant("v2", "south"))
+
+        with self.assertRaises(ValueError) as cm:
+            attribute.validate(resource_mappings=mappings)
+        self.assertIn("Missing variants for variant attribute: ['south']", str(cm.exception))
+
+
 class FlowUtilsTests(unittest.TestCase):
     """Tests for flow-related utilities."""
 
@@ -1590,10 +1758,12 @@ class LoadYamlParserTests(unittest.TestCase):
     def assert_same_load(self, text: str) -> None:
         self.assertEqual(repr(resource_utils.load_yaml(text)), repr(self.pure_loader.load(text)))
 
-    @unittest.skipUnless(_libyaml_expected(), "ruamel.yaml.clib is not installed on this platform")
-    def test_libyaml_parser_is_used(self):
-        self.assertIsNotNone(CParser)
-        self.assertIs(resource_utils._yaml_loader.Parser, CParser)
+    def test_ryaml_is_used(self):
+        self.assertIsNotNone(resource_utils.ryaml)
+
+    def test_falls_back_to_ruamel_without_ryaml(self):
+        with patch.object(resource_utils, "ryaml", None):
+            self.assertEqual(resource_utils.load_yaml("a: 1\nb: [x]\n"), {"a": 1, "b": ["x"]})
 
     def test_clib_marker_covers_running_python(self):
         covered = _clib_requirement().marker.evaluate(
@@ -1617,9 +1787,15 @@ class LoadYamlParserTests(unittest.TestCase):
             with self.subTest(path=str(path.relative_to(TEST_PROJECTS_DIR))):
                 self.assert_same_load(path.read_text(encoding="utf-8"))
 
-    @unittest.skipIf(CParser is None, "libyaml parser not installed")
-    def test_edge_case_scalars_load_identically(self):
-        self.assert_same_load(EDGE_CASE_YAML)
+    def test_edge_case_scalars_load_identically_except_dates_and_digit_strings(self):
+        loaded = resource_utils.load_yaml(EDGE_CASE_YAML)
+        expected = self.pure_loader.load(EDGE_CASE_YAML)
+        # ruamel reads these as dates and numbers; ryaml keeps them as written
+        expected.update(
+            leading_zero="0777", underscored="1_000", date="2026-09-23",
+            timestamp="2026-09-23T10:00:00Z",
+        )
+        self.assertEqual(repr(loaded), repr(expected))
 
     @unittest.skipIf(CParser is None, "libyaml parser not installed")
     def test_crlf_and_byte_order_mark_load_identically(self):
@@ -1627,8 +1803,91 @@ class LoadYamlParserTests(unittest.TestCase):
 
     def test_invalid_yaml_raises_yaml_error(self):
         for loader in (resource_utils.load_yaml, self.pure_loader.load):
-            with self.subTest(loader=loader), self.assertRaises(YAMLError):
+            with self.subTest(loader=loader), self.assertRaises((YAMLError, ValueError)):
                 loader("key: [unclosed")
+
+
+
+class DumpYamlTests(unittest.TestCase):
+    """dump_yaml writes files that every supported reader loads back to the same data."""
+
+    def setUp(self):
+        self.ruamel_loader = YAML(typ="safe")
+
+    def assert_round_trips(self, data):
+        text = resource_utils.dump_yaml(data)
+        self.assertEqual(resource_utils.load_yaml(text), data)
+        self.assertEqual(self.ruamel_loader.load(text), data)
+        return text
+
+    def test_multiline_strings_use_block_style(self):
+        text = self.assert_round_trips({"prompt": "First line\nSecond line"})
+        self.assertEqual(text, "prompt: |-\n  First line\n  Second line\n")
+
+    def test_strings_that_read_as_other_types_are_quoted(self):
+        for value in ("0118", "1_000", "2026-11-02T06:30:00Z", "2026-11-02", "true", "null", "1e3"):
+            with self.subTest(value=value):
+                text = self.assert_round_trips({"value": value})
+                self.assertEqual(text, f"value: '{value}'\n")
+
+    def test_plain_strings_stay_unquoted(self):
+        self.assertEqual(resource_utils.dump_yaml({"name": "Refunds"}), "name: Refunds\n")
+
+    def test_long_strings_are_not_wrapped(self):
+        text = self.assert_round_trips({"description": "word " * 40 + "end"})
+        self.assertEqual(len(text.splitlines()), 1)
+
+    def test_emoji_keep_block_style(self):
+        text = self.assert_round_trips({"content": "Thanks! \U0001f60a\nAnything else?"})
+        self.assertEqual(text, "content: |-\n  Thanks! \U0001f60a\n  Anything else?\n")
+
+    def test_repeated_objects_are_written_in_full(self):
+        shared = {"sandbox": "", "live": "+447700900000"}
+        text = self.assert_round_trips({"a": shared, "b": shared})
+        self.assertNotIn("&", text)
+        self.assertNotIn("*", text)
+
+    def test_none_is_written_as_an_empty_value(self):
+        self.assertEqual(resource_utils.dump_yaml({"value": None}), "value:\n")
+
+    def test_keys_with_anchor_characters_round_trip(self):
+        self.assert_round_trips({"Bull & Anchor": 1, "*starred": 2})
+
+    def test_tabs_inside_lines_keep_block_style(self):
+        text = self.assert_round_trips({"table": "Name:\tJohn\nAge:\t42"})
+        self.assertEqual(text, "table: |-\n  Name:\tJohn\n  Age:\t42\n")
+
+    def test_lines_starting_with_a_tab_are_escaped(self):
+        text = self.assert_round_trips({"code": "def f():\n\treturn 1"})
+        self.assertEqual(text, 'code: "def f():\\n\\treturn 1"\n')
+
+
+class FormatYamlTests(unittest.TestCase):
+    def test_trailing_spaces_are_trimmed_so_block_style_survives(self):
+        source = 'prompt: "Call the agent \\nThen stop.  "\n'
+        self.assertEqual(
+            resource_utils.format_yaml(source, "flow.yaml"), "prompt: |-\n  Call the agent\n  Then stop.\n"
+        )
+
+    def test_invalid_yaml_is_returned_unchanged(self):
+        self.assertEqual(resource_utils.format_yaml("key: [unclosed", "x.yaml"), "key: [unclosed")
+
+
+class StripStringsTests(unittest.TestCase):
+    def test_strips_the_ends_of_single_line_strings(self):
+        self.assertEqual(resource_utils.strip_strings({"a": "  text  "}), {"a": "text"})
+
+    def test_strips_trailing_whitespace_from_each_line(self):
+        self.assertEqual(
+            resource_utils.strip_strings({"a": ["First line  \n\t\nSecond line \n"]}),
+            {"a": ["First line\n\nSecond line"]},
+        )
+
+    def test_keeps_leading_indentation_of_inner_lines(self):
+        self.assertEqual(resource_utils.strip_strings("Steps:\n  - one\n  - two"), "Steps:\n  - one\n  - two")
+
+    def test_removes_zero_width_no_break_spaces(self):
+        self.assertEqual(resource_utils.strip_strings("Hello\ufeff\nWorld"), "Hello\nWorld")
 
 
 if __name__ == "__main__":

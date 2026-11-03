@@ -1,6 +1,336 @@
 # CHANGELOG
 
 
+## v0.77.0 (2026-10-29)
+
+### Features
+
+- Load YAML with ryaml and dump with PyYAML ([#395](https://github.com/polyai/adk/pull/395),
+  [`213018f`](https://github.com/polyai/adk/commit/213018f171ee19e525e1d114ce571b0c0d0d8933))
+
+## Summary
+
+YAML is now loaded with `ryaml`, a Rust parser, and dumped with PyYAML instead of ruamel.yaml. On
+  large projects this makes pulls about 60% faster, diffs about 70% faster and push dry runs about
+  20% faster. The file format changes in two visible ways: long strings are no longer wrapped at 100
+  characters, and trailing spaces at the end of lines inside multiline strings are removed.
+
+## Motivation
+
+YAML handling was the biggest cost in pull and diff. ruamel.yaml builds every loaded and dumped
+  value in pure Python, and dumping alone was about half of a fresh pull. Timings on five real
+  projects (310 to 1,779 files), best of 3:
+
+| Operation | Before | After | Change | | --- | --- | --- | --- | | Pull (fresh, into an empty
+  directory) | 4.23 s | 1.72 s | −59% | | Push (dry run, one topic edited) | 2.86 s | 2.20 s | −23%
+  | | Diff (two projections) | 6.09 s | 1.72 s | −72% |
+
+## Changes
+
+- `load_yaml` uses `ryaml`. On platforms without a `ryaml` wheel, it falls back to ruamel.yaml's
+  safe loader. - `ryaml` keeps a few unquoted forms as strings where ruamel.yaml converted them:
+  dates and timestamps (`2026-09-23`), leading-zero numbers (`0777`) and numbers with underscores
+  (`1_000`). Test case clock fields already accept a string or a datetime, so they behave the same.
+  - `dump_yaml` uses PyYAML. It keeps `|` block style for multiline strings and quotes any string
+  that ruamel.yaml would read as another type, so older versions read new files the same way. It
+  never writes anchors and doesn't wrap long lines. Data containing emoji goes through PyYAML's
+  pure-Python emitter, because libyaml's emitter escapes characters beyond U+FFFF. -
+  `_strip_strings` also trims trailing whitespace from each line of a multiline string and removes
+  U+FEFF. A line ending in a space, or a U+FEFF, would force the string into an escaped
+  double-quoted form. Multi-resource files now go through `_strip_strings` when saved, as
+  single-resource files already did. Local and remote hashes are computed from the stripped data, so
+  this pushes nothing on its own. - New runtime dependencies: `pyyaml` and `ryaml`, the latter
+  limited to the platforms its wheels cover. `ryaml` has no musllinux wheels and needs glibc 2.28 or
+  later, so installing on Alpine needs a Rust toolchain to build it. - `licenses.json`, the `poly
+  format` reference page and the resources contributor guide are updated.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+- New tests cover dump output (block style, quoting, no wrapping, emoji, no anchors, empty values,
+  keys with `&` and `*`) and the per-line trimming. They check that every file loads back to the
+  same data with both `ryaml` and ruamel.yaml. - Every YAML file in 13,795 files across 80 real
+  projects loads to identical data with `ryaml` and ruamel.yaml, apart from the forms listed above,
+  none of which appear in those files. - Every YAML file in 68,607 files across 425 real projects
+  was loaded and dumped with main and with this branch, run through prettier, and compared with the
+  committed copy. Apart from trimmed whitespace, no file loads back to different data. The format
+  changes are: - 42% of files are unchanged. - 48.5% only have long strings moved onto one line. -
+  7.5% only lose trailing spaces. - About 1.5% use different quoting (for example `yes` becomes
+  `"yes"`). - 4 files keep an escaped multiline string, because it contains a tab.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+A long string, before and after:
+
+```yaml # before description: Account holder status was set to valid for the remainder of the call
+  based on an FAQ asked # after description: Account holder status was set to valid for the
+  remainder of the call based on an FAQ asked ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.76.0 (2026-10-29)
+
+### Features
+
+- Pull barge-in from the legacy setting and refuse removing it
+  ([#394](https://github.com/polyai/adk/pull/394),
+  [`a9043fb`](https://github.com/polyai/adk/commit/a9043fb6dcab83feb04018cb32df0a443dcc5706))
+
+## Summary
+
+`poly pull` now writes `barge_in` from Agent Studio's earlier ASR barge-in setting when the project
+  has no voice-channel barge-in config. Removing `barge_in` from `asr_settings.yaml` now fails the
+  push.
+
+## Motivation
+
+Agent Studio stores barge-in in two places: the earlier ASR setting (on or off) and the newer
+  voice-channel barge-in config. At runtime, the earlier setting is the base. The newer config
+  overrides it only when it exists, and only for the fields it sets.
+
+[#359](https://github.com/polyai/adk/pull/359) pulled only the newer config. So a project still on
+  the earlier setting pulled `asr_settings.yaml` as `{}`, even when barge-in was on. That led to two
+  problems:
+
+- **Pull showed nothing.** Nothing in the project showed that barge-in was on. Adding a `barge_in`
+  section to "match" could silently switch it off. - **Removing the section handed barge-in to the
+  earlier setting.** Removing `barge_in` sent a reset, which hands barge-in back to the earlier
+  setting. On a new project that setting is off, so barge-in stopped while Agent Studio's Model
+  Configuration page still showed it on.
+
+## Changes
+
+- **Pull:** - With a barge-in config, `barge_in` is pulled from it, as before. - Without one,
+  `barge_in` is pulled as `enabled: <earlier setting>, allow_on_first_turn: false`. The runtime
+  treats the unset fields the same way (off, no limit per call). - `barge_in` is therefore always in
+  the file when the project has a voice channel. - **Push:** - Pushing an unchanged pulled section
+  sends nothing. - The first change to `barge_in` stores the whole section as the voice-channel
+  config. Barge-in keeps working as before: the runtime only applies fields that are set, so storing
+  `{enabled: <earlier setting>}` changes nothing on calls. - Removing `barge_in` fails the push with
+  "Set 'enabled: false' to turn barge-in off", in the same way as `background_ambience`. - Clearing
+  `max_per_call` still sends a reset followed by an update. - **Not changed:** `speech_end_delay_ms`
+  stays optional, and removing it still resets it. - **Docs:** the speech recognition reference and
+  the `poly docs` page describe `barge_in` as always present and not removable, and list it under
+  validation.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+- **Unit tests:** - pulling the earlier setting, including when nothing is stored; - a pulled
+  section reading back with no commands; - the first edit sending an update; - removing `barge_in`
+  failing at the resource and project level; - removing `speech_end_delay_ms` still resetting; - a
+  `max_per_call` clear still building its reset. - **Against a live project, on a new branch with no
+  barge-in config and barge-in off in the earlier setting:** 1. Pulled `barge_in: {enabled: false,
+  allow_on_first_turn: false}`, and `poly status` showed no changes. 2. Removed `barge_in`: the push
+  failed with exit code 1, and a pull showed the platform unchanged. 3. Set `enabled: true` and
+  `speech_end_delay_ms: 700`, then pushed and pulled: the file was identical and status was clean.
+
+4. Removed only `speech_end_delay_ms`: it was reset, the pull was identical and status was clean.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`: no skill mentions `barge_in`
+
+## Screenshots / Logs
+
+A project still on the earlier setting, with barge-in on, pulls `asr_settings.yaml` as:
+
+```yaml barge_in: enabled: true
+
+allow_on_first_turn: false ```
+
+Removing the section:
+
+``` Error: barge_in can't be removed from voice/speech_recognition/asr_settings.yaml. Set 'enabled:
+  false' to turn barge-in off. ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+## v0.75.3 (2026-10-29)
+
+### Performance Improvements
+
+- Index multi-resource lookups and reuse mapping tables
+  ([#329](https://github.com/polyai/adk/pull/329),
+  [`d3dcb0e`](https://github.com/polyai/adk/commit/d3dcb0e49f1e1419c0f00be9336c955e10edfe33))
+
+## Summary
+
+Removes two sources of repeated full-list work on large projects: finding an entry in a
+  multi-resource YAML file by name, and rebuilding lookup tables from resource mappings for every
+  resource read.
+
+## Motivation
+
+On a large production project (about 1,238 variants with 21 attributes each, plus 3,317
+  pronunciation rules), `pull`, `status` and `push` spend a lot of time on work that grows
+  quadratically with project size:
+
+- Every lookup by name in a multi-resource file (`_find_matching`) scanned the whole list and called
+  `clean_name` on every entry. Each command does one lookup per resource, so the cost is O(N²). -
+  Every pronunciation read copied the whole rule list and scanned it to find the entry at a known
+  index. - Every resource read rebuilt its reference-lookup dict, and every variant attribute
+  rebuilt its variant id/name map, from the full mappings list (thousands of entries). The mappings
+  list is the same for the whole command.
+
+## Changes
+
+- `MultiResourceYamlResource` keeps an index per `(top_level_name, resource_key)` holding the list
+  it was built from, each entry's clean name, and the position of the first entry for each clean
+  name. The index is only used while it refers to the same list object at the same length, so when
+  `_file_cache` reloads or clears a file (which creates new lists) the index is rebuilt. `save` and
+  `delete_resource` keep the index up to date, and first-match semantics are unchanged when two
+  entries share a clean name. - New `_entry_key` classmethod for the clean name an entry is matched
+  by. `KeyphraseBoosting` overrides it to read resolved YAML scalars as text, as its discovery
+  already does. A hand-typed `keyphrase: 2024` or `keyphrase: true` can now be looked up. Before
+  this change, `clean_name` raised `TypeError` on that entry, so every lookup that reached it
+  failed. - `Pronunciation.read_from_file` and `read_local_resource` read the rule directly at the
+  path's index, with a bounds check. A missing index still raises `FileNotFoundError`. - New
+  `resource_utils.memo_for_mappings(mappings, key, build)`: a single-slot cache of tables derived
+  from one mappings list. A cached table is reused while calls pass the same list object at the same
+  length. An empty or missing list always calls `build()`. It is used by the reference replacer and
+  by the variant name table in `Variant.validate`, which are both built once per resource.
+  `VariantAttribute` builds its variant id/name tables directly, since it does so about once per
+  attribute. - `sync_ids_with_parent` builds its combined mappings list once, before the loop,
+  instead of on every iteration.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New tests read and write real files in a temp directory:
+
+- Index: duplicate clean names (first match wins for read, save and delete); delete then append; a
+  save that changes an entry's name; numeric and boolean keyphrases; reload after the file changes
+  on disk; variants and attributes interleaved in `variant_attributes.yaml`. - Pronunciation reads
+  by index, including out-of-range indexes. - Memo: reuse, separate tables per key, invalidation
+  when the list is extended, a rebuild for a different list of the same length, empty lists that are
+  never cached, and reference swaps equal to the unmemoised builder across flow scopes and both
+  directions. Variant validation and pretty-dict round trips pick up a variant appended after an
+  earlier call.
+
+The benchmark writes identical file digests on `main` and on this branch after every phase.
+
+On copies of real projects, against `main` at 0.74.0, a dry-run push with one topic edited (best of
+  5) went from 0.449 s to 0.330 s (−27%) on a project with about 1,300 resources, mostly variants,
+  and by 6–15% on three other large projects. Smaller projects without many multi-resource entries
+  are unchanged. The queued resources were identical to main's on six real projects for no edit, one
+  topic edited, one multi-resource entry edited and one topic deleted.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`scripts/bench_large_project.py` at its default scale (1,238 variants × 21 attributes, 3,317
+  pronunciations), on `main` at 0.74.0 against this branch, both with the libyaml parser. Best of
+  three interleaved runs:
+
+| Phase | `main` | This PR | |---|---|---| | init | 1.20 s | 1.16 s | | force-pull | 2.29 s | 1.74 s
+  | | pull | 2.37 s | 1.74 s | | status | 1.15 s | 0.57 s | | push | 1.07 s | 0.38 s | | total |
+  8.17 s | 5.78 s |
+
+The per-phase file digests are identical on both.
+
+At 6,638 pronunciation rules, reading every rule with `Pronunciation.read_local_resource` takes 0.94
+  s on `main` and 0.19 s on this branch.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- Resolve dataclass field types once per class when checking YAML types
+  ([#391](https://github.com/polyai/adk/pull/391),
+  [`e2946d8`](https://github.com/polyai/adk/commit/e2946d8cfa9f7a2e453019f8df927d25e58f936a))
+
+## Summary
+
+`check_yaml_field_types` now works out each dataclass's field types once per class instead of on
+  every call, so reading resources spends less time resolving type hints. The checks and their
+  errors are unchanged.
+
+**Stacked on #329. Merge #329 first, then retarget this PR to `main`.**
+
+## Motivation
+
+Every resource read calls `check_yaml_field_types`, and every call ran `typing.get_type_hints` on
+  the resource's class and unwrapped each field's `Optional`, list and dict arguments. All of that
+  depends only on the class, so a push on a large project repeated it thousands of times for the
+  same few classes.
+
+## Changes
+
+- New `_field_type_hints(cls)`, cached per class, returns each field's name, unwrapped type hint,
+  and list and dict type arguments. - `check_yaml_field_types` reads that plan and only checks
+  values, so it raises the same errors for the same inputs.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New test: checking two resources of the same class resolves its type hints once, and a badly typed
+  value is still caught on the second check. It fails without the change. The existing
+  `CheckYamlFieldTypesTest` cases pass unchanged.
+
+On copies of real projects, a dry-run push with one topic edited (best of 5) took 10–19% less time
+  than #329 alone on five large projects, and 8–15% less than `main` when applied without #329.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] PR title follows
+  [conventional commits](https://www.conventionalcommits.org/), and its type matches the change
+  (`feat:` for anything user-visible; see CONTRIBUTING.md) - [x] User-facing changes are reflected
+  in `docs/docs/`, `src/poly/docs/` (resource shapes) and `skills/`
+
+## Screenshots / Logs
+
+`scripts/bench_large_project.py` at its default scale (1,238 variants × 21 attributes, 3,317
+  pronunciations), best of three interleaved runs:
+
+| Phase | #329 | #329 + this PR | |---|---|---| | force-pull | 1.76 s | 1.61 s | | pull | 1.73 s |
+  1.63 s | | status | 0.56 s | 0.34 s | | push | 0.38 s | 0.16 s | | total | 5.52 s | 4.88 s |
+
+The per-phase file digests are identical to `main`'s.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.75.2 (2026-10-28)
 
 ### Bug Fixes
