@@ -112,7 +112,7 @@
   {
     "License": "MIT",
     "Name": "filelock",
-    "URL": "https://github.com/tox-dev/py-filelock"
+    "URL": "https://github.com/tox-dev/filelock"
   },
   {
     "License": "Apache-2.0",
