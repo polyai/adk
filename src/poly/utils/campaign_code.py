@@ -38,6 +38,19 @@ class LocalCampaignCode:
         """The id of the saved node whose local version reads `path`, if any."""
         return next((node_id for node_id, held in self.kept.items() if held == path), None)
 
+    def removed_owner(
+        self, path: str, original: dict[str, OutboundCampaignNode], root: str
+    ) -> Optional[str]:
+        """The id of the saved node removed locally whose saved function file is `path`, if any."""
+        return next(
+            (
+                node_id
+                for node_id, node in original.items()
+                if node_id not in self.kept and os.path.join(root, node.function_file) == path
+            ),
+            None,
+        )
+
 
 def _node_type(node: OutboundCampaignNode) -> Optional[str]:
     return node.data.get("type") if isinstance(node.data, dict) else None

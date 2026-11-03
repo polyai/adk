@@ -29,6 +29,16 @@ def _path(stem: str, folder: str = "reminders") -> str:
     return os.path.join(ROOT, "outbound_campaigns", folder, "functions", f"{stem}.py")
 
 
+class RemovedOwnerTest(unittest.TestCase):
+    def test_only_a_saved_node_missing_locally_owns_its_saved_file(self):
+        saved = _nodes(_node("call-1", "First call", "call"), _node("sms-1", "Text", "sms"))
+        local = LocalCampaignCode(kept={"CMPGN-ONE:sms-1": _path("text")})
+
+        self.assertEqual(local.removed_owner(_path("first_call"), saved, ROOT), "CMPGN-ONE:call-1")
+        self.assertIsNone(local.removed_owner(_path("text"), saved, ROOT))
+        self.assertIsNone(local.removed_owner(_path("stray"), saved, ROOT))
+
+
 class ClaimTest(unittest.TestCase):
     def test_a_kept_node_claims_the_file_it_reads(self):
         nodes = _nodes(_node("call-1", "First call", "call"))

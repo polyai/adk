@@ -1259,7 +1259,8 @@ class AgentStudioProject:
         `claim` finds each node's local file and `plan` the files the result goes to. A file
         there that another local node or no node still holds is merged against, never
         overwritten: against the saved code of a node still live, and against nothing when
-        the node is gone, so an edit to a removed node's code always conflicts.
+        the node is gone, so an edit to a removed node's code always conflicts. An unedited
+        file of a node removed locally is taken over.
 
         Returns:
             The function files left with merge conflicts.
@@ -1279,9 +1280,12 @@ class AgentStudioProject:
             if path in claimants:
                 other = claimants[path]
                 return other == node_id or path not in targets[other]
-            holder = local.holder(path)
-            if path in local.new or holder is None:
+            if path in local.new:
                 return False
+            holder = local.holder(path)
+            if holder is None:
+                removed = local.removed_owner(path, original_nodes, self.root_path)
+                return removed is not None and unedited(local.files[path], original_nodes[removed])
             return holder not in incoming_nodes and unedited(
                 local.files[path], original_nodes.get(holder)
             )
@@ -2250,9 +2254,9 @@ class AgentStudioProject:
     def revert_changes(self, file_paths: list[str] = None) -> list[str]:
         """Revert changes in the project.
 
-        A campaign's `campaign.yaml`, given by its own path or reverted with everything, is
-        rewritten whole from the saved state, so nodes added locally and conflict markers left
-        by a pull go too.
+        A campaign's `campaign.yaml` given by its own path is rewritten whole from the saved
+        state, so nodes added locally go too. Reverting everything rewrites it whole only when
+        it can't be read, such as one left in conflict; otherwise nodes added locally are kept.
 
         Args:
             file_paths (list[str]): List of specific files to revert. If None, revert all changes.
@@ -2270,7 +2274,11 @@ class AgentStudioProject:
             os.path.join(self.root_path, CAMPAIGNS_DIR, campaign.folder, CAMPAIGN_FILE)
             for campaign in self.resources.get(OutboundCampaign, {}).values()
         }
-        whole_files = saved_campaign_files if all_files else saved_campaign_files & set(file_paths)
+        whole_files = (
+            {path for path in saved_campaign_files if not self._campaign_file_readable(path)}
+            if all_files
+            else saved_campaign_files & set(file_paths)
+        )
         MultiResourceYamlResource._file_cache.clear()
         try:
             for campaign_file in whole_files:
@@ -2318,6 +2326,16 @@ class AgentStudioProject:
             MultiResourceYamlResource._file_cache.clear()
 
         return reverted_files
+
+    @staticmethod
+    def _campaign_file_readable(campaign_file: str) -> bool:
+        try:
+            OutboundCampaignNode._get_top_level_data(campaign_file)
+        except FileNotFoundError:
+            return True
+        except (ValueError, YAMLError):
+            return False
+        return True
 
     @staticmethod
     def _campaign_code_path(mapping: ResourceMapping) -> str:
