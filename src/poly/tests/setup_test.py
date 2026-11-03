@@ -15,6 +15,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from poly.cli import AgentStudioCLI
 from poly.cli_commands.auth import (
     LoginCommand,
@@ -452,7 +454,9 @@ class SetupAuthStepTest(unittest.TestCase):
         self._run_setup(region="studio", account_id="acc-flag")
 
         self.m["api"].get_accounts_internal.assert_not_called()
-        self.m["save_account"].assert_called_once_with("studio", "sk-minted", "acc-flag", "setup-key")
+        self.m["save_account"].assert_called_once_with(
+            "studio", "sk-minted", "acc-flag", "setup-key"
+        )
 
     def test_several_accounts_at_a_terminal_use_the_picker(self):
         self.m["api"].get_accounts_internal.return_value = [{"id": "acc-1"}, {"id": "acc-2"}]
@@ -525,6 +529,13 @@ class SetupAuthStepTest(unittest.TestCase):
         self.m["write_env"].assert_called_once()
 
 
+def _unauthorized() -> requests.HTTPError:
+    """The error make_request raises when the gateway answers 401."""
+    response = requests.Response()
+    response.status_code = 401
+    return requests.HTTPError("401 Client Error: Unauthorized", response=response)
+
+
 class SetupVerifyStepTest(unittest.TestCase):
     """Tests for SetupCommand._verify, the one call that proves the account key."""
 
@@ -576,6 +587,51 @@ class SetupVerifyStepTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
         self.assertIn("poly apikey --region studio", mock_error.call_args[0][0])
         self.assertNotIn("sk-minted", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.setup.time.sleep")
+    @patch("poly.output.console.info")
+    @patch("poly.output.console.success")
+    def test_a_key_not_active_yet_is_retried_until_the_gateway_accepts_it(
+        self, mock_success, mock_info, mock_sleep
+    ):
+        """The gateway can take a few seconds to know a freshly minted key."""
+        self.m["api"].get_projects_with_key.side_effect = [
+            _unauthorized(),
+            _unauthorized(),
+            {"proj-1": "Agent One"},
+        ]
+
+        self.assertTrue(self._verify())
+
+        self.assertEqual(self.m["api"].get_projects_with_key.call_count, 3)
+        self.assertEqual(mock_sleep.call_count, 2)
+        notices = [c[0][0] for c in mock_info.call_args_list if "not active yet" in c[0][0]]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("1 agent,", mock_success.call_args[0][0])
+        self.assertEqual(self.step.outcome, "done")
+
+    @patch("poly.cli_commands.setup.time.sleep")
+    @patch("poly.output.console.error")
+    def test_a_key_still_refused_after_the_retry_window_ends_the_run(self, mock_error, mock_sleep):
+        self.m["api"].get_projects_with_key.side_effect = _unauthorized()
+        clock = iter(range(0, 100, 5))  # one tick per monotonic() read, past the window
+        with patch("poly.cli_commands.setup.time.monotonic", side_effect=lambda: next(clock)):
+            with self.assertRaises(SystemExit) as ctx:
+                self._verify()
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertGreater(self.m["api"].get_projects_with_key.call_count, 1)
+        self.assertIn("refused", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.setup.time.sleep")
+    def test_a_non_auth_error_is_not_retried(self, mock_sleep):
+        self.m["api"].get_projects_with_key.side_effect = RuntimeError("connection reset")
+
+        with patch("poly.output.console.error"), self.assertRaises(SystemExit):
+            self._verify()
+
+        self.m["api"].get_projects_with_key.assert_called_once()
+        mock_sleep.assert_not_called()
 
     @patch("poly.output.console.error")
     def test_refused_key_in_a_full_run_writes_nothing_and_records_failed(self, mock_error):

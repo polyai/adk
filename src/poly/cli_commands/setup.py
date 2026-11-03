@@ -55,6 +55,10 @@ logger = logging.getLogger(__name__)
 
 # Value for the X-Poly-Source header on the account-key calls setup makes.
 SETUP_SOURCE = "setup"
+# A freshly minted account key can take a few seconds to become valid at the public
+# gateway, so a 401 right after minting is retried for this long before it counts.
+VERIFY_RETRY_SECONDS = 20
+VERIFY_RETRY_INTERVAL_SECONDS = 2
 ACCOUNT_KEY_ENV_VAR = "POLY_API_KEY"
 
 # Marks lines 'poly setup' added to a shell rc file, so re-runs can detect them.
@@ -65,6 +69,15 @@ _SHELL_RC_FILES = {
     "zsh": "~/.zshrc",
 }
 _FISH_COMPLETION_PATH = "~/.config/fish/completions/poly.fish"
+
+
+def _is_not_yet_valid(exc: Exception) -> bool:
+    """Whether `exc` is the gateway refusing a key that may simply not be active yet."""
+    response = getattr(exc, "response", None)
+    return isinstance(exc, requests.HTTPError) and getattr(response, "status_code", None) in (
+        401,
+        403,
+    )
 
 
 class SetupCommand(BaseCommand):
@@ -393,16 +406,26 @@ class SetupCommand(BaseCommand):
 
         api = AgentStudioInterface()
         started = time.monotonic()
-        try:
-            projects = api.get_projects_with_key(region, api_key, account_id)
-        except Exception as e:
-            error(
-                f"Verify: the account API key was refused by the {region} API ({e})."
-                " Nothing else has been written with it. Wait a moment and re-run"
-                " 'poly setup'; if it keeps failing, run 'poly apikey --region"
-                f" {region}' to mint a new key."
-            )
-            sys.exit(1)
+        deadline = started + VERIFY_RETRY_SECONDS
+        retrying = False
+        while True:
+            try:
+                projects = api.get_projects_with_key(region, api_key, account_id)
+                break
+            except Exception as e:
+                if _is_not_yet_valid(e) and time.monotonic() < deadline:
+                    if not retrying:
+                        info("Verify: the new key is not active yet, retrying for a few seconds.")
+                        retrying = True
+                    time.sleep(VERIFY_RETRY_INTERVAL_SECONDS)
+                    continue
+                error(
+                    f"Verify: the account API key was refused by the {region} API ({e})."
+                    " Nothing else has been written with it. Wait a moment and re-run"
+                    " 'poly setup'; if it keeps failing, run 'poly apikey --region"
+                    f" {region}' to mint a new key."
+                )
+                sys.exit(1)
         elapsed_ms = int((time.monotonic() - started) * 1000)
         success(
             f"Verify: connected to account {account_id}, {len(projects)} agent"
