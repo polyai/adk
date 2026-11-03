@@ -88,6 +88,8 @@ class SetupRun:
         self.started_at = time.monotonic()
         self.steps: dict[str, str] = {}
         self.details: dict[str, str] = {}
+        # Set by the verify step; None until it runs (or when it is skipped).
+        self.verify_ok: bool | None = None
         # One failed send disables the rest of the run so a bad network costs one
         # timeout, not one per event.
         self._enabled = True
@@ -127,14 +129,16 @@ class SetupRun:
         """Time a step and emit ``setup_step`` when the block ends, however it ends.
 
         An exception (including ``SystemExit``) records the step as failed with
-        the exception's class name and is re-raised.
+        the exception's class name and is re-raised, unless the block already
+        called :meth:`StepResult.failed` with the real cause.
         """
         result = StepResult()
         start = time.monotonic()
         try:
             yield result
         except BaseException as exc:
-            result.failed(type(exc).__name__)
+            if result.outcome != OUTCOME_FAILED:
+                result.failed(type(exc).__name__)
             raise
         finally:
             self._record(name, result, time.monotonic() - start)
@@ -158,6 +162,8 @@ class SetupRun:
             "duration_ms": int((time.monotonic() - self.started_at) * 1000),
             "steps_done": [name for name, outcome in self.steps.items() if outcome == OUTCOME_DONE],
         }
+        if self.verify_ok is not None:
+            properties["verify_ok"] = self.verify_ok
         if "project" in self.details:
             properties["project"] = self.details["project"]
         self._send(EVENT_COMPLETED, properties)

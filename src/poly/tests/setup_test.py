@@ -15,6 +15,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from poly.cli import AgentStudioCLI
 from poly.cli_commands.auth import (
     LoginCommand,
@@ -29,12 +31,15 @@ from poly.cli_commands.skills import (
     node_gate_reason,
     update_skills,
 )
+from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS
 from poly.setup.agents import (
     detect_entry,
     detect_installed_agents,
     detect_invoking_agent,
 )
 from poly.setup.telemetry import SetupRun, StepResult, detect_mode
+from poly.utils.apikey_session import CachedSession
+from poly.utils.env_profile import EnvVarConflict, ProfileTarget
 
 
 def _parse_setup_args(argv: list[str]):
@@ -55,6 +60,64 @@ def _silence_telemetry(test: unittest.TestCase) -> MagicMock:
 def _events(capture: MagicMock, name: str) -> list[dict]:
     """The properties of every captured event called ``name``, in order."""
     return [call.args[2] for call in capture.call_args_list if call.args[1] == name]
+
+
+JWT = "jwt-token"
+CACHED_JWT = "jwt-cached"
+STORED_ACCOUNT = {"key": "sk-stored", "account_id": "acc-stored", "name": "setup-key"}
+PROFILE = ProfileTarget(path=Path("/home/u/.zshrc"), shell="zsh")
+
+
+def _cached_session(token: str = CACHED_JWT) -> CachedSession:
+    import time
+
+    now = int(time.time())
+    return CachedSession(token, now + 55 * 60, now - 5 * 60)
+
+
+def _mock_auth(test: unittest.TestCase) -> dict[str, MagicMock]:
+    """Patch every collaborator of the setup auth and environment steps.
+
+    The default state is a machine with no credentials, no kept sign-in, one
+    account and no existing keys, at a terminal. Tests adjust the mocks for the
+    other fixtures: ADK key only, account key only, both.
+    """
+    api = MagicMock()
+    api.get_accounts_internal.return_value = [{"id": "acc-1", "name": "Acme"}]
+    api.list_account_api_keys_internal.return_value = []
+    api.create_account_api_key_internal.return_value = {"key": "sk-minted"}
+    api.get_accounts_with_key.return_value = {"acc-1": "Acme"}
+    api.get_projects_with_key.return_value = {"proj-1": "Agent One", "proj-2": "Agent Two"}
+    prefix = "poly.cli_commands.setup."
+    patchers = {
+        "retrieve_api_key": patch(prefix + "retrieve_api_key", side_effect=ValueError("none")),
+        "stored_regions": patch(prefix + "regions_with_stored_keys", return_value=[]),
+        "load_account": patch(prefix + "load_account_key_credential", return_value=None),
+        "save_account": patch(prefix + "save_account_key_credential"),
+        "session_load": patch(prefix + "apikey_session.load", return_value=None),
+        "session_save": patch(prefix + "apikey_session.save"),
+        "session_clear": patch(prefix + "apikey_session.clear"),
+        "signin": patch(prefix + "_signin", return_value=JWT),
+        "select_region": patch(prefix + "_select_region", return_value="studio"),
+        "save_key": patch(prefix + "_authenticate_and_save_key", return_value={"acc-1": "Acme"}),
+        "authorise": patch(prefix + "authorise_or_explain"),
+        "interface": patch(prefix + "AgentStudioInterface", return_value=api),
+        "any_credentials": patch(prefix + "any_credentials_exist", return_value=False),
+        "detect_profile": patch(prefix + "detect_profile", return_value=PROFILE),
+        "read_env": patch(prefix + "read_env_var", return_value=None),
+        "write_env": patch(
+            prefix + "write_env_var", return_value=(PROFILE, 'export POLY_API_KEY="sk-m****nted"')
+        ),
+        "confirm": patch("questionary.confirm"),
+        "pick_account": patch(prefix + "pick_account", return_value="acc-picked"),
+        "stdin": patch("sys.stdin"),
+    }
+    mocks = {name: p.start() for name, p in patchers.items()}
+    mocks["api"] = api
+    mocks["confirm"].return_value.ask.return_value = True
+    mocks["stdin"].isatty.return_value = True
+    test.addCleanup(patch.stopall)
+    return mocks
 
 
 class NodeGateReasonTest(unittest.TestCase):
@@ -230,69 +293,455 @@ class UpdateSkillsTest(unittest.TestCase):
 
 
 class SetupAuthStepTest(unittest.TestCase):
-    """Tests for the authentication step of ``poly setup``.
+    """Tests for the authentication step of ``poly setup``: one sign-in, both credentials.
 
     Each test runs the full setup sequence in a throwaway directory that already
     contains a project.yaml and under an unrecognised shell, so the completion,
-    skills, and project steps skip themselves and only auth is exercised.
+    skills, and project steps skip themselves and only auth (and the
+    POLY_API_KEY export it feeds) is exercised.
     """
 
     def setUp(self):
         self.base_path = tempfile.mkdtemp()
         Path(self.base_path, "project.yaml").write_text("projectId: proj-1\n", encoding="utf-8")
         self.addCleanup(shutil.rmtree, self.base_path, True)
-
-        env_patcher = patch.dict(os.environ, {"SHELL": "/bin/unrecognised-shell"})
-        env_patcher.start()
-        self.addCleanup(env_patcher.stop)
-
-        self.mock_signin = patch("poly.cli_commands.setup._signin").start()
-        self.mock_signin.return_value = "jwt-token"
-        self.mock_save_key = patch("poly.cli_commands.setup._authenticate_and_save_key").start()
-        self.mock_select_region = patch("poly.cli_commands.setup._select_region").start()
-        self.mock_select_region.return_value = "studio"
-        self.mock_credentials = patch("poly.cli_commands.setup.any_credentials_exist").start()
-        self.mock_credentials.return_value = False
+        patch.dict(os.environ, {"SHELL": "/bin/unrecognised-shell"}).start()
+        self.m = _mock_auth(self)
         self.capture = _silence_telemetry(self)
+        self.alias = patch("poly.setup.telemetry.alias_identity", return_value=True).start()
 
     def _run_setup(self, **kwargs) -> None:
         """Run setup with the skills step disabled unless a test opts in."""
         kwargs.setdefault("skip_skills", True)
         SetupCommand.setup(base_path=self.base_path, **kwargs)
 
-    def test_skip_auth_never_signs_in(self):
-        """--skip-auth leaves credentials untouched even when none exist."""
+    def _have_adk_key(self, region: str = "studio") -> None:
+        self.m["retrieve_api_key"].side_effect = None
+        self.m["retrieve_api_key"].return_value = "adk-key"
+        self.m["stored_regions"].return_value = [region]
+        self.m["any_credentials"].return_value = True
+
+    def _have_account_key(self) -> None:
+        self.m["load_account"].return_value = dict(STORED_ACCOUNT)
+
+    def test_skip_auth_never_signs_in_or_exports(self):
+        """--skip-auth leaves credentials untouched and has no key to export."""
         self._run_setup(skip_auth=True)
 
-        self.mock_signin.assert_not_called()
-        self.mock_save_key.assert_not_called()
+        self.m["signin"].assert_not_called()
+        self.m["save_key"].assert_not_called()
+        self.m["api"].create_account_api_key_internal.assert_not_called()
+        self.m["write_env"].assert_not_called()
 
-    def test_existing_credentials_skip_sign_in(self):
-        """Re-running setup with credentials already saved does not sign in again."""
-        self.mock_credentials.return_value = True
+    def test_no_credentials_signs_in_once_and_mints_both(self):
+        """A clean machine ends with an ADK key and a setup-key account key."""
+        self._run_setup(region="studio")
+
+        self.m["signin"].assert_called_once_with("studio", auth_details=APIKEY_AUTH_DETAILS)
+        self.m["session_save"].assert_called_once_with("studio", JWT)
+        self.m["save_key"].assert_called_once_with(JWT, region="studio")
+        self.m["api"].create_account_api_key_internal.assert_called_once_with(
+            region="studio", jwt_token=JWT, account_id="acc-1", name="setup-key", source="setup"
+        )
+        self.m["save_account"].assert_called_once_with("studio", "sk-minted", "acc-1", "setup-key")
+        self.m["write_env"].assert_called_once_with("POLY_API_KEY", "sk-minted")
+        self.alias.assert_called_once()
+        self.assertEqual(self.alias.call_args.args[2], "acc-1")
+
+    def test_adk_key_only_gains_the_account_key_without_a_new_sign_in(self):
+        """A kept sign-in is enough: no browser, no PAT work, just the account key."""
+        self._have_adk_key()
+        self.m["session_load"].return_value = _cached_session()
 
         self._run_setup()
 
-        self.mock_signin.assert_not_called()
-        self.mock_save_key.assert_not_called()
+        self.m["signin"].assert_not_called()
+        self.m["save_key"].assert_not_called()
+        self.m["authorise"].assert_called_once()
+        self.assertEqual(self.m["authorise"].call_args.args[2], CACHED_JWT)
+        self.m["api"].create_account_api_key_internal.assert_called_once()
+        self.m["save_account"].assert_called_once_with("studio", "sk-minted", "acc-1", "setup-key")
+
+    def test_adk_key_only_without_a_kept_sign_in_signs_in_once(self):
+        self._have_adk_key()
+
+        self._run_setup()
+
+        self.m["signin"].assert_called_once()
+        self.m["save_key"].assert_not_called()
+        self.m["api"].create_account_api_key_internal.assert_called_once()
+
+    def test_account_key_only_signs_in_and_adds_the_adk_key(self):
+        """The stored account key is kept and exported; only the PAT is minted."""
+        self._have_account_key()
+
+        self._run_setup(region="studio")
+
+        self.m["signin"].assert_called_once()
+        self.m["save_key"].assert_called_once_with(JWT, region="studio")
+        self.m["api"].create_account_api_key_internal.assert_not_called()
+        self.m["save_account"].assert_not_called()
+        self.m["write_env"].assert_called_once_with("POLY_API_KEY", "sk-stored")
+        self.assertEqual(self.alias.call_args.args[2], "acc-stored")
+
+    def test_both_credentials_skip_sign_in_and_still_export(self):
+        """A configured machine signs in for nothing and keeps its identity."""
+        self._have_adk_key()
+        self._have_account_key()
+
+        self._run_setup()
+
+        self.m["signin"].assert_not_called()
+        self.m["authorise"].assert_not_called()
+        self.m["save_key"].assert_not_called()
+        self.m["api"].list_account_api_keys_internal.assert_not_called()
+        self.m["write_env"].assert_called_once_with("POLY_API_KEY", "sk-stored")
+        self.assertEqual(self.alias.call_args.args[2], "acc-stored")
+
+    def test_region_is_inferred_from_the_single_stored_adk_key(self):
+        self._have_adk_key("uk-1")
+
+        self._run_setup()
+
+        self.m["select_region"].assert_not_called()
+        self.m["signin"].assert_called_once_with("uk-1", auth_details=None)
+
+    def test_several_stored_regions_prompt_for_one(self):
+        self._have_adk_key()
+        self.m["stored_regions"].return_value = ["studio", "us-1"]
+        self.m["select_region"].return_value = "us-1"
+
+        self._run_setup()
+
+        self.m["select_region"].assert_called_once()
+        self.m["signin"].assert_called_once_with("us-1", auth_details=None)
 
     def test_explicit_region_is_used_without_prompting(self):
-        """--region signs in to that region and skips the interactive picker."""
+        """--region signs in to that region on its standard client and skips the picker."""
         self._run_setup(region="us-1")
 
-        self.mock_select_region.assert_not_called()
-        self.mock_signin.assert_called_once_with("us-1")
-        self.mock_save_key.assert_called_once_with("jwt-token", region="us-1")
+        self.m["select_region"].assert_not_called()
+        self.m["signin"].assert_called_once_with("us-1", auth_details=None)
+        self.m["save_key"].assert_called_once_with(JWT, region="us-1")
+        self.m["api"].create_account_api_key_internal.assert_called_once()
+        self.assertEqual(
+            self.m["api"].create_account_api_key_internal.call_args.kwargs["name"], "setup-key-us-1"
+        )
 
     def test_missing_region_is_prompted_for_and_threaded_through(self):
         """Without --region the user picks one, and that choice is used to sign in."""
-        self.mock_select_region.return_value = "uk-1"
+        self.m["select_region"].return_value = "uk-1"
 
         self._run_setup()
 
-        self.mock_select_region.assert_called_once()
-        self.mock_signin.assert_called_once_with("uk-1")
-        self.mock_save_key.assert_called_once_with("jwt-token", region="uk-1")
+        self.m["select_region"].assert_called_once()
+        self.m["signin"].assert_called_once_with("uk-1", auth_details=None)
+        self.m["save_key"].assert_called_once_with(JWT, region="uk-1")
+
+    def test_existing_cli_generated_key_is_reused_instead_of_created(self):
+        self.m["api"].list_account_api_keys_internal.return_value = [
+            {"key": "sk-cli", "active": True, "policies": [{"name": "cli-generated-key"}]}
+        ]
+
+        self._run_setup(region="studio")
+
+        self.m["api"].create_account_api_key_internal.assert_not_called()
+        self.m["save_account"].assert_called_once_with(
+            "studio", "sk-cli", "acc-1", "cli-generated-key"
+        )
+
+    def test_account_id_flag_skips_the_account_lookup(self):
+        self._run_setup(region="studio", account_id="acc-flag")
+
+        self.m["api"].get_accounts_internal.assert_not_called()
+        self.m["save_account"].assert_called_once_with(
+            "studio", "sk-minted", "acc-flag", "setup-key"
+        )
+
+    def test_several_accounts_at_a_terminal_use_the_picker(self):
+        self.m["api"].get_accounts_internal.return_value = [{"id": "acc-1"}, {"id": "acc-2"}]
+
+        self._run_setup(region="studio")
+
+        self.m["pick_account"].assert_called_once()
+        self.m["save_account"].assert_called_once_with(
+            "studio", "sk-minted", "acc-picked", "setup-key"
+        )
+
+    @patch("poly.output.console.error")
+    def test_several_accounts_without_a_terminal_stop_and_list_them(self, mock_error):
+        self.m["api"].get_accounts_internal.return_value = [{"id": "acc-1"}, {"id": "acc-2"}]
+        self.m["stdin"].isatty.return_value = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            self._run_setup(region="studio")
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("--account-id", mock_error.call_args[0][0])
+        self.m["pick_account"].assert_not_called()
+        self.m["save_account"].assert_not_called()
+
+    def test_refused_kept_sign_in_is_cleared_and_signed_in_again(self):
+        """A revoked cached token costs one extra sign-in, not a failed run."""
+        import requests
+
+        self._have_adk_key()
+        self.m["session_load"].return_value = _cached_session()
+        response = MagicMock(status_code=401)
+        self.m["authorise"].side_effect = [requests.HTTPError(response=response), {}]
+
+        self._run_setup()
+
+        self.m["session_clear"].assert_called_once_with("studio")
+        self.m["signin"].assert_called_once()
+        self.assertEqual(self.m["authorise"].call_args.args[2], JWT)
+        self.m["api"].create_account_api_key_internal.assert_called_once()
+
+    def test_refused_fresh_sign_in_propagates(self):
+        import requests
+
+        self._have_adk_key()
+        response = MagicMock(status_code=401)
+        self.m["authorise"].side_effect = requests.HTTPError(response=response)
+
+        with self.assertRaises(requests.HTTPError):
+            self._run_setup()
+
+        self.m["session_clear"].assert_not_called()
+
+    @patch("poly.output.console.error")
+    def test_unprovisioned_enterprise_user_exits_with_the_message(self, mock_error):
+        self._have_adk_key("us-1")
+        self.m["authorise"].side_effect = ValueError("No account is provisioned for you on us-1.")
+
+        with self.assertRaises(SystemExit):
+            self._run_setup()
+
+        self.assertIn("No account is provisioned", mock_error.call_args[0][0])
+
+    @patch("poly.output.console.warning")
+    def test_key_that_never_activates_warns_but_setup_continues(self, mock_warning):
+        self.m["api"].get_accounts_with_key.side_effect = RuntimeError("401")
+        with patch("poly.auth.account_key.time.sleep"):
+            self._run_setup(region="studio")
+
+        self.assertIn("not active yet", mock_warning.call_args[0][0])
+        self.m["write_env"].assert_called_once()
+
+
+def _unauthorized() -> requests.HTTPError:
+    """The error make_request raises when the gateway answers 401."""
+    response = requests.Response()
+    response.status_code = 401
+    return requests.HTTPError("401 Client Error: Unauthorized", response=response)
+
+
+class SetupVerifyStepTest(unittest.TestCase):
+    """Tests for SetupCommand._verify, the one call that proves the account key."""
+
+    def setUp(self):
+        self.m = _mock_auth(self)
+        self.step = StepResult()
+
+    def _verify(self, api_key="sk-minted", account_id="acc-1", skip_verify=False, fresh=True):
+        return SetupCommand._verify(
+            api_key, "studio", account_id, skip_verify, self.step, fresh=fresh
+        )
+
+    @patch("poly.output.console.success")
+    def test_calls_the_public_api_with_the_key_and_reports_the_account(self, mock_success):
+        self.assertTrue(self._verify())
+
+        self.m["api"].get_projects_with_key.assert_called_once_with("studio", "sk-minted", "acc-1")
+        message = mock_success.call_args[0][0]
+        self.assertIn("acc-1", message)
+        self.assertIn("2 agents", message)
+        self.assertRegex(message, r"\d+ ms")
+        self.assertEqual(self.step.outcome, "done")
+
+    @patch("poly.output.console.success")
+    def test_one_agent_is_singular(self, mock_success):
+        self.m["api"].get_projects_with_key.return_value = {"proj-1": "Agent One"}
+
+        self._verify()
+
+        self.assertIn("1 agent,", mock_success.call_args[0][0])
+
+    def test_skip_flag_makes_no_call(self):
+        self.assertIsNone(self._verify(skip_verify=True))
+
+        self.m["api"].get_projects_with_key.assert_not_called()
+        self.assertEqual(self.step.outcome, "skipped")
+
+    def test_no_key_makes_no_call(self):
+        self.assertIsNone(self._verify(api_key=None))
+
+        self.m["api"].get_projects_with_key.assert_not_called()
+        self.assertEqual(self.step.outcome, "skipped")
+
+    @patch("poly.output.console.error")
+    def test_refused_key_ends_the_run_before_any_write(self, mock_error):
+        self.m["api"].get_projects_with_key.side_effect = RuntimeError("401 Unauthorized")
+
+        with self.assertRaises(SystemExit) as ctx:
+            self._verify()
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("poly apikey --region studio", mock_error.call_args[0][0])
+        self.assertNotIn("sk-minted", mock_error.call_args[0][0])
+        self.assertEqual((self.step.outcome, self.step.error_class), ("failed", "RuntimeError"))
+
+    @patch("poly.cli_commands.setup.time.sleep")
+    @patch("poly.output.console.info")
+    @patch("poly.output.console.success")
+    def test_a_key_not_active_yet_is_retried_until_the_gateway_accepts_it(
+        self, mock_success, mock_info, mock_sleep
+    ):
+        """The gateway can take a few seconds to know a freshly minted key."""
+        self.m["api"].get_projects_with_key.side_effect = [
+            _unauthorized(),
+            _unauthorized(),
+            {"proj-1": "Agent One"},
+        ]
+
+        self.assertTrue(self._verify())
+
+        self.assertEqual(self.m["api"].get_projects_with_key.call_count, 3)
+        self.assertEqual(mock_sleep.call_count, 2)
+        notices = [c[0][0] for c in mock_info.call_args_list if "does not know the new key" in c[0][0]]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("1 agent,", mock_success.call_args[0][0])
+        self.assertEqual(self.step.outcome, "done")
+
+    @patch("poly.cli_commands.setup.time.sleep")
+    @patch("poly.output.console.error")
+    def test_a_key_still_refused_after_the_retry_window_ends_the_run(self, mock_error, mock_sleep):
+        self.m["api"].get_projects_with_key.side_effect = _unauthorized()
+        clock = iter(range(0, 100, 5))  # one tick per monotonic() read, past the window
+        with patch("poly.cli_commands.setup.time.monotonic", side_effect=lambda: next(clock)):
+            with self.assertRaises(SystemExit) as ctx:
+                self._verify()
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertGreater(self.m["api"].get_projects_with_key.call_count, 1)
+        self.assertIn("new account API key was refused", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.setup.time.sleep")
+    @patch("poly.output.console.error")
+    def test_a_stored_key_that_is_refused_is_not_retried_and_names_revocation(
+        self, mock_error, mock_sleep
+    ):
+        """A key read back from the credentials file has had time to activate."""
+        self.m["api"].get_projects_with_key.side_effect = _unauthorized()
+
+        with self.assertRaises(SystemExit):
+            self._verify(fresh=False)
+
+        self.m["api"].get_projects_with_key.assert_called_once()
+        mock_sleep.assert_not_called()
+        message = mock_error.call_args[0][0]
+        self.assertIn("stored account API key was refused", message)
+        self.assertIn("revoked", message)
+        self.assertIn("poly apikey --region studio", message)
+        self.assertEqual((self.step.outcome, self.step.error_class), ("failed", "HTTPError"))
+
+    @patch("poly.cli_commands.setup.time.sleep")
+    def test_a_non_auth_error_is_not_retried(self, mock_sleep):
+        self.m["api"].get_projects_with_key.side_effect = RuntimeError("connection reset")
+
+        with patch("poly.output.console.error"), self.assertRaises(SystemExit):
+            self._verify()
+
+        self.m["api"].get_projects_with_key.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    @patch("poly.output.console.error")
+    def test_refused_key_in_a_full_run_writes_nothing_and_records_failed(self, mock_error):
+        """The profile and later steps are never reached with a key that does not work."""
+        base_path = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base_path, True)
+        patch.dict(os.environ, {"SHELL": "/bin/unrecognised-shell"}).start()
+        capture = _silence_telemetry(self)
+        self.m["api"].get_projects_with_key.side_effect = RuntimeError("401 Unauthorized")
+
+        with self.assertRaises(SystemExit):
+            SetupCommand.setup(base_path=base_path, region="studio", skip_skills=True)
+
+        self.m["write_env"].assert_not_called()
+        steps = [(e["step"], e["outcome"]) for e in _events(capture, "setup_step")]
+        self.assertEqual(steps[-1], ("verify", "failed"))
+        # The cause, not the SystemExit that ended the run, is what the funnel sees.
+        self.assertEqual(_events(capture, "setup_step")[-1]["error_class"], "RuntimeError")
+        self.assertEqual(_events(capture, "setup_completed"), [])
+
+    def test_skip_verify_flag_is_parsed_and_forwarded(self):
+        args = _parse_setup_args(["setup", "--skip-verify"])
+
+        self.assertTrue(args.skip_verify)
+        with patch.object(SetupCommand, "setup") as mock_setup:
+            SetupCommand.run(args)
+        self.assertTrue(mock_setup.call_args.kwargs["skip_verify"])
+
+
+class SetupEnvironmentStepTest(unittest.TestCase):
+    """Tests for SetupCommand._export_account_key, the confirmed POLY_API_KEY write."""
+
+    def setUp(self):
+        self.m = _mock_auth(self)
+        self.step = StepResult()
+
+    def _export(self, api_key="sk-minted"):
+        SetupCommand._export_account_key(api_key, "studio", self.step)
+
+    def test_no_key_skips_without_touching_the_profile(self):
+        self._export(None)
+
+        self.assertEqual(self.step.outcome, "skipped")
+        self.m["read_env"].assert_not_called()
+        self.m["confirm"].assert_not_called()
+
+    def test_value_already_in_the_profile_skips_without_asking(self):
+        self.m["read_env"].return_value = "sk-minted"
+
+        self._export()
+
+        self.assertEqual(self.step.outcome, "skipped")
+        self.m["confirm"].assert_not_called()
+        self.m["write_env"].assert_not_called()
+
+    @patch("poly.output.console.info")
+    def test_no_terminal_skips_and_names_the_later_command(self, mock_info):
+        self.m["stdin"].isatty.return_value = False
+
+        self._export()
+
+        self.assertEqual(self.step.outcome, "skipped")
+        self.assertIn("poly apikey --region studio", mock_info.call_args[0][0])
+        self.m["write_env"].assert_not_called()
+
+    def test_confirmation_names_the_profile_and_writes_on_yes(self):
+        self._export()
+
+        self.assertIn(str(PROFILE.path), self.m["confirm"].call_args.args[0])
+        self.m["write_env"].assert_called_once_with("POLY_API_KEY", "sk-minted")
+        self.assertEqual(self.step.outcome, "done")
+
+    def test_declining_writes_nothing(self):
+        self.m["confirm"].return_value.ask.return_value = False
+
+        self._export()
+
+        self.m["write_env"].assert_not_called()
+        self.assertEqual(self.step.outcome, "declined")
+
+    @patch("poly.output.console.warning")
+    def test_conflicting_value_fails_the_step_with_the_force_hint(self, mock_warning):
+        self.m["write_env"].side_effect = EnvVarConflict("sk-o****ld", "sk-m****ted", PROFILE.path)
+
+        self._export()
+
+        self.assertEqual((self.step.outcome, self.step.error_class), ("failed", "EnvVarConflict"))
+        self.assertIn("--force", mock_warning.call_args[0][0])
 
 
 class SetupSkillsStepTest(unittest.TestCase):
@@ -506,8 +955,23 @@ class SetupProjectStepTest(unittest.TestCase):
 
         SetupCommand._setup_project(self.base_path, region="us-1")
 
-        self.mock_create.assert_called_once_with(self.base_path, region="us-1")
+        self.mock_create.assert_called_once_with(self.base_path, region="us-1", account_id=None)
         self.mock_init.assert_not_called()
+
+    def test_the_account_from_the_auth_step_is_passed_on_so_it_is_not_asked_twice(self):
+        """A developer with several accounts picked one at sign-in; the project step keeps it."""
+        self.mock_select.return_value.ask.return_value = "create"
+
+        SetupCommand._setup_project(self.base_path, region="us-1", account_id="acc-1")
+
+        self.mock_create.assert_called_once_with(self.base_path, region="us-1", account_id="acc-1")
+
+    def test_connecting_a_project_also_keeps_the_account(self):
+        self.mock_select.return_value.ask.return_value = "init"
+
+        SetupCommand._setup_project(self.base_path, region="uk-1", account_id="acc-1")
+
+        self.mock_init.assert_called_once_with(self.base_path, region="uk-1", account_id="acc-1")
 
     def test_choosing_connect_inits_an_existing_project(self):
         """Selecting 'init' delegates to project init with the setup region."""
@@ -515,7 +979,7 @@ class SetupProjectStepTest(unittest.TestCase):
 
         SetupCommand._setup_project(self.base_path, region="uk-1")
 
-        self.mock_init.assert_called_once_with(self.base_path, region="uk-1")
+        self.mock_init.assert_called_once_with(self.base_path, region="uk-1", account_id=None)
         self.mock_create.assert_not_called()
 
     def test_choosing_skip_leaves_the_directory_untouched(self):
@@ -540,12 +1004,8 @@ class SetupTelemetryWiringTest(unittest.TestCase):
         self.base_path = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.base_path, True)
         patch.dict(os.environ, {"SHELL": "/bin/unrecognised-shell"}).start()
-        self.mock_signin = patch("poly.cli_commands.setup._signin", return_value="jwt").start()
-        self.mock_save_key = patch("poly.cli_commands.setup._authenticate_and_save_key").start()
-        self.mock_save_key.return_value = {"acc-1": "Acme"}
-        patch("poly.cli_commands.setup.any_credentials_exist", return_value=False).start()
-        self.mock_stdin = patch("sys.stdin").start()
-        self.mock_stdin.isatty.return_value = True
+        self.m = _mock_auth(self)
+        self.mock_signin = self.m["signin"]
         self.mock_select = patch("questionary.select").start()
         self.mock_select.return_value.ask.return_value = "skip"
         patch("poly.setup.telemetry.detect_installed_agents", return_value=["cursor"]).start()
@@ -593,6 +1053,8 @@ class SetupTelemetryWiringTest(unittest.TestCase):
             [
                 ("signin", "done"),
                 ("credentials", "done"),
+                ("verify", "done"),
+                ("environment", "done"),
                 ("completion", "skipped"),
                 ("skills", "skipped"),
                 ("project", "declined"),
@@ -604,13 +1066,18 @@ class SetupTelemetryWiringTest(unittest.TestCase):
 
     def test_existing_credentials_report_both_auth_steps_as_skipped(self):
         """The auth skip still records signin and credentials, so funnels stay comparable."""
-        with patch("poly.cli_commands.setup.any_credentials_exist", return_value=True):
-            self._run_setup()
+        self.m["any_credentials"].return_value = True
+        self.m["retrieve_api_key"].side_effect = None
+        self.m["retrieve_api_key"].return_value = "adk-key"
+        self.m["load_account"].return_value = dict(STORED_ACCOUNT)
+
+        self._run_setup()
 
         steps = [(e["step"], e["outcome"]) for e in _events(self.capture, "setup_step")]
         self.assertEqual(steps[:2], [("signin", "skipped"), ("credentials", "skipped")])
         [started] = _events(self.capture, "setup_started")
         self.assertTrue(started["had_credentials"])
+        self.assertEqual(self.capture.call_args.args[3], "acc-stored")
 
     def test_single_account_sign_in_switches_identity_to_the_account(self):
         """Events before sign-in use an anonymous id; after it, the account id, aliased."""
@@ -621,33 +1088,39 @@ class SetupTelemetryWiringTest(unittest.TestCase):
         self.assertEqual(distinct_ids[-1], "acc-1")
         self.alias.assert_called_once_with("studio", distinct_ids[0], "acc-1")
 
-    def test_multiple_accounts_keep_the_run_anonymous(self):
-        """Without a resolved account the PAT path cannot pick one, so no alias is sent."""
-        self.mock_save_key.return_value = {"acc-1": "Acme", "acc-2": "Globex"}
+    def test_picked_account_becomes_the_identity(self):
+        """With several accounts, the one chosen at the picker keys the run."""
+        self.m["api"].get_accounts_internal.return_value = [{"id": "acc-1"}, {"id": "acc-2"}]
 
         self._run_setup()
 
-        self.alias.assert_not_called()
-        self.assertTrue(all(c.args[3].startswith("anon:") for c in self.capture.call_args_list))
+        self.alias.assert_called_once()
+        self.assertEqual(self.alias.call_args.args[2], "acc-picked")
+        self.assertEqual(self.capture.call_args.args[3], "acc-picked")
 
     def test_completed_event_lists_done_steps_and_the_project_choice(self):
         """setup_completed summarises the run for the funnel's last tile."""
         self._run_setup()
 
         [completed] = _events(self.capture, "setup_completed")
-        self.assertEqual(completed["steps_done"], ["signin", "credentials"])
+        self.assertEqual(
+            completed["steps_done"], ["signin", "credentials", "verify", "environment"]
+        )
         self.assertEqual(completed["project"], "declined")
+        self.assertTrue(completed["verify_ok"])
         self.assertIsInstance(completed["duration_ms"], int)
 
     def test_created_project_is_reported_as_created(self):
         """Choosing 'create' marks the project step done with the created detail."""
         self.mock_select.return_value.ask.return_value = "create"
-        with patch("poly.cli_commands.setup.ProjectCommand.create_project"):
+        with patch("poly.cli_commands.setup.ProjectCommand.create_project") as create:
             self._run_setup()
 
         [completed] = _events(self.capture, "setup_completed")
         self.assertEqual(completed["project"], "created")
         self.assertIn("project", completed["steps_done"])
+        # The account resolved at sign-in is the one the project is created in.
+        self.assertEqual(create.call_args.kwargs["account_id"], "acc-1")
 
     def test_sign_in_failure_records_the_step_as_failed_and_propagates(self):
         """A failing step is reported with its error class; no completed event follows."""
@@ -669,7 +1142,8 @@ class SetupTelemetryWiringTest(unittest.TestCase):
             flat = str(call.args[2])
             self.assertNotIn(self.base_path, flat)
             self.assertNotIn("jwt", flat)
-            self.assertNotIn("~/", flat)
+            self.assertNotIn("sk-", flat)
+            self.assertNotIn(str(PROFILE.path), flat)
 
 
 class DetectInvokingAgentTest(unittest.TestCase):

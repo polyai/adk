@@ -18,17 +18,23 @@ import contextlib
 import sys
 import time
 from argparse import ArgumentParser, Namespace, _SubParsersAction
-from datetime import datetime, timezone
 from typing import Callable
 
+from poly.auth.account_key import (
+    DEFAULT_KEY_NAME,
+    MultipleAccountsError,
+    key_name_for_region,
+    mint_account_key,
+    resolve_account_id,
+    wait_for_key_active,
+)
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.auth import authorise_or_explain
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
-from poly.cli_commands.shared import REGION_CHOICES, region_type
+from poly.cli_commands.shared import REGION_CHOICES, pick_account, region_type
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
 from poly.handlers.interface import AgentStudioInterface
 from poly.utils import apikey_session
-from poly.utils.api_keys import select_reusable_api_key
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
     load_api_key_from_credential_file,
@@ -36,72 +42,20 @@ from poly.utils.credentials import (
 )
 from poly.utils.env_profile import EnvVarConflict, ProfileTarget, write_env_var
 
-DEFAULT_KEY_NAME = "cli-generated-key"
-ACCOUNT_POLL_ATTEMPTS = 20
-ACCOUNT_POLL_INTERVAL_SECONDS = 1
-ACCOUNT_POLL_TIMEOUT_SECONDS = ACCOUNT_POLL_ATTEMPTS * ACCOUNT_POLL_INTERVAL_SECONDS
 APIKEY_SOURCE = "apikey"
 # Short path that docs.poly.ai redirects to the Dialog RSN 1 first-call page.
 NEXT_STEP_URL = "https://docs.poly.ai/dialog-rsn-1"
 
 
-class MultipleAccountsError(ValueError):
-    """More than one account and no way to choose one without asking.
-
-    Carries the accounts so `--json` can list them for the caller to pick from.
-    """
-
-    def __init__(self, region: str, accounts: list[dict], sign_in_kept: bool = False):
-        self.region = region
-        self.accounts = [_account_summary(a) for a in accounts]
-        listing = ", ".join(f"{a['id']} ({a.get('name') or 'unnamed'})" for a in accounts)
-        message = (
-            f"Multiple accounts found for {region}: {listing}. "
-            "Re-run with --account-id <id> to pick one."
-        )
-        if sign_in_kept:
-            message += " Your sign-in is kept, so the re-run will not ask you to sign in again."
-        super().__init__(message)
-        self.raw_accounts = accounts
-
-
 def _default_key_name(region: str) -> str:
     """The default API key name - disambiguated by region so keys never collide."""
-    return DEFAULT_KEY_NAME if region == "studio" else f"{DEFAULT_KEY_NAME}-{region}"
+    return key_name_for_region(DEFAULT_KEY_NAME, region)
 
 
 def _say(output_json: bool, fn: Callable[[str], None], message: str) -> None:
     """Print via `fn` unless --json is active (stdout must then be a single JSON object)."""
     if not output_json:
         fn(message)
-
-
-def _account_summary(account: dict) -> dict:
-    """The account fields worth showing someone choosing between accounts."""
-    return {key: account.get(key) for key in ("id", "name", "role", "created_by")}
-
-
-def _pick_account(accounts: list[dict]) -> str:
-    """Ask which account to use, with the same picker `poly project create` uses.
-
-    Raises:
-        ValueError: The picker was cancelled.
-    """
-    import questionary
-
-    choices = [
-        questionary.Choice(title=f"{a.get('name') or 'unnamed'} ({a['id']})", value=a["id"])
-        for a in accounts
-    ]
-    chosen = questionary.select(
-        "Select Account",
-        choices=choices,
-        use_search_filter=True,
-        use_jk_keys=False,
-    ).ask()
-    if not chosen:
-        raise ValueError("No account selected.")
-    return chosen
 
 
 def _fail(exc: Exception, step: str, exit_code: int, *, output_json: bool, verbose: bool) -> None:
@@ -123,95 +77,6 @@ def _fail(exc: Exception, step: str, exit_code: int, *, output_json: bool, verbo
 
         error(message)
     sys.exit(exit_code)
-
-
-def _resolve_account_id(
-    api: AgentStudioInterface,
-    region: str,
-    jwt_token: str,
-    account_id: str | None,
-    *,
-    interactive: bool,
-) -> str:
-    """Return `account_id` unchanged, or poll for the account and choose one.
-
-    With more than one account: at a terminal (`interactive`), ask. Otherwise choosing
-    would be a guess, so raise with the list instead.
-
-    Raises:
-        MultipleAccountsError: Several accounts and not interactive.
-        ValueError: No account appeared within `ACCOUNT_POLL_TIMEOUT_SECONDS`, or the
-            picker was cancelled.
-    """
-    if account_id is not None:
-        return account_id
-    for _ in range(ACCOUNT_POLL_ATTEMPTS):
-        accounts = api.get_accounts_internal(
-            region=region, jwt_token=jwt_token, source=APIKEY_SOURCE
-        )
-        if accounts:
-            if len(accounts) == 1:
-                return accounts[0]["id"]
-            if interactive:
-                return _pick_account(accounts)
-            raise MultipleAccountsError(region, accounts)
-        time.sleep(ACCOUNT_POLL_INTERVAL_SECONDS)
-    raise ValueError(
-        f"No account appeared after {ACCOUNT_POLL_TIMEOUT_SECONDS}s. Re-run with --account-id <id>."
-    )
-
-
-def _get_or_create_key(
-    api: AgentStudioInterface, region: str, jwt_token: str, account_id: str, key_name: str
-) -> tuple[str, bool]:
-    """Reuse an active, unexpired key named `key_name`, or create one.
-
-    Returns:
-        tuple[str, bool]: The key, and whether it was reused rather than created.
-
-    Raises:
-        ValueError: The create call succeeded but returned no key.
-    """
-    keys = api.list_account_api_keys_internal(
-        region=region, jwt_token=jwt_token, account_id=account_id, source=APIKEY_SOURCE
-    )
-    existing_key = select_reusable_api_key(keys, key_name, datetime.now(timezone.utc))
-    if existing_key is not None:
-        return existing_key, True
-
-    response = api.create_account_api_key_internal(
-        region=region,
-        jwt_token=jwt_token,
-        account_id=account_id,
-        name=key_name,
-        source=APIKEY_SOURCE,
-    )
-    api_key = response.get("key")
-    if not api_key:
-        raise ValueError("API key not found in response. Please contact support.")
-    return api_key, False
-
-
-def _wait_for_key_active(api: AgentStudioInterface, region: str, api_key: str) -> bool:
-    """Poll until `api_key` itself is usable, mirroring `poly login`'s activation wait.
-
-    A newly created key can take a few seconds to activate; polling here means a
-    command run immediately after `poly apikey` does not fail against a key the
-    platform has not finished activating yet. Must probe with `api_key` directly
-    rather than `get_accounts` (which authenticates via the on-disk credential) -
-    when an existing credential is kept rather than overwritten, that would
-    silently validate a different, already-active key instead of this one.
-
-    Returns:
-        bool: Whether the key became active within the poll window.
-    """
-    for _ in range(ACCOUNT_POLL_ATTEMPTS):
-        try:
-            api.get_accounts_with_key(region=region, api_key=api_key)
-            return True
-        except Exception:
-            time.sleep(ACCOUNT_POLL_INTERVAL_SECONDS)
-    return False
 
 
 def _save_credentials(region: str, api_key: str) -> tuple[bool, str]:
@@ -461,12 +326,13 @@ class ApiKeyCommand(BaseCommand):
 
                     step = "account"
                     try:
-                        resolved_account_id = _resolve_account_id(
+                        resolved_account_id = resolve_account_id(
                             api,
                             region,
                             jwt_token,
                             account_id,
-                            interactive=interactive,
+                            source=APIKEY_SOURCE,
+                            pick=pick_account if interactive else None,
                         )
                     except MultipleAccountsError as e:
                         if session is None:
@@ -505,8 +371,8 @@ class ApiKeyCommand(BaseCommand):
                 )
 
             step = "key"
-            api_key, key_reused = _get_or_create_key(
-                api, region, jwt_token, resolved_account_id, key_name
+            api_key, key_reused, _ = mint_account_key(
+                api, region, jwt_token, resolved_account_id, key_name, source=APIKEY_SOURCE
             )
             if key_reused:
                 _say(
@@ -533,7 +399,7 @@ class ApiKeyCommand(BaseCommand):
                 else console.status("[info]Verifying API key is active...[/info]")
             )
             with status_ctx:
-                key_active = _wait_for_key_active(api, region, api_key)
+                key_active = wait_for_key_active(api, region, api_key)
             if not key_active:
                 _say(
                     output_json,

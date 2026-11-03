@@ -152,6 +152,20 @@ class AgentStudioInterface:
         return PlatformAPIHandler.get_accounts_with_key(region, api_key)
 
     @staticmethod
+    def get_projects_with_key(region: str, api_key: str, account_id: str) -> dict[str, str]:
+        """Get an account's projects, authenticating with `api_key` directly.
+
+        Args:
+            region (str): The region name.
+            api_key (str): The API key to authenticate with.
+            account_id (str): The account ID.
+
+        Returns:
+            dict[str, str]: A dictionary mapping project ids to project names.
+        """
+        return PlatformAPIHandler.get_projects_with_key(region, api_key, account_id)
+
+    @staticmethod
     def get_project(region: str, account_id: str, project_id: str) -> dict[str, Any]:
         """Get the details of a specific project.
 

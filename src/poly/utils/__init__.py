@@ -14,8 +14,10 @@ from poly.utils.commands import create_command_webchat_channel_update_status
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
     any_credentials_exist,
+    load_account_key_credential,
     raise_if_no_credentials,
     retrieve_api_key,
+    save_account_key_credential,
     save_api_key_credential_file,
 )
 from poly.utils.decorators import (
@@ -49,6 +51,8 @@ __all__ = [
     "merge_strings",
     "read_json_file",
     "retrieve_api_key",
+    "load_account_key_credential",
+    "save_account_key_credential",
     "save_api_key_credential_file",
     "save_imports",
     "write_json_file",

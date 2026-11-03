@@ -15,6 +15,7 @@ from poly.utils.env_profile import (
     EnvVarConflict,
     _get_windows_registry_backend,
     detect_profile,
+    read_env_var,
     write_env_var,
 )
 
@@ -309,3 +310,46 @@ class WriteEnvVarWindows(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReadEnvVar(unittest.TestCase):
+    """Tests for read_env_var, the done-state check before an export is offered."""
+
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp_dir.name)
+        patch.dict(
+            os.environ,
+            {"HOME": str(self.home), "USERPROFILE": str(self.home), "SHELL": "/bin/zsh"},
+        ).start()
+        patch("poly.utils.env_profile._is_windows", return_value=False).start()
+        self.addCleanup(patch.stopall)
+        self.addCleanup(self._tmp_dir.cleanup)
+
+    def test_missing_profile_reads_as_unset(self):
+        self.assertIsNone(read_env_var("POLY_API_KEY"))
+
+    def test_reads_back_what_write_env_var_wrote(self):
+        write_env_var("POLY_API_KEY", "sk-abcdefgh1234")
+
+        self.assertEqual(read_env_var("POLY_API_KEY"), "sk-abcdefgh1234")
+
+    def test_reads_a_hand_written_line_and_takes_the_last_one(self):
+        (self.home / ".zshrc").write_text(
+            "export POLY_API_KEY='first'\nexport OTHER=1\nPOLY_API_KEY=\"second\"\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(read_env_var("POLY_API_KEY"), "second")
+
+    def test_process_environment_is_not_consulted(self):
+        with patch.dict(os.environ, {"POLY_API_KEY": "sk-live"}):
+            self.assertIsNone(read_env_var("POLY_API_KEY"))
+
+    @patch("poly.utils.env_profile._is_windows", new=lambda: True)
+    @patch("poly.utils.env_profile._get_windows_registry_backend")
+    def test_windows_reads_the_registry_backend(self, mock_get_backend):
+        mock_get_backend.return_value.read.return_value = "sk-registry"
+
+        self.assertEqual(read_env_var("POLY_API_KEY"), "sk-registry")
+        mock_get_backend.return_value.read.assert_called_once_with("POLY_API_KEY")

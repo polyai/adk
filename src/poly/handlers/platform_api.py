@@ -337,6 +337,46 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=patch)
 
     @staticmethod
+    def get_projects_with_key(region: str, api_key: str, account_id: str) -> dict[str, str]:
+        """Get the projects for an account, authenticating with `api_key` directly.
+
+        The call `poly setup` uses to prove a freshly minted account API key works
+        against the public gateway before anything persistent is written with it.
+
+        Args:
+            region (str): The region name.
+            api_key (str): The API key to authenticate with.
+            account_id (str): The account ID.
+
+        Returns:
+            dict[str, str]: A dictionary mapping project IDs to project names.
+        """
+        projects_data = PlatformAPIHandler.make_request(
+            region,
+            PROJECTS_URL.format(account_id=account_id),
+            "GET",
+            headers={
+                "X-API-KEY": api_key,
+                "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+                "X-Poly-Source": "setup",
+                "Content-Type": "application/json",
+            },
+        )
+        return PlatformAPIHandler._parse_projects(projects_data)
+
+    @staticmethod
+    def _parse_projects(projects_data: dict) -> dict[str, str]:
+        """Turn a projects response into ``{id: name}``, skipping incomplete records."""
+        projects_list = projects_data.get("projects", [])
+        if not isinstance(projects_list, list):
+            raise ValueError("Expected a list of projects")
+        return {
+            project["id"]: project["name"]
+            for project in projects_list
+            if project.get("id") and project.get("name")
+        }
+
+    @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
         """Get the projects for a given account.
 
@@ -347,19 +387,10 @@ class PlatformAPIHandler:
         Returns:
             dict[str, str]: A dictionary mapping project IDs to project names
         """
-        projects = {}
         endpoint = PROJECTS_URL.format(account_id=account_id)
-        projects_data = PlatformAPIHandler.make_request(region, endpoint, "GET")
-        projects_list = projects_data.get("projects", [])
-
-        if not isinstance(projects_list, list):
-            raise ValueError("Expected a list of projects")
-
-        for project in projects_list:
-            if project.get("id") and project.get("name"):
-                projects[project.get("id")] = project.get("name")
-
-        return projects
+        return PlatformAPIHandler._parse_projects(
+            PlatformAPIHandler.make_request(region, endpoint, "GET")
+        )
 
     @staticmethod
     def create_project(
