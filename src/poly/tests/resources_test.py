@@ -15723,6 +15723,23 @@ class OutboundCampaignTests(unittest.TestCase):
         settings = MessageToDict(campaign.settings_change().build_update_proto())["settings"]
         self.assertNotIn("fromNumber", settings)
 
+    def test_dates_read_as_yaml_dates_are_read_as_iso_text(self):
+        campaign = OutboundCampaign.from_yaml_dict(
+            {
+                "name": "Reminders",
+                "settings": {
+                    "startDate": datetime.date(2026, 1, 1),
+                    "endDate": datetime.date(2026, 2, 1),
+                    "country": "US",
+                },
+            },
+            "CMPGN-ONE",
+        )
+
+        self.assertEqual(campaign.settings["startDate"], "2026-01-01")
+        self.assertEqual(campaign.settings["endDate"], "2026-02-01")
+        campaign.validate(resource_mappings=[])
+
     def test_validate_accepts_settings_the_platform_accepts(self):
         campaign = _campaign()
         campaign.settings = {

@@ -9791,6 +9791,32 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertNotIn("Spare", self._read("reminders", "campaign.yaml"))
         self.assertEqual(self.project.project_status(), ([], [], [], []))
 
+    def test_revert_of_everything_keeps_locally_added_nodes_and_their_code(self):
+        data = self._yaml()
+        self._node(data, "Trigger")["ingestInterval"] = "hourly"
+        data["nodes"].append(
+            {
+                "name": "Spare",
+                "type": "end",
+                "exitReason": "spare",
+                "writebackEnabled": False,
+                "function": {"name": "spare", "description": ""},
+            }
+        )
+        self._write_yaml(data)
+        spare_code = "def spare(outbound_contact, outbound_campaign):\n    pass\n"
+        self._write_function("spare", spare_code)
+        self._write_function("trigger", self.TRIGGER_CODE + "    # local\n")
+
+        self.project.revert_changes()
+
+        self.assertNotEqual(self._node(self._yaml(), "Trigger").get("ingestInterval"), "hourly")
+        self.assertEqual(self._node(self._yaml(), "Spare")["exitReason"], "spare")
+        self.assertEqual(self._read("reminders", "functions", "spare.py"), spare_code)
+        self.assertEqual(self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE)
+        spare_entry = os.path.join(self.folder, "campaign.yaml", "nodes", "Spare")
+        self.assertIn(spare_entry, self.project.project_status()[2])
+
     def test_stray_function_file_shows_as_new_and_fails_validation(self):
         self._write_function("stray", "x = 1\n")
         stray = os.path.join(self.folder, "functions", "stray.py")
@@ -10011,6 +10037,24 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         code = self._read("reminders", "functions", "first_call.py")
         self.assertTrue(resource_utils.contains_merge_conflict(code))
         self.assertIn("# local", code)
+        self.assertIn("map_contacts", code)
+
+    def test_renamed_node_takes_a_locally_removed_unedited_node_file(self):
+        self._pull_with_call_code()
+        data = self._yaml()
+        data["nodes"].remove(self._node(data, "First call"))
+        self._write_yaml(data)
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._projection_from_state(
+                {"trigger-1": "First call", "call-1": "Dial"}
+            )
+        )
+
+        first_call = os.path.join(self.folder, "functions", "first_call.py")
+        self.assertNotIn(first_call, conflicts)
+        code = self._read("reminders", "functions", "first_call.py")
+        self.assertFalse(resource_utils.contains_merge_conflict(code))
         self.assertIn("map_contacts", code)
 
     def test_format_pull_removes_the_unedited_file_of_a_removed_node(self):

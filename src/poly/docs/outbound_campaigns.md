@@ -16,7 +16,7 @@ outbound_campaigns/
 
 The folder name is the campaign's name, lowercased with punctuation replaced by `_`. A second campaign with the same name gets the end of its id added, as in `reminders-a1b2c3d4`. Renaming a campaign means changing `name` and renaming the folder to match. The campaign keeps its identity only when its nodes keep their names and types (the trigger may be renamed too); otherwise the push replaces it with a new campaign, so rename the folder in a push of its own.
 
-`poly revert outbound_campaigns/{campaign_name}/campaign.yaml` puts the whole file back as it was last pulled or pushed, including one a pull left with conflict markers.
+`poly revert outbound_campaigns/{campaign_name}/campaign.yaml` puts the whole file back as it was last pulled or pushed, including one a pull left with conflict markers. A plain `poly revert` puts back the nodes saved in that file and keeps nodes you added, unless the file can't be read, as when it has conflict markers: then it puts the whole file back too.
 
 ## campaign.yaml
 

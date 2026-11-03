@@ -1,6 +1,7 @@
 """Copyright PolyAI Limited"""
 
 import ast
+import datetime
 import keyword
 import logging
 import os
@@ -167,6 +168,8 @@ def _plain(value: Any) -> Any:
         return float(value)
     if isinstance(value, str):
         return str(value)
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.isoformat()
     return value
 
 
