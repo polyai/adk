@@ -129,14 +129,16 @@ class SetupRun:
         """Time a step and emit ``setup_step`` when the block ends, however it ends.
 
         An exception (including ``SystemExit``) records the step as failed with
-        the exception's class name and is re-raised.
+        the exception's class name and is re-raised, unless the block already
+        called :meth:`StepResult.failed` with the real cause.
         """
         result = StepResult()
         start = time.monotonic()
         try:
             yield result
         except BaseException as exc:
-            result.failed(type(exc).__name__)
+            if result.outcome != OUTCOME_FAILED:
+                result.failed(type(exc).__name__)
             raise
         finally:
             self._record(name, result, time.monotonic() - start)

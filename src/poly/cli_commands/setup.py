@@ -425,6 +425,7 @@ class SetupCommand(BaseCommand):
                     " 'poly setup'; if it keeps failing, run 'poly apikey --region"
                     f" {region}' to mint a new key."
                 )
+                step.failed(type(e).__name__)
                 sys.exit(1)
         elapsed_ms = int((time.monotonic() - started) * 1000)
         success(

@@ -587,6 +587,7 @@ class SetupVerifyStepTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
         self.assertIn("poly apikey --region studio", mock_error.call_args[0][0])
         self.assertNotIn("sk-minted", mock_error.call_args[0][0])
+        self.assertEqual((self.step.outcome, self.step.error_class), ("failed", "RuntimeError"))
 
     @patch("poly.cli_commands.setup.time.sleep")
     @patch("poly.output.console.info")
@@ -648,6 +649,8 @@ class SetupVerifyStepTest(unittest.TestCase):
         self.m["write_env"].assert_not_called()
         steps = [(e["step"], e["outcome"]) for e in _events(capture, "setup_step")]
         self.assertEqual(steps[-1], ("verify", "failed"))
+        # The cause, not the SystemExit that ended the run, is what the funnel sees.
+        self.assertEqual(_events(capture, "setup_step")[-1]["error_class"], "RuntimeError")
         self.assertEqual(_events(capture, "setup_completed"), [])
 
     def test_skip_verify_flag_is_parsed_and_forwarded(self):
