@@ -244,7 +244,7 @@ class SetupCommand(BaseCommand):
 
         # --- 6. Project setup ---
         with run.step("project") as step:
-            cls._setup_project(base_path, region, step)
+            cls._setup_project(base_path, region, step, account_id=account_id)
 
         run.completed()
         success("Setup complete.")
@@ -630,13 +630,21 @@ class SetupCommand(BaseCommand):
 
     @classmethod
     def _setup_project(
-        cls, base_path: str, region: str | None, step: StepResult | None = None
+        cls,
+        base_path: str,
+        region: str | None,
+        step: StepResult | None = None,
+        *,
+        account_id: str | None = None,
     ) -> None:
         """Create or connect a project, unless already inside one.
 
         Args:
             step: Telemetry record for this step, filled in with the outcome and
                 a ``created`` / ``connected`` / ``declined`` detail.
+            account_id: The account the auth step resolved, so a developer with more
+                than one account is not asked to pick it a second time. None when
+                authentication was skipped; the project commands then ask.
         """
         import sys
 
@@ -669,10 +677,10 @@ class SetupCommand(BaseCommand):
         ).ask()
 
         if choice == "create":
-            ProjectCommand.create_project(base_path, region=region)
+            ProjectCommand.create_project(base_path, region=region, account_id=account_id)
             step.done("created")
         elif choice == "init":
-            InitCommand.init_project(base_path, region=region)
+            InitCommand.init_project(base_path, region=region, account_id=account_id)
             step.done("connected")
         else:
             info("Project: skipped. Run 'poly project create' or 'poly init' when you are ready.")

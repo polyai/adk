@@ -24,7 +24,7 @@ The six steps, in order:
 3. **`POLY_API_KEY`** — offers to add one line exporting the account API key to your shell profile (or, on Windows, your user environment). This always asks separately, and is skipped when the profile already holds that value or when there is no terminal to ask; `poly apikey` writes it later in that case.
 4. **Shell completion** — installs tab completion for your shell. For bash and zsh this appends an `eval "$(poly completion <shell>)"` line to your rc file; for fish it writes `~/.config/fish/completions/poly.fish`. Skipped if already configured. See [`poly completion`](./completion.md) for the manual route.
 5. **AI agent skills** — installs the ADK skills into coding agents detected on your machine (Claude Code, Cursor, Codex, and others) via the `npx skills` package. Skipped with a warning if Node.js 18+ is not available — a missing Node never fails setup.
-6. **Project** — offers to create a new Agent Studio project or connect an existing one, as [`poly project create`](./project.md) and [`poly init`](./init.md) do. Skipped if the directory already contains a project.
+6. **Project** — offers to create a new Agent Studio project or connect an existing one, as [`poly project create`](./project.md) and [`poly init`](./init.md) do, in the account the sign-in step chose so you are not asked for it twice. Skipped if the directory already contains a project.
 
 | Flag | Description |
 |---|---|

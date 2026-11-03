@@ -955,8 +955,23 @@ class SetupProjectStepTest(unittest.TestCase):
 
         SetupCommand._setup_project(self.base_path, region="us-1")
 
-        self.mock_create.assert_called_once_with(self.base_path, region="us-1")
+        self.mock_create.assert_called_once_with(self.base_path, region="us-1", account_id=None)
         self.mock_init.assert_not_called()
+
+    def test_the_account_from_the_auth_step_is_passed_on_so_it_is_not_asked_twice(self):
+        """A developer with several accounts picked one at sign-in; the project step keeps it."""
+        self.mock_select.return_value.ask.return_value = "create"
+
+        SetupCommand._setup_project(self.base_path, region="us-1", account_id="acc-1")
+
+        self.mock_create.assert_called_once_with(self.base_path, region="us-1", account_id="acc-1")
+
+    def test_connecting_a_project_also_keeps_the_account(self):
+        self.mock_select.return_value.ask.return_value = "init"
+
+        SetupCommand._setup_project(self.base_path, region="uk-1", account_id="acc-1")
+
+        self.mock_init.assert_called_once_with(self.base_path, region="uk-1", account_id="acc-1")
 
     def test_choosing_connect_inits_an_existing_project(self):
         """Selecting 'init' delegates to project init with the setup region."""
@@ -964,7 +979,7 @@ class SetupProjectStepTest(unittest.TestCase):
 
         SetupCommand._setup_project(self.base_path, region="uk-1")
 
-        self.mock_init.assert_called_once_with(self.base_path, region="uk-1")
+        self.mock_init.assert_called_once_with(self.base_path, region="uk-1", account_id=None)
         self.mock_create.assert_not_called()
 
     def test_choosing_skip_leaves_the_directory_untouched(self):
@@ -1098,12 +1113,14 @@ class SetupTelemetryWiringTest(unittest.TestCase):
     def test_created_project_is_reported_as_created(self):
         """Choosing 'create' marks the project step done with the created detail."""
         self.mock_select.return_value.ask.return_value = "create"
-        with patch("poly.cli_commands.setup.ProjectCommand.create_project"):
+        with patch("poly.cli_commands.setup.ProjectCommand.create_project") as create:
             self._run_setup()
 
         [completed] = _events(self.capture, "setup_completed")
         self.assertEqual(completed["project"], "created")
         self.assertIn("project", completed["steps_done"])
+        # The account resolved at sign-in is the one the project is created in.
+        self.assertEqual(create.call_args.kwargs["account_id"], "acc-1")
 
     def test_sign_in_failure_records_the_step_as_failed_and_propagates(self):
         """A failing step is reported with its error class; no completed event follows."""
