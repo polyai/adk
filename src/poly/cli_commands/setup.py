@@ -220,13 +220,15 @@ class SetupCommand(BaseCommand):
                 step.skipped()
             with run.step("credentials") as step:
                 step.skipped()
-            account_key = None
+            account_key, fresh_key = None, False
         else:
-            region, account_id, account_key = cls._authenticate(region, account_id, run)
+            region, account_id, account_key, fresh_key = cls._authenticate(region, account_id, run)
 
         # --- 2. Verify: prove the account key before anything persistent uses it ---
         with run.step("verify") as step:
-            run.verify_ok = cls._verify(account_key, region, account_id, skip_verify, step)
+            run.verify_ok = cls._verify(
+                account_key, region, account_id, skip_verify, step, fresh=fresh_key
+            )
 
         # --- 3. POLY_API_KEY in the shell profile ---
         with run.step("environment") as step:
@@ -250,7 +252,7 @@ class SetupCommand(BaseCommand):
     @classmethod
     def _authenticate(
         cls, region: str | None, account_id: str | None, run: SetupRun
-    ) -> tuple[str, str | None, str | None]:
+    ) -> tuple[str, str | None, str | None, bool]:
         """Make sure `region` holds both an ADK key and an account API key.
 
         Signs in at most once, reusing the sign-in ``poly apikey`` keeps when it is
@@ -291,7 +293,7 @@ class SetupCommand(BaseCommand):
             with run.step("credentials") as step:
                 step.skipped()
             run.identify(stored_account["account_id"])
-            return region, stored_account["account_id"], stored_account["key"]
+            return region, stored_account["account_id"], stored_account["key"], False
 
         with run.step("signin"):
             jwt_token, sign_in_reused = cls._sign_in_or_reuse(region)
@@ -329,7 +331,7 @@ class SetupCommand(BaseCommand):
                     f"Account API key: existing '{stored_account['name'] or 'stored'}' key kept."
                 )
                 run.identify(stored_account["account_id"])
-                return region, stored_account["account_id"], stored_account["key"]
+                return region, stored_account["account_id"], stored_account["key"], False
 
             try:
                 account_id = resolve_account_id(
@@ -364,7 +366,7 @@ class SetupCommand(BaseCommand):
                         " If your next call fails, wait a moment and retry."
                     )
             run.identify(account_id)
-        return region, account_id, api_key
+        return region, account_id, api_key, not reused
 
     @classmethod
     def _verify(
@@ -374,6 +376,8 @@ class SetupCommand(BaseCommand):
         account_id: str | None,
         skip_verify: bool,
         step: StepResult | None = None,
+        *,
+        fresh: bool = False,
     ) -> bool | None:
         """Make one timed call to the public API with the account key and report it.
 
@@ -387,6 +391,9 @@ class SetupCommand(BaseCommand):
             account_id: The account the key is scoped to.
             skip_verify: ``--skip-verify``.
             step: Telemetry record for this step, filled in with the outcome.
+            fresh: Whether the key was minted this run. Only then is a refusal
+                retried, because the gateway can lag a few seconds behind the
+                platform; a stored key that is refused has been revoked.
 
         Returns:
             True when the call succeeded, None when it was skipped. Never False:
@@ -413,18 +420,28 @@ class SetupCommand(BaseCommand):
                 projects = api.get_projects_with_key(region, api_key, account_id)
                 break
             except Exception as e:
-                if _is_not_yet_valid(e) and time.monotonic() < deadline:
+                if fresh and _is_not_yet_valid(e) and time.monotonic() < deadline:
                     if not retrying:
-                        info("Verify: the new key is not active yet, retrying for a few seconds.")
+                        info(
+                            "Verify: the API does not know the new key yet, retrying for a moment."
+                        )
                         retrying = True
                     time.sleep(VERIFY_RETRY_INTERVAL_SECONDS)
                     continue
-                error(
-                    f"Verify: the account API key was refused by the {region} API ({e})."
-                    " Nothing else has been written with it. Wait a moment and re-run"
-                    " 'poly setup'; if it keeps failing, run 'poly apikey --region"
-                    f" {region}' to mint a new key."
-                )
+                if fresh:
+                    error(
+                        f"Verify: the new account API key was refused by the {region} API"
+                        f" ({e}). Nothing else has been written with it. Wait a moment and"
+                        " re-run 'poly setup'; if it keeps failing, run 'poly apikey"
+                        f" --region {region}' to mint a new key."
+                    )
+                else:
+                    error(
+                        f"Verify: the stored account API key was refused by the {region} API"
+                        f" ({e}). It may have been revoked. Nothing else has been written"
+                        f" with it. Run 'poly apikey --region {region}' to mint a new key,"
+                        " then re-run 'poly setup'."
+                    )
                 step.failed(type(e).__name__)
                 sys.exit(1)
         elapsed_ms = int((time.monotonic() - started) * 1000)

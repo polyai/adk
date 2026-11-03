@@ -543,8 +543,10 @@ class SetupVerifyStepTest(unittest.TestCase):
         self.m = _mock_auth(self)
         self.step = StepResult()
 
-    def _verify(self, api_key="sk-minted", account_id="acc-1", skip_verify=False):
-        return SetupCommand._verify(api_key, "studio", account_id, skip_verify, self.step)
+    def _verify(self, api_key="sk-minted", account_id="acc-1", skip_verify=False, fresh=True):
+        return SetupCommand._verify(
+            api_key, "studio", account_id, skip_verify, self.step, fresh=fresh
+        )
 
     @patch("poly.output.console.success")
     def test_calls_the_public_api_with_the_key_and_reports_the_account(self, mock_success):
@@ -606,7 +608,7 @@ class SetupVerifyStepTest(unittest.TestCase):
 
         self.assertEqual(self.m["api"].get_projects_with_key.call_count, 3)
         self.assertEqual(mock_sleep.call_count, 2)
-        notices = [c[0][0] for c in mock_info.call_args_list if "not active yet" in c[0][0]]
+        notices = [c[0][0] for c in mock_info.call_args_list if "does not know the new key" in c[0][0]]
         self.assertEqual(len(notices), 1)
         self.assertIn("1 agent,", mock_success.call_args[0][0])
         self.assertEqual(self.step.outcome, "done")
@@ -622,7 +624,26 @@ class SetupVerifyStepTest(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 1)
         self.assertGreater(self.m["api"].get_projects_with_key.call_count, 1)
-        self.assertIn("refused", mock_error.call_args[0][0])
+        self.assertIn("new account API key was refused", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.setup.time.sleep")
+    @patch("poly.output.console.error")
+    def test_a_stored_key_that_is_refused_is_not_retried_and_names_revocation(
+        self, mock_error, mock_sleep
+    ):
+        """A key read back from the credentials file has had time to activate."""
+        self.m["api"].get_projects_with_key.side_effect = _unauthorized()
+
+        with self.assertRaises(SystemExit):
+            self._verify(fresh=False)
+
+        self.m["api"].get_projects_with_key.assert_called_once()
+        mock_sleep.assert_not_called()
+        message = mock_error.call_args[0][0]
+        self.assertIn("stored account API key was refused", message)
+        self.assertIn("revoked", message)
+        self.assertIn("poly apikey --region studio", message)
+        self.assertEqual((self.step.outcome, self.step.error_class), ("failed", "HTTPError"))
 
     @patch("poly.cli_commands.setup.time.sleep")
     def test_a_non_auth_error_is_not_retried(self, mock_sleep):
