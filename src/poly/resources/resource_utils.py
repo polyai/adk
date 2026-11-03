@@ -13,30 +13,91 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import types
 import typing
 from dataclasses import fields, is_dataclass
 from difflib import unified_diff
 from enum import Enum
-from io import StringIO
-from typing import TYPE_CHECKING, Callable, Optional, Union
+from typing import TYPE_CHECKING, Callable, Optional, TypeVar, Union
 
-import ruamel.yaml as yaml
+import yaml
+from ruamel.yaml import YAML
+from ruamel.yaml.nodes import ScalarNode
+from ruamel.yaml.resolver import VersionedResolver
+
+try:
+    import ryaml
+except ImportError:  # No ryaml wheel for this platform
+    ryaml = None
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 if TYPE_CHECKING:
     from poly.resources.flows import BaseFlowStep
     from poly.resources.resource import ResourceMapping
 
-# Create YAML instances with block style for multiline strings
-_yaml_dumper = yaml.YAML()
-_yaml_dumper.default_flow_style = False
-_yaml_dumper.preserve_quotes = False
-_yaml_dumper.width = 100
+_STR_TAG = "tag:yaml.org,2002:str"
+# Long strings stay on one line, so a wrap never lands next to whitespace that a formatter such
+# as prettier would then trim from the line end.
+_NO_WRAP = 1_000_000_000
+# ruamel's resolver is the strictest reader of these files we support (older ADK versions use
+# it), so any string it would read as another type is written quoted.
+_resolver = VersionedResolver()
+_fallback_loader = YAML(typ="safe")
 
-_yaml_loader = yaml.YAML(typ="safe")
-_yaml_loader.preserve_quotes = False
+
+def _reads_as_other_type(value: str) -> bool:
+    return _resolver.resolve(ScalarNode, value, (True, False)) != _STR_TAG
+
+
+class _DumperMixin:
+    def ignore_aliases(self, data) -> bool:
+        """Write shared objects out in full rather than as anchors and aliases."""
+        return True
+
+
+class _Dumper(_DumperMixin, yaml.CSafeDumper if hasattr(yaml, "CSafeDumper") else yaml.SafeDumper):
+    pass
+
+
+# libyaml's emitter escapes the whole string when it holds characters beyond U+FFFF (emoji) or a
+# tab, so data holding either goes through PyYAML's pure-Python emitter instead.
+class _PureDumper(_DumperMixin, yaml.SafeDumper):
+    def analyze_scalar(self, scalar):
+        """Allow tabs inside block scalars, as YAML does, unless a line starts with one."""
+        lines = scalar.split("\n")
+        if len(lines) > 1 and "\t" in scalar and not any(line.startswith("\t") for line in lines):
+            analysis = super().analyze_scalar(scalar.replace("\t", " "))
+            analysis.scalar = scalar
+            return analysis
+        return super().analyze_scalar(scalar)
+
+
+def _needs_pure_emitter(data) -> bool:
+    if isinstance(data, str):
+        return bool(data) and (max(data) > "\uffff" or ("\t" in data and "\n" in data))
+    if isinstance(data, dict):
+        return any(_needs_pure_emitter(k) or _needs_pure_emitter(v) for k, v in data.items())
+    if isinstance(data, (list, tuple)):
+        return any(_needs_pure_emitter(item) for item in data)
+    return False
+
+
+def _represent_str(dumper, value: str):
+    if "\n" in value:
+        return dumper.represent_scalar(_STR_TAG, value, style="|")
+    if _reads_as_other_type(value):
+        return dumper.represent_scalar(_STR_TAG, value, style="'")
+    return dumper.represent_scalar(_STR_TAG, value)
+
+
+for _cls in (_Dumper, _PureDumper):
+    _cls.add_representer(str, _represent_str)
+    _cls.add_representer(type(None), lambda d, _: d.represent_scalar("tag:yaml.org,2002:null", ""))
+    _cls.add_representer(tuple, yaml.SafeDumper.represent_list)
 
 
 @functools.cache
@@ -81,38 +142,27 @@ def _serialize_value(value):
     return value
 
 
-def _key_needs_quoting(key: str) -> bool:
-    """Return True if a YAML key should be quoted to avoid parse errors."""
-    return "&" in key or "*" in key
+def strip_strings(data):
+    """Recursively strip whitespace from the ends of strings and of each line in them.
 
-
-def _prepare_yaml_data(data):
-    """Recursively prepare data for YAML dumping in a single pass.
-
-    - Quote dict keys containing & or * (YAML anchor/alias indicators)
-    - Set block style (|) for multiline strings
-    - Force double quotes on ambiguous scalar values
+    A line ending in whitespace, or a string holding U+FEFF (an invisible character pasted in from
+    some editors), can't be written as a YAML block scalar, so both are removed to keep multiline
+    strings readable.
     """
     if isinstance(data, dict):
-        result = {}
-        for k, v in data.items():
-            new_key = (
-                yaml.scalarstring.DoubleQuotedScalarString(k)
-                if isinstance(k, str) and _key_needs_quoting(k)
-                else k
-            )
-            if isinstance(v, str) and "\n" in v:
-                result[new_key] = yaml.scalarstring.LiteralScalarString(v)
-            else:
-                result[new_key] = _prepare_yaml_data(v)
-        return result
-    elif isinstance(data, list):
-        return [_prepare_yaml_data(item) for item in data]
+        return {k: strip_strings(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [strip_strings(item) for item in data]
+    if isinstance(data, str):
+        stripped = data.replace("\ufeff", "").strip()
+        if "\n" in stripped:
+            return "\n".join(line.rstrip() for line in stripped.split("\n"))
+        return stripped
     return data
 
 
 def dump_yaml(data, stream=None):
-    """Dump data to YAML format with block style for multiline strings.
+    """Dump data to YAML, with block style for multiline strings.
 
     Args:
         data: Data structure to dump.
@@ -121,14 +171,15 @@ def dump_yaml(data, stream=None):
     Returns:
         str: YAML string if stream is None, otherwise None.
     """
-    data = _prepare_yaml_data(data)
-    if stream is None:
-        stream = StringIO()
-        _yaml_dumper.dump(data, stream)
-        return stream.getvalue()
-    else:
-        _yaml_dumper.dump(data, stream)
-        return None
+    return yaml.dump(
+        data,
+        stream,
+        Dumper=_PureDumper if _needs_pure_emitter(data) else _Dumper,
+        sort_keys=False,
+        default_flow_style=False,
+        allow_unicode=True,
+        width=_NO_WRAP,
+    )
 
 
 def load_yaml(content):
@@ -140,7 +191,12 @@ def load_yaml(content):
     Returns:
         Parsed YAML data.
     """
-    return _yaml_loader.load(content)
+    if not isinstance(content, str):
+        content = content.read()
+    if ryaml is not None:
+        # ryaml reads a byte order mark as the start of a second document
+        return ryaml.loads(content.removeprefix("\ufeff"))
+    return _fallback_loader.load(content)
 
 
 def same_yaml_data(a, b) -> bool:
@@ -327,6 +383,66 @@ def validate_references(
     return len(invalid_references) == 0, invalid_references
 
 
+class _ThreadMappingsMemo(threading.local):
+    """Holds each thread's own memo for memo_for_mappings."""
+
+    def __init__(self) -> None:
+        # (mappings, len(mappings), {key: table}) for the last mappings list this thread passed.
+        self.memo: tuple[Optional[list], int, dict] = (None, 0, {})
+
+
+_thread_mappings_memo = _ThreadMappingsMemo()
+
+
+def memo_for_mappings(
+    mappings: list["ResourceMapping"], key: typing.Hashable, build: Callable[[], _T]
+) -> _T:
+    """Return build(), reusing the result while the same mappings list is passed again.
+
+    A table derived from the mappings is cached under `key` for as long as calls pass the
+    same list object at the same length; any other list starts a fresh cache. Each thread
+    keeps its own cache, so threads never share or evict each other's tables. A mappings
+    list may be extended between calls but must not be edited in place, and callers must not
+    mutate the returned table.
+
+    Args:
+        mappings: The resource mappings the table is derived from.
+        key: Identifies the table among those derived from the same mappings.
+        build: Builds the table from the mappings.
+
+    Returns:
+        The table built by build(), possibly from an earlier call.
+    """
+    if not mappings or not isinstance(mappings, list):
+        return build()
+    memo = _thread_mappings_memo.memo
+    if memo[0] is not mappings or memo[1] != len(mappings):
+        memo = (mappings, len(mappings), {})
+        _thread_mappings_memo.memo = memo
+    tables = memo[2]
+    if key not in tables:
+        tables[key] = build()
+    return tables[key]
+
+
+def _build_reference_lookup(
+    resource_mappings: list["ResourceMapping"],
+    flow_folder_name: Optional[str],
+    names_to_ids: bool,
+) -> dict[tuple[str, str], str]:
+    """Build the (prefix, from) -> to lookup used by _build_reference_replacer."""
+    lookup: dict[tuple[str, str], str] = {}
+    for rm in resource_mappings:
+        if rm.flow_name and clean_name(rm.flow_name) not in (None, flow_folder_name):
+            continue
+        if rm.resource_prefix:
+            if names_to_ids:
+                lookup[(rm.resource_prefix, rm.resource_name)] = rm.resource_id
+            else:
+                lookup[(rm.resource_prefix, rm.resource_id)] = rm.resource_name
+    return lookup
+
+
 def _build_reference_replacer(
     resource_mappings: list["ResourceMapping"],
     flow_folder_name: str = None,
@@ -340,16 +456,11 @@ def _build_reference_replacer(
         flow_folder_name: Restricts flow-scoped mappings to the current flow.
         names_to_ids: When True, map names -> ids; when False, ids -> names.
     """
-    # Build dict for O(1) lookups: (prefix, from) -> to
-    lookup: dict[tuple[str, str], str] = {}
-    for rm in resource_mappings:
-        if rm.flow_name and clean_name(rm.flow_name) not in (None, flow_folder_name):
-            continue
-        if rm.resource_prefix:
-            if names_to_ids:
-                lookup[(rm.resource_prefix, rm.resource_name)] = rm.resource_id
-            else:
-                lookup[(rm.resource_prefix, rm.resource_id)] = rm.resource_name
+    lookup = memo_for_mappings(
+        resource_mappings,
+        ("refs", flow_folder_name, names_to_ids),
+        lambda: _build_reference_lookup(resource_mappings, flow_folder_name, names_to_ids),
+    )
 
     def _replacer(match: re.Match) -> str:
         key = (match.group(1), match.group(2))
@@ -590,7 +701,7 @@ def format_code_with_ruff(code: str, file_name: str) -> str:
 
 
 def format_yaml(yaml_content: str, file_name: str) -> str:
-    """Format YAML content using ruamel.yaml (no external tools).
+    """Format YAML content (no external tools).
 
     Args:
         yaml_content: Raw YAML string.
@@ -602,7 +713,7 @@ def format_yaml(yaml_content: str, file_name: str) -> str:
         data = load_yaml(yaml_content)
         if data is None:
             return yaml_content
-        return dump_yaml(data)
+        return dump_yaml(strip_strings(data))
     except Exception:
         return yaml_content
 
@@ -750,21 +861,31 @@ def _matches_scalar(value: object, expected: type) -> bool:
     return isinstance(value, expected)
 
 
+@functools.cache
+def _field_type_hints(cls: type) -> tuple[tuple[str, object, tuple, tuple], ...]:
+    """Return (field name, unwrapped hint, list args, dict args) for each dataclass field."""
+    hints = typing.get_type_hints(cls)
+    plan = []
+    for f in fields(cls):
+        hint = _unwrap_optional(hints.get(f.name, type(None)))
+        list_args = typing.get_args(hint) if typing.get_origin(hint) is list else ()
+        dict_args = typing.get_args(hint) if typing.get_origin(hint) is dict else ()
+        plan.append((f.name, hint, list_args, dict_args))
+    return tuple(plan)
+
+
 def check_yaml_field_types(instance: object, _path: str = "") -> None:
     """Validate that scalar and list[scalar] fields have the correct type after YAML parsing."""
-    hints = typing.get_type_hints(type(instance))
-    for f in fields(instance):
-        value = getattr(instance, f.name)
+    for name, hint, list_args, dict_args in _field_type_hints(type(instance)):
+        value = getattr(instance, name)
         if value is None:
             continue
-        hint = _unwrap_optional(hints.get(f.name, type(None)))
-        field_path = f"{_path}.{f.name}" if _path else f.name
+        field_path = f"{_path}.{name}" if _path else name
 
         if hint in _SCALAR_TYPES and not _matches_scalar(value, hint):
             raise ValueError(
                 f"'{field_path}' should be {hint.__name__} but got {type(value).__name__}."
             )
-        list_args = typing.get_args(hint) if typing.get_origin(hint) is list else ()
         if list_args and list_args[0] in _SCALAR_TYPES:
             expected_item_type = list_args[0]
             if not isinstance(value, list):
@@ -778,7 +899,6 @@ def check_yaml_field_types(instance: object, _path: str = "") -> None:
                         f"'{field_path}[{i}]' should be {expected_item_type.__name__} "
                         f"but got {type(item).__name__}."
                     )
-        dict_args = typing.get_args(hint) if typing.get_origin(hint) is dict else ()
         if len(dict_args) == 2 and isinstance(value, dict):
             key_type, val_type = dict_args
             for k, v in value.items():

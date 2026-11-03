@@ -15,7 +15,7 @@ poly format --path /path/to/project
 poly format --check
 ~~~
 
-By default, applies fixes: `ruff check --fix` and `ruff format` for Python, and in-process `ruamel.yaml`/stdlib formatting for YAML/JSON. Use `--check` to only verify without writing changes. Use `--ty` to also run type checking (via `ty`) after formatting.
+By default, applies fixes: `ruff check --fix` and `ruff format` for Python, and in-process formatting for YAML and JSON. Use `--check` to only verify without writing changes. Use `--ty` to also run type checking (via `ty`) after formatting.
 
 | Flag | Description |
 |---|---|
