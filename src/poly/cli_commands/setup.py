@@ -2,7 +2,8 @@
 
 Runs the full first-run sequence — authentication, shell completion, AI agent
 skills, and project setup — skipping any step that is already done, so it is
-safe to re-run at any time.
+safe to re-run at any time. Each run reports start, per-step outcome and
+completion to PostHog unless the user opted out (see ``poly.setup.telemetry``).
 
 Copyright PolyAI Limited
 """
@@ -18,6 +19,7 @@ from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.cli_commands.skills import install_skills, node_gate_reason
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE
+from poly.setup.telemetry import SetupRun, StepResult, detect_mode
 from poly.utils import any_credentials_exist
 
 logger = logging.getLogger(__name__)
@@ -140,36 +142,61 @@ class SetupCommand(BaseCommand):
         )
         plain("")
 
-        # --- 1. Authentication ---
-        if skip_auth:
-            info("Authentication: skipped (--skip-auth).")
-        elif any_credentials_exist():
-            success("Authentication: existing credentials found — skipping.")
+        had_credentials = any_credentials_exist()
+        run = SetupRun(region=region, mode=detect_mode())
+        run.started(had_credentials=had_credentials)
+
+        # --- 1. Authentication: sign in, then fetch or create the key ---
+        if skip_auth or had_credentials:
+            if skip_auth:
+                info("Authentication: skipped (--skip-auth).")
+            else:
+                success("Authentication: existing credentials found — skipping.")
+            with run.step("signin") as step:
+                step.skipped()
+            with run.step("credentials") as step:
+                step.skipped()
         else:
-            if region is None:
-                region = _select_region()
-            jwt_access_token = _signin(region)
-            _authenticate_and_save_key(jwt_access_token, region=region)
+            with run.step("signin"):
+                if region is None:
+                    region = _select_region()
+                run.region = region
+                jwt_access_token = _signin(region)
+            with run.step("credentials"):
+                accounts = _authenticate_and_save_key(jwt_access_token, region=region)
+                # The PAT path does not pick an account; with exactly one there is no
+                # ambiguity. Multi-account runs stay anonymous until the credentials
+                # step resolves one.
+                if len(accounts) == 1:
+                    run.identify(next(iter(accounts)))
 
         # --- 2. Shell completion ---
-        cls._install_completion()
+        with run.step("completion") as step:
+            cls._install_completion(step)
 
         # --- 3. AI agent skills ---
-        cls._install_skills(skip_skills, agents, dev, global_install)
+        with run.step("skills") as step:
+            cls._install_skills(skip_skills, agents, dev, global_install, step)
 
         # --- 4. Project setup ---
-        cls._setup_project(base_path, region)
+        with run.step("project") as step:
+            cls._setup_project(base_path, region, step)
 
+        run.completed()
         success("Setup complete.")
 
     @classmethod
-    def _install_completion(cls) -> None:
+    def _install_completion(cls, step: StepResult | None = None) -> None:
         """Install shell completion for the user's shell, if not already installed.
 
         Never raises — completion is a convenience and must not abort setup.
+
+        Args:
+            step: Telemetry record for this step, filled in with the outcome.
         """
         from poly.output.console import info, success, warning
 
+        step = step or StepResult()
         shell = Path(os.environ.get("SHELL", "")).name
         try:
             if shell in _SHELL_RC_FILES:
@@ -177,6 +204,7 @@ class SetupCommand(BaseCommand):
                 existing = rc_path.read_text(encoding="utf-8") if rc_path.exists() else ""
                 if COMPLETION_MARKER in existing or "poly completion" in existing:
                     success(f"Shell completion: already configured in {rc_path} — skipping.")
+                    step.skipped()
                     return
                 with open(rc_path, "a", encoding="utf-8") as f:
                     f.write(f'\n{COMPLETION_MARKER}\neval "$(poly completion {shell})"\n')
@@ -185,6 +213,7 @@ class SetupCommand(BaseCommand):
                 completion_path = Path(_FISH_COMPLETION_PATH).expanduser()
                 if completion_path.exists():
                     success(f"Shell completion: {completion_path} already exists — skipping.")
+                    step.skipped()
                     return
                 import argcomplete
 
@@ -199,12 +228,14 @@ class SetupCommand(BaseCommand):
                     f" {shell or '(unknown)'} — skipping."
                     " See 'poly completion --help' to set it up manually."
                 )
+                step.skipped()
         except Exception as e:
             logger.debug("Completion install failed: %s", e)
             warning(
                 "Shell completion: could not install automatically."
                 " See 'poly completion --help' to set it up manually."
             )
+            step.failed(type(e).__name__)
 
     @classmethod
     def _install_skills(
@@ -213,12 +244,19 @@ class SetupCommand(BaseCommand):
         agents: list[str] | None,
         dev: bool,
         global_install: bool,
+        step: StepResult | None = None,
     ) -> None:
-        """Install AI agent skills. Non-fatal: failure warns and setup continues."""
+        """Install AI agent skills. Non-fatal: failure warns and setup continues.
+
+        Args:
+            step: Telemetry record for this step, filled in with the outcome.
+        """
         from poly.output.console import info, success, warning
 
+        step = step or StepResult()
         if skip_skills:
             info("AI skills: skipped (--skip-skills).")
+            step.skipped()
             return
 
         gate_reason = node_gate_reason()
@@ -227,6 +265,7 @@ class SetupCommand(BaseCommand):
                 f"AI skills: skipped — {gate_reason}."
                 " Install Node.js 18+ and re-run 'poly setup' to add them."
             )
+            step.skipped()
             return
 
         info("AI skills: installing into detected coding agents...")
@@ -235,19 +274,29 @@ class SetupCommand(BaseCommand):
             success("AI skills: installed.")
         else:
             warning("AI skills: installation failed. Re-run 'poly setup' to retry.")
+            step.failed("npx_failed")
 
     @classmethod
-    def _setup_project(cls, base_path: str, region: str | None) -> None:
-        """Create or connect a project, unless already inside one."""
+    def _setup_project(
+        cls, base_path: str, region: str | None, step: StepResult | None = None
+    ) -> None:
+        """Create or connect a project, unless already inside one.
+
+        Args:
+            step: Telemetry record for this step, filled in with the outcome and
+                a ``created`` / ``connected`` / ``declined`` detail.
+        """
         import sys
 
         import questionary
 
         from poly.output.console import info, success
 
+        step = step or StepResult()
         for marker in (PROJECT_CONFIG_FILE, STATUS_FILE):
             if os.path.exists(os.path.join(base_path, marker)):
                 success("Project: already inside an ADK project — skipping.")
+                step.skipped()
                 return
 
         if not sys.stdin.isatty():
@@ -255,6 +304,7 @@ class SetupCommand(BaseCommand):
                 "Project: skipped (not an interactive terminal). Run"
                 " 'poly project create' or 'poly init' to set one up."
             )
+            step.skipped()
             return
 
         choice = questionary.select(
@@ -268,7 +318,10 @@ class SetupCommand(BaseCommand):
 
         if choice == "create":
             ProjectCommand.create_project(base_path, region=region)
+            step.done("created")
         elif choice == "init":
             InitCommand.init_project(base_path, region=region)
+            step.done("connected")
         else:
             info("Project: skipped. Run 'poly project create' or 'poly init' when you are ready.")
+            step.declined("declined")
