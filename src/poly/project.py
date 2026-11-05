@@ -2423,10 +2423,15 @@ class AgentStudioProject:
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
         if resource_class == OutboundCampaign:
+            saved_campaign = (
+                original_resource if isinstance(original_resource, OutboundCampaign) else None
+            )
             additional_kwargs["known_identity"] = (
-                original_resource.identity
-                if isinstance(original_resource, OutboundCampaign)
-                else None
+                saved_campaign.identity if saved_campaign else None
+            )
+            additional_kwargs["known_status"] = saved_campaign.status if saved_campaign else None
+            additional_kwargs["known_settings"] = (
+                saved_campaign.settings if saved_campaign else None
             )
             additional_kwargs["had_trigger"] = any(
                 node.campaign_id == resource.resource_id and node.data.get("type") == "trigger"
@@ -2728,7 +2733,9 @@ class AgentStudioProject:
         self._keep_campaign_trigger_ids(
             node_types, new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
         )
-        self._key_new_campaign_functions(new_resource_mappings, kept_resource_mappings)
+        self._key_campaign_functions(
+            new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
+        )
         return new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
 
     def _keep_campaign_trigger_ids(
@@ -2788,12 +2795,17 @@ class AgentStudioProject:
                 deleted_resource_mappings.append(replace(mapping))
             mapping.resource_id = trigger_id
 
-    @staticmethod
-    def _key_new_campaign_functions(
+    def _key_campaign_functions(
+        self,
         new_resource_mappings: list[ResourceMapping],
         kept_resource_mappings: list[ResourceMapping],
+        deleted_resource_mappings: list[ResourceMapping],
     ) -> None:
-        """Give each new campaign function file its node's id, as pull does."""
+        """Give each campaign function file its node's id, as pull does.
+
+        A file keyed by its node can change id when its node does, as when a new node takes
+        a renamed trigger's old name, so each file is sorted again into new, kept or deleted.
+        """
         node_ids = {
             (campaign_folder_of(mapping.file_path), function_file_stem(mapping.resource_name)): (
                 mapping.resource_id
@@ -2801,12 +2813,37 @@ class AgentStudioProject:
             for mapping in new_resource_mappings + kept_resource_mappings
             if mapping.resource_type is OutboundCampaignNode
         }
-        for mapping in new_resource_mappings:
-            if mapping.resource_type is OutboundCampaignFunction:
-                mapping.resource_id = node_ids.get(
-                    (campaign_folder_of(mapping.file_path), mapping.resource_name),
-                    mapping.resource_id,
-                )
+        saved = self.resources.get(OutboundCampaignFunction, {})
+        functions = [
+            mapping
+            for mapping in new_resource_mappings + kept_resource_mappings
+            if mapping.resource_type is OutboundCampaignFunction
+        ]
+        before = {mapping.resource_id: replace(mapping) for mapping in functions}
+        for mapping in functions:
+            for mappings in (new_resource_mappings, kept_resource_mappings):
+                if mapping in mappings:
+                    mappings.remove(mapping)
+            mapping.resource_id = node_ids.get(
+                (campaign_folder_of(mapping.file_path), mapping.resource_name),
+                mapping.resource_id,
+            )
+            (
+                kept_resource_mappings if mapping.resource_id in saved else new_resource_mappings
+            ).append(mapping)
+        taken = {mapping.resource_id for mapping in functions}
+        deleted_resource_mappings[:] = [
+            mapping
+            for mapping in deleted_resource_mappings
+            if mapping.resource_type is not OutboundCampaignFunction
+            or mapping.resource_id not in taken
+        ]
+        deleted = {mapping.resource_id for mapping in deleted_resource_mappings}
+        deleted_resource_mappings.extend(
+            mapping
+            for resource_id, mapping in before.items()
+            if resource_id in saved and resource_id not in taken | deleted
+        )
 
     @staticmethod
     def generate_uuid(resource_type: type[Resource]) -> str:
@@ -3378,9 +3415,11 @@ class AgentStudioProject:
         """
         validation_errors = [
             f"Validation error: {error}"
-            for resource_type in deleted_resources or {}
+            for resource_type in {**(new_resources or {}), **(deleted_resources or {})}
             if issubclass(resource_type, Resource)
-            for error in resource_type.validate_deletions(new_resources or {}, deleted_resources)
+            for error in resource_type.validate_creates_and_deletes(
+                new_resources or {}, deleted_resources or {}
+            )
         ]
         for resource_type, resources in resources_dict.items():
             for resource_id, resource in resources.items():

@@ -94,6 +94,7 @@ from poly.resources.outbound_campaign import (
     OutboundCampaignFunction,
     OutboundCampaignNode,
     OutboundCampaignSettings,
+    campaign_names,
     def_line_error,
     function_file_stem,
     function_parameters,
@@ -15433,6 +15434,17 @@ class OutboundCampaignTests(unittest.TestCase):
         end = nodes["CMPGN-ONE:end-1"]
         named = dataclasses.replace(end, platform_label=None)
         self.assertNotEqual(end.compute_hash(), named.compute_hash())
+
+    def test_a_campaign_whose_name_is_already_unique_keeps_it(self):
+        names = campaign_names(
+            [
+                {"id": "A", "name": "Foo", "createdAt": "2026-01-02"},
+                {"id": "B", "name": "Foo (1)", "createdAt": "2026-01-03"},
+                {"id": "C", "name": "Foo", "createdAt": "2026-01-01"},
+            ]
+        )
+
+        self.assertEqual(names, {"C": "Foo", "B": "Foo (1)", "A": "Foo (2)"})
 
     def test_call_and_sms_routes_from_the_platform_are_dropped(self):
         """Calls and texts route only by defaultRoute; the platform still sends empty routes."""

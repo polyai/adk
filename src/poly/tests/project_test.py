@@ -41,6 +41,7 @@ from poly.resources import (
     KeyphraseBoosting,
     MCPServer,
     OutboundCampaign,
+    OutboundCampaignFunction,
     OutboundCampaignNode,
     Pronunciation,
     Resource,
@@ -8703,6 +8704,34 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             os.path.join(self.folder, "functions", f"{resource_utils.clean_name(name)}.py"),
         )
 
+    def test_new_node_at_the_old_trigger_name_keeps_both_function_files(self):
+        self._rename_trigger("Start")
+        data = self._yaml()
+        data["nodes"].append(
+            {
+                "name": "Trigger",
+                "type": "call",
+                "flowName": "Booking",
+                "function": {"name": "call_args", "description": ""},
+                "greeting": "Hi",
+                "voicemailEnabled": False,
+                "maxAttempts": 1,
+                "backoff": 1,
+                "backoffUnit": "hours",
+                "defaultRoute": "End",
+            }
+        )
+        self._write_yaml(data)
+        self._write_function("trigger", "def call_args(outbound_contact, outbound_campaign):\n    return {}\n")
+
+        success, message = self._push_for_real()
+
+        self.assertTrue(success, message)
+        functions = self.project.resources[OutboundCampaignFunction]
+        self.assertEqual(sorted(f.name for f in functions.values()), ["start", "trigger"])
+        self.assertEqual(functions["CMPGN-ONE:trigger-1"].name, "start")
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
     def test_renaming_the_trigger_updates_it_under_its_old_id(self):
         """Agent Studio refuses to delete a campaign's only trigger."""
         self._rename_trigger("Start")
@@ -9388,6 +9417,41 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             [command_type for command_type, _ in self._push()], ["outbound_campaign_update"]
         )
 
+    def _pull_with_unknown_setting(self) -> dict:
+        projection = _campaign_projection()
+        self._entity(projection)["settings"]["quietHours"] = {"start": "21:00"}
+        self._pull_into_new_project(projection)
+        return self._yaml()
+
+    def test_settings_change_with_settings_the_adk_does_not_know_is_refused(self):
+        for key, value in (("quietHours", {"start": "22:00"}), ("country", "GB")):
+            with self.subTest(key=key):
+                data = self._pull_with_unknown_setting()
+                data["settings"][key] = value
+                self._write_yaml(data)
+
+                self._assert_push_refused(
+                    "Settings quietHours can't be sent from the ADK, and a settings change "
+                    "replaces them all."
+                )
+
+    def test_new_campaign_with_settings_the_adk_does_not_know_is_refused(self):
+        data = self._pull_with_unknown_setting()
+        self._write_yaml(
+            {**data, "name": "Renewals"}, os.path.join(self.root, "outbound_campaigns", "renewals")
+        )
+
+        self._assert_push_refused("Settings quietHours can't be sent from the ADK")
+
+    def test_renamed_folder_with_settings_the_adk_does_not_know_pushes(self):
+        self._pull_with_unknown_setting()
+        self._rename_campaign("Monthly", "monthly")
+
+        self.assertEqual(self.project.validate_project(), [])
+        self.assertEqual(
+            [command_type for command_type, _ in self._push()], ["outbound_campaign_update"]
+        )
+
     def _pull_published(self) -> None:
         projection = _campaign_projection()
         self._entity(projection)["status"] = "active"
@@ -9402,6 +9466,18 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             "`poly campaign pause` then `poly campaign archive`"
         )
 
+    def test_published_campaign_folder_removed_after_a_push_is_refused(self):
+        self._pull_published()
+        data = self._yaml()
+        data["description"] = "Edited"
+        self._write_yaml(data)
+        success, message = self._push_for_real()
+        self.assertTrue(success, message)
+        self._handler_patch.stop()
+        shutil.rmtree(self.folder)
+
+        self._assert_push_refused("'Reminders' has been published, so it can't be deleted.")
+
     def test_published_campaign_keeps_its_status_out_of_the_file(self):
         self._pull_published()
 
@@ -9413,6 +9489,15 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         data = self._yaml()
         self._node(data, "Trigger")["sourceType"] = "api"
         self._write_yaml(data)
+
+        self._assert_push_refused("The contact source stays 'csv' once the campaign has been published.")
+
+    def test_published_trigger_source_type_change_with_a_folder_rename_is_refused(self):
+        self._pull_published()
+        data = self._rename_campaign("Monthly", "monthly")
+        self._node(data, "Trigger")["sourceType"] = "api"
+        self._write_yaml(data)
+        self._write_function("trigger", "def map_contacts(outbound_campaign, sync):\n    return {}\n")
 
         self._assert_push_refused("The contact source stays 'csv' once the campaign has been published.")
 
