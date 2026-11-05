@@ -31,10 +31,10 @@ class SIPTrunksCommand(BaseCommand):
                 "Manage account-level SIP trunks and extension routing.\n\n"
                 "Account and region are read from the selected ADK project.\n\n"
                 "Examples:\n"
-                "  adk sip-trunks manage\n"
-                "  adk sip-trunks list --output\n"
-                "  adk sip-trunks get <trunk-id>\n"
-                "  adk sip-trunks delete <trunk-id>\n"
+                "  poly sip-trunks manage\n"
+                "  poly sip-trunks list --output\n"
+                "  poly sip-trunks get <trunk-id>\n"
+                "  poly sip-trunks delete <trunk-id>\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
