@@ -4240,9 +4240,8 @@ class AgentStudioProject:
         except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
             return [f"Invalid schema: {e}"]
 
-    # SIP trunks belong to an account and region. Pass the scope resolved from
-    # the selected project without initializing branch synchronization through
-    # self.api_handler.
+    # These account-level APIs bypass self.api_handler because it initializes
+    # project branch synchronization.
 
     @staticmethod
     def build_sip_trunk_plan(
