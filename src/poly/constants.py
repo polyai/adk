@@ -74,3 +74,36 @@ PERMISSIONS = [
     "webchat_configurations",
     "csat",
 ]
+
+# Data API enums. These mirror the service's request schemas for the metrics
+# routes; it rejects anything else with a 400, so the ADK checks them first.
+DATA_CHANNELS = ["VOICE-SIP", "CHAT", "WEBCHAT", "SMS", "RCS"]
+DATA_CLIENT_ENVS = ["test", "sandbox", "pre-release", "live", "scenarios"]
+DATA_INTERVALS = ["hourly", "daily", "weekly", "monthly"]
+DATA_AGGS = [
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "p50",
+    "p95",
+    "p99",
+    "conversation_count",
+    "distinct_count",
+]
+DATA_GROUP_BY = [
+    "project_id",
+    "channel",
+    "deployment_id",
+    "variant_id",
+    "client_env",
+    "experiment_id",
+    "experiment_version_id",
+    "value_string",
+]
+DATA_FILTER_OPS = ["eq", "gt", "gte", "lt", "lte", "in", "ex", "exists"]
+DATA_LIST_OPS = ("in", "ex")
+DATA_HAVING_OPS = ["eq", "gt", "gte", "lt", "lte"]
+DATA_MAX_LIMIT = 100
+DATA_MAX_OFFSET = 1000
+DATA_RATE_LIMIT_PER_MINUTE = 100

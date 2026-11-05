@@ -16,7 +16,9 @@ from poly.output.console import (
     mask_api_key,
     mask_secret,
     paged_output,
+    print_aggregate,
     print_archived_branches,
+    print_available_metrics,
     print_branch_history,
     print_experiment_detail,
     print_experiments,
@@ -686,3 +688,70 @@ class PrintExperimentDetailTest(unittest.TestCase):
         output = self._render(experiment)
 
         self.assertIn("(— traffic)", output)
+
+
+class PrintAvailableMetricsTest(unittest.TestCase):
+    """Tests for print_available_metrics, the `metrics available` table."""
+
+    def _render(self, metrics: list[dict]) -> str:
+        with console.capture() as capture:
+            print_available_metrics(metrics)
+        return capture.get()
+
+    def test_metrics_are_sorted_with_values_and_description(self):
+        """Rows are alphabetical; string metrics list their expected values."""
+        output = self._render(
+            [
+                {"name": "poly_score", "type": "float", "description": "Overall score"},
+                {"name": "OUTCOME", "type": "string", "values": ["booked", "cancelled"]},
+            ]
+        )
+
+        self.assertLess(output.index("OUTCOME"), output.index("poly_score"))
+        self.assertIn("booked, cancelled", output)
+        self.assertIn("Overall score", output)
+        self.assertIn("2 metrics", output)
+
+    def test_empty_catalog(self):
+        """No metrics prints a one-line notice rather than an empty table."""
+        self.assertIn("No metrics available", self._render([]))
+
+
+class PrintAggregateTest(unittest.TestCase):
+    """Tests for print_aggregate, the `metrics query` / `metrics score` table."""
+
+    def _render(self, result: dict, headline: str | None = None) -> str:
+        # Wide enough that no column truncates, whatever the platform calls UTC.
+        with patch.object(console, "_width", 200), console.capture() as capture:
+            print_aggregate(result, headline=headline)
+        return capture.get()
+
+    def test_numbers_and_buckets_are_formatted(self):
+        """Floats get two decimals, counts get separators, buckets a readable timestamp."""
+        output = self._render(
+            {
+                "columns": ["bucket", "channel", "avg", "conversation_count"],
+                "rows": [["2026-09-01T00:00:00+00:00", "VOICE-SIP", 4.2134, 1318]],
+                "limit": 20,
+                "offset": 0,
+            },
+            headline="Poly Score: 4.21 average",
+        )
+
+        self.assertIn("Poly Score: 4.21 average", output)
+        self.assertIn("VOICE-SIP", output)
+        self.assertIn("4.21", output)
+        self.assertIn("1,318", output)
+        self.assertNotIn("2026-09-01T00:00:00+00:00", output)
+        self.assertRegex(output, r"\d{2} \w{3} 26 \d{2}:\d{2}")
+        self.assertNotIn("Use --offset", output)
+
+    def test_full_page_hints_at_the_next_offset(self):
+        """When the page is full, the footer says where the next page starts."""
+        output = self._render({"columns": ["avg"], "rows": [[1.0], [2.0]], "limit": 2, "offset": 2})
+
+        self.assertIn("Use --offset 4", output)
+
+    def test_no_rows(self):
+        """An empty window prints a notice and no table."""
+        self.assertIn("No data in this window", self._render({"columns": ["avg"], "rows": []}))

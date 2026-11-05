@@ -12,9 +12,18 @@ import json
 import logging
 import os
 import sys
+from argparse import ArgumentParser
 from typing import Any, Optional
 
-from poly.constants import REGION_NAMES
+import requests
+
+from poly.constants import (
+    DATA_CHANNELS,
+    DATA_CLIENT_ENVS,
+    DATA_LIST_OPS,
+    DATA_RATE_LIMIT_PER_MINUTE,
+    REGION_NAMES,
+)
 from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
@@ -510,3 +519,141 @@ def is_newer_version(candidate: str, current: str) -> bool:
         return Version(candidate) > Version(current)
     except InvalidVersion:
         return False
+
+
+def coerce_filter_value(raw: str) -> Any:
+    """Turn a command-line token into the JSON type the Data API expects."""
+    lowered = raw.lower()
+    if lowered in ("true", "false"):
+        return lowered == "true"
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        return raw
+
+
+def filter_flags_to_filters(flags: Optional[list[list[str]]]) -> list[dict]:
+    """Map repeated ``--filter METRIC OP VALUE`` triples onto Data API filter dicts.
+
+    ``in`` and ``ex`` take a comma-separated list; the others take one value.
+    The project validates the operator.
+    """
+    filters = []
+    for metric, op, value in flags or []:
+        op = op.lower()
+        if op in DATA_LIST_OPS:
+            coerced: Any = [coerce_filter_value(v.strip()) for v in value.split(",") if v.strip()]
+        else:
+            coerced = coerce_filter_value(value)
+        filters.append({"metric": metric, "op": op, "value": coerced})
+    return filters
+
+
+def having_flags_to_having(flags: Optional[list[list[str]]]) -> list[dict]:
+    """Map repeated ``--having AGG OP VALUE`` triples onto Data API threshold dicts."""
+    return [{"field": field, "op": op, "value": value} for field, op, value in flags or []]
+
+
+def sort_flag_to_sort(value: Optional[str]) -> Optional[dict]:
+    """Map ``FIELD`` or ``FIELD:asc|desc`` onto a Data API sort dict."""
+    if not value:
+        return None
+    field, _, order = value.partition(":")
+    return {"field": field, "order": order or "asc"}
+
+
+def add_window_arguments(parser: ArgumentParser, default_help: str) -> None:
+    """Add ``--from``/``--to`` to a Data API read command."""
+    parser.add_argument(
+        "--from",
+        dest="from_dt",
+        type=str,
+        default=None,
+        metavar="DATE",
+        help=f"Inclusive start, YYYY-MM-DD or ISO datetime. {default_help}",
+    )
+    parser.add_argument(
+        "--to",
+        dest="to_dt",
+        type=str,
+        default=None,
+        metavar="DATE",
+        help="Exclusive end, YYYY-MM-DD (whole day included) or ISO datetime.",
+    )
+
+
+def add_cohort_arguments(parser: ArgumentParser, *, deployments: bool = True) -> None:
+    """Add the channel/environment/deployment/variant restrictors."""
+    parser.add_argument(
+        "--channel",
+        action="append",
+        choices=DATA_CHANNELS,
+        default=None,
+        help="Restrict to a channel. Repeatable.",
+    )
+    parser.add_argument(
+        "--env",
+        action="append",
+        choices=DATA_CLIENT_ENVS,
+        default=None,
+        help="Restrict to an environment (pre-release is Staging). Repeatable.",
+    )
+    if deployments:
+        parser.add_argument(
+            "--deployment",
+            action="append",
+            default=None,
+            metavar="ID",
+            help="Restrict to a deployment ID. Repeatable.",
+        )
+        parser.add_argument(
+            "--variant",
+            action="append",
+            default=None,
+            metavar="ID",
+            help="Restrict to a variant ID. Repeatable.",
+        )
+
+
+def describe_data_api_error(e: requests.HTTPError) -> str:
+    """Explain a Data API HTTP error in the caller's terms."""
+    response = e.response
+    status = response.status_code if response is not None else None
+    detail = ""
+    if response is not None:
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict):
+            detail = payload.get("detail") or payload.get("message") or ""
+        elif payload is not None:
+            detail = payload
+        else:
+            detail = response.text.strip()[:200]
+        if isinstance(detail, list):
+            detail = "; ".join(
+                str(d.get("msg", d)) if isinstance(d, dict) else str(d) for d in detail
+            )
+        elif not isinstance(detail, str):
+            detail = json.dumps(detail)
+    if status == 400:
+        return f"The Data API rejected the request: {detail or 'validation error'}."
+    if status == 401:
+        return "The API key for this region is missing or invalid. Run `poly apikey`."
+    if status == 403:
+        return "Your API key does not have permission for this project or account."
+    if status == 404:
+        return detail or "Not found, or the key cannot access this account."
+    if status == 422:
+        return f"Unsupported filter: {detail or 'see --help for valid operators'}."
+    if status == 429:
+        return (
+            f"Rate limited: the Data API allows {DATA_RATE_LIMIT_PER_MINUTE} requests "
+            "per minute per key. Wait a minute and retry."
+        )
+    return f"Request failed ({status}): {detail or str(e)}"

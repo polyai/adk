@@ -1896,3 +1896,13 @@ class AgentStudioInterface:
             project_id=project_id,
             account_id=account_id,
         )
+
+    @staticmethod
+    def get_available_metrics(region: str, project_id: Optional[str] = None) -> dict:
+        """List the metrics a project can query, built-in metrics included."""
+        return PlatformAPIHandler.get_available_metrics(region, project_id)
+
+    @staticmethod
+    def query_metric(region: str, body: dict) -> dict:
+        """Aggregate one metric over a window; see ``PlatformAPIHandler.query_metric``."""
+        return PlatformAPIHandler.query_metric(region, body)

@@ -3,8 +3,9 @@ name: poly-adk-conversations
 description: >
   This skill should be used when the user wants to "see what happened on a call",
   "review real conversations", "download a call recording", "debug a production call",
-  or "add logging/metrics" to a PolyAI agent. Covers poly conversations and instrumenting
-  functions with conv.log and metrics. Part of the PolyAI ADK skills suite. Do NOT use
+  "check the Poly Score", "how are calls scoring", or "add logging/metrics" to a PolyAI
+  agent. Covers poly conversations, reading Poly Score and metric values with poly metrics,
+  and instrumenting functions with conv.log and metrics. Part of the PolyAI ADK skills suite. Do NOT use
   for simulated test conversations (use poly-adk-testing).
 metadata:
   author: PolyAI
@@ -31,9 +32,26 @@ poly conversations get-audio <conversation_id> -o recording.wav
 
 - `get` includes channel, language, duration, handoff, tags, PolyScore, summary, and every turn — use `--json` when analyzing programmatically.
 - `get-audio` downloads the WAV for a voice call; `--direction user|agent|combined` picks the track, `--redacted` fetches the redacted version.
-- The CLI reads individual conversations. Aggregate views — containment, CSAT, handle time, flagged transcripts — live in Agent Studio, not the CLI.
+- `get` reads one conversation. For how calls are scoring across the project, use `poly metrics score` (below). Containment, CSAT dashboards and flagged transcripts still live in Agent Studio.
 
 Treat what you find as input to development: a surprising real conversation is the raw material for the next `test_suite/` case (see `poly-adk-testing`). What callers actually say is reliably different from what you imagined.
+
+## Reading Poly Score and metric values
+
+`poly metrics` also reads metric **values** from the project's live conversation data. These call the Data API directly, need no push, and page with `--limit` / `--offset`.
+
+```bash
+poly metrics available                                   # every metric you can query: built-ins (poly_score, duration, handoff) plus the project's custom metrics
+poly metrics score                                       # Poly Score: overall average and count for the last 7 days, then a daily table
+poly metrics score --interval weekly --from 2026-09-01   # weekly buckets since a date
+poly metrics score --by channel --env live               # split by channel, live traffic only
+poly metrics query duration --agg avg --agg p95 --interval daily
+poly metrics query CSAT --agg avg --filter channel eq VOICE-SIP --having avg gte 4
+```
+
+- `score` is a shortcut for `query poly_score --agg avg --agg conversation_count`. Its headline is computed over the whole window in a separate request, so it does not change with `--limit` or `--offset`.
+- `query` takes `--from` / `--to` (a bare `--to` date includes the whole day), `--interval`, `--by`, `--filter METRIC OP VALUE` (`eq gt gte lt lte in ex exists`), `--having`, and the `--channel` / `--env` / `--deployment` / `--variant` restrictors. Metric names are case-insensitive and come from `poly metrics available`.
+- Use `--json` when feeding the numbers into analysis. `poly metrics list` is different: it lists the custom metric *definitions*, not values.
 
 ## Instrumenting functions
 
