@@ -49,12 +49,12 @@ conv.log.error("Payment provider returned 500")
 
 Log around the things that can fail — API calls, validation, any branch you'd want to explain later. **Never swallow an external failure silently**: a bare `except` with no log turns a broken integration into a mysteriously unhelpful agent with nothing in the transcript to explain it.
 
-**Metrics** — count outcomes you'll aggregate across calls (flow completions, handoffs fired, API fallbacks). The common mistake is inflation: a metric emitted in a loop or on every turn counts nothing useful. Use `write_once=True` for once-per-conversation events, and emit on the outcome you actually want to count.
+**Metrics** — count outcomes you'll aggregate across calls (flow completions, handoffs fired, API fallbacks). Each metric's name and type are defined separately from the code that writes it: `poly metrics list` shows the definitions, and `poly metrics add` / `poly metrics edit` change them. **Definitions are project-wide and take effect immediately, with no branch or push step, and a metric can be deactivated but not easily removed**, so confirm with the user before adding or editing one. The common mistake is inflation: a metric emitted in a loop or on every turn counts nothing useful. Use `write_once=True` for once-per-conversation events, and emit on the outcome you actually want to count.
 
 The test for both: would this line help answer a question you can imagine being asked — "how often do callers abandon at payment?", "did that transfer actually fire?" If not, it's noise.
 
 ## When debugging a specific call
 
-1. `poly conversations get <id>` — read the transcript and logs turn by turn.
+1. `poly conversations get <id> --json` — read the turns. The plain-text output shows only what the caller and agent said, so use `--json` to see the rest of each turn.
 2. If the wording is right but the *audio* is wrong, it's a channel-settings problem, not a prompt problem: mishearing → `voice/speech_recognition/` (keyphrase boosting, transcript corrections); mispronunciation → `voice/response_control/` (pronunciations). See `poly docs speech_recognition response_control`.
 3. Reproduce with `poly chat` (simulate SIP headers, variant, language — see `poly-adk-testing`), then encode the fix's verification as a test case.

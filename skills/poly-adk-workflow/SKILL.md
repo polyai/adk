@@ -38,7 +38,7 @@ This skill covers setup and the core loop. Load the matching skill when the task
 Assume `poly` is installed. If a command fails because it isn't:
 
 - **Install** → `uv tool install polyai-adk` (install `uv` first if needed: `curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- **Update to latest** → `uv tool upgrade polyai-adk`
+- **Update to latest** → `poly update` (upgrades the CLI and refreshes these skills; `--check` only reports whether an update exists)
 
 ## 2. Authentication
 
@@ -69,6 +69,7 @@ Resources reference each other by name with `{{prefix:name}}` placeholders (`{{f
 ```bash
 poly project create   # create a new Agent Studio project and pull it locally
 poly init             # connect to an existing project (interactive pickers)
+poly init --region <region> --account_id <id> --project_id <id>   # non-interactive, for agents
 poly template list    # optional: start from a pre-built template
 poly template load <name>
 ```
@@ -98,8 +99,9 @@ A project looks like:
 **You cannot work on `main`.** Every change goes on a branch. The branch you are on determines what `poly push` writes to and what `poly chat` talks to.
 
 ```bash
-poly pull                        # 1. start from the latest state on main
-poly branch create <name>        # 2. create + switch to a branch (keeps local edits)
+poly branch switch main          # 1. start from main (skip if already there)
+poly pull                        #    and pull its latest state
+poly branch create <name>        # 2. create + switch to a branch off the current one (keeps local edits)
 # 3. edit resource files on disk
 poly status                      # 4. see unpushed local changes
 poly diff                        #    inspect them in detail
@@ -109,7 +111,7 @@ poly chat --push                 # 7. test interactively (see poly-adk-testing)
 poly test run                    #    and/or run the simulated test suite
 # 8. iterate: repeat 3–7
 poly branch diff                 # 9. review everything on the branch since creation
-poly branch merge '<message>'    # 10. merge into main (deploys to sandbox automatically)
+poly branch merge '<message>'    # 10. merge into the parent branch (into main, this deploys to live; see section 7)
 ```
 
 Key distinctions:
@@ -133,14 +135,17 @@ Four layers, catching different problems — load `poly-adk-testing` for the det
 
 ## 7. Deployment
 
-Merging into `main` deploys to `sandbox` automatically. From there, promotion is one step at a time up the ladder — `sandbox` → `pre-release` → `live`:
+**Merging into `main` deploys straight to `live`**, which is production. The interactive prompt warns about this, but `--json` and `--force` skip the prompt. **Never merge into `main` unless the user has explicitly asked for that merge.**
+
+To try a branch in a deployed environment before merging, `poly branch tag` deploys it to staging (`poly branch untag` removes it).
 
 ```bash
-poly deployments promote --from sandbox --to pre-release --dry-run
 poly deployments list             # what is deployed where
 ```
 
-**Never promote to `pre-release` or `live` unless the user explicitly asks** — `live` is production. Use `--dry-run` first to preview, and re-run tests against each environment after promoting. See `poly deployments --help` for the full surface, including rollback.
+`poly chat -e live` talks to production (avoid `-e sandbox`, which is frozen with simplified deployments). See `poly deployments --help` for the full surface, including rollback, and never roll back or deploy unless the user explicitly asks.
+
+A few older projects still use sandbox-first deployments. There, merging into `main` deploys to `sandbox`, and `poly deployments promote` moves it up `sandbox` → `pre-release` → `live` one step at a time (`--dry-run` first).
 
 ## Rules and gotchas
 
