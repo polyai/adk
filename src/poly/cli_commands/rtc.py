@@ -201,6 +201,7 @@ class RTCCommand(BaseCommand):
         )
         rtc_push_parser.add_argument(
             "--force",
+            "-f",
             action="store_true",
             help="Skip drift protection check and confirmation prompt.",
         )
@@ -254,6 +255,7 @@ class RTCCommand(BaseCommand):
         )
         rtc_edit_parser.add_argument(
             "--force",
+            "-f",
             action="store_true",
             help="Skip confirmation prompt for live environment.",
         )
