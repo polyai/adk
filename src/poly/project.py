@@ -111,6 +111,20 @@ class DeploymentMode(Enum):
     RELEASES_BRANCHES = "releases_branches"
 
 
+def _moved_folders(old_file: str, new_file: str) -> tuple[str, str]:
+    """Return the folders, or files, a move renames: the paths without their shared ending."""
+    old_parts, new_parts = old_file.split(os.sep), new_file.split(os.sep)
+    while len(old_parts) > 1 and len(new_parts) > 1 and old_parts[-1] == new_parts[-1]:
+        old_parts.pop()
+        new_parts.pop()
+    return os.sep.join(old_parts), os.sep.join(new_parts)
+
+
+def _inside(path: str, folder: str) -> bool:
+    """Return whether a path is a folder or file, or lies within it."""
+    return path == folder or path.startswith(folder + os.sep)
+
+
 def _non_empty_types(resources: ResourceMap) -> ResourceMap:
     """Return resources without the types that have none."""
     return {resource_type: typed for resource_type, typed in resources.items() if typed}
@@ -793,56 +807,6 @@ class AgentStudioProject:
             for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
         }
 
-    def _follow_moved_multi_resources(
-        self, original_resources: ResourceMap, incoming_resources: ResourceMap
-    ) -> tuple[ResourceMap, dict[tuple[type[Resource], str], Resource]]:
-        """Find saved multi-resource entries that moved upstream to a file free to take them.
-
-        A file is free when it isn't on disk, or when the entries in it move away too, as when
-        two campaigns swap names.
-
-        Returns:
-            The original resources with each moved entry placed where it now lives, so it
-            merges there, and each moved entry as it was saved, by type and id.
-        """
-        candidates: dict[tuple[type[Resource], str], tuple[Resource, Resource, str, str]] = {}
-        for resource_type, originals in original_resources.items():
-            if not issubclass(resource_type, MultiResourceYamlResource):
-                continue
-            incoming = incoming_resources.get(resource_type) or {}
-            for resource_id, original in originals.items():
-                if resource_id not in incoming:
-                    continue
-                old_file = _parse_multi_resource_path(original.get_path(self.root_path))[0]
-                new_file = _parse_multi_resource_path(
-                    incoming[resource_id].get_path(self.root_path)
-                )[0]
-                relocated = original.moved_to(incoming[resource_id])
-                if old_file != new_file and relocated is not None and os.path.isfile(old_file):
-                    candidates[(resource_type, resource_id)] = (
-                        original,
-                        relocated,
-                        old_file,
-                        new_file,
-                    )
-        while True:
-            vacated = {old_file for _, _, old_file, _ in candidates.values()}
-            blocked = [
-                key
-                for key, (_, _, _, new_file) in candidates.items()
-                if os.path.exists(new_file) and new_file not in vacated
-            ]
-            if not blocked:
-                break
-            for key in blocked:
-                del candidates[key]
-        moved: dict[tuple[type[Resource], str], Resource] = {}
-        followed = dict(original_resources)
-        for (resource_type, resource_id), (original, relocated, _, _) in candidates.items():
-            moved[(resource_type, resource_id)] = original
-            followed[resource_type] = {**followed[resource_type], resource_id: relocated}
-        return followed, moved
-
     def _take_entries_added_here(
         self,
         moved: dict[tuple[type[Resource], str], Resource],
@@ -1223,12 +1187,19 @@ class AgentStudioProject:
                 on_save(total, total)
             return []
 
-        files_with_conflicts = []
+        files_with_conflicts: list[str] = []
         moved: dict[tuple[type[Resource], str], Resource] = {}
+        vacated: set[str] = set()
         if not force:
-            original_resources, moved = self._follow_moved_multi_resources(
-                original_resources, incoming_resources
+            files_with_conflicts, vacated, moved = self._hold_back_taken_moves(
+                original_resources, incoming_resources, format=format
             )
+            original_resources = dict(original_resources)
+            for (resource_type, resource_id), original in moved.items():
+                original_resources[resource_type] = {
+                    **original_resources[resource_type],
+                    resource_id: original.moved_to(incoming_resources[resource_type][resource_id]),
+                }
 
         # Generate resource mappings
         incoming_resource_mappings: list[ResourceMapping] = (
@@ -1264,20 +1235,12 @@ class AgentStudioProject:
         # For other resources, we follow the usual process
         writes: list[tuple[Resource, str, str]] = []
         fresh: list[Resource] = []
-        removals: set[str] = set()
-        moving_away = self._paths_moving_away(original_resources, incoming_resources)
+        renamed: dict[str, str] = {}
+        deletions: list[tuple[type[Resource], Resource]] = []
         for resource_type, incoming in incoming_resources.items():
             if issubclass(resource_type, MultiResourceYamlResource):
                 continue
 
-            originals = original_resources.get(resource_type) or {}
-            deleted_upstream = {
-                original.get_path(self.root_path): original
-                for resource_id, original in originals.items()
-                if resource_id not in incoming
-            }
-            conflicted_deletions: set[str] = set()
-            vacated_deletions: set[str] = set()
             for resource_id, incoming_resource in incoming.items():
                 current += 1
                 if on_save:
@@ -1313,46 +1276,6 @@ class AgentStudioProject:
                 else:
                     original_content = ""
                     local_file_path = incoming_resource.get_path(self.root_path)
-                renamed = original_resource is not None and local_file_path != file_path
-                if renamed and file_path in deleted_upstream:
-                    if self._deleted_upstream_but_edited(
-                        deleted_upstream[file_path],
-                        original_resource_mappings,
-                        incoming_resource_mappings,
-                        format=format,
-                    ):
-                        conflicted_deletions.add(file_path)
-                        files_with_conflicts.append(file_path)
-                        continue
-                    vacated_deletions.add(file_path)
-                    vacated = True
-                else:
-                    vacated = file_path in moving_away.get(resource_type, set())
-                if (
-                    renamed
-                    and not vacated
-                    and os.path.exists(file_path)
-                    and os.path.exists(local_file_path)
-                    and not os.path.samefile(file_path, local_file_path)
-                ):
-                    logger.warning(
-                        f"{os.path.relpath(local_file_path, self.root_path)} was renamed to "
-                        f"{os.path.relpath(file_path, self.root_path)}, which is already taken "
-                        "here."
-                    )
-                    occupant = resource_type.read_from_file(file_path)
-                    marked = utils.merge_strings(
-                        "",
-                        occupant,
-                        incoming_resource.to_pretty(
-                            resource_name=incoming_resource.name,
-                            resource_mappings=incoming_resource_mappings,
-                        ),
-                    )
-                    if resource_utils.contains_merge_conflict(marked):
-                        incoming_resource.save_to_file(marked, file_path)
-                    files_with_conflicts.append(file_path)
-                    continue
                 try:
                     # Normalise the local resource to ensure formatting differences don't cause unnecessary merge conflicts
                     local_resource, local_file_path = self._read_pulled_resource_locally(
@@ -1405,9 +1328,9 @@ class AgentStudioProject:
                     original_content, local_content, incoming_content
                 )
 
-                if renamed:
-                    removals.add(original_resource.get_path(self.root_path))
-                if merged_contents == local_content and local_file_path == file_path:
+                if local_file_path != file_path:
+                    renamed[file_path] = local_file_path
+                elif merged_contents == local_content:
                     continue
 
                 if resource_utils.contains_merge_conflict(merged_contents):
@@ -1417,20 +1340,14 @@ class AgentStudioProject:
 
             # Delete resources that are no longer present in the project
             incoming_files = {res.get_path(self.root_path) for res in incoming.values()}
-            for file_path, original_resource in deleted_upstream.items():
-                if file_path in conflicted_deletions:
-                    continue
-                if file_path in incoming_files and file_path not in vacated_deletions:
-                    continue
-                if not force and self._deleted_upstream_but_edited(
-                    original_resource,
-                    original_resource_mappings,
-                    incoming_resource_mappings,
-                    format=format,
+            for resource_id, original_resource in (
+                original_resources.get(resource_type) or {}
+            ).items():
+                file_path = original_resource.get_path(self.root_path)
+                if resource_id not in incoming and (
+                    file_path not in incoming_files or file_path in vacated
                 ):
-                    files_with_conflicts.append(file_path)
-                    continue
-                resource_type.delete_resource(file_path)
+                    deletions.append((resource_type, original_resource))
 
             if (
                 self._not_loaded_resources is not None
@@ -1439,6 +1356,14 @@ class AgentStudioProject:
                 self._not_loaded_resources.remove(resource_type)
 
         for resource, contents, file_path in writes:
+            old_path = renamed.get(file_path)
+            if (
+                old_path
+                and os.path.exists(old_path)
+                and os.path.exists(file_path)
+                and os.path.samefile(old_path, file_path)
+            ):
+                os.rename(old_path, file_path)
             resource.save_to_file(contents, file_path)
         for resource in fresh:
             resource.save(
@@ -1450,7 +1375,20 @@ class AgentStudioProject:
         written = {file_path for _, _, file_path in writes} | {
             resource.get_path(self.root_path) for resource in fresh
         }
-        for old_file_path in removals - written:
+        for resource_type, original_resource in deletions:
+            file_path = original_resource.get_path(self.root_path)
+            if file_path in written:
+                continue
+            if not force and self._deleted_upstream_but_edited(
+                original_resource,
+                original_resource_mappings,
+                incoming_resource_mappings,
+                format=format,
+            ):
+                files_with_conflicts.append(file_path)
+                continue
+            resource_type.delete_resource(file_path)
+        for old_file_path in set(renamed.values()) - written:
             if os.path.exists(old_file_path) and not any(
                 os.path.exists(path) and os.path.samefile(old_file_path, path) for path in written
             ):
@@ -1486,11 +1424,15 @@ class AgentStudioProject:
         original_resource_mappings: list[ResourceMapping],
         incoming_resource_mappings: list[ResourceMapping],
         format: bool = False,
+        mark: bool = True,
     ) -> bool:
         """Mark a file deleted upstream but edited here as a conflict, instead of deleting it.
 
+        Args:
+            mark: Whether to write the conflict into the file, or only report it.
+
         Returns:
-            Whether the file was edited, and so was left in conflict.
+            Whether the file was edited, and so is in conflict.
         """
         file_path = original_resource.get_path(self.root_path)
         if not os.path.isfile(file_path):
@@ -1521,39 +1463,137 @@ class AgentStudioProject:
         merged = utils.merge_strings(original_content, local_content, "")
         if not resource_utils.contains_merge_conflict(merged):
             return False
-        original_resource.save_to_file(merged, file_path)
+        if mark:
+            original_resource.save_to_file(merged, file_path)
         return True
 
-    def _paths_moving_away(
-        self, original_resources: ResourceMap, incoming_resources: ResourceMap
-    ) -> dict[type[Resource], set[str]]:
-        """Return, by type, the saved paths of single-file resources that move elsewhere upstream."""
-        moving_away: dict[type[Resource], set[str]] = {}
+    def _hold_back_taken_moves(
+        self, original_resources: ResourceMap, incoming_resources: ResourceMap, format: bool
+    ) -> tuple[list[str], set[str], dict[tuple[type[Resource], str], Resource]]:
+        """Hold back each upstream move onto a file that is taken here.
+
+        A file is free when nothing is there, or when every resource saved in it moves away or
+        is a single file deleted upstream and unedited here. A file no resource is saved in is
+        taken, unless the moving resource's own file is gone here, as it is then that resource
+        renamed here too. A held-back resource stays as saved in `incoming_resources`, so the
+        next pull moves it once its target is free. The other moves out of its folder wait with
+        it, and so does anything new upstream in either folder.
+
+        Returns:
+            The path each held-back move leaves from, to report as a conflict; the saved files
+            of single-file resources that free their path; and each multi-resource entry that
+            moves to another file, as it was saved, by type and id.
+        """
+        mappings = self._make_resource_mappings(original_resources)
+        moves: dict[tuple[type[Resource], str], tuple[str, str]] = {}
+        saved_in: dict[str, list[tuple[type[Resource], str]]] = {}
+        freed_by_delete: set[tuple[type[Resource], str]] = set()
         for resource_type, originals in original_resources.items():
-            if issubclass(resource_type, MultiResourceYamlResource):
-                continue
             incoming = incoming_resources.get(resource_type) or {}
-            moving_away[resource_type] = {
-                original.get_path(self.root_path)
-                for resource_id, original in originals.items()
-                if resource_id in incoming
-                and incoming[resource_id].get_path(self.root_path)
-                != original.get_path(self.root_path)
+            single_file = not issubclass(resource_type, MultiResourceYamlResource)
+            for resource_id, original in originals.items():
+                key = (resource_type, resource_id)
+                old_file = self._file_of(original)
+                saved_in.setdefault(old_file, []).append(key)
+                if resource_id not in incoming:
+                    if single_file and not self._deleted_upstream_but_edited(
+                        original, mappings, mappings, format=format, mark=False
+                    ):
+                        freed_by_delete.add(key)
+                    continue
+                new_file = self._file_of(incoming[resource_id])
+                if old_file != new_file and (
+                    single_file or original.moved_to(incoming[resource_id]) is not None
+                ):
+                    moves[key] = (old_file, new_file)
+
+        def free(old_file: str, new_file: str, held: set) -> bool:
+            if not os.path.exists(new_file):
+                return True
+            if os.path.exists(old_file) and os.path.samefile(old_file, new_file):
+                return True
+            keys = saved_in.get(new_file)
+            if not keys:
+                return not os.path.exists(old_file)
+            return all(key in freed_by_delete or (key in moves and key not in held) for key in keys)
+
+        held: set[tuple[type[Resource], str]] = set()
+        while True:
+            held_folders = [_moved_folders(*moves[key])[0] for key in held]
+            newly = {
+                key
+                for key, (old_file, new_file) in moves.items()
+                if key not in held
+                and (
+                    not free(old_file, new_file, held)
+                    or any(_inside(old_file, folder) for folder in held_folders)
+                )
             }
-        return moving_away
+            if not newly:
+                break
+            held |= newly
+
+        folders = {_moved_folders(*moves[key]) for key in held}
+        for resource_type, resource_id in held:
+            incoming_resources[resource_type][resource_id] = original_resources[resource_type][
+                resource_id
+            ]
+        for resource_type, incoming in incoming_resources.items():
+            originals = original_resources.get(resource_type) or {}
+            for resource_id in [
+                resource_id
+                for resource_id, resource in incoming.items()
+                if resource_id not in originals
+                and any(
+                    _inside(self._file_of(resource), folder) for pair in folders for folder in pair
+                )
+            ]:
+                del incoming[resource_id]
+
+        conflicts = []
+        for old_folder, new_folder in sorted(folders):
+            if any(old_folder != other and _inside(old_folder, other) for other, _ in folders):
+                continue
+            logger.warning(
+                f"Agent Studio renamed {os.path.relpath(old_folder, self.root_path)} to "
+                f"{os.path.relpath(new_folder, self.root_path)}, which is already here. Move or "
+                "delete it, then pull again."
+            )
+            conflicts.append(old_folder)
+        moved = {
+            key: original_resources[key[0]][key[1]]
+            for key, (old_file, _) in moves.items()
+            if key not in held
+            and issubclass(key[0], MultiResourceYamlResource)
+            and os.path.isfile(old_file)
+        }
+        vacated = {
+            old_file for key, (old_file, _) in moves.items() if key not in held and key not in moved
+        } | {
+            self._file_of(original_resources[resource_type][resource_id])
+            for resource_type, resource_id in freed_by_delete
+        }
+        return conflicts, vacated, moved
+
+    def _file_of(self, resource: Resource) -> str:
+        """Return the file a resource lives in."""
+        path = resource.get_path(self.root_path)
+        if isinstance(resource, MultiResourceYamlResource):
+            return _parse_multi_resource_path(path)[0]
+        return path
 
     def _read_pulled_resource_locally(
         self,
         incoming_resource: Resource,
         original_resource: Optional[Resource],
         resource_mappings: list[ResourceMapping],
-        vacated: bool,
+        vacated: set[str],
     ) -> tuple[Resource, str]:
         """Read a resource's local copy, following it when it moved upstream.
 
         A moved resource's local copy is its file at the saved path. Only when that file is gone
-        here is a file at the new path read instead, unless the new path is vacated by a resource
-        moving away or deleted upstream.
+        here is a file at the new path read instead. A file in `vacated` belongs to a resource
+        that moved away or was deleted upstream, so it is no other resource's local copy.
 
         Raises:
             FileNotFoundError: When there is no local copy.
@@ -1562,23 +1602,17 @@ class AgentStudioProject:
         original_path = (
             original_resource.get_path(self.root_path) if original_resource is not None else None
         )
-        if original_path is None or original_path == incoming_path:
-            if original_path is None and vacated:
-                raise FileNotFoundError(incoming_path)
-            resource = self.read_local_resource(
-                resource=self._make_resource_mapping(incoming_resource),
-                resource_mappings=resource_mappings,
-            )
-            return resource, incoming_path
-        try:
-            resource = self.read_local_resource(
-                resource=self._make_resource_mapping(original_resource),
-                resource_mappings=resource_mappings,
-            )
-            return resource, original_path
-        except FileNotFoundError:
-            if vacated:
-                raise
+        if original_path is not None and original_path != incoming_path:
+            try:
+                resource = self.read_local_resource(
+                    resource=self._make_resource_mapping(original_resource),
+                    resource_mappings=resource_mappings,
+                )
+                return resource, original_path
+            except FileNotFoundError:
+                pass
+        if original_path != incoming_path and incoming_path in vacated:
+            raise FileNotFoundError(incoming_path)
         resource = self.read_local_resource(
             resource=self._make_resource_mapping(incoming_resource),
             resource_mappings=resource_mappings,

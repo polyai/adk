@@ -75,7 +75,11 @@ from poly.resources.flows import (
 )
 from poly.resources.function import FunctionParameters, FunctionType
 from poly.resources.outbound_campaign import NODE_FIELDS
-from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
+from poly.resources.resource import (
+    MultiResourceYamlResource,
+    ResourceMap,
+    _parse_multi_resource_path,
+)
 from poly.resources.test_suite import TestCaseApiOperationMock
 from poly.tests.testing_utils import mock_read_from_file
 from poly.utils import merge_strings
@@ -8352,28 +8356,70 @@ class PullRemoteRenameTest(unittest.TestCase):
         )
         return conflicts
 
-    def test_remote_rename_onto_a_file_made_here_conflicts_and_keeps_both_files(self):
-        """A file made here at the new name is kept in conflict, not overwritten or taken over."""
-        own_topic = (
-            self._topic_file("hours.yaml")
-            .replace("Opening hours", "My own topic")
-            .replace("Hours", "Opening hours")
+    def _path(self, name: str) -> str:
+        return os.path.join(self.root, "topics", name)
+
+    def _pushed(self) -> list[tuple[str, dict]]:
+        success, message, commands = self.project.push_project(
+            dry_run=True, parent_projection_json={}
         )
-        self._write_topic("opening_hours.yaml", own_topic)
+        if message == "No changes detected":
+            return []
+        self.assertTrue(success, message)
+        return [
+            (command.type, MessageToDict(getattr(command, command.type))) for command in commands
+        ]
+
+    def _assert_push_refused(self, projection: dict) -> None:
+        success, message, commands = self.project.push_project(
+            projection_json=projection, parent_projection_json={}
+        )
+        self.assertFalse(success)
+        self.assertIn("Merge conflicts", message)
+        self.assertEqual(commands, [])
+
+    def test_remote_rename_onto_a_file_made_here_is_held_back(self):
+        """A file made here at the new name holds the rename back until it is moved."""
         hours = self._topic_file("hours.yaml")
+        own_topic = hours.replace("Opening hours", "My own topic").replace("Hours", "Opening hours")
+        self._write_topic("opening_hours.yaml", own_topic)
+        renamed = self._topic_projection("Opening hours", content="Open 9 to 5")
 
-        conflicts, _ = self.project.pull_project(
-            projection_json=self._topic_projection("Opening hours")
-        )
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
 
-        new_path = os.path.join(self.root, "topics", "opening_hours.yaml")
-        self.assertEqual(conflicts, [new_path])
+        self.assertEqual(conflicts, [self._path("hours.yaml")])
         self.assertEqual(self._topic_files(), ["hours.yaml", "opening_hours.yaml"])
-        self.assertIn("My own topic", self._topic_file("opening_hours.yaml"))
-        self.assertTrue(
-            resource_utils.contains_merge_conflict(self._topic_file("opening_hours.yaml"))
-        )
         self.assertEqual(self._topic_file("hours.yaml"), hours)
+        self.assertEqual(self._topic_file("opening_hours.yaml"), own_topic)
+        self.assertEqual(
+            self.project.project_status(), ([], [], [self._path("opening_hours.yaml")], [])
+        )
+        self._assert_push_refused(renamed)
+
+        os.remove(self._path("opening_hours.yaml"))
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
+        self.assertIn("Open 9 to 5", self._topic_file("opening_hours.yaml"))
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self._pushed(), [])
+
+    def test_remote_rename_onto_an_identical_file_made_here_is_held_back(self):
+        """A file at the new name is never taken over, even when it matches the incoming one."""
+        self.project.pull_project(projection_json=self._topic_projection("Hours"))
+        renamed = self._topic_projection("Opening hours")
+        hours = self._topic_file("hours.yaml")
+        self._write_topic("opening_hours.yaml", hours.replace("Hours", "Opening hours"))
+
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [self._path("hours.yaml")])
+        self.assertEqual(self._topic_files(), ["hours.yaml", "opening_hours.yaml"])
+        self.assertEqual(self._topic_file("hours.yaml"), hours)
+        self.assertEqual(
+            self.project.project_status(), ([], [], [self._path("opening_hours.yaml")], [])
+        )
 
     def test_remote_delete_and_rename_onto_its_name_moves_the_file_cleanly(self):
         """A topic deleted upstream frees its name for a topic renamed onto it."""
@@ -8385,6 +8431,7 @@ class PullRemoteRenameTest(unittest.TestCase):
         self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
         self.assertIn("Open 9 to 5", self._topic_file("opening_hours.yaml"))
         self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self._pushed(), [])
 
     def test_remote_delete_and_rename_keeps_an_edit_to_the_renamed_topic(self):
         """A local edit to the renamed topic moves with it."""
@@ -8395,31 +8442,147 @@ class PullRemoteRenameTest(unittest.TestCase):
 
         conflicts = self._pull_rename_onto_the_deleted_topic()
 
-        new_path = os.path.join(self.root, "topics", "opening_hours.yaml")
+        new_path = self._path("opening_hours.yaml")
         self.assertEqual(conflicts, [])
         self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
         self.assertIn("Open 8 to 6", self._topic_file("opening_hours.yaml"))
         self.assertEqual(self.project.project_status(), ([], [new_path], [], []))
+        pushed = self._pushed()
+        self.assertEqual([command_type for command_type, _ in pushed], ["update_topic"])
+        self.assertEqual(pushed[0][1]["id"], "TOPIC-1")
+        self.assertIn("Open 8 to 6", str(pushed[0][1]))
 
-    def test_remote_delete_and_rename_onto_a_topic_edited_here_conflicts(self):
-        """An edit to the topic deleted upstream is kept in conflict, not merged into another."""
+    def test_remote_delete_and_rename_onto_a_topic_edited_here_is_held_back(self):
+        """An edit to the topic deleted upstream is kept in conflict, and holds the rename back."""
         self._pull_hours_and_opening_hours()
         self._write_topic(
             "opening_hours.yaml",
             self._topic_file("opening_hours.yaml").replace("Weekdays", "Every day"),
         )
         hours = self._topic_file("hours.yaml")
+        renamed = self._topics_projection(("TOPIC-1", "Opening hours", "Open 9 to 5"))
 
         conflicts = self._pull_rename_onto_the_deleted_topic()
 
-        new_path = os.path.join(self.root, "topics", "opening_hours.yaml")
-        self.assertEqual(conflicts, [new_path])
+        self.assertEqual(
+            sorted(conflicts), [self._path("hours.yaml"), self._path("opening_hours.yaml")]
+        )
         self.assertEqual(self._topic_files(), ["hours.yaml", "opening_hours.yaml"])
+        self.assertEqual(self._topic_file("hours.yaml"), hours)
         self.assertIn("Every day", self._topic_file("opening_hours.yaml"))
         self.assertTrue(
             resource_utils.contains_merge_conflict(self._topic_file("opening_hours.yaml"))
         )
+        self._assert_push_refused(renamed)
+
+        os.remove(self._path("opening_hours.yaml"))
+        conflicts = self._pull_rename_onto_the_deleted_topic()
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self._pushed(), [])
+
+    def test_remote_chain_onto_a_file_made_here_holds_every_link_back(self):
+        """Each rename in a chain waits when the last one's target is taken, losing no edit."""
+        self._pull_hours_and_opening_hours()
+        self._write_topic(
+            "opening_hours.yaml",
+            self._topic_file("opening_hours.yaml").replace("Weekdays", "B LOCAL EDIT"),
+        )
+        self._write_topic("times.yaml", self._topic_file("hours.yaml").replace("Hours", "Times"))
+        before = {name: self._topic_file(name) for name in self._topic_files()}
+        chain = self._topics_projection(
+            ("TOPIC-1", "Opening hours", "Open 9 to 5"), ("TOPIC-2", "Times", "Weekdays")
+        )
+
+        conflicts, _ = self.project.pull_project(projection_json=chain)
+
+        self.assertEqual(
+            sorted(conflicts), [self._path("hours.yaml"), self._path("opening_hours.yaml")]
+        )
+        self.assertEqual({name: self._topic_file(name) for name in self._topic_files()}, before)
+        self.assertEqual(
+            self.project.project_status(),
+            ([], [self._path("opening_hours.yaml")], [self._path("times.yaml")], []),
+        )
+        self._assert_push_refused(chain)
+
+        os.remove(self._path("times.yaml"))
+        conflicts, _ = self.project.pull_project(projection_json=chain)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml", "times.yaml"])
+        self.assertIn("Open 9 to 5", self._topic_file("opening_hours.yaml"))
+        self.assertIn("B LOCAL EDIT", self._topic_file("times.yaml"))
+        self.assertEqual(self.project.project_status(), ([], [self._path("times.yaml")], [], []))
+        pushed = self._pushed()
+        self.assertEqual([command_type for command_type, _ in pushed], ["update_topic"])
+        self.assertEqual(pushed[0][1]["id"], "TOPIC-2")
+
+    def test_remote_rename_also_made_here_is_pulled_clean(self):
+        """A topic renamed alike here and in Agent Studio merges with its file at the new name."""
+        os.rename(self._path("hours.yaml"), self._path("opening_hours.yaml"))
+        self._write_topic(
+            "opening_hours.yaml",
+            self._topic_file("opening_hours.yaml").replace("Hours", "Opening hours"),
+        )
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._topic_projection("Opening hours")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self._pushed(), [])
+
+    def test_remote_rename_of_a_topic_deleted_here_onto_a_held_back_name_waits(self):
+        """A topic deleted here never takes over the file of a topic whose rename is held back."""
+        self._pull_hours_and_opening_hours()
+        hours = self._topic_file("hours.yaml")
+        os.remove(self._path("opening_hours.yaml"))
+        self._write_topic("times.yaml", hours.replace("Hours", "Times"))
+        chain = self._topics_projection(
+            ("TOPIC-1", "Times", "Open 9 to 5"), ("TOPIC-2", "Hours", "Weekdays")
+        )
+
+        conflicts, _ = self.project.pull_project(projection_json=chain)
+
+        self.assertEqual(
+            sorted(conflicts), [self._path("hours.yaml"), self._path("opening_hours.yaml")]
+        )
+        self.assertEqual(self._topic_files(), ["hours.yaml", "times.yaml"])
         self.assertEqual(self._topic_file("hours.yaml"), hours)
+        self.assertEqual(
+            self.project.project_status(),
+            ([], [], [self._path("times.yaml")], [self._path("opening_hours.yaml")]),
+        )
+        self._assert_push_refused(chain)
+
+    def test_remote_swap_keeps_each_topic_and_its_edit(self):
+        """Two topics swapping names upstream each keep their own content and edits."""
+        self._pull_hours_and_opening_hours()
+        self._write_topic(
+            "hours.yaml", self._topic_file("hours.yaml").replace("Open 9 to 5", "Open 8 to 6")
+        )
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._topics_projection(
+                ("TOPIC-1", "Opening hours", "Open 9 to 5"), ("TOPIC-2", "Hours", "Weekdays")
+            )
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["hours.yaml", "opening_hours.yaml"])
+        self.assertIn("Open 8 to 6", self._topic_file("opening_hours.yaml"))
+        self.assertIn("Weekdays", self._topic_file("hours.yaml"))
+        self.assertEqual(
+            self.project.project_status(), ([], [self._path("opening_hours.yaml")], [], [])
+        )
+        pushed = self._pushed()
+        self.assertEqual([command_type for command_type, _ in pushed], ["update_topic"])
+        self.assertEqual(pushed[0][1]["id"], "TOPIC-1")
 
     def test_failed_write_after_a_remote_rename_leaves_the_old_file(self):
         """The old file is removed only after the new one is written."""
@@ -8441,6 +8604,103 @@ class PullRemoteRenameTest(unittest.TestCase):
             self.project.pull_project(projection_json=self._topic_projection("Opening hours"))
 
         self.assertIn("Open 9 to 5", self._topic_file("hours.yaml"))
+
+
+class PullRemoteFlowRenameTest(unittest.TestCase):
+    """Pulling a flow whose folder was renamed in Agent Studio."""
+
+    def setUp(self):
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+        self.root = tempfile.mkdtemp()
+        shutil.rmtree(self.root)
+        shutil.copytree(TEST_DIR, self.root)
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, self.root)
+        self.step = os.path.join(
+            self.root, "flows", "test_flow", "function_steps", "process_payment.py"
+        )
+        with open(self.step, encoding="utf-8") as file:
+            code = file.read()
+        with open(self.step, "w", encoding="utf-8") as file:
+            file.write(code + "\nLIMIT = 5\n")
+
+    def _renamed(self) -> ResourceMap:
+        incoming = deepcopy(self.project.resources)
+        for resource_type, resources in incoming.items():
+            for resource in resources.values():
+                if getattr(resource, "flow_name", None) == "test_flow":
+                    resource.flow_name = "moved flow"
+                elif resource_type is FlowConfig and resource.name == "test_flow":
+                    resource.name = "moved flow"
+                else:
+                    continue
+                resource.__dict__.pop("file_path", None)
+        return incoming
+
+    def _pull(self, incoming: ResourceMap) -> list[str]:
+        conflicts = self.project._update_pulled_resources(
+            self.project.resources,
+            incoming,
+            force=False,
+            original_slim_resources=self.project.slim_resources,
+            incoming_slim_resources=self.project.slim_resources,
+        )
+        self.project.resources = incoming
+        self.project.file_structure_info = self.project.compute_file_structure_info(incoming)
+        return conflicts
+
+    def _flow_files(self) -> dict[str, str]:
+        files = {}
+        for directory, _, names in os.walk(os.path.join(self.root, "flows")):
+            for name in names:
+                path = os.path.join(directory, name)
+                with open(path, encoding="utf-8") as file:
+                    files[os.path.relpath(path, self.root)] = file.read()
+        return files
+
+    def test_remote_flow_rename_moves_every_file_with_a_local_edit(self):
+        """Every file of the flow moves, and the edit to a function step goes with it."""
+        before = self._flow_files()
+
+        conflicts = self._pull(self._renamed())
+
+        moved = os.path.join(self.root, "flows", "moved_flow", "function_steps")
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            sorted(self._flow_files()),
+            sorted(path.replace("test_flow" + os.sep, "moved_flow" + os.sep) for path in before),
+        )
+        self.assertIn(
+            "LIMIT = 5",
+            self._flow_files()[
+                os.path.relpath(os.path.join(moved, "process_payment.py"), self.root)
+            ],
+        )
+        self.assertEqual(
+            self.project.project_status(),
+            ([], [os.path.join(moved, "process_payment.py")], [], []),
+        )
+
+    def test_remote_flow_rename_onto_a_folder_made_here_is_held_back(self):
+        """A flow made here at the new name holds every file of the renamed flow back."""
+        own = os.path.join(self.root, "flows", "moved_flow", "flow_config.yaml")
+        os.makedirs(os.path.dirname(own))
+        with open(own, "w", encoding="utf-8") as file:
+            file.write("name: moved flow\ndescription: Made here\nstart_step: Start\n")
+        before = self._flow_files()
+        saved = self.project.resources
+
+        conflicts = self._pull(self._renamed())
+
+        self.assertEqual(conflicts, [os.path.join(self.root, "flows", "test_flow")])
+        self.assertEqual(self._flow_files(), before)
+        self.assertEqual(self.project.resources.keys(), saved.keys())
+        status = self.project.project_status()
+        self.assertEqual(status[0], [])
+        self.assertEqual(status[1], [self.step])
+        self.assertEqual(status[2], [own])
+        self.assertEqual(status[3], [])
 
 
 def _campaign_projection(
@@ -10467,6 +10727,52 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(moved, "campaign.yaml")))
         self.assertTrue(os.path.isfile(os.path.join(moved, "functions", "trigger.py")))
         self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_remote_rename_onto_a_folder_made_here_is_held_back(self):
+        """A campaign folder made here at the new name holds the rename back until it moves."""
+        monthly = os.path.join(self.root, "outbound_campaigns", "monthly")
+        shutil.copytree(self.folder, monthly)
+        own = self._yaml(monthly)
+        own["name"] = "Monthly"
+        self._write_yaml(own, monthly)
+        data = self._yaml()
+        self._node(data, "First call")["greeting"] = "Edited here"
+        self._write_yaml(data)
+        before = self._tree()
+        renamed = _campaign_projection(name="Monthly")
+
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [self.folder])
+        self.assertEqual(self._tree(), before)
+        status = self.project.project_status()
+        self.assertEqual(status[0], [])
+        self.assertEqual(
+            status[1], [os.path.join(self.folder, "campaign.yaml", "nodes", "First_call")]
+        )
+        self.assertTrue(status[2])
+        self.assertTrue(all(path.startswith(monthly + os.sep) for path in status[2]))
+        self.assertEqual(status[3], [])
+        success, message, commands = self.project.push_project(projection_json=renamed)
+        self.assertFalse(success)
+        self.assertIn("Merge conflicts", message)
+        self.assertEqual(commands, [])
+
+        shutil.rmtree(monthly)
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [])
+        self.assertFalse(os.path.exists(self.folder))
+        self.assertEqual(self._node(self._yaml(monthly), "First call")["greeting"], "Edited here")
+        self.assertEqual(self._read("monthly", "functions", "trigger.py"), self.TRIGGER_CODE)
+        self.assertEqual(
+            self.project.project_status(),
+            ([], [os.path.join(monthly, "campaign.yaml", "nodes", "First_call")], [], []),
+        )
+        self.assertEqual(
+            [(command, body["nodeId"]) for command, body in self._push()],
+            [("outbound_campaign_update_node", "call-1")],
+        )
 
     def test_remote_delete_removes_the_folder(self):
         self.project.pull_project(
