@@ -10,6 +10,7 @@ Copyright PolyAI Limited
 """
 
 import copy
+import graphlib
 import uuid
 from typing import Callable, Optional, TypeAlias
 
@@ -502,7 +503,7 @@ def relabel_campaign_nodes_first(
 
     Agent Studio refuses a label another node still has. A kept node changes label when its
     trigger is renamed, when pull gave it a name, or when only the case or punctuation of its
-    name changed. A node taking a label another relabelled node gives up goes after it.
+    name changed. A node taking a label other relabelled nodes give up goes after them.
     """
     if OutboundCampaignNode in deleted_resources:
         pre_push_deleted_resources.setdefault(OutboundCampaignNode, {}).update(
@@ -514,9 +515,28 @@ def relabel_campaign_nodes_first(
         for resource_id, node in list(updated_nodes.items())
         if node.saved_label is not None and node.saved_label != node.name
     ]
-    freed = {(node.campaign_id, node.saved_label.strip()) for node in relabelled}
-    for node in sorted(relabelled, key=lambda node: (node.campaign_id, node.name.strip()) in freed):
-        pre_push_updated_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
+    by_id = {node.resource_id: node for node in relabelled}
+    givers: dict[tuple[str, str], list[str]] = {}
+    for node in relabelled:
+        givers.setdefault((node.campaign_id, node.saved_label.strip()), []).append(node.resource_id)
+    order = graphlib.TopologicalSorter(
+        {
+            node.resource_id: [
+                giver
+                for giver in givers.get((node.campaign_id, node.name.strip()), [])
+                if giver != node.resource_id
+            ]
+            for node in relabelled
+        }
+    )
+    try:
+        ordered = list(order.static_order())
+    except graphlib.CycleError:
+        ordered = list(by_id)
+    for resource_id in ordered:
+        pre_push_updated_resources.setdefault(OutboundCampaignNode, {})[resource_id] = by_id[
+            resource_id
+        ]
     _prune_empty((updated_resources,), (OutboundCampaignNode,))
 
 

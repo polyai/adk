@@ -32,6 +32,7 @@ from poly.resources import (
     FlowConfig,
     Function,
     Handoff,
+    OutboundCampaignNode,
     ResourceMapping,
     SMSTemplate,
     Variable,
@@ -1681,6 +1682,27 @@ class ClearUnusedSettingsFromFlowStepTest(unittest.TestCase):
         self.assertEqual(queued[0].type, "clear_step_settings")
         self.assertEqual(queued[0].clear_step_settings.flow_id, self.FLOW_ID)
         self.assertEqual(queued[0].clear_step_settings.step_id, self.STEP_ID)
+
+
+class RelabelCampaignNodesFirstTest(unittest.TestCase):
+    def test_each_node_is_relabelled_after_the_node_giving_up_its_label(self):
+        def node(node_id: str, saved_label: str, name: str) -> types.SimpleNamespace:
+            return types.SimpleNamespace(
+                resource_id=node_id, campaign_id="C", saved_label=saved_label, name=name
+            )
+
+        updated = {
+            OutboundCampaignNode: {
+                "a": node("a", "x", "y"),
+                "b": node("b", "y", "z"),
+                "c": node("c", "z", "w"),
+            }
+        }
+        pre_push_updated: dict = {}
+
+        prepush.relabel_campaign_nodes_first(updated, {}, pre_push_updated, {})
+
+        self.assertEqual(list(pre_push_updated[OutboundCampaignNode]), ["c", "b", "a"])
 
 
 class JsonIoTests(unittest.TestCase):

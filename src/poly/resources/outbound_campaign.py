@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import zoneinfo
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, ClassVar, Optional
 
@@ -463,7 +464,7 @@ def campaign_names(campaigns: list[dict]) -> dict[str, str]:
 
     Agent Studio allows two campaigns the same name, but each needs its own folder. The oldest
     keeps its name, and a later one whose name cleans to a name taken becomes `<name> (1)`,
-    numbered on. A name with nothing left once cleaned becomes `Campaign`, numbered the same way.
+    numbered past any name another campaign already has. A name with nothing left once cleaned becomes `Campaign`, numbered the same way.
     """
     order = sorted(
         range(len(campaigns)),
@@ -473,17 +474,21 @@ def campaign_names(campaigns: list[dict]) -> dict[str, str]:
             index,
         ),
     )
-    names: dict[str, str] = {}
-    taken: set[str] = set()
-    for index in order:
-        campaign = campaigns[index]
+    bases = []
+    for campaign in campaigns:
         name = utils.strip_strings(campaign.get("name") or "")
-        base = name if utils.clean_name(name) else "Campaign"
+        bases.append(name if utils.clean_name(name) else "Campaign")
+    counts = Counter(utils.clean_name(base) for base in bases)
+    taken = {utils.clean_name(base) for base in bases if counts[utils.clean_name(base)] == 1}
+    names: dict[str, str] = {}
+    for index in order:
+        base = bases[index]
         candidate, number = base, 1
-        while utils.clean_name(candidate) in taken:
-            candidate, number = f"{base} ({number})", number + 1
-        taken.add(utils.clean_name(candidate))
-        names[campaign["id"]] = candidate
+        if counts[utils.clean_name(base)] > 1:
+            while utils.clean_name(candidate) in taken:
+                candidate, number = f"{base} ({number})", number + 1
+            taken.add(utils.clean_name(candidate))
+        names[campaigns[index]["id"]] = candidate
     return names
 
 
@@ -575,6 +580,19 @@ def _node_signature(nodes: dict[str, "OutboundCampaignNode"]) -> tuple:
     return tuple(sorted((node_pairing_key(node) for node in nodes.values()), key=repr))
 
 
+def _source_type_error(source: Optional[str]) -> str:
+    return f"The contact source stays '{source}' once the campaign has been published."
+
+
+def _source_type_errors(
+    saved: dict[str, "OutboundCampaignNode"], local: dict[str, "OutboundCampaignNode"]
+) -> list[str]:
+    saved_trigger = next((node.data for node in saved.values() if node.is_trigger), {})
+    local_trigger = next((node.data for node in local.values() if node.is_trigger), {})
+    source = saved_trigger.get("sourceType")
+    return [] if local_trigger.get("sourceType") == source else [_source_type_error(source)]
+
+
 def paired_campaigns(new_resources: dict, deleted_resources: dict) -> dict[str, str]:
     """Pair each deleted campaign with the new one its folder was renamed to, by old id.
 
@@ -622,6 +640,7 @@ class OutboundCampaign(MultiResourceYamlResource):
     unknown_keys: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
     had_trigger: bool = field(default=False, init=False, repr=False, compare=False)
     saved_identity: Optional[tuple] = field(default=None, init=False, repr=False, compare=False)
+    saved_settings: Optional[dict] = field(default=None, init=False, repr=False, compare=False)
 
     @property
     def folder(self) -> str:
@@ -677,6 +696,8 @@ class OutboundCampaign(MultiResourceYamlResource):
         name: str = "",
         had_trigger: bool = False,
         known_identity: Optional[tuple] = None,
+        known_status: Optional[str] = None,
+        known_settings: Optional[dict] = None,
         **kwargs,
     ) -> "OutboundCampaign":
         yaml_dict = utils.strip_strings(_plain(yaml_dict or {}))
@@ -685,9 +706,11 @@ class OutboundCampaign(MultiResourceYamlResource):
             name=yaml_dict.get("name") or "",
             description=yaml_dict.get("description"),
             settings=normalise_settings(yaml_dict.get("settings")),
+            status=known_status,
         )
         campaign.had_trigger = had_trigger
         campaign.saved_identity = known_identity
+        campaign.saved_settings = known_settings
         return campaign
 
     @classmethod
@@ -886,6 +909,8 @@ class OutboundCampaign(MultiResourceYamlResource):
         if self.unknown_keys:
             errors.append(f"Unknown fields: {', '.join(self.unknown_keys)}.")
         errors.extend(_settings_errors(self.settings))
+        if self.saved_settings is not None and self.settings != self.saved_settings:
+            errors.extend(_unsendable_settings_errors(self.settings))
         errors.extend(_node_entry_errors(self.node_entries))
         if (
             self.had_trigger
@@ -908,11 +933,15 @@ class OutboundCampaign(MultiResourceYamlResource):
         return super().is_modified(other_hash) or bool(_node_entry_errors(self.node_entries))
 
     @classmethod
-    def validate_deletions(cls, new_resources: dict, deleted_resources: dict) -> list[str]:
+    def validate_creates_and_deletes(
+        cls, new_resources: dict, deleted_resources: dict
+    ) -> list[str]:
         """Refuse deleting a published campaign, or one whose folder rename can't be paired.
 
         A delete and a create in one push would replace a campaign rather than rename it, so
         they are refused unless pairing makes them a rename. A draft can still be deleted alone.
+        A new campaign is refused settings the ADK can't send, unless a rename keeps them as
+        they were.
         """
         paired = paired_campaigns(new_resources, deleted_resources)
         created = [
@@ -920,9 +949,21 @@ class OutboundCampaign(MultiResourceYamlResource):
             for campaign_id, campaign in new_resources.get(cls, {}).items()
             if campaign_id not in paired.values()
         ]
+        renamed_from = {new_id: old_id for old_id, new_id in paired.items()}
         errors = []
+        for campaign_id, campaign in new_resources.get(cls, {}).items():
+            saved = deleted_resources.get(cls, {}).get(renamed_from.get(campaign_id))
+            if saved is None or campaign.settings != saved.settings:
+                errors.extend(_unsendable_settings_errors(campaign.settings))
         for campaign_id, campaign in deleted_resources.get(cls, {}).items():
             if campaign_id in paired:
+                if campaign.status not in (None, "draft"):
+                    errors.extend(
+                        _source_type_errors(
+                            campaign_nodes(deleted_resources, campaign_id),
+                            campaign_nodes(new_resources, paired[campaign_id]),
+                        )
+                    )
                 continue
             if campaign.status not in (None, "draft"):
                 errors.append(
@@ -1024,6 +1065,16 @@ def _has_trigger(entries: Optional[list]) -> bool:
     return any(
         isinstance(entry, dict) and entry.get("type") == "trigger" for entry in entries or []
     )
+
+
+def _unsendable_settings_errors(settings: Any) -> list[str]:
+    unknown = sorted(set(settings) - set(SETTINGS_DEFAULTS)) if isinstance(settings, dict) else []
+    if not unknown:
+        return []
+    return [
+        f"Settings {', '.join(unknown)} can't be sent from the ADK, and a settings change "
+        "replaces them all. Change this campaign's settings in Agent Studio, or update the ADK."
+    ]
 
 
 def _settings_errors(settings: Any) -> list[str]:
@@ -1560,9 +1611,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             and self.is_trigger
             and self.data.get("sourceType") != source
         ):
-            errors.append(
-                f"The contact source stays '{source}' once the campaign has been published."
-            )
+            errors.append(_source_type_error(source))
         if len(self.name) > 256:
             errors.append("The name must be under 256 characters.")
         if resource_mappings is not None and isinstance(self.data, dict) and self._routes_changed():

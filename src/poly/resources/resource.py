@@ -195,11 +195,13 @@ class Resource(BaseResource, ABC):
         pass
 
     @classmethod
-    def validate_deletions(cls, new_resources: dict, deleted_resources: dict) -> list[str]:
-        """Return why the resources of this type in `deleted_resources` can't be deleted.
+    def validate_creates_and_deletes(
+        cls, new_resources: dict, deleted_resources: dict
+    ) -> list[str]:
+        """Return why the resources of this type in either map can't be created or deleted.
 
         `new_resources` and `deleted_resources` hold every type's new and deleted resources,
-        for a type whose deletes depend on what is created alongside them.
+        for a type whose creates and deletes depend on each other.
         """
         return []
 
