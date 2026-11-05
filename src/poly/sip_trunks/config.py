@@ -52,19 +52,8 @@ def file_digest(path: str) -> str:
         return sha256(source_file.read()).hexdigest()
 
 
-def _read_project_config(path: str) -> "AgentStudioProject | None":
-    """Use the shared project lookup from an absolute directory path."""
-    from poly.cli_commands.shared import read_project_config
-
-    base_path = os.path.abspath(path)
-    if os.path.isfile(base_path):
-        base_path = os.path.dirname(base_path)
-    return read_project_config(base_path)
-
-
-def resolve_account_context(path: str) -> AccountContext:
+def resolve_account_context(project: "AgentStudioProject | None") -> AccountContext:
     """Read the account and region from the selected project."""
-    project = _read_project_config(path)
     if project is None:
         raise ValueError(
             "No project configuration found. Run from an ADK project or use --path to select one."
@@ -76,7 +65,7 @@ def resolve_account_context(path: str) -> AccountContext:
     )
 
 
-def find_manage_file(base_path: str, file_path: str | None) -> str:
+def find_manage_file(project: "AgentStudioProject | None", file_path: str | None) -> str:
     """Find an explicit file, or check the project root and its immediate parent."""
     if file_path:
         resolved = os.path.abspath(file_path)
@@ -84,7 +73,6 @@ def find_manage_file(base_path: str, file_path: str | None) -> str:
             raise FileNotFoundError(f"SIP trunk configuration not found: {resolved}")
         return resolved
 
-    project = _read_project_config(base_path)
     if project is None:
         raise ValueError(
             "No project configuration found. Run from an ADK project or use --path to select one."
@@ -101,15 +89,15 @@ def find_manage_file(base_path: str, file_path: str | None) -> str:
 
 
 def load_manage_config(
-    path: str,
+    project: "AgentStudioProject | None",
     *,
     file_path: str | None = None,
 ) -> LoadedManageConfig:
     """Load a SIP trunk YAML file and resolve its account context."""
     from poly.resources.resource_utils import load_yaml
 
-    context = resolve_account_context(path)
-    config_path = find_manage_file(path, file_path)
+    context = resolve_account_context(project)
+    config_path = find_manage_file(project, file_path)
     with open(config_path, "rb") as config_file:
         source = config_file.read()
     config = load_yaml(source.decode("utf-8"))
@@ -204,9 +192,8 @@ def persist_trunk_response(
     return True
 
 
-def default_export_path(path: str) -> str:
+def default_export_path(project: "AgentStudioProject | None") -> str:
     """Return the default SIP trunk export path in the current project root."""
-    project = _read_project_config(path)
     if project is None:
         raise ValueError(
             "No project configuration found. Run from an ADK project or use --path to select one."
@@ -229,7 +216,7 @@ def _sip_trunk_yaml() -> "YAML":
 
 
 def write_export(
-    path: str,
+    project: "AgentStudioProject",
     data: dict[str, Any],
     *,
     output: str | None = PROJECT_DEFAULT_OUTPUT,
@@ -239,7 +226,7 @@ def write_export(
     from poly.resources.resource_utils import dump_yaml
 
     output_path = (
-        default_export_path(path)
+        default_export_path(project)
         if output in {None, PROJECT_DEFAULT_OUTPUT}
         else os.path.abspath(output)
     )

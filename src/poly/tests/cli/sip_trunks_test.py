@@ -3,7 +3,6 @@
 Copyright PolyAI Limited
 """
 
-import os
 import unittest
 from argparse import Namespace
 from contextlib import chdir
@@ -12,6 +11,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 from poly.cli import AgentStudioCLI
+from poly.cli_commands.shared import load_project
 from poly.cli_commands.sip_trunks import SIPTrunksCommand
 from poly.handlers.interface import AgentStudioInterface
 from poly.project import AgentStudioProject
@@ -92,9 +92,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 args = self._parser().parse_args(["sip-trunks", "delete", "tr-123", flag])
                 self.assertTrue(args.force)
 
-    @patch.object(SIPTrunksCommand, "_apply_manage_plan")
+    @patch.object(AgentStudioProject, "apply_sip_trunk_plan")
     @patch("poly.output.console.print_sip_trunk_changes")
-    @patch.object(SIPTrunksCommand, "_build_manage_plan")
+    @patch.object(AgentStudioProject, "build_sip_trunk_plan")
     @patch("questionary.confirm")
     def test_manage_displays_diff_and_aborts_when_not_confirmed(
         self, confirm, build_plan, print_diff, apply_plan
@@ -103,7 +103,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         plan = MagicMock(changes=(PlanChange(**changes[0]),))
         build_plan.return_value = plan
         confirm.return_value.ask.return_value = False
-        args = self._parser().parse_args(["sip-trunks", "manage"])
+        args = self._project_args(["manage"])
 
         SIPTrunksCommand.run(args)
 
@@ -114,9 +114,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
         apply_plan.assert_not_called()
 
     @patch("poly.output.console.print_sip_trunk_manage_result")
-    @patch.object(SIPTrunksCommand, "_apply_manage_plan")
+    @patch.object(AgentStudioProject, "apply_sip_trunk_plan")
     @patch("poly.output.console.print_sip_trunk_changes")
-    @patch.object(SIPTrunksCommand, "_build_manage_plan")
+    @patch.object(AgentStudioProject, "build_sip_trunk_plan")
     @patch("questionary.confirm")
     def test_manage_applies_changes_after_confirmation(
         self, confirm, build_plan, print_diff, apply_plan, print_result
@@ -127,18 +127,20 @@ class SIPTrunksCommandTest(unittest.TestCase):
         build_plan.return_value = plan
         confirm.return_value.ask.return_value = True
         apply_plan.return_value = result
-        args = self._parser().parse_args(["sip-trunks", "manage"])
+        args = self._project_args(["manage"])
 
         SIPTrunksCommand.run(args)
 
         print_diff.assert_called_once_with(changes)
-        apply_plan.assert_called_once_with(plan)
+        apply_plan.assert_called_once_with(
+            plan, prompt_auth_secret=SIPTrunksCommand._prompt_auth_secret
+        )
         print_result.assert_called_once_with(result)
 
     @patch("poly.output.console.print_sip_trunk_manage_result")
-    @patch.object(SIPTrunksCommand, "_apply_manage_plan")
+    @patch.object(AgentStudioProject, "apply_sip_trunk_plan")
     @patch("poly.output.console.print_sip_trunk_changes")
-    @patch.object(SIPTrunksCommand, "_build_manage_plan")
+    @patch.object(AgentStudioProject, "build_sip_trunk_plan")
     @patch("questionary.confirm")
     def test_manage_force_applies_without_confirmation(
         self, confirm, build_plan, print_diff, apply_plan, print_result
@@ -147,19 +149,21 @@ class SIPTrunksCommandTest(unittest.TestCase):
         result = {"success": True, "trunks": []}
         build_plan.return_value = plan
         apply_plan.return_value = result
-        args = self._parser().parse_args(["sip-trunks", "manage", "--force"])
+        args = self._project_args(["manage", "--force"])
 
         SIPTrunksCommand.run(args)
 
         confirm.assert_not_called()
         print_diff.assert_called_once_with([change.as_dict() for change in plan.changes])
-        apply_plan.assert_called_once_with(plan)
+        apply_plan.assert_called_once_with(
+            plan, prompt_auth_secret=SIPTrunksCommand._prompt_auth_secret
+        )
         print_result.assert_called_once_with(result)
 
     @patch("poly.cli_commands.sip_trunks.json_print")
-    @patch.object(SIPTrunksCommand, "_apply_manage_plan")
+    @patch.object(AgentStudioProject, "apply_sip_trunk_plan")
     @patch("poly.output.console.print_sip_trunk_changes")
-    @patch.object(SIPTrunksCommand, "_build_manage_plan")
+    @patch.object(AgentStudioProject, "build_sip_trunk_plan")
     @patch("questionary.confirm")
     def test_manage_json_applies_without_confirmation(
         self, confirm, build_plan, print_diff, apply_plan, json_print
@@ -168,25 +172,27 @@ class SIPTrunksCommandTest(unittest.TestCase):
         result = {"success": True, "trunks": []}
         build_plan.return_value = plan
         apply_plan.return_value = result
-        args = self._parser().parse_args(["sip-trunks", "manage", "--json"])
+        args = self._project_args(["manage", "--json"])
 
         SIPTrunksCommand.run(args)
 
         confirm.assert_not_called()
         print_diff.assert_not_called()
-        apply_plan.assert_called_once_with(plan)
+        apply_plan.assert_called_once_with(
+            plan, prompt_auth_secret=SIPTrunksCommand._prompt_auth_secret
+        )
         json_print.assert_called_once_with(result)
 
     @patch("poly.cli_commands.sip_trunks.json_print")
-    @patch.object(SIPTrunksCommand, "_apply_manage_plan")
+    @patch.object(AgentStudioProject, "apply_sip_trunk_plan")
     @patch("poly.output.console.print_sip_trunk_changes")
-    @patch.object(SIPTrunksCommand, "_build_manage_plan")
+    @patch.object(AgentStudioProject, "build_sip_trunk_plan")
     @patch("questionary.confirm")
     def test_manage_json_with_no_changes_does_not_apply(
         self, confirm, build_plan, print_diff, apply_plan, json_print
     ):
         build_plan.return_value = MagicMock(changes=())
-        args = self._parser().parse_args(["sip-trunks", "manage", "--json"])
+        args = self._project_args(["manage", "--json"])
 
         SIPTrunksCommand.run(args)
 
@@ -204,7 +210,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         SIPTrunksCommand.run(args)
 
-        export_config.assert_called_once_with("uk-1", "acct-123")
+        export_config.assert_called_once_with()
         print_list_table.assert_called_once_with(export)
 
     @patch("poly.output.console.print_sip_trunk_detail")
@@ -221,8 +227,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         SIPTrunksCommand.run(args)
 
-        get_trunk.assert_called_once_with("uk-1", "acct-123", "tr-123")
-        list_extensions.assert_called_once_with("uk-1", "acct-123", "tr-123")
+        get_trunk.assert_called_once_with("tr-123")
+        list_extensions.assert_called_once_with("tr-123")
         print_get_table.assert_called_once_with(trunk, extensions)
 
     @patch("poly.cli_commands.sip_trunks.json_print")
@@ -232,7 +238,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         SIPTrunksCommand.run(args)
 
-        delete_trunk.assert_called_once_with("us-1", "acct-123", "tr-123")
+        delete_trunk.assert_called_once_with("tr-123")
         print_result.assert_called_once_with(
             {"success": True, "trunk_id": "tr-123"}
         )
@@ -257,7 +263,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         SIPTrunksCommand.run(args)
 
-        delete_trunk.assert_called_once_with("uk-1", "acct-123", "tr-123")
+        delete_trunk.assert_called_once_with("tr-123")
         success.assert_called_once_with("Deleted SIP trunk tr-123.")
 
     @patch("poly.output.console.success")
@@ -269,7 +275,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         SIPTrunksCommand.run(args)
 
         confirm.assert_not_called()
-        delete_trunk.assert_called_once_with("uk-1", "acct-123", "tr-123")
+        delete_trunk.assert_called_once_with("tr-123")
         success.assert_called_once_with("Deleted SIP trunk tr-123.")
 
     @patch("poly.cli_commands.sip_trunks.json_print")
@@ -281,20 +287,24 @@ class SIPTrunksCommandTest(unittest.TestCase):
         SIPTrunksCommand.run(args)
 
         confirm.assert_not_called()
-        delete_trunk.assert_called_once_with("uk-1", "acct-123", "tr-123")
+        delete_trunk.assert_called_once_with("tr-123")
         json_print.assert_called_once_with({"success": True, "trunk_id": "tr-123"})
 
-    @patch("poly.cli_commands.shared.read_project_config")
-    def test_context_defaults_to_current_project(self, read_project_config):
-        read_project_config.return_value = MagicMock(
-            account_id="acct-123", region="euw-1", root_path="/account/project"
+    @patch("poly.cli_commands.sip_trunks.json_print")
+    @patch("poly.cli_commands.sip_trunks.load_project")
+    def test_command_uses_the_selected_project(self, load_selected_project, json_print):
+        project = load_selected_project.return_value
+        export = {"account_id": "acct-123", "sip_trunks": []}
+        project.export_sip_trunks.return_value = export
+        args = self._parser().parse_args(
+            ["sip-trunks", "list", "--path", "relative-project", "--json"]
         )
-        args = Namespace(path="relative-project", json=False)
 
-        result = SIPTrunksCommand._resolve_context(args)
+        SIPTrunksCommand.run(args)
 
-        self.assertEqual(result, ("euw-1", "acct-123"))
-        read_project_config.assert_called_once_with(os.path.abspath(args.path))
+        load_selected_project.assert_called_once_with("relative-project", output_json=True)
+        project.export_sip_trunks.assert_called_once_with()
+        json_print.assert_called_once_with(export)
 
     @patch("poly.cli_commands.sip_trunks.json_print")
     @patch.object(AgentStudioProject, "export_sip_trunks")
@@ -314,7 +324,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             self.assertEqual(output.read_text(encoding="utf-8"), "[]\n")
             self.assertFalse((Path(temp_dir) / "sip-trunks.yaml").exists())
 
-        export_config.assert_called_once_with("uk-1", "acct-123")
+        export_config.assert_called_once_with()
         json_print.assert_called_once_with(
             {"success": True, "output_path": str(output), "trunk_count": 0}
         )
@@ -337,8 +347,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
                         args = self._parser().parse_args(
                             ["sip-trunks", *command, "--path", temp_dir, "--json"]
                         )
-                        with self.assertRaisesRegex(ValueError, "No project configuration found.*--path"):
+                        with self.assertRaises(SystemExit) as error:
                             SIPTrunksCommand.run(args)
+                        self.assertEqual(error.exception.code, 1)
                         request.assert_not_called()
                         export_config.assert_not_called()
                         json_print.assert_not_called()
@@ -453,8 +464,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 encoding="utf-8",
             )
             output = account_dir / "sip-trunks.yaml"
-            args = Namespace(output=str(output), force=False, path=str(account_dir))
-            SIPTrunksCommand._write_export(args, data)
+            args = Namespace(output=str(output), force=False, path=str(project_dir))
+            project = load_project(args.path)
+            project.write_sip_trunk_export(data, output=args.output, force=args.force)
             exported_text = output.read_text(encoding="utf-8")
             manage_args = Namespace(
                 path=str(project_dir),
@@ -463,7 +475,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
 
             loaded = load_manage_config(
-                manage_args.path,
+                load_project(manage_args.path),
                 file_path=manage_args.file_path,
             )
 
@@ -488,17 +500,18 @@ class SIPTrunksCommandTest(unittest.TestCase):
             output = project_dir / "sip-trunks.yaml"
             args = Namespace(path=str(project_dir), output=str(output), force=False)
 
-            SIPTrunksCommand._write_export(args, data)
+            project = load_project(args.path)
+            project.write_sip_trunk_export(data, output=args.output, force=args.force)
 
             exported = output.read_text(encoding="utf-8")
             self.assertIn("default_route: null\n", exported)
             self.assertIn("outbound: null\n", exported)
             self.assertEqual(load_yaml(exported), data["sip_trunks"])
-            self.assertEqual(load_manage_config(str(project_dir)).trunks, data["sip_trunks"])
+            self.assertEqual(load_manage_config(load_project(str(project_dir))).trunks, data["sip_trunks"])
 
             # Blank values remain a valid spelling of null in user-authored files.
             output.write_text(exported.replace(": null\n", ":\n"), encoding="utf-8")
-            self.assertEqual(load_manage_config(str(project_dir)).trunks, data["sip_trunks"])
+            self.assertEqual(load_manage_config(load_project(str(project_dir))).trunks, data["sip_trunks"])
 
         self.assertEqual(dump_yaml({"value": None}), "value:\n")
 
@@ -534,7 +547,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(ValueError, "missing required field.*agent_id"):
-                SIPTrunksCommand._build_manage_plan(args)
+                project = load_project(args.path, output_json=args.json)
+                project.build_sip_trunk_plan(file_path=args.file_path)
 
         prompt.assert_not_called()
 
@@ -592,9 +606,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 rotate_auth=None,
             )
 
-            changes = [
-                change.as_dict() for change in SIPTrunksCommand._build_manage_plan(args).changes
-            ]
+            project = load_project(args.path, output_json=args.json)
+            plan = project.build_sip_trunk_plan(file_path=args.file_path)
+            changes = [change.as_dict() for change in plan.changes]
 
         self.assertIn(
             {
@@ -703,7 +717,13 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 json=False,
             )
 
-            result = SIPTrunksCommand._apply_manage_plan(SIPTrunksCommand._build_manage_plan(args))
+            project = load_project(args.path, output_json=args.json)
+            plan = project.build_sip_trunk_plan(
+                file_path=args.file_path, rotate_auth=getattr(args, "rotate_auth", None)
+            )
+            result = project.apply_sip_trunk_plan(
+                plan, prompt_auth_secret=SIPTrunksCommand._prompt_auth_secret
+            )
             saved_config = config_file.read_text(encoding="utf-8")
 
         create_trunk.assert_called_once_with(
@@ -769,7 +789,13 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 rotate_auth="tr-123",
             )
 
-            result = SIPTrunksCommand._apply_manage_plan(SIPTrunksCommand._build_manage_plan(args))
+            project = load_project(args.path, output_json=args.json)
+            plan = project.build_sip_trunk_plan(
+                file_path=args.file_path, rotate_auth=getattr(args, "rotate_auth", None)
+            )
+            result = project.apply_sip_trunk_plan(
+                plan, prompt_auth_secret=SIPTrunksCommand._prompt_auth_secret
+            )
 
         prompt.assert_called_once_with("SIP password for tr-123: ")
         update_trunk.assert_called_once_with(
@@ -836,7 +862,13 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 json=False,
             )
 
-            result = SIPTrunksCommand._apply_manage_plan(SIPTrunksCommand._build_manage_plan(args))
+            project = load_project(args.path, output_json=args.json)
+            plan = project.build_sip_trunk_plan(
+                file_path=args.file_path, rotate_auth=getattr(args, "rotate_auth", None)
+            )
+            result = project.apply_sip_trunk_plan(
+                plan, prompt_auth_secret=SIPTrunksCommand._prompt_auth_secret
+            )
 
         update_trunk.assert_called_once_with(
             "uk-1", "acct-123", "tr-managed", {"encrypted": False}

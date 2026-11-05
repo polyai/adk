@@ -4,14 +4,12 @@ Copyright PolyAI Limited
 """
 
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
+from poly.cli_commands.shared import load_project
 from poly.output.json_output import json_print
-from poly.sip_trunks import config as sip_trunk_config
-
-if TYPE_CHECKING:
-    from poly.sip_trunks.reconciler import ManagePlan
+from poly.sip_trunks.config import PROJECT_DEFAULT_OUTPUT
 
 
 class SIPTrunksCommand(BaseCommand):
@@ -46,7 +44,7 @@ class SIPTrunksCommand(BaseCommand):
             "-o",
             "--output",
             nargs="?",
-            const=sip_trunk_config.PROJECT_DEFAULT_OUTPUT,
+            const=PROJECT_DEFAULT_OUTPUT,
             help=(
                 "Write reusable YAML to FILE, relative to the current working directory. "
                 "When passed without FILE, writes "
@@ -108,20 +106,6 @@ class SIPTrunksCommand(BaseCommand):
         )
 
     @staticmethod
-    def _resolve_context(args: Namespace) -> tuple[str, str]:
-        context = sip_trunk_config.resolve_account_context(args.path)
-        return context.region, context.account_id
-
-    @staticmethod
-    def _write_export(args: Namespace, data: dict[str, Any]) -> str:
-        return sip_trunk_config.write_export(
-            args.path,
-            data,
-            output=args.output,
-            force=args.force,
-        )
-
-    @staticmethod
     def _prompt_auth_secret(
         local_name: str,
         current: dict[str, Any] | None,
@@ -178,32 +162,6 @@ class SIPTrunksCommand(BaseCommand):
         return False
 
     @classmethod
-    def _build_manage_plan(cls, args: Namespace) -> "ManagePlan":
-        from poly.project import AgentStudioProject
-
-        loaded = sip_trunk_config.load_manage_config(
-            args.path,
-            file_path=args.file_path,
-        )
-        return AgentStudioProject.build_sip_trunk_plan(
-            loaded.path,
-            loaded.region,
-            loaded.account_id,
-            loaded.trunks,
-            rotate_auth=getattr(args, "rotate_auth", None),
-            source_digest=loaded.source_digest,
-        )
-
-    @classmethod
-    def _apply_manage_plan(cls, plan: "ManagePlan") -> dict[str, Any]:
-        from poly.project import AgentStudioProject
-
-        return AgentStudioProject.apply_sip_trunk_plan(
-            plan,
-            prompt_auth_secret=cls._prompt_auth_secret,
-        )
-
-    @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching SIP trunk action."""
         action = args.sip_trunks_subcommand
@@ -219,7 +177,10 @@ class SIPTrunksCommand(BaseCommand):
     @classmethod
     def sip_trunks_manage(cls, args: Namespace) -> None:
         """Preview and apply the SIP trunks declared in a YAML file."""
-        plan = cls._build_manage_plan(args)
+        project = load_project(args.path, output_json=args.json)
+        plan = project.build_sip_trunk_plan(
+            file_path=args.file_path, rotate_auth=getattr(args, "rotate_auth", None)
+        )
         changes = [change.as_dict() for change in plan.changes]
         if not changes:
             if args.json:
@@ -244,7 +205,7 @@ class SIPTrunksCommand(BaseCommand):
 
                 info("Aborted. No changes were applied.")
                 return
-        result = cls._apply_manage_plan(plan)
+        result = project.apply_sip_trunk_plan(plan, prompt_auth_secret=cls._prompt_auth_secret)
         if args.json:
             json_print(result)
         else:
@@ -255,14 +216,12 @@ class SIPTrunksCommand(BaseCommand):
     @classmethod
     def sip_trunks_list(cls, args: Namespace) -> None:
         """List account SIP trunks or export their configuration to YAML."""
-        from poly.project import AgentStudioProject
-
-        region, account_id = cls._resolve_context(args)
-        if args.output == sip_trunk_config.PROJECT_DEFAULT_OUTPUT:
-            args.output = sip_trunk_config.default_export_path(args.path)
-        result = AgentStudioProject.export_sip_trunks(region, account_id)
+        project = load_project(args.path, output_json=args.json)
+        result = project.export_sip_trunks()
         if args.output:
-            output_path = cls._write_export(args, result)
+            output_path = project.write_sip_trunk_export(
+                result, output=args.output, force=args.force
+            )
             if args.json:
                 json_print(
                     {
@@ -285,17 +244,11 @@ class SIPTrunksCommand(BaseCommand):
     @classmethod
     def sip_trunks_get(cls, args: Namespace) -> None:
         """Show a SIP trunk and its extension routing."""
-        from poly.project import AgentStudioProject
-
-        region, account_id = cls._resolve_context(args)
-        result = AgentStudioProject.get_sip_trunk(region, account_id, args.trunk_id)
+        project = load_project(args.path, output_json=args.json)
+        result = project.get_sip_trunk(args.trunk_id)
         if not args.json:
-            extension_response = AgentStudioProject.list_sip_trunk_extensions(
-                region, account_id, args.trunk_id
-            )
+            extension_response = project.list_sip_trunk_extensions(args.trunk_id)
             extensions = extension_response.get("extensions", [])
-            if not isinstance(extensions, list):
-                raise ValueError("Expected the SIP Trunking API to return an extensions list.")
             from poly.output.console import print_sip_trunk_detail
 
             print_sip_trunk_detail(result, extensions)
@@ -306,9 +259,7 @@ class SIPTrunksCommand(BaseCommand):
     @classmethod
     def sip_trunks_delete(cls, args: Namespace) -> None:
         """Delete a SIP trunk after confirmation when required."""
-        from poly.project import AgentStudioProject
-
-        region, account_id = cls._resolve_context(args)
+        project = load_project(args.path, output_json=args.json)
         if not args.json and not args.force:
             import questionary
 
@@ -322,7 +273,7 @@ class SIPTrunksCommand(BaseCommand):
 
                 info("Aborted. SIP trunk was not deleted.")
                 return
-        AgentStudioProject.delete_sip_trunk(region, account_id, args.trunk_id)
+        project.delete_sip_trunk(args.trunk_id)
         result = {"success": True, "trunk_id": args.trunk_id}
         if not args.json:
             from poly.output.console import success
