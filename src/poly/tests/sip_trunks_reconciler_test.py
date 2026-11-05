@@ -16,6 +16,7 @@ from poly.sip_trunks.reconciler import (
     export_config,
     managed_trunk_data,
     normalized_extensions,
+    trunk_patch,
 )
 
 
@@ -500,6 +501,128 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
 
         self.assertEqual(prompt.call_count, 2)
         create_trunk.assert_not_called()
+
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
+    def test_list_export_is_reusable_and_contains_extensions(self, list_trunks, list_extensions):
+        list_trunks.return_value = {
+            "sip_trunks": [
+                {
+                    "id": "tr-123",
+                    "name": "Primary carrier",
+                    "sip_cidr": ["203.0.113.0/24"],
+                    "rtp_cidr": ["198.51.100.0/24"],
+                    "encrypted": True,
+                    "inbound": {
+                        "hostname": "tr-123.sbc.sip.uk.poly.ai",
+                        "sip_auth": {
+                            "enabled": True,
+                            "username": "alice",
+                            "realm": "sbc.sip.uk.poly.ai",
+                        },
+                        "sip_token_auth": {"enabled": False},
+                    },
+                    "created_at": "2026-08-12T12:00:00Z",
+                    "updated_at": "2026-08-12T12:01:00Z",
+                }
+            ]
+        }
+        list_extensions.return_value = {
+            "extensions": [
+                {
+                    "extension": "1000",
+                    "agent": {
+                        "agent_id": "charging-support",
+                        "client_env": "live",
+                        "variant_id": "",
+                    },
+                }
+            ]
+        }
+
+        result = export_config("uk-1", "pod-point-uk")
+
+        self.assertNotIn("region", result)
+        config = result["sip_trunks"][0]
+        self.assertEqual(config["hostname"], "tr-123.sbc.sip.uk.poly.ai")
+        self.assertEqual(
+            config["inbound_auth"],
+            {
+                "type": "digest",
+                "username": "alice",
+                "realm": "sbc.sip.uk.poly.ai",
+            },
+        )
+        self.assertNotIn("created_at", config)
+        self.assertNotIn("updated_at", config)
+        self.assertEqual(
+            config["extensions"][0],
+            {
+                "extension": "1000",
+                "agent_id": "charging-support",
+                "client_env": "live",
+                "variant_id": "",
+            },
+        )
+
+    def test_environment_secret_reference_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "password_env.*prompted"):
+            managed_trunk_data(
+                "tr-123",
+                {
+                    "outbound": None,
+                    "default_route": None,
+                    "inbound_auth": {
+                        "type": "digest",
+                        "username": "alice",
+                        "password_env": "CARRIER_SIP_PASSWORD",
+                    },
+                },
+                create=False,
+            )
+
+    def test_auth_type_none_disables_current_auth(self):
+        desired = managed_trunk_data(
+            "tr-123", {"outbound": None, "default_route": None, "inbound_auth": {"type": "none"}}, create=False
+        )
+        patch_data = trunk_patch(
+            {
+                "name": "tr-123",
+                "inbound": {
+                    "sip_auth": {"enabled": False},
+                    "sip_token_auth": {"enabled": True},
+                },
+            },
+            desired,
+            secret_supplied=False,
+        )
+
+        self.assertEqual(patch_data, {"inbound": {"sip_token_auth": {"disable": True}}})
+
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions")
+    @patch.object(AgentStudioInterface, "list_sip_trunks")
+    def test_export_includes_empty_authoritative_extensions_list(
+        self, list_trunks, list_extensions
+    ):
+        list_trunks.return_value = {
+            "sip_trunks": [
+                {
+                    "id": "tr-123",
+                    "name": "Example",
+                    "sip_cidr": ["203.0.113.0/24"],
+                    "rtp_cidr": ["198.51.100.0/24"],
+                    "encrypted": True,
+                    "inbound": {},
+                }
+            ]
+        }
+        list_extensions.return_value = {"extensions": []}
+
+        result = export_config("uk-1", "acct-123")
+
+        self.assertEqual(result["sip_trunks"][0]["extensions"], [])
+        self.assertIsNone(result["sip_trunks"][0]["default_route"])
+        self.assertIsNone(result["sip_trunks"][0]["outbound"])
 
 
 class SIPTrunkDefaultRouteTest(unittest.TestCase):
