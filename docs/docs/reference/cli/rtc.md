@@ -66,7 +66,7 @@ poly rtc push --env live --force
 | Flag | Description |
 |---|---|
 | `--env` | **Required.** Environment to push to. Choices: `sandbox`, `pre-release`, `live`. |
-| `--force` | Skip the drift check and confirmation prompt, overwriting the remote state. |
+| `-f`, `--force` | Skip the drift check and confirmation prompt, overwriting the remote state. |
 | `--no-merge` | Fail with an error on drift instead of merging automatically. |
 | `--skip-validation` | Skip schema validation before pushing. |
 | `--schema` | Push the schema only. Mutually exclusive with `--data`. |
@@ -108,7 +108,7 @@ poly rtc edit --env sandbox --schema
 |---|---|
 | `--env` | **Required.** Environment to edit. Choices: `sandbox`, `pre-release`, `live`. |
 | `--schema` | Edit the schema instead of the data. |
-| `--force` | Skip the confirmation prompt when editing `live`. |
+| `-f`, `--force` | Skip the confirmation prompt when editing `live`. |
 
 The file opens with `$EDITOR` or `$VISUAL`. Closing the editor without changes cancels the operation. Before pushing, the remote state is re-checked, so a change made elsewhere while you were editing is caught rather than overwritten — the push fails rather than merging.
 

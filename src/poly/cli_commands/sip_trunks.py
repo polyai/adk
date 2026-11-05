@@ -55,6 +55,7 @@ class SIPTrunksCommand(BaseCommand):
         )
         list_parser.add_argument(
             "--force",
+            "-f",
             action="store_true",
             help="Overwrite an existing output file.",
         )

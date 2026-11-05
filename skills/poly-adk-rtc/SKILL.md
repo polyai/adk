@@ -54,5 +54,5 @@ poly rtc push --env sandbox    # --env is REQUIRED on push — no default, so no
 Each `poly rtc pull` stores a base copy. On push, if the remote moved since your last pull (usually someone editing in the Agent Studio UI), the config has **drifted**. Default behavior is a three-way merge — **per key**, unlike resource files which merge per line: a key changed on one side applies cleanly; a key changed differently on both sides is a conflict and aborts the push.
 
 - `--no-merge` — fail on any drift instead of merging.
-- `--force` — skip the drift check and overwrite the remote. Confirm with the user first; someone's UI edits may be on the other side.
+- `--force` / `-f` — skip the drift check and overwrite the remote. Confirm with the user first; someone's UI edits may be on the other side.
 - **Drift protection only works if you pulled first** — push without a prior pull and the check is silently skipped. Always `poly rtc pull` before editing.

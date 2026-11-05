@@ -40,7 +40,7 @@ An export includes every trunk in the project's account and region, with all ext
 | Flag | Description |
 |---|---|
 | `-o`, `--output [FILE]` | Write YAML to `FILE`, relative to the working directory. Without a filename, write `sip-trunks.yaml` in the project root. |
-| `--force` | Allow an existing output file to be overwritten. Required for overwrites even with `--json`. |
+| `-f`, `--force` | Allow an existing output file to be overwritten. Required for overwrites even with `--json`. |
 
 `--json` output shape:
 
