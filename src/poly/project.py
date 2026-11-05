@@ -827,6 +827,100 @@ class AgentStudioProject:
                 followed[resource_type] = {**followed[resource_type], resource_id: relocated}
         return followed, moved
 
+    def _move_entries_added_here(
+        self,
+        moved: dict[tuple[type[Resource], str], Resource],
+        incoming_resources: ResourceMap,
+        resource_mappings: list[ResourceMapping],
+    ) -> None:
+        """Move the entries added here to a file whose saved entries all moved upstream.
+
+        Only the file cache changes. An entry moves when every saved entry of its type in the
+        old file went to the same new file.
+        """
+        targets: dict[tuple[type[Resource], str], Optional[Resource]] = {}
+        saved_paths: set[str] = set()
+        for (resource_type, resource_id), old in moved.items():
+            old_path = old.get_path(self.root_path)
+            saved_paths.add(old_path)
+            target = incoming_resources[resource_type][resource_id]
+            key = (resource_type, _parse_multi_resource_path(old_path)[0])
+            previous = targets.get(key, target)
+            same_file = (
+                previous is not None
+                and _parse_multi_resource_path(previous.get_path(self.root_path))[0]
+                == _parse_multi_resource_path(target.get_path(self.root_path))[0]
+            )
+            targets[key] = target if same_file else None
+        for resource_type in {resource_type for resource_type, _ in targets}:
+            for path in resource_type.discover_resources(self.root_path):
+                target = targets.get((resource_type, _parse_multi_resource_path(path)[0]))
+                if target is None or path in saved_paths:
+                    continue
+                mapping = ResourceMapping(
+                    resource_id=path,
+                    resource_type=resource_type,
+                    resource_name=os.path.basename(path),
+                    file_path=path,
+                    flow_name=None,
+                    resource_prefix=None,
+                )
+                try:
+                    local = self.read_local_resource(
+                        resource=mapping, resource_mappings=resource_mappings
+                    )
+                except (FileNotFoundError, ValueError, TypeError):
+                    continue
+                relocated = local.moved_to(target)
+                if relocated is None:
+                    continue
+                resource_type.delete_resource(path, save_to_cache=True)
+                relocated.save(
+                    self.root_path,
+                    resource_name=relocated.name,
+                    resource_mappings=resource_mappings,
+                    save_to_cache=True,
+                )
+
+    def _move_files_added_here(
+        self,
+        moved: dict[tuple[type[Resource], str], Resource],
+        incoming_resources: ResourceMap,
+        original_resources: ResourceMap,
+        conflicts: list[str],
+    ) -> None:
+        """Move the files added here into the folder a moved file's folder became upstream."""
+        folders: dict[str, Optional[str]] = {}
+        for (resource_type, resource_id), old in moved.items():
+            old_folder = os.path.dirname(
+                _parse_multi_resource_path(old.get_path(self.root_path))[0]
+            )
+            new_folder = os.path.dirname(
+                _parse_multi_resource_path(
+                    incoming_resources[resource_type][resource_id].get_path(self.root_path)
+                )[0]
+            )
+            folders[old_folder] = (
+                new_folder if folders.get(old_folder, new_folder) == new_folder else None
+            )
+        saved_paths = {
+            resource.get_path(self.root_path)
+            for resource_type, resources in original_resources.items()
+            if not issubclass(resource_type, MultiResourceYamlResource)
+            for resource in resources.values()
+        }
+        for old_folder, new_folder in folders.items():
+            if new_folder is None or old_folder == new_folder or not os.path.isdir(old_folder):
+                continue
+            for directory, _, names in os.walk(old_folder):
+                for name in names:
+                    path = os.path.join(directory, name)
+                    target = os.path.join(new_folder, os.path.relpath(path, old_folder))
+                    if path in saved_paths or path in conflicts or os.path.exists(target):
+                        continue
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    shutil.move(path, target)
+
     @staticmethod
     def _write_yaml_or_remove(file: str, data: dict) -> None:
         if data:
@@ -974,6 +1068,7 @@ class AgentStudioProject:
                         )
                     except (FileNotFoundError, ValueError, TypeError):
                         continue
+            self._move_entries_added_here(moved, incoming_resources, incoming_resource_mappings)
 
             local_file_data = self._snapshot_multi_resource_file_cache()
 
@@ -1277,6 +1372,9 @@ class AgentStudioProject:
                     continue
                 resource_type.delete_resource(resource.get_path(self.root_path))
 
+        self._move_files_added_here(
+            moved, incoming_resources, original_resources, files_with_conflicts
+        )
         return files_with_conflicts
 
     def _deleted_upstream_but_edited(

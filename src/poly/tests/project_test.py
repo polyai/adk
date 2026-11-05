@@ -10123,6 +10123,35 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             ["outbound_campaign_update_node", "outbound_campaign_update_node"],
         )
 
+    def test_remote_campaign_rename_carries_nodes_added_here(self):
+        data = self._yaml()
+        self._node(data, "First call")["defaultRoute"] = "Text"
+        data["nodes"].append(
+            {
+                "name": "Text",
+                "type": "sms",
+                "function": {"name": "sms_args", "description": ""},
+                "messageTemplate": "Hi",
+                "defaultRoute": "End",
+            }
+        )
+        self._write_yaml(data)
+        code = "def sms_args(outbound_contact, outbound_campaign):\n    return {}\n"
+        self._write_function("text", code)
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=_campaign_projection(name="Monthly")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertFalse(os.path.exists(self.folder))
+        self.folder = os.path.join(self.root, "outbound_campaigns", "monthly")
+        pulled = self._yaml()
+        self.assertEqual(self._node(pulled, "Text")["messageTemplate"], "Hi")
+        self.assertEqual(self._node(pulled, "First call")["defaultRoute"], "Text")
+        self.assertEqual(self._read("monthly", "functions", "text.py"), code)
+        self.assertEqual(self.project.validate_project(), [])
+
     def test_status_lists_a_campaign_file_left_in_conflict_by_a_pull(self):
         data = self._yaml()
         self._node(data, "First call")["greeting"] = "Hello there"
