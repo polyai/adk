@@ -128,7 +128,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
             "extensions": [
                 {
                     "extension": "1000",
-                    "agent": {"agent_id": "charging-support", "client_env": "live"},
+                    "agent": {"agent_id": "agent-1", "client_env": "live"},
                 }
             ]
         }
@@ -150,7 +150,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                     "extensions": [
                         {
                             "extension": "1000",
-                            "agent_id": "charging-support",
+                            "agent_id": "agent-1",
                             "client_env": "live",
                         }
                     ],
@@ -532,7 +532,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
                 {
                     "extension": "1000",
                     "agent": {
-                        "agent_id": "charging-support",
+                        "agent_id": "agent-1",
                         "client_env": "live",
                         "variant_id": "",
                     },
@@ -540,7 +540,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
             ]
         }
 
-        result = export_config("uk-1", "pod-point-uk")
+        result = export_config("uk-1", "acct-123")
 
         self.assertNotIn("region", result)
         config = result["sip_trunks"][0]
@@ -559,7 +559,7 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
             config["extensions"][0],
             {
                 "extension": "1000",
-                "agent_id": "charging-support",
+                "agent_id": "agent-1",
                 "client_env": "live",
                 "variant_id": "",
             },
