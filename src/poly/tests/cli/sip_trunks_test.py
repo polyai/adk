@@ -418,7 +418,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     def test_exported_yaml_can_be_loaded_by_manage(self):
         data = {
-            "account_id": "pod-point-uk",
+            "account_id": "acct-123",
             "sip_trunks": [
                 {
                     "id": "tr-123",
@@ -435,7 +435,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                     "extensions": [
                         {
                             "extension": extension,
-                            "agent_id": "charging-support",
+                            "agent_id": "agent-1",
                             "client_env": "live",
                         }
                         for extension in ("0010", "1000", "+44/2000", "*123", "true")
@@ -444,12 +444,12 @@ class SIPTrunksCommandTest(unittest.TestCase):
             ],
         }
         with TemporaryDirectory() as temp_dir:
-            account_dir = Path(temp_dir) / "pod-point-uk"
+            account_dir = Path(temp_dir) / "acct-123"
             account_dir.mkdir()
-            project_dir = account_dir / "charging-support"
+            project_dir = account_dir / "agent-1"
             project_dir.mkdir()
             (project_dir / "project.yaml").write_text(
-                "project_id: charging-support\naccount_id: pod-point-uk\nregion: uk-1\n",
+                "project_id: agent-1\naccount_id: acct-123\nregion: uk-1\n",
                 encoding="utf-8",
             )
             output = account_dir / "sip-trunks.yaml"
@@ -468,7 +468,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
 
         self.assertEqual(loaded.region, "uk-1")
-        self.assertEqual(loaded.account_id, "pod-point-uk")
+        self.assertEqual(loaded.account_id, "acct-123")
         self.assertEqual(loaded.trunks, data["sip_trunks"])
         self.assertTrue(exported_text.startswith("- id: tr-123\n"))
         self.assertNotIn("sip_trunks:", exported_text)
@@ -676,7 +676,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         list_trunks.return_value = {"sip_trunks": []}
         create_trunk.return_value = {
             "id": "tr-123",
-            "account_id": "pod-point-uk",
+            "account_id": "acct-123",
             "name": "Primary carrier",
             "inbound": {"hostname": "tr-123.sbc.sip.uk.poly.ai"},
             "created_at": "2026-08-12T12:00:00Z",
@@ -685,8 +685,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
         list_extensions.return_value = {"extensions": []}
 
         with TemporaryDirectory() as temp_dir:
-            account_dir = Path(temp_dir) / "pod-point-uk"
-            self._write_project_config(account_dir, account_id="pod-point-uk")
+            account_dir = Path(temp_dir) / "acct-123"
+            self._write_project_config(account_dir, account_id="acct-123")
             config_file = account_dir / "sip-trunks.yaml"
             config_file.write_text(
                 """- name: Primary carrier
@@ -708,7 +708,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         create_trunk.assert_called_once_with(
             "uk-1",
-            "pod-point-uk",
+            "acct-123",
             {
                 "name": "Primary carrier",
                 "sip_cidr": ["203.0.113.0/24"],
@@ -746,8 +746,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
         list_extensions.return_value = {"extensions": []}
 
         with TemporaryDirectory() as temp_dir:
-            account_dir = Path(temp_dir) / "pod-point-uk"
-            self._write_project_config(account_dir, account_id="pod-point-uk")
+            account_dir = Path(temp_dir) / "acct-123"
+            self._write_project_config(account_dir, account_id="acct-123")
             (account_dir / "sip-trunks.yaml").write_text(
                 """- id: tr-123
   name: Primary carrier
@@ -774,7 +774,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         prompt.assert_called_once_with("SIP password for tr-123: ")
         update_trunk.assert_called_once_with(
             "uk-1",
-            "pod-point-uk",
+            "acct-123",
             "tr-123",
             {"inbound": {"sip_auth": {"username": "alice", "password": "rotated-secret"}}},
         )
@@ -816,8 +816,8 @@ class SIPTrunksCommandTest(unittest.TestCase):
         }
 
         with TemporaryDirectory() as temp_dir:
-            account_dir = Path(temp_dir) / "pod-point-uk"
-            self._write_project_config(account_dir, account_id="pod-point-uk")
+            account_dir = Path(temp_dir) / "acct-123"
+            self._write_project_config(account_dir, account_id="acct-123")
             config_file = account_dir / "sip-trunks.yaml"
             config_file.write_text(
                 """- id: tr-managed
@@ -839,7 +839,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             result = SIPTrunksCommand._apply_manage_plan(SIPTrunksCommand._build_manage_plan(args))
 
         update_trunk.assert_called_once_with(
-            "uk-1", "pod-point-uk", "tr-managed", {"encrypted": False}
+            "uk-1", "acct-123", "tr-managed", {"encrypted": False}
         )
         delete_trunk.assert_not_called()
         self.assertEqual([item["id"] for item in result["trunks"]], ["tr-managed"])

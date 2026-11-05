@@ -271,7 +271,7 @@ class SIPTrunksConfigTest(unittest.TestCase):
                 "Primary carrier",
                 {
                     "id": "tr-123",
-                    "account_id": "pod-point-uk",
+                    "account_id": "acct-123",
                     "inbound": {
                         "hostname": "tr-123.sbc.sip.uk.poly.ai",
                         "sip_auth": {"realm": "sbc.sip.uk.poly.ai"},
