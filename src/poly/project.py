@@ -1067,11 +1067,23 @@ class AgentStudioProject:
         local_resources: list[tuple[type[Resource], Resource, Optional[Resource]]] = []
         MultiResourceYamlResource._file_cache.clear()
         if not force:
+            vacated = {
+                _parse_multi_resource_path(old.get_path(self.root_path))[0]
+                for old in moved.values()
+            }
             for resource_type, resources in incoming_resources.items():
                 if not issubclass(resource_type, MultiResourceYamlResource):
                     continue
+                saved = original_resources.get(resource_type) or {}
                 for resource in resources.values():
                     old = moved.get((resource_type, resource.resource_id))
+                    if (
+                        old is None
+                        and resource.resource_id not in saved
+                        and _parse_multi_resource_path(resource.get_path(self.root_path))[0]
+                        in vacated
+                    ):
+                        continue
                     try:
                         local_resource = self.read_local_resource(
                             resource=self._make_resource_mapping(old or resource),
@@ -1251,11 +1263,13 @@ class AgentStudioProject:
 
         # For other resources, we follow the usual process
         writes: list[tuple[Resource, str, str]] = []
+        fresh: list[Resource] = []
         removals: set[str] = set()
         saved_paths = {
             resource_type: {resource.get_path(self.root_path) for resource in resources.values()}
             for resource_type, resources in original_resources.items()
         }
+        moving_away = self._paths_moving_away(original_resources, incoming_resources)
         for resource_type, incoming in incoming_resources.items():
             if issubclass(resource_type, MultiResourceYamlResource):
                 continue
@@ -1302,6 +1316,7 @@ class AgentStudioProject:
                         original_resource,
                         incoming_resource_mappings,
                         saved_paths.get(resource_type, set()),
+                        moving_away.get(resource_type, set()),
                     )
                     local_content = local_resource.to_pretty(
                         resource_name=incoming_resource.name,
@@ -1316,12 +1331,7 @@ class AgentStudioProject:
                             f"Resource {incoming_resource.name} does not exist locally, "
                             "saving directly."
                         )
-                        incoming_resource.save(
-                            self.root_path,
-                            resource_name=incoming_resource.name,
-                            resource_mappings=incoming_resource_mappings,
-                            format=format,
-                        )
+                        fresh.append(incoming_resource)
                     continue
                 except Exception:
                     # If can't read file but file exists, use local version
@@ -1387,12 +1397,21 @@ class AgentStudioProject:
             ):
                 self._not_loaded_resources.remove(resource_type)
 
-        written = {file_path for _, _, file_path in writes}
+        for resource, contents, file_path in writes:
+            resource.save_to_file(contents, file_path)
+        for resource in fresh:
+            resource.save(
+                self.root_path,
+                resource_name=resource.name,
+                resource_mappings=incoming_resource_mappings,
+                format=format,
+            )
+        written = {file_path for _, _, file_path in writes} | {
+            resource.get_path(self.root_path) for resource in fresh
+        }
         for old_file_path in removals - written:
             if os.path.exists(old_file_path):
                 os.remove(old_file_path)
-        for resource, contents, file_path in writes:
-            resource.save_to_file(contents, file_path)
 
         # Delete resources whose entire type is absent from incoming
         for resource_type, original in original_resources.items():
@@ -1462,35 +1481,75 @@ class AgentStudioProject:
         original_resource.save_to_file(merged, file_path)
         return True
 
+    def _paths_moving_away(
+        self, original_resources: ResourceMap, incoming_resources: ResourceMap
+    ) -> dict[type[Resource], set[str]]:
+        """Return, by type, the saved paths of single-file resources that move elsewhere upstream."""
+        moving_away: dict[type[Resource], set[str]] = {}
+        for resource_type, originals in original_resources.items():
+            if issubclass(resource_type, MultiResourceYamlResource):
+                continue
+            incoming = incoming_resources.get(resource_type) or {}
+            moving_away[resource_type] = {
+                original.get_path(self.root_path)
+                for resource_id, original in originals.items()
+                if resource_id in incoming
+                and incoming[resource_id].get_path(self.root_path)
+                != original.get_path(self.root_path)
+            }
+        return moving_away
+
     def _read_pulled_resource_locally(
         self,
         incoming_resource: Resource,
         original_resource: Optional[Resource],
         resource_mappings: list[ResourceMapping],
         saved_paths: set[str],
+        moving_away: set[str],
     ) -> tuple[Resource, str]:
-        """Read a resource's local copy where it was saved, by id, so swapped paths stay apart.
+        """Read a resource's local copy, following it when it moved upstream.
 
-        The incoming path is read only when nothing was saved there.
+        A moved resource is read where it was saved, unless another file is at its new path
+        and stays there. A path whose saved file moves away holds no local copy of a
+        different resource.
+
+        Raises:
+            FileNotFoundError: When there is no local copy.
         """
         incoming_path = incoming_resource.get_path(self.root_path)
-        if original_resource is not None:
-            original_path = original_resource.get_path(self.root_path)
-            if original_path != incoming_path:
-                try:
-                    resource = self.read_local_resource(
-                        resource=self._make_resource_mapping(original_resource),
-                        resource_mappings=resource_mappings,
-                    )
-                    return resource, original_path
-                except FileNotFoundError:
-                    if incoming_path in saved_paths:
-                        raise
-        resource = self.read_local_resource(
-            resource=self._make_resource_mapping(incoming_resource),
-            resource_mappings=resource_mappings,
+        original_path = (
+            original_resource.get_path(self.root_path) if original_resource is not None else None
         )
-        return resource, incoming_path
+        if original_path is None or original_path == incoming_path:
+            if original_path is None and incoming_path in moving_away:
+                raise FileNotFoundError(incoming_path)
+            resource = self.read_local_resource(
+                resource=self._make_resource_mapping(incoming_resource),
+                resource_mappings=resource_mappings,
+            )
+            return resource, incoming_path
+        if incoming_path in moving_away or not os.path.exists(incoming_path):
+            try:
+                resource = self.read_local_resource(
+                    resource=self._make_resource_mapping(original_resource),
+                    resource_mappings=resource_mappings,
+                )
+                return resource, original_path
+            except FileNotFoundError:
+                if incoming_path in saved_paths:
+                    raise
+        try:
+            resource = self.read_local_resource(
+                resource=self._make_resource_mapping(incoming_resource),
+                resource_mappings=resource_mappings,
+            )
+            return resource, incoming_path
+        except FileNotFoundError:
+            resource = self.read_local_resource(
+                resource=self._make_resource_mapping(original_resource),
+                resource_mappings=resource_mappings,
+            )
+            return resource, original_path
 
     def _stage_commands(
         self,
