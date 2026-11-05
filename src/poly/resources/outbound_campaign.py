@@ -452,23 +452,41 @@ def _projection_nodes(campaign: dict) -> list[dict]:
     return [entities[node_id] for node_id in nodes.get("ids") or [] if node_id in entities]
 
 
-def campaign_folders(campaigns: list[dict]) -> dict[str, str]:
-    """Return each campaign's folder by id.
+def campaign_names(campaigns: list[dict]) -> dict[str, str]:
+    """Return each campaign's name by id, unique once cleaned.
 
-    The folder is the cleaned name. Campaign names need not be unique, so a later campaign whose
-    name cleans to a folder already taken gets the end of its id added.
+    Agent Studio allows two campaigns the same name, but each needs its own folder. The oldest
+    keeps its name, and a later one whose name cleans to a name taken becomes `<name> (1)`,
+    numbered on. A name with nothing left once cleaned becomes `Campaign`, numbered the same way.
     """
-    folders: dict[str, str] = {}
+    order = sorted(
+        range(len(campaigns)),
+        key=lambda index: (
+            not campaigns[index].get("createdAt"),
+            campaigns[index].get("createdAt") or "",
+            index,
+        ),
+    )
+    names: dict[str, str] = {}
     taken: set[str] = set()
-    for campaign in campaigns:
-        folder = utils.clean_name(campaign.get("name") or "")
-        if not folder or folder in taken:
-            folder = f"{folder}-{utils.clean_name(campaign['id'].rsplit('-', 1)[-1])[-8:]}".strip(
-                "-"
-            )
-        taken.add(folder)
-        folders[campaign["id"]] = folder
-    return folders
+    for index in order:
+        campaign = campaigns[index]
+        name = utils.strip_strings(campaign.get("name") or "")
+        base = name if utils.clean_name(name) else "Campaign"
+        candidate, number = base, 1
+        while utils.clean_name(candidate) in taken:
+            candidate, number = f"{base} ({number})", number + 1
+        taken.add(utils.clean_name(candidate))
+        names[campaign["id"]] = candidate
+    return names
+
+
+def campaign_folders(campaigns: list[dict]) -> dict[str, str]:
+    """Return each campaign's folder by id: its cleaned name."""
+    return {
+        campaign_id: utils.clean_name(name)
+        for campaign_id, name in campaign_names(campaigns).items()
+    }
 
 
 def node_names(nodes: list[dict]) -> dict[str, str]:
@@ -538,7 +556,8 @@ class OutboundCampaign(MultiResourceYamlResource):
     """An outbound campaign's name, description and settings in `<folder>/campaign.yaml`.
 
     The same file holds the campaign's nodes under `nodes`, each an `OutboundCampaignNode`;
-    this resource reads and writes only its own keys.
+    this resource reads and writes only its own keys. `platform_label` is set only when pull
+    renamed the campaign because another has its name, so the next push sends the new name.
     """
 
     resource_id_prefix = "CMPGN"
@@ -547,6 +566,7 @@ class OutboundCampaign(MultiResourceYamlResource):
     description: Optional[str] = None
     settings: dict = field(default_factory=lambda: normalise_settings({}))
     folder_name: str = ""
+    platform_label: Optional[str] = field(default=None, repr=False, compare=False)
 
     node_entries: Any = field(default=None, init=False, repr=False, compare=False)
     unknown_keys: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
@@ -583,6 +603,21 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     def moved_to(self, other: MultiResourceYamlResource) -> "OutboundCampaign":
         return replace(self, folder_name=other.folder_name)
+
+    def compute_hash(self) -> str:
+        campaign = self.to_yaml_dict()
+        if self.platform_label is not None:
+            campaign["name"] = self.platform_label
+        return utils.compute_hash_from_dict(utils.strip_strings(campaign))
+
+    def get_diff(self, other_resource: Resource) -> str:
+        """Diff from Agent Studio's name when pull renamed the campaign."""
+        if self.platform_label is None or not other_resource:
+            return super().get_diff(other_resource)
+        saved = utils.dump_yaml(
+            utils.strip_strings({**self.to_yaml_dict(), "name": self.platform_label})
+        )
+        return utils.get_diff(saved, other_resource.raw)
 
     @classmethod
     def from_yaml_dict(
@@ -685,17 +720,25 @@ class OutboundCampaign(MultiResourceYamlResource):
         if campaigns is None:
             logger.debug("No outbound campaigns in projection - they will not be pulled.")
             return {}
-        folders = campaign_folders(campaigns)
-        return {
-            campaign["id"]: cls(
+        names = campaign_names(campaigns)
+        resources = {}
+        for campaign in campaigns:
+            name = names[campaign["id"]]
+            label = utils.strip_strings(campaign.get("name") or "")
+            if label != name:
+                logger.warning(
+                    f"Renamed '{label}' to '{name}': campaign names must be unique. "
+                    "The next push sends the new name."
+                )
+            resources[campaign["id"]] = cls(
                 resource_id=campaign["id"],
-                name=utils.strip_strings(campaign.get("name") or ""),
+                name=name,
                 description=utils.strip_strings(campaign.get("description")),
                 settings=utils.strip_strings(normalise_settings(campaign.get("settings"))),
-                folder_name=folders[campaign["id"]],
+                folder_name=utils.clean_name(name),
+                platform_label=None if label == name else label,
             )
-            for campaign in campaigns
-        }
+        return resources
 
     @classmethod
     def to_pretty_dict(
@@ -742,7 +785,7 @@ class OutboundCampaign(MultiResourceYamlResource):
         )
         folder = campaign_folder_of(file_path)
         expected = utils.clean_name(campaign.name)
-        if expected and folder != expected and not folder.startswith(f"{expected}-"):
+        if expected and folder != expected:
             raise ValueError(
                 f"Campaign folder name does not match campaign name '{campaign.name}'. "
                 f"{folder} != {expected}"
@@ -835,8 +878,8 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     @property
     def identity(self) -> tuple:
-        """The name and description, the fields an `outbound_campaign_update` sends."""
-        return (self.name, self.description)
+        """The name and description, as Agent Studio has them: the fields an update sends."""
+        return (self.name if self.platform_label is None else self.platform_label, self.description)
 
     def settings_change(self) -> "OutboundCampaignSettings":
         """Return the settings as a change to send. Settings are always sent whole."""

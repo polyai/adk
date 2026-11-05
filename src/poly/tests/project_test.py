@@ -10048,7 +10048,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.folder))
         self.assertEqual(self.project.project_status(), ([], [], [], []))
 
-    def test_campaigns_with_the_same_name_are_both_pulled(self):
+    def test_campaigns_with_the_same_name_are_both_pulled_and_the_rename_pushed(self):
         """Agent Studio allows duplicate names; one must not stop the pull for the project."""
         other = _campaign_projection(campaign_id="CMPGN-TWO")["outboundCampaigns"][
             "outboundCampaigns"
@@ -10057,12 +10057,16 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         conflicts, _ = self.project.pull_project(projection_json=projection)
 
+        renamed = os.path.join(self.root, "outbound_campaigns", "reminders_1", "campaign.yaml")
         self.assertEqual(conflicts, [])
-        self.assertTrue(
-            os.path.isfile(
-                os.path.join(self.root, "outbound_campaigns", "reminders-two", "campaign.yaml")
-            )
-        )
+        self.assertTrue(os.path.isfile(renamed))
+        self.assertEqual(self.project.project_status()[1], [os.path.join(renamed, "campaign")])
+        update = [
+            payload for kind, payload in self._push() if kind == "outbound_campaign_update"
+        ]
+        self.assertEqual(update, [{"id": "CMPGN-TWO", "name": "Reminders (1)", "clearDescription": True}])
+        success, message = self._push_for_real()
+        self.assertTrue(success, message)
         self.assertEqual(self.project.project_status(), ([], [], [], []))
 
     def test_campaign_yaml_that_is_not_yaml_stops_the_push(self):

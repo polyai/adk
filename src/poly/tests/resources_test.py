@@ -15441,23 +15441,38 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertNotIn("routes", call.data)
         self.assertEqual(call.data["defaultRoute"], "end-1")
 
-    def test_campaigns_with_the_same_folder_name_get_distinct_folders(self):
+    def test_campaigns_with_the_same_cleaned_name_are_renamed_from_the_second_oldest(self):
         """Agent Studio allows duplicate names, so a clash must not stop the whole pull."""
         projection = _campaigns_projection(
-            _campaign_entity(),
-            _campaign_entity(campaign_id="CMPGN-TWO", name="Reminders!"),
+            _campaign_entity(createdAt="2026-02-01T00:00:00Z"),
+            _campaign_entity(campaign_id="CMPGN-TWO", name="Reminders!", createdAt="2026-01-01"),
+            _campaign_entity(campaign_id="CMPGN-THREE", createdAt="2026-03-01T00:00:00Z"),
+            _campaign_entity(campaign_id="CMPGN-FOUR", name="📞"),
         )
 
-        campaigns = OutboundCampaign.from_projection(projection)
+        with self.assertLogs("poly.resources.outbound_campaign", "WARNING") as logs:
+            campaigns = OutboundCampaign.from_projection(projection)
         nodes = OutboundCampaignNode.from_projection(projection)
 
         self.assertEqual(
-            [campaign.folder for campaign in campaigns.values()], ["reminders", "reminders-two"]
+            {campaign_id: campaign.name for campaign_id, campaign in campaigns.items()},
+            {
+                "CMPGN-ONE": "Reminders (1)",
+                "CMPGN-TWO": "Reminders!",
+                "CMPGN-THREE": "Reminders (2)",
+                "CMPGN-FOUR": "Campaign",
+            },
         )
-        self.assertEqual(nodes["CMPGN-TWO:end-1"].campaign_folder, "reminders-two")
-        self.assertEqual(
-            len({resource.file_path for resource in (*campaigns.values(), *nodes.values())}), 8
+        self.assertEqual(campaigns["CMPGN-ONE"].folder, "reminders_1")
+        self.assertEqual(campaigns["CMPGN-ONE"].platform_label, "Reminders")
+        self.assertIsNone(campaigns["CMPGN-TWO"].platform_label)
+        self.assertEqual(campaigns["CMPGN-ONE"].identity, ("Reminders", None))
+        self.assertEqual(nodes["CMPGN-ONE:end-1"].campaign_folder, "reminders_1")
+        self.assertIn(
+            "Renamed 'Reminders' to 'Reminders (1)': campaign names must be unique.",
+            logs.output[0],
         )
+        self.assertEqual(len(logs.output), 3)
 
     def test_file_paths(self):
         campaign = _campaign(name="Appointment Reminders!")
@@ -15596,7 +15611,7 @@ class OutboundCampaignTests(unittest.TestCase):
     def test_read_local_resource_checks_the_folder_against_the_name(self):
         campaign = _campaign()
         with tempfile.TemporaryDirectory() as root:
-            for folder, accepted in (("reminders-two", True), ("other", False)):
+            for folder, accepted in (("reminders", True), ("reminders-two", False)):
                 with self.subTest(folder=folder):
                     campaign.folder_name = folder
                     campaign.save(root)
