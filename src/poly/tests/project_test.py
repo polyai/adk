@@ -10152,6 +10152,65 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(self._read("monthly", "functions", "text.py"), code)
         self.assertEqual(self.project.validate_project(), [])
 
+    @staticmethod
+    def _two_campaigns(first: str, second: str) -> dict:
+        other = _campaign_projection(
+            name=second,
+            campaign_id="CMPGN-TWO",
+            trigger_code="def map_contacts(contacts, outbound_campaign):\n    return {'two': 2}\n",
+        )["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-TWO"]
+        return _campaign_projection(name=first, extra_campaigns=(other,))
+
+    def test_campaigns_swapping_names_keep_their_own_files(self):
+        self._pull_into_new_project(self._two_campaigns("Reminders", "Other"))
+        one_code = self.TRIGGER_CODE + "\n\nLIMIT = 5\n"
+        self._write_function("trigger", one_code)
+        data = self._yaml()
+        self._node(data, "First call")["greeting"] = "Edited here"
+        self._write_yaml(data)
+        two_code = self._read("other", "functions", "trigger.py")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._two_campaigns("Other", "Reminders")
+        )
+
+        self.assertEqual(conflicts, [])
+        other = os.path.join(self.root, "outbound_campaigns", "other")
+        self.assertEqual(self._yaml(other)["name"], "Other")
+        self.assertEqual(self._node(self._yaml(other), "First call")["greeting"], "Edited here")
+        self.assertEqual(self._read("other", "functions", "trigger.py"), one_code)
+        self.assertEqual(self._yaml()["name"], "Reminders")
+        self.assertEqual(self._node(self._yaml(), "First call")["greeting"], "Hi")
+        self.assertEqual(self._read("reminders", "functions", "trigger.py"), two_code)
+        _, modified, new, deleted = self.project.project_status()
+        self.assertEqual(
+            sorted(modified),
+            [
+                os.path.join(other, "campaign.yaml", "nodes", "First_call"),
+                os.path.join(other, "functions", "trigger.py"),
+            ],
+        )
+        self.assertEqual((new, deleted), ([], []))
+
+    def test_campaigns_swapping_names_carry_nodes_added_here(self):
+        self._pull_into_new_project(self._two_campaigns("Reminders", "Other"))
+        data = self._yaml()
+        self._node(data, "First call")["defaultRoute"] = "Wait"
+        data["nodes"].append(
+            {"name": "Wait", "type": "wait", "amount": 1, "unit": "days", "next": "End"}
+        )
+        self._write_yaml(data)
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._two_campaigns("Other", "Reminders")
+        )
+
+        self.assertEqual(conflicts, [])
+        other = self._yaml(os.path.join(self.root, "outbound_campaigns", "other"))
+        self.assertEqual([node["name"] for node in other["nodes"]][-1], "Wait")
+        self.assertNotIn("Wait", [node["name"] for node in self._yaml()["nodes"]])
+        self.assertEqual(self.project.validate_project(), [])
+
     def test_status_lists_a_campaign_file_left_in_conflict_by_a_pull(self):
         data = self._yaml()
         self._node(data, "First call")["greeting"] = "Hello there"
