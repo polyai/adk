@@ -25,6 +25,7 @@ from poly.resources import (
     Function,
     FunctionStep,
     OutboundCampaign,
+    OutboundCampaignFunction,
     OutboundCampaignNode,
     OutboundCampaignSettings,
     Resource,
@@ -37,7 +38,7 @@ from poly.resources import (
     Variant,
     VariantAttribute,
 )
-from poly.resources.outbound_campaign import map_route_targets
+from poly.resources.outbound_campaign import function_file_stem, map_route_targets
 from poly.resources.test_suite import (
     TestCaseApiOperationMock,
     TestCaseIntegrationAttributes,
@@ -288,19 +289,18 @@ def group_outbound_campaign_changes(
     deleted_resources: ResourceMap,
     pre_push_updated_resources: ResourceMap,
     pre_push_deleted_resources: ResourceMap,
-    post_push_new_resources: ResourceMap,
 ) -> None:
     """Finish the campaign changes in place.
 
-    A renamed folder keeps its campaign's id and its nodes' ids, a node that changes
-    type is replaced, a renamed trigger keeps its id, and deleting a campaign deletes its nodes
-    with it.
+    The steps run in this order because each relies on the ids the one before settles. A
+    renamed folder keeps its campaign's and nodes' ids first, so a node that changes type is
+    replaced under its kept campaign. Code changes then go out with the node that has its
+    final id. Deleting a campaign deletes its nodes with it, and the label changes left go
+    before any create, since Agent Studio refuses a label another node still has.
     """
     pair_renamed_campaigns(state, new_resources, updated_resources, deleted_resources)
     replace_retyped_campaign_nodes(state, new_resources, updated_resources, deleted_resources)
-    pair_replaced_campaign_triggers(
-        state, new_resources, updated_resources, deleted_resources, post_push_new_resources
-    )
+    push_campaign_code_with_nodes(state, new_resources, updated_resources, deleted_resources)
     prune_cascade_deleted_campaign_nodes(deleted_resources)
     relabel_campaign_nodes_first(
         updated_resources, deleted_resources, pre_push_updated_resources, pre_push_deleted_resources
@@ -420,6 +420,7 @@ def _carry_node_id(
     state_nodes.pop(node.resource_id, None)
     node.resource_id = saved.resource_id
     node.position = saved.position
+    node.saved_code = saved.code
     state_nodes[node.resource_id] = node
     if node.compute_hash() != saved.compute_hash():
         updated_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
@@ -479,43 +480,46 @@ def replace_retyped_campaign_nodes(
     _prune_empty((updated_resources,), (OutboundCampaignNode,))
 
 
-def pair_replaced_campaign_triggers(
+def push_campaign_code_with_nodes(
     state: ResourceMap,
     new_resources: ResourceMap,
     updated_resources: ResourceMap,
     deleted_resources: ResourceMap,
-    post_push_new_resources: ResourceMap,
 ) -> None:
-    """Push a campaign's one new trigger as an update of a deleted one, by name if one matches.
+    """Send a change to a campaign function file as an update of its node.
 
-    Agent Studio refuses to delete a campaign's only trigger, so a renamed or replaced trigger
-    takes the old trigger's id and position, and the routes leading to it follow. A new node
-    that takes the old trigger's label is created after the trigger is updated, since Agent
-    Studio refuses a label another node still has.
+    Function files have no command of their own, the same way ASR settings go out by
+    section. A node being created or deleted carries its code already. Each function file
+    also takes its node's final id, so a later pull matches the two.
     """
-    new_triggers = _triggers_by_campaign(new_resources)
-    deleted_triggers = _triggers_by_campaign(deleted_resources)
-    for campaign_id, triggers in new_triggers.items():
-        saved_triggers = deleted_triggers.get(campaign_id, [])
-        if len(triggers) != 1 or not saved_triggers:
-            continue
-        [node] = triggers
-        saved = next(
-            (trigger for trigger in saved_triggers if trigger.name == node.name), saved_triggers[0]
-        )
-        new_node_id = node.node_id
-        _carry_node_id(state, new_resources, updated_resources, deleted_resources, node, saved)
-        _remap_campaign_routes(
-            state, new_resources, updated_resources, campaign_id, {new_node_id: node.node_id}
-        )
-        saved_label = saved.platform_name
-        node.saved_label = saved_label
-        heir = _campaign_nodes(new_resources, campaign_id).get(saved_label)
-        if heir is not None:
-            new_resources[OutboundCampaignNode].pop(heir.resource_id)
-            heir.position = None
-            post_push_new_resources.setdefault(OutboundCampaignNode, {})[heir.resource_id] = heir
-    _prune_empty((new_resources, updated_resources, deleted_resources), (OutboundCampaignNode,))
+    node_ids = {
+        (node.campaign_folder, function_file_stem(node.name)): node.resource_id
+        for node in state.get(OutboundCampaignNode, {}).values()
+    }
+    if OutboundCampaignFunction in state:
+        functions = {}
+        for function in state[OutboundCampaignFunction].values():
+            function.resource_id = node_ids.get(
+                (function.campaign_folder, function_file_stem(function.name)),
+                function.resource_id,
+            )
+            functions[function.resource_id] = function
+        state[OutboundCampaignFunction] = functions
+    touched = {
+        (function.campaign_folder, function_file_stem(function.name))
+        for changes in (new_resources, updated_resources, deleted_resources)
+        for function in changes.pop(OutboundCampaignFunction, {}).values()
+    }
+    if not touched:
+        return
+    created = new_resources.get(OutboundCampaignNode, {})
+    for node in state.get(OutboundCampaignNode, {}).values():
+        if (
+            (node.campaign_folder, function_file_stem(node.name)) in touched
+            and node.resource_id not in created
+            and node.code != (node.saved_code or "")
+        ):
+            updated_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
 
 
 def relabel_campaign_nodes_first(
@@ -524,44 +528,25 @@ def relabel_campaign_nodes_first(
     pre_push_updated_resources: ResourceMap,
     pre_push_deleted_resources: ResourceMap,
 ) -> None:
-    """Send the updates that change a kept node's label before anything is created.
+    """Send node deletes and label changes before anything is created.
 
-    Agent Studio refuses a label another node still has, and a label a kept node is giving up,
-    such as one pull had to rename, may be the label of a node created in the same push. So
-    node deletes go first, and a node giving up a label is relabelled before the node taking
-    it.
+    Agent Studio refuses a label another node still has. A kept node changes label when its
+    trigger is renamed, when pull gave it a name, or when only the case or punctuation of its
+    name changed. A node taking a label another relabelled node gives up goes after it.
     """
     if OutboundCampaignNode in deleted_resources:
         pre_push_deleted_resources.setdefault(OutboundCampaignNode, {}).update(
             deleted_resources.pop(OutboundCampaignNode)
         )
     updated_nodes = updated_resources.get(OutboundCampaignNode, {})
-    relabelled = {
-        resource_id: node
-        for resource_id, node in updated_nodes.items()
-        if node.saved_label is not None and node.saved_label != node.name
-    }
-    if not relabelled:
-        return
-    for resource_id in relabelled:
+    relabelled = [
         updated_nodes.pop(resource_id)
-
-    holders: dict[tuple[str, str], list[OutboundCampaignNode]] = {}
-    for node in relabelled.values():
-        holders.setdefault((node.campaign_id, node.saved_label.strip()), []).append(node)
-    ordered: dict[str, OutboundCampaignNode] = {}
-
-    def place(node: OutboundCampaignNode, visiting: set[str]) -> None:
-        if node.resource_id in ordered or node.resource_id in visiting:
-            return
-        for holder in holders.get((node.campaign_id, node.name.strip()), []):
-            if holder is not node:
-                place(holder, visiting | {node.resource_id})
-        ordered[node.resource_id] = node
-
-    for node in relabelled.values():
-        place(node, set())
-    pre_push_updated_resources.setdefault(OutboundCampaignNode, {}).update(ordered)
+        for resource_id, node in list(updated_nodes.items())
+        if node.saved_label is not None and node.saved_label != node.name
+    ]
+    freed = {(node.campaign_id, node.saved_label.strip()) for node in relabelled}
+    for node in sorted(relabelled, key=lambda node: (node.campaign_id, node.name.strip()) in freed):
+        pre_push_updated_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
     _prune_empty((updated_resources,), (OutboundCampaignNode,))
 
 
@@ -575,14 +560,6 @@ def drop_settings_only_campaign_updates(updated_resources: ResourceMap) -> None:
         if campaign.saved_identity == campaign.identity:
             campaigns.pop(resource_id)
     _prune_empty((updated_resources,), (OutboundCampaign,))
-
-
-def _triggers_by_campaign(changes: ResourceMap) -> dict[str, list[OutboundCampaignNode]]:
-    triggers: dict[str, list[OutboundCampaignNode]] = {}
-    for node in changes.get(OutboundCampaignNode, {}).values():
-        if isinstance(node, OutboundCampaignNode) and node.data.get("type") == "trigger":
-            triggers.setdefault(node.campaign_id, []).append(node)
-    return triggers
 
 
 def prune_cascade_deleted_campaign_nodes(deleted_resources: ResourceMap) -> None:

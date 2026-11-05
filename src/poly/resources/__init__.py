@@ -57,6 +57,7 @@ from poly.resources.languages import AdditionalLanguage, DefaultLanguage
 from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
 from poly.resources.outbound_campaign import (
     OutboundCampaign,
+    OutboundCampaignFunction,
     OutboundCampaignNode,
     OutboundCampaignSettings,
 )

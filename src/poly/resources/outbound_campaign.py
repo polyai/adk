@@ -550,9 +550,6 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     node_entries: Any = field(default=None, init=False, repr=False, compare=False)
     unknown_keys: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
-    orphan_function_files: list[str] = field(
-        default_factory=list, init=False, repr=False, compare=False
-    )
     had_trigger: bool = field(default=False, init=False, repr=False, compare=False)
     saved_identity: Optional[tuple] = field(default=None, init=False, repr=False, compare=False)
 
@@ -583,6 +580,9 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     def to_yaml_dict(self) -> dict:
         return {"name": self.name, "description": self.description, "settings": self.settings}
+
+    def moved_to(self, other: MultiResourceYamlResource) -> "OutboundCampaign":
+        return replace(self, folder_name=other.folder_name)
 
     @classmethod
     def from_yaml_dict(
@@ -751,10 +751,6 @@ class OutboundCampaign(MultiResourceYamlResource):
         top = cls._top_level(file_path)
         campaign.node_entries = top.get(NODES_KEY)
         campaign.unknown_keys = sorted(set(top) - {*CAMPAIGN_KEYS, NODES_KEY})
-        true_file_path, _ = _parse_multi_resource_path(file_path)
-        campaign.orphan_function_files = _orphan_function_files(
-            os.path.dirname(true_file_path), campaign.node_entries
-        )
         return campaign
 
     @classmethod
@@ -795,11 +791,6 @@ class OutboundCampaign(MultiResourceYamlResource):
                 errors.append("Description must be under 1024 characters.")
         if self.unknown_keys:
             errors.append(f"Unknown fields: {', '.join(self.unknown_keys)}.")
-        errors.extend(
-            f"{FUNCTIONS_DIR}/{file_name} has no node of that name in "
-            f"{CAMPAIGNS_DIR}/{self.folder}/{CAMPAIGN_FILE}."
-            for file_name in self.orphan_function_files
-        )
         errors.extend(_settings_errors(self.settings))
         errors.extend(_node_entry_errors(self.node_entries))
         if (
@@ -819,19 +810,8 @@ class OutboundCampaign(MultiResourceYamlResource):
         return errors
 
     def is_modified(self, other_hash: str) -> bool:
-        """Treat an unreadable node list or a stray function file as a change, for validation."""
-        return self.is_entry_modified(other_hash) or bool(self.orphan_function_files)
-
-    def is_entry_modified(self, other_hash: str) -> bool:
-        """Whether the campaign's keys in its file changed, or its node list can't be read."""
+        """Treat a node list that can't be read as a change, so validation reports it."""
         return super().is_modified(other_hash) or bool(_node_entry_errors(self.node_entries))
-
-    def orphan_function_paths(self, base_path: str) -> list[str]:
-        """The paths of the function files in the campaign's folder that no node owns."""
-        return [
-            os.path.join(base_path, CAMPAIGNS_DIR, self.folder, FUNCTIONS_DIR, file_name)
-            for file_name in self.orphan_function_files
-        ]
 
     def build_create_proto(self) -> campaigns_pb2.OutboundCampaign_Create:
         return campaigns_pb2.OutboundCampaign_Create(
@@ -873,22 +853,6 @@ class OutboundCampaign(MultiResourceYamlResource):
         if self.settings != old_resource.settings:
             return [], [self.settings_change()], []
         return [], [], []
-
-
-def _orphan_function_files(campaign_path: str, entries: Any) -> list[str]:
-    functions_path = os.path.join(campaign_path, FUNCTIONS_DIR)
-    if not os.path.isdir(functions_path):
-        return []
-    stems = {
-        function_file_stem(entry["name"])
-        for entry in (entries if isinstance(entries, list) else [])
-        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
-    }
-    return [
-        file_name
-        for file_name in sorted(os.listdir(functions_path))
-        if file_name.endswith(".py") and file_name[: -len(".py")] not in stems
-    ]
 
 
 def is_empty_campaign_file(top: Any) -> bool:
@@ -1198,8 +1162,9 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     """One node of a campaign: an entry under `nodes` in its `campaign.yaml`, keyed by name.
 
     The id is `<campaign id>:<node id>`. Routes name the nodes they lead to. The position is
-    kept from the last pull, as a flow step's is, and the function code lives in
-    `functions/<node name>.py`. `platform_label` is set only when pull named the node other than
+    kept from the last pull, as a flow step's is. The function code is the
+    `OutboundCampaignFunction` in `functions/<node name>.py`, and goes out with the node.
+    `platform_label` is set only when pull named the node other than
     Agent Studio's label, so the saved hash differs and the next push sends the name.
     """
 
@@ -1239,6 +1204,11 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         )
 
     @property
+    def is_trigger(self) -> bool:
+        """Whether the node is its campaign's trigger."""
+        return isinstance(self.data, dict) and self.data.get("type") == "trigger"
+
+    @property
     def platform_name(self) -> str:
         """The label Agent Studio has for the node: its name, unless pull had to rename it."""
         return self.name if self.platform_label is None else self.platform_label
@@ -1272,6 +1242,9 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     def to_yaml_dict(self) -> dict:
         return {"name": self.name, **self.data}
 
+    def moved_to(self, other: MultiResourceYamlResource) -> "OutboundCampaignNode":
+        return replace(self, campaign_folder=other.campaign_folder)
+
     def get_diff(self, other_resource: Resource) -> str:
         """Diff from Agent Studio's label when pull named the node differently."""
         if self.platform_label is None or not other_resource:
@@ -1285,7 +1258,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         node = self.to_yaml_dict()
         if self.platform_label is not None:
             node["name"] = self.platform_label
-        return utils.compute_hash_from_dict({"node": utils.strip_strings(node), "code": self.code})
+        return utils.compute_hash_from_dict(utils.strip_strings(node))
 
     @classmethod
     def from_yaml_dict(
@@ -1396,45 +1369,11 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         }
         return map_route_targets(yaml_dict, lambda target: ids.get(target, target))
 
-    def save(
-        self, base_path: str, format: bool = False, save_to_cache: bool = False, **kwargs
-    ) -> None:
-        """Write the node's entry, and its function file unless only the cache is written."""
-        super().save(base_path, format=format, save_to_cache=save_to_cache, **kwargs)
-        if not save_to_cache:
-            self.save_code(base_path)
-
-    def save_code(self, base_path: str) -> None:
-        """Write the node's code to its function file, or remove the file when it has none."""
-        path = os.path.join(base_path, self.function_file)
-        if self.code:
-            self.save_to_file(self.code, path)
-        elif os.path.isfile(path):
-            os.remove(path)
-
-    @classmethod
-    def delete_resource(cls, file_path: str, save_to_cache: bool = False) -> None:
-        """Remove the node's entry, and its function file unless only the cache is written."""
-        super().delete_resource(file_path, save_to_cache=save_to_cache)
-        if save_to_cache:
-            return
-        true_file_path, segments = _parse_multi_resource_path(file_path)
-        code_path = os.path.join(
-            os.path.dirname(true_file_path), FUNCTIONS_DIR, f"{function_file_stem(segments[-1])}.py"
-        )
-        if os.path.isfile(code_path):
-            os.remove(code_path)
-
     @classmethod
     def read_local_resource(
         cls, file_path: str, resource_id: str, resource_name: str, **kwargs
     ) -> "OutboundCampaignNode":
-        """Read the node's entry and its code.
-
-        Raises:
-            MergeConflictError: if the code has conflict markers, unless `allow_code_conflict`.
-        """
-        allow_code_conflict = kwargs.pop("allow_code_conflict", False)
+        """Read the node's entry, and the code in its function file to send with it."""
         node: OutboundCampaignNode = super().read_local_resource(
             file_path, resource_id=resource_id, resource_name=resource_name, **kwargs
         )
@@ -1445,8 +1384,6 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         )
         if os.path.isfile(code_path):
             node.code = Resource.read_from_file(code_path)
-            if not allow_code_conflict and utils.contains_merge_conflict(node.code):
-                raise utils.MergeConflictError(code_path)
         top = cls._get_top_level_data(true_file_path)
         entries = top.get(NODES_KEY) if isinstance(top, dict) else None
         node.campaign_has_trigger = _has_trigger(entries if isinstance(entries, list) else None)
@@ -1524,10 +1461,6 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             "name"
         ) or function_parameters(self.data) != function_parameters(self.saved_data)
 
-    def is_same_file_entry(self, saved: "OutboundCampaignNode") -> bool:
-        """Whether only the function code, which lives in its own file, differs from `saved`."""
-        return replace(self, code=saved.code).compute_hash() == saved.compute_hash()
-
     def _position_proto(self) -> campaigns_pb2.Position:
         position = self.position or {}
         return campaigns_pb2.Position(x=position.get("x", 0.0), y=position.get("y", 0.0))
@@ -1560,6 +1493,107 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         return campaigns_pb2.OutboundCampaign_DeleteNode(
             outbound_campaign_id=self.campaign_id, node_id=self.node_id
         )
+
+
+@register_resource("outbound_campaign_functions")
+@dataclass
+class OutboundCampaignFunction(Resource):
+    """A node's function code in `functions/<node name>.py`.
+
+    Its id is its node's, so a pull that renames the node or its campaign moves the file like
+    any other renamed resource. It has no command of its own: a change goes out with its node.
+    """
+
+    campaign_folder: str = ""
+    code: str = ""
+
+    @property
+    def file_path(self) -> str:
+        return os.path.join(
+            CAMPAIGNS_DIR,
+            self.campaign_folder,
+            FUNCTIONS_DIR,
+            f"{function_file_stem(self.name)}.py",
+        )
+
+    @property
+    def raw(self) -> str:
+        return self.code
+
+    @property
+    def command_type(self) -> str:
+        return "outbound_campaign_update_node"
+
+    @staticmethod
+    def make_pretty(contents: str, **kwargs) -> str:
+        return contents
+
+    @classmethod
+    def from_pretty(cls, contents: str, **kwargs) -> str:
+        return contents
+
+    @staticmethod
+    def format_resource(content: str, file_name: str, **kwargs) -> str:
+        return utils.format_code_with_ruff(content, file_name)
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "OutboundCampaignFunction"]:
+        return {
+            node.resource_id: cls(
+                resource_id=node.resource_id,
+                name=function_file_stem(node.name),
+                campaign_folder=node.campaign_folder,
+                code=node.code,
+            )
+            for node in OutboundCampaignNode.from_projection(projection).values()
+            if node.code
+        }
+
+    @classmethod
+    def read_local_resource(
+        cls, file_path: str, resource_id: str, resource_name: str, **kwargs
+    ) -> "OutboundCampaignFunction":
+        return cls(
+            resource_id=resource_id,
+            name=os.path.splitext(os.path.basename(file_path))[0],
+            campaign_folder=campaign_folder_of(file_path),
+            code=cls.read_to_raw(file_path),
+        )
+
+    @staticmethod
+    def discover_resources(base_path: str) -> list[str]:
+        discovered = []
+        for folder in _campaign_folders_on_disk(base_path):
+            functions_path = os.path.join(base_path, CAMPAIGNS_DIR, folder, FUNCTIONS_DIR)
+            if os.path.isdir(functions_path):
+                discovered.extend(
+                    os.path.join(functions_path, file_name)
+                    for file_name in sorted(os.listdir(functions_path))
+                    if file_name.endswith(".py")
+                )
+        return discovered
+
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        stem = function_file_stem(self.name)
+        if resource_mappings is not None and not any(
+            mapping.resource_type is OutboundCampaignNode
+            and campaign_folder_of(mapping.file_path) == self.campaign_folder
+            and function_file_stem(mapping.resource_name) == stem
+            for mapping in resource_mappings
+        ):
+            raise ValueError(
+                f"{FUNCTIONS_DIR}/{stem}.py has no node of that name in "
+                f"{CAMPAIGNS_DIR}/{self.campaign_folder}/{CAMPAIGN_FILE}."
+            )
+
+    def build_create_proto(self):
+        raise NotImplementedError("Campaign function code is pushed with its node.")
+
+    def build_update_proto(self):
+        raise NotImplementedError("Campaign function code is pushed with its node.")
+
+    def build_delete_proto(self):
+        raise NotImplementedError("Campaign function code is pushed with its node.")
 
 
 @dataclass

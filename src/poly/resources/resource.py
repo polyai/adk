@@ -637,6 +637,13 @@ class MultiResourceYamlResource(YamlResource, ABC):
         """Return the single resource's parsed sub-dict from the multi-resource file."""
         return cls._get_matching(file_path)
 
+    def moved_to(self, other: "MultiResourceYamlResource") -> Optional["MultiResourceYamlResource"]:
+        """Return this entry placed in the file `other` lives in, or None if entries can't move.
+
+        A pull uses it to carry local edits to an entry whose file was renamed upstream.
+        """
+        return None
+
     @classmethod
     def _entry_key(cls, entry: dict) -> str:
         """Return the clean name an entry of the top-level list is matched by."""
