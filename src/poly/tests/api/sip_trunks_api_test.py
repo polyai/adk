@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import json
 import os
+import unittest
 from unittest.mock import patch
 
 import pytest
@@ -124,3 +125,43 @@ def test_sip_requests_retain_shared_auth_and_user_override_headers():
     assert sent["headers"]["X-PolyAI-Correlation-Id"].startswith("adk-")
     assert json.loads(sent["data"]) == payload
     assert result == response
+
+
+class SIPTrunkingInterfaceTest(unittest.TestCase):
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_create_trunk_uses_account_endpoint(self, make_request):
+        body = {
+            "name": "carrier",
+            "sip_cidr": ["203.0.113.0/24"],
+            "rtp_cidr": ["198.51.100.0/24"],
+        }
+        make_request.return_value = {"id": "tr-123"}
+
+        result = AgentStudioInterface.create_sip_trunk("euw-1", "acct-123", body)
+
+        self.assertEqual(result, {"id": "tr-123"})
+        make_request.assert_called_once_with(
+            "euw-1",
+            "/v1/accounts/acct-123/telephony/sip-trunks",
+            "POST",
+            data=body,
+        )
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_extension_is_url_encoded(self, make_request):
+        AgentStudioInterface.get_sip_trunk_extension("uk-1", "acct-123", "tr-123", "+44/100")
+
+        make_request.assert_called_once_with(
+            "uk-1",
+            "/v1/accounts/acct-123/telephony/sip-trunks/tr-123/extensions/%2B44%2F100",
+        )
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_delete_extension_uses_delete(self, make_request):
+        AgentStudioInterface.delete_sip_trunk_extension("us-1", "acct-123", "tr-123", "1000")
+
+        make_request.assert_called_once_with(
+            "us-1",
+            "/v1/accounts/acct-123/telephony/sip-trunks/tr-123/extensions/1000",
+            "DELETE",
+        )
