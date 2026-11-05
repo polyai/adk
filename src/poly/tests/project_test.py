@@ -8307,6 +8307,18 @@ class PullRemoteRenameTest(unittest.TestCase):
         self.assertEqual(os.listdir(os.path.join(self.root, "topics")), ["opening_hours.yaml"])
         self.assertEqual(self.project.project_status(), ([], [], [], []))
 
+    def test_remote_rename_moves_past_an_unrelated_topic_added_here(self):
+        """Only a file at the new name holds a topic rename back, not others in the folder."""
+        self._write_topic("faq.yaml", "name: FAQ\nactions: ''\ncontent: Ask us\n")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._topic_projection("Opening hours")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["faq.yaml", "opening_hours.yaml"])
+        self.assertEqual(self.project.project_status(), ([], [], [self._path("faq.yaml")], []))
+
     def test_remote_rename_keeps_a_local_edit(self):
         """A local edit moves with the file instead of being lost, which would delete it on push."""
         path = os.path.join(self.root, "topics", "hours.yaml")
@@ -8463,8 +8475,9 @@ class PullRemoteRenameTest(unittest.TestCase):
         self.assertEqual(self.project.project_status(), ([], [], [], []))
         self.assertEqual(self._pushed(), [])
 
-    def test_remote_rename_changing_only_case_renames_the_file(self):
-        """On a case-insensitive file system the old and new names are one file."""
+    def test_remote_rename_changing_only_case_calls_rename_for_the_same_file(self):
+        """When the old and new names are one file, as on a case-insensitive file system, the
+        file is renamed with os.rename rather than written and then removed."""
 
         def projection(name: str) -> dict:
             projection = self._topic_projection("Hours")
@@ -10932,6 +10945,133 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             {node.node_id for node in self.project.resources[OutboundCampaignNode].values()},
             {"m-trigger-1", "m-call-1", "m-end-1"},
         )
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        _, message, _ = self.project.push_project(dry_run=True)
+        self.assertEqual(message, "No changes detected")
+
+    def test_remote_rename_onto_a_deleted_folder_with_a_file_added_here_waits_for_it(self):
+        """Code added here for a deleted campaign must not become the code of the campaign that
+        takes its folder."""
+        monthly_code = "def map_contacts(contacts, outbound_campaign):\n    return {'m': 1}\n"
+        self.project.pull_project(
+            projection_json=_campaign_projection(
+                extra_campaigns=(self._monthly_with_its_own_node_ids("Monthly", monthly_code),)
+            )
+        )
+        added = "def call_args(outbound_contact, outbound_campaign):\n    return {'r': 1}\n"
+        added_path = os.path.join(self.folder, "functions", "first_call.py")
+        with open(added_path, "w", encoding="utf-8") as file:
+            file.write(added)
+        renamed = {
+            "outboundCampaigns": {
+                "outboundCampaigns": {
+                    "ids": ["CMPGN-TWO"],
+                    "entities": {
+                        "CMPGN-TWO": self._monthly_with_its_own_node_ids("Reminders", monthly_code)
+                    },
+                }
+            }
+        }
+        monthly = os.path.join("outbound_campaigns", "monthly")
+        reminders = os.path.join("outbound_campaigns", "reminders")
+        held_tree = [
+            os.path.join(monthly, "campaign.yaml"),
+            os.path.join(monthly, "functions", "trigger.py"),
+            os.path.join(reminders, "functions", "first_call.py"),
+        ]
+
+        for _ in range(2):
+            with self.assertLogs("poly.project", level="WARNING") as logs:
+                conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+            self.assertIn("which holds files that aren't part of it", "\n".join(logs.output))
+            self.assertEqual(conflicts, [os.path.join(self.root, monthly)])
+            self.assertEqual(sorted(self._tree()), held_tree)
+            self.assertEqual(self._read("reminders", "functions", "first_call.py"), added)
+            self.assertEqual(
+                self.project.resources[OutboundCampaign]["CMPGN-TWO"].folder, "monthly"
+            )
+            self.assertEqual(self.project.project_status(), ([], [], [], []))
+            _, push_message, _ = self.project.push_project(dry_run=True)
+            self.assertEqual(push_message, "No changes detected")
+
+        os.remove(added_path)
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            sorted(self._tree()),
+            [
+                os.path.join(reminders, "campaign.yaml"),
+                os.path.join(reminders, "functions", "trigger.py"),
+            ],
+        )
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-TWO"].folder, "reminders")
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        _, push_message, _ = self.project.push_project(dry_run=True)
+        self.assertEqual(push_message, "No changes detected")
+
+    def test_remote_rename_onto_a_deleted_folder_edited_here_says_it_is_still_here(self):
+        """An edit to the deleted campaign keeps its folder, so pulling again alone won't help."""
+        monthly_code = "def map_contacts(contacts, outbound_campaign):\n    return {'m': 1}\n"
+        self.project.pull_project(
+            projection_json=_campaign_projection(
+                extra_campaigns=(self._monthly_with_its_own_node_ids("Monthly", monthly_code),)
+            )
+        )
+        trigger = os.path.join(self.folder, "functions", "trigger.py")
+        with open(trigger, "w", encoding="utf-8") as file:
+            file.write("def map_contacts(contacts, outbound_campaign):\n    return {'r': 2}\n")
+        renamed = {
+            "outboundCampaigns": {
+                "outboundCampaigns": {
+                    "ids": ["CMPGN-TWO"],
+                    "entities": {
+                        "CMPGN-TWO": self._monthly_with_its_own_node_ids("Reminders", monthly_code)
+                    },
+                }
+            }
+        }
+
+        with self.assertLogs("poly.project", level="WARNING") as logs:
+            conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        output = "\n".join(logs.output)
+        self.assertIn("which is already here", output)
+        self.assertNotIn("which Agent Studio deleted", output)
+        self.assertIn(os.path.join(self.root, "outbound_campaigns", "monthly"), conflicts)
+        self.assertIn(trigger, conflicts)
+        self.assertIn("{'r': 2}", self._read("reminders", "functions", "trigger.py"))
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-TWO"].folder, "monthly")
+
+    def test_remote_rename_onto_a_folder_with_only_hidden_files_moves(self):
+        """Files the system makes, such as .DS_Store and caches, don't hold a rename back."""
+        target = os.path.join(self.root, "outbound_campaigns", "monthly")
+        os.makedirs(os.path.join(target, "functions", "__pycache__"))
+        for path in (
+            os.path.join(target, ".DS_Store"),
+            os.path.join(target, "functions", "__pycache__", "trigger.cpython-312.pyc"),
+        ):
+            with open(path, "w", encoding="utf-8") as file:
+                file.write("x")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=_campaign_projection(name="Monthly")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertFalse(os.path.exists(self.folder))
+        monthly = os.path.join("outbound_campaigns", "monthly")
+        self.assertEqual(
+            sorted(self._tree()),
+            [
+                os.path.join(monthly, ".DS_Store"),
+                os.path.join(monthly, "campaign.yaml"),
+                os.path.join(monthly, "functions", "__pycache__", "trigger.cpython-312.pyc"),
+                os.path.join(monthly, "functions", "trigger.py"),
+            ],
+        )
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-ONE"].folder, "monthly")
         self.assertEqual(self.project.project_status(), ([], [], [], []))
         _, message, _ = self.project.push_project(dry_run=True)
         self.assertEqual(message, "No changes detected")

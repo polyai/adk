@@ -125,6 +125,18 @@ def _inside(path: str, folder: str) -> bool:
     return path == folder or path.startswith(folder + os.sep)
 
 
+def _files_in(path: str) -> list[str]:
+    """Return a file, or the files under a folder, leaving out hidden files and caches."""
+    if os.path.isfile(path):
+        return [path]
+    found = []
+    for directory, subfolders, names in os.walk(path):
+        subfolders[:] = [name for name in subfolders if not name.startswith(".")]
+        subfolders[:] = [name for name in subfolders if name != "__pycache__"]
+        found += [os.path.join(directory, name) for name in names if not name.startswith(".")]
+    return found
+
+
 def _non_empty_types(resources: ResourceMap) -> ResourceMap:
     """Return resources without the types that have none."""
     return {resource_type: typed for resource_type, typed in resources.items() if typed}
@@ -1188,10 +1200,11 @@ class AgentStudioProject:
             return []
 
         files_with_conflicts: list[str] = []
+        held_renames: list[tuple[str, str, bool]] = []
         moved: dict[tuple[type[Resource], str], Resource] = {}
         vacated: set[str] = set()
         if not force:
-            files_with_conflicts, vacated, moved = self._hold_back_taken_moves(
+            held_renames, vacated, moved = self._hold_back_taken_moves(
                 original_resources,
                 incoming_resources,
                 format=format,
@@ -1200,6 +1213,7 @@ class AgentStudioProject:
                 incoming_mappings=self._make_resource_mappings(incoming_resources)
                 + incoming_slim_resources,
             )
+            files_with_conflicts = [old_folder for old_folder, _, _ in held_renames]
             original_resources = dict(original_resources)
             for (resource_type, resource_id), original in moved.items():
                 original_resources[resource_type] = {
@@ -1422,7 +1436,31 @@ class AgentStudioProject:
         self._move_files_added_here(
             moved, incoming_resources, original_resources, files_with_conflicts
         )
+        self._warn_held_renames(held_renames)
         return files_with_conflicts
+
+    def _warn_held_renames(self, held_renames: list[tuple[str, str, bool]]) -> None:
+        """Say why each held-back rename waits, and what lets the next pull apply it."""
+        if held_renames:
+            OutboundCampaign.remove_empty_files(self.root_path)
+        for old_folder, new_folder, holds_other_files in held_renames:
+            renamed = (
+                f"Agent Studio renamed {os.path.relpath(old_folder, self.root_path)} to "
+                f"{os.path.relpath(new_folder, self.root_path)}"
+            )
+            if holds_other_files:
+                logger.warning(
+                    f"{renamed}, which holds files that aren't part of it. Move or delete them, "
+                    "then pull again."
+                )
+            elif not _files_in(new_folder):
+                logger.warning(
+                    f"{renamed}, which Agent Studio deleted. Pull again to apply the rename."
+                )
+            else:
+                logger.warning(
+                    f"{renamed}, which is already here. Move or delete it, then pull again."
+                )
 
     def _deleted_upstream_but_edited(
         self,
@@ -1480,25 +1518,26 @@ class AgentStudioProject:
         format: bool,
         original_mappings: list[ResourceMapping],
         incoming_mappings: list[ResourceMapping],
-    ) -> tuple[list[str], set[str], dict[tuple[type[Resource], str], Resource]]:
+    ) -> tuple[list[tuple[str, str, bool]], set[str], dict[tuple[type[Resource], str], Resource]]:
         """Hold back each upstream move onto a file that is taken here.
 
         A file is free when nothing is there, or when every resource saved in it moves away or
-        is a single file deleted upstream and unedited here. A file no resource is saved in is
-        taken, unless the moving resource's own file is gone here, as it is then that resource
-        renamed here too. A held-back resource stays as saved in `incoming_resources`, so the
+        is a single file deleted upstream and unedited here. A folder a flow or campaign moves
+        into is free only when every file in it is. A file no resource is saved in is taken,
+        unless the moving resource's own file is gone here, as it is then that resource renamed
+        here too. A held-back resource stays as saved in `incoming_resources`, so the
         next pull moves it once its target is free. The other moves out of its folder wait with
         it, and so does anything new upstream in either folder.
 
         Returns:
-            The path each held-back move leaves from, to report as a conflict; the saved files
+            Each held-back rename's old and new folder, and whether the new one holds files no
+            resource is saved in, so the old folder is reported as a conflict; the saved files
             of single-file resources that free their path; and each multi-resource entry that
             moves to another file, as it was saved, by type and id.
         """
         moves: dict[tuple[type[Resource], str], tuple[str, str]] = {}
         saved_in: dict[str, list[tuple[type[Resource], str]]] = {}
         freed_by_delete: set[tuple[type[Resource], str]] = set()
-        deleted_upstream: set[tuple[type[Resource], str]] = set()
         for resource_type, originals in original_resources.items():
             incoming = incoming_resources.get(resource_type) or {}
             single_file = not issubclass(resource_type, MultiResourceYamlResource)
@@ -1507,7 +1546,6 @@ class AgentStudioProject:
                 old_file = self._file_of(original)
                 saved_in.setdefault(old_file, []).append(key)
                 if resource_id not in incoming:
-                    deleted_upstream.add(key)
                     if single_file and not self._deleted_upstream_but_edited(
                         original, original_mappings, incoming_mappings, format=format, mark=False
                     ):
@@ -1529,6 +1567,23 @@ class AgentStudioProject:
                 return not os.path.exists(old_file)
             return all(key in freed_by_delete or (key in moves and key not in held) for key in keys)
 
+        def other_files(old_file: str, new_file: str) -> list[str]:
+            old_folder, new_folder = _moved_folders(old_file, new_file)
+            if new_folder == new_file or not os.path.exists(old_folder):
+                return []
+            return [file for file in _files_in(new_folder) if file not in saved_in]
+
+        def folder_free(old_file: str, new_file: str, held: set) -> bool:
+            if other_files(old_file, new_file):
+                return False
+            new_folder = _moved_folders(old_file, new_file)[1]
+            return all(
+                key in freed_by_delete or (key in moves and key not in held)
+                for file, keys in saved_in.items()
+                if _inside(file, new_folder) and os.path.exists(file)
+                for key in keys
+            )
+
         held: set[tuple[type[Resource], str]] = set()
         while True:
             held_folders = [_moved_folders(*moves[key])[0] for key in held]
@@ -1538,6 +1593,7 @@ class AgentStudioProject:
                 if key not in held
                 and (
                     not free(old_file, new_file, held)
+                    or not folder_free(old_file, new_file, held)
                     or any(_inside(old_file, folder) for folder in held_folders)
                 )
             }
@@ -1562,27 +1618,19 @@ class AgentStudioProject:
             ]:
                 del incoming[resource_id]
 
-        conflicts = []
-        for old_folder, new_folder in sorted(folders):
-            if any(old_folder != other and _inside(old_folder, other) for other, _ in folders):
-                continue
-            taken_by = [
-                key for file, keys in saved_in.items() if _inside(file, new_folder) for key in keys
-            ]
-            renamed = (
-                f"Agent Studio renamed {os.path.relpath(old_folder, self.root_path)} to "
-                f"{os.path.relpath(new_folder, self.root_path)}"
+        held_renames = [
+            (
+                old_folder,
+                new_folder,
+                any(
+                    other_files(*moves[key])
+                    for key in held
+                    if _moved_folders(*moves[key]) == (old_folder, new_folder)
+                ),
             )
-            if taken_by and all(key in deleted_upstream for key in taken_by):
-                logger.warning(
-                    f"{renamed}, which Agent Studio deleted. Pull again to apply the rename once "
-                    "it is gone here."
-                )
-            else:
-                logger.warning(
-                    f"{renamed}, which is already here. Move or delete it, then pull again."
-                )
-            conflicts.append(old_folder)
+            for old_folder, new_folder in sorted(folders)
+            if not any(old_folder != other and _inside(old_folder, other) for other, _ in folders)
+        ]
         moved = {
             key: original_resources[key[0]][key[1]]
             for key, (old_file, _) in moves.items()
@@ -1596,7 +1644,7 @@ class AgentStudioProject:
             self._file_of(original_resources[resource_type][resource_id])
             for resource_type, resource_id in freed_by_delete
         }
-        return conflicts, vacated, moved
+        return held_renames, vacated, moved
 
     def _file_of(self, resource: Resource) -> str:
         """Return the file a resource lives in."""
