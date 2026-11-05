@@ -9,6 +9,7 @@ from contextlib import chdir
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from poly.cli_commands.shared import read_project_config
 from poly.resources.resource_utils import dump_yaml, load_yaml
 from poly.sip_trunks.config import (
     default_export_path,
@@ -18,6 +19,10 @@ from poly.sip_trunks.config import (
     resolve_account_context,
     validate_sip_trunk_region,
 )
+
+
+def _project(path):
+    return read_project_config(str(Path(path).absolute()))
 
 
 class SIPTrunksConfigTest(unittest.TestCase):
@@ -51,8 +56,8 @@ class SIPTrunksConfigTest(unittest.TestCase):
             )
             (parent / "sip-trunks.yaml").write_text("[]\n", encoding="utf-8")
 
-            context = resolve_account_context(str(project_dir))
-            loaded = load_manage_config(str(project_dir))
+            context = resolve_account_context(_project(str(project_dir)))
+            loaded = load_manage_config(_project(str(project_dir)))
 
         self.assertEqual((context.region, context.account_id), ("uk-1", "acct-123"))
         self.assertEqual((loaded.region, loaded.account_id), ("uk-1", "acct-123"))
@@ -63,14 +68,14 @@ class SIPTrunksConfigTest(unittest.TestCase):
             self._write_project_config(account_dir / "child-project")
 
             with self.assertRaisesRegex(ValueError, "No project configuration found.*--path"):
-                resolve_account_context(str(account_dir))
+                resolve_account_context(_project(str(account_dir)))
 
     def test_context_accepts_supported_regions_from_project_metadata(self):
         with TemporaryDirectory() as temp_dir:
             for region in ("us-1", "euw-1", "uk-1"):
                 with self.subTest(region=region):
                     project_dir = self._write_project_config(Path(temp_dir) / region, region=region)
-                    context = resolve_account_context(str(project_dir))
+                    context = resolve_account_context(_project(str(project_dir)))
                     self.assertEqual((context.region, context.account_id), (region, "acct-123"))
 
     def test_noncanonical_project_region_is_rejected(self):
@@ -78,7 +83,7 @@ class SIPTrunksConfigTest(unittest.TestCase):
             project_dir = self._write_project_config(Path(temp_dir) / "project", region="uk")
 
             with self.assertRaisesRegex(ValueError, "Unsupported SIP Trunking region: uk$"):
-                resolve_account_context(str(project_dir))
+                resolve_account_context(_project(str(project_dir)))
 
     def test_explicit_file_from_another_account_keeps_current_project_context(self):
         with TemporaryDirectory() as temp_dir:
@@ -93,7 +98,7 @@ class SIPTrunksConfigTest(unittest.TestCase):
             config_path = account_a / "sip-trunks.yaml"
             config_path.write_text("[]\n", encoding="utf-8")
 
-            loaded = load_manage_config(str(current_project_dir), file_path=str(config_path))
+            loaded = load_manage_config(_project(str(current_project_dir)), file_path=str(config_path))
 
         self.assertEqual(loaded.path, str(config_path))
         self.assertEqual(loaded.account_id, "account-b")
@@ -110,7 +115,7 @@ class SIPTrunksConfigTest(unittest.TestCase):
             )
 
             with chdir(root):
-                loaded = load_manage_config(str(project_dir), file_path="selected.yaml")
+                loaded = load_manage_config(_project(str(project_dir)), file_path="selected.yaml")
 
         self.assertEqual(loaded.path, str(selected))
         self.assertEqual(loaded.trunks, [{"outbound": None, "name": "Selected carrier", "default_route": None}])
@@ -124,7 +129,7 @@ class SIPTrunksConfigTest(unittest.TestCase):
             for file_path in (None, str(config_path)):
                 with self.subTest(file_path=file_path):
                     with self.assertRaisesRegex(ValueError, "No project configuration found.*--path"):
-                        load_manage_config(temp_dir, file_path=file_path)
+                        load_manage_config(_project(temp_dir), file_path=file_path)
 
     def test_default_export_uses_project_root_from_nested_directory(self):
         with TemporaryDirectory() as temp_dir:
@@ -132,14 +137,14 @@ class SIPTrunksConfigTest(unittest.TestCase):
             nested_dir = project_dir / "flows" / "greeting"
             nested_dir.mkdir(parents=True)
 
-            result = default_export_path(str(nested_dir))
+            result = default_export_path(_project(str(nested_dir)))
 
         self.assertEqual(result, str(project_dir / "sip-trunks.yaml"))
 
     def test_default_export_requires_a_project(self):
         with TemporaryDirectory() as temp_dir:
             with self.assertRaisesRegex(ValueError, "No project configuration found.*--path"):
-                default_export_path(temp_dir)
+                default_export_path(_project(temp_dir))
 
     def test_manage_rejects_region_in_yaml(self):
         with TemporaryDirectory() as temp_dir:
@@ -154,7 +159,7 @@ class SIPTrunksConfigTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "Do not set 'region'"):
                 load_manage_config(
-                    args.path,
+                    _project(args.path),
                     file_path=args.file_path,
                 )
 
@@ -177,7 +182,7 @@ class SIPTrunksConfigTest(unittest.TestCase):
                     config_file.write_text(source, encoding="utf-8")
                     with self.assertRaisesRegex(ValueError, "top-level list of SIP trunk mappings"):
                         load_manage_config(
-                            temp_dir, file_path=str(config_file),
+                            _project(temp_dir), file_path=str(config_file),
                         )
 
     def test_empty_manage_files_declare_no_trunks(self):
@@ -188,7 +193,7 @@ class SIPTrunksConfigTest(unittest.TestCase):
                 with self.subTest(source=source):
                     config_file.write_text(source, encoding="utf-8")
                     loaded = load_manage_config(
-                        temp_dir, file_path=str(config_file)
+                        _project(temp_dir), file_path=str(config_file)
                     )
                     self.assertEqual(loaded.trunks, [])
 
@@ -199,7 +204,7 @@ class SIPTrunksConfigTest(unittest.TestCase):
             config_file = parent / "sip-trunks.yaml"
             config_file.write_text("[]\n", encoding="utf-8")
 
-            result = find_manage_file(str(project_dir), None)
+            result = find_manage_file(_project(str(project_dir)), None)
 
             self.assertEqual(result, str(config_file))
 
@@ -213,11 +218,11 @@ class SIPTrunksConfigTest(unittest.TestCase):
                 (directory / "sip-trunks.yaml").write_text("[]\n", encoding="utf-8")
 
             self.assertEqual(
-                find_manage_file(str(nested_dir), None), str(project_dir / "sip-trunks.yaml")
+                find_manage_file(_project(str(nested_dir)), None), str(project_dir / "sip-trunks.yaml")
             )
             (project_dir / "sip-trunks.yaml").unlink()
             self.assertEqual(
-                find_manage_file(str(nested_dir), None), str(parent / "sip-trunks.yaml")
+                find_manage_file(_project(str(nested_dir)), None), str(parent / "sip-trunks.yaml")
             )
 
     def test_manage_discovery_does_not_search_above_project_parent(self):
@@ -226,7 +231,7 @@ class SIPTrunksConfigTest(unittest.TestCase):
             (Path(temp_dir) / "sip-trunks.yaml").write_text("[]\n", encoding="utf-8")
 
             with self.assertRaises(FileNotFoundError):
-                find_manage_file(str(project_dir), None)
+                find_manage_file(_project(str(project_dir)), None)
 
     def test_persist_trunk_response_rejects_wrapped_formats_without_modifying_file(self):
         with TemporaryDirectory() as temp_dir:

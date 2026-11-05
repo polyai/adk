@@ -4243,61 +4243,85 @@ class AgentStudioProject:
     # These account-level APIs bypass self.api_handler because it initializes
     # project branch synchronization.
 
-    @staticmethod
     def build_sip_trunk_plan(
-        config_path: str,
-        region: str,
-        account_id: str,
-        desired_trunks: list[dict[str, Any]],
+        self,
         *,
+        file_path: str | None = None,
         rotate_auth: str | None = None,
-        source_digest: str | None = None,
     ) -> "ManagePlan":
         """Preview account-level SIP trunk and extension changes."""
+        from poly.sip_trunks.config import load_manage_config
         from poly.sip_trunks.reconciler import build_manage_plan
 
+        loaded = load_manage_config(self, file_path=file_path)
         return build_manage_plan(
-            config_path,
-            region,
-            account_id,
-            desired_trunks,
+            loaded.path,
+            self.region,
+            self.account_id,
+            loaded.trunks,
             rotate_auth=rotate_auth,
-            source_digest=source_digest,
+            source_digest=loaded.source_digest,
         )
 
-    @staticmethod
-    def apply_sip_trunk_plan(plan: "ManagePlan", *, prompt_auth_secret: "AuthPrompt") -> dict:
+    def apply_sip_trunk_plan(self, plan: "ManagePlan", *, prompt_auth_secret: "AuthPrompt") -> dict:
         """Apply a reviewed plan and persist the returned trunk metadata."""
-        from poly.sip_trunks.config import persist_trunk_response
+        from poly.sip_trunks.config import persist_trunk_response, resolve_account_context
         from poly.sip_trunks.reconciler import apply_manage_plan
 
+        context = resolve_account_context(self)
+        if (plan.region, plan.account_id) != (context.region, context.account_id):
+            raise ValueError("The SIP trunk plan belongs to a different account or region.")
         return apply_manage_plan(
             plan,
             prompt_auth_secret=prompt_auth_secret,
             persist_trunk_response=persist_trunk_response,
         )
 
-    @staticmethod
-    def export_sip_trunks(region: str, account_id: str) -> dict:
+    def export_sip_trunks(self) -> dict:
         """Export account trunks with all extension routes, across projects."""
+        from poly.sip_trunks.config import resolve_account_context
         from poly.sip_trunks.reconciler import export_config
 
-        return export_config(region, account_id)
+        resolve_account_context(self)
+        return export_config(self.region, self.account_id)
 
-    @staticmethod
-    def get_sip_trunk(region: str, account_id: str, trunk_id: str) -> dict:
+    def get_sip_trunk(self, trunk_id: str) -> dict:
         """Get a SIP trunk belonging to the selected account."""
-        return AgentStudioInterface.get_sip_trunk(region, account_id, trunk_id)
+        from poly.sip_trunks.config import resolve_account_context
 
-    @staticmethod
-    def list_sip_trunk_extensions(region: str, account_id: str, trunk_id: str) -> dict:
+        resolve_account_context(self)
+        return AgentStudioInterface.get_sip_trunk(self.region, self.account_id, trunk_id)
+
+    def list_sip_trunk_extensions(self, trunk_id: str) -> dict:
         """List every extension on a trunk, including routes to other projects."""
-        return AgentStudioInterface.list_sip_trunk_extensions(region, account_id, trunk_id)
+        from poly.sip_trunks.config import resolve_account_context
 
-    @staticmethod
-    def delete_sip_trunk(region: str, account_id: str, trunk_id: str) -> dict:
+        resolve_account_context(self)
+        response = AgentStudioInterface.list_sip_trunk_extensions(
+            self.region, self.account_id, trunk_id
+        )
+        if not isinstance(response.get("extensions", []), list):
+            raise ValueError("Expected the SIP Trunking API to return an extensions list.")
+        return response
+
+    def delete_sip_trunk(self, trunk_id: str) -> dict:
         """Delete a SIP trunk from the selected account."""
-        return AgentStudioInterface.delete_sip_trunk(region, account_id, trunk_id)
+        from poly.sip_trunks.config import resolve_account_context
+
+        resolve_account_context(self)
+        return AgentStudioInterface.delete_sip_trunk(self.region, self.account_id, trunk_id)
+
+    def write_sip_trunk_export(
+        self,
+        data: dict[str, Any],
+        *,
+        output: str | None = None,
+        force: bool = False,
+    ) -> str:
+        """Write SIP trunk YAML, defaulting to this project's root directory."""
+        from poly.sip_trunks.config import write_export
+
+        return write_export(self, data, output=output, force=force)
 
     def get_custom_metrics(self) -> list[dict]:
         """List all custom metrics for the project.
