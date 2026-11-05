@@ -125,13 +125,6 @@ def _inside(path: str, folder: str) -> bool:
     return path == folder or path.startswith(folder + os.sep)
 
 
-def _files_under(folder: str) -> list[str]:
-    """Return every file in a folder and its subfolders, or the path itself if it is a file."""
-    if os.path.isfile(folder):
-        return [folder]
-    return [os.path.join(path, name) for path, _, names in os.walk(folder) for name in names]
-
-
 def _non_empty_types(resources: ResourceMap) -> ResourceMap:
     """Return resources without the types that have none."""
     return {resource_type: typed for resource_type, typed in resources.items() if typed}
@@ -1491,11 +1484,9 @@ class AgentStudioProject:
         """Hold back each upstream move onto a file that is taken here.
 
         A file is free when nothing is there, or when every resource saved in it moves away or
-        is deleted upstream and unedited here, with nothing added here beside the deleted ones.
-        A folder freed by a multi-resource entry deleted upstream is free only if every file in
-        it is saved and moves away or is deleted upstream unedited. A file no resource is saved
-        in is taken, unless the moving resource's own file is gone here, as it is then that
-        resource renamed here too. A held-back resource stays as saved in `incoming_resources`, so the
+        is a single file deleted upstream and unedited here. A file no resource is saved in is
+        taken, unless the moving resource's own file is gone here, as it is then that resource
+        renamed here too. A held-back resource stays as saved in `incoming_resources`, so the
         next pull moves it once its target is free. The other moves out of its folder wait with
         it, and so does anything new upstream in either folder.
 
@@ -1507,6 +1498,7 @@ class AgentStudioProject:
         moves: dict[tuple[type[Resource], str], tuple[str, str]] = {}
         saved_in: dict[str, list[tuple[type[Resource], str]]] = {}
         freed_by_delete: set[tuple[type[Resource], str]] = set()
+        deleted_upstream: set[tuple[type[Resource], str]] = set()
         for resource_type, originals in original_resources.items():
             incoming = incoming_resources.get(resource_type) or {}
             single_file = not issubclass(resource_type, MultiResourceYamlResource)
@@ -1515,16 +1507,9 @@ class AgentStudioProject:
                 old_file = self._file_of(original)
                 saved_in.setdefault(old_file, []).append(key)
                 if resource_id not in incoming:
-                    if (
-                        not self._deleted_upstream_but_edited(
-                            original,
-                            original_mappings,
-                            incoming_mappings,
-                            format=format,
-                            mark=False,
-                        )
-                        if single_file
-                        else not self._entry_edited_here(original, incoming_mappings)
+                    deleted_upstream.add(key)
+                    if single_file and not self._deleted_upstream_but_edited(
+                        original, original_mappings, incoming_mappings, format=format, mark=False
                     ):
                         freed_by_delete.add(key)
                     continue
@@ -1542,26 +1527,7 @@ class AgentStudioProject:
             keys = saved_in.get(new_file)
             if not keys:
                 return not os.path.exists(old_file)
-            if not all(
-                key in freed_by_delete or (key in moves and key not in held) for key in keys
-            ):
-                return False
-            deleted = [key for key in keys if key in freed_by_delete]
-            if not deleted:
-                return True
-            if self._entries_added_here(new_file, deleted):
-                return False
-            if not any(issubclass(key[0], MultiResourceYamlResource) for key in deleted):
-                return True
-            new_folder = _moved_folders(old_file, new_file)[1]
-            return all(
-                saved_in.get(path)
-                and all(
-                    key in freed_by_delete or (key in moves and key not in held)
-                    for key in saved_in[path]
-                )
-                for path in _files_under(new_folder)
-            )
+            return all(key in freed_by_delete or (key in moves and key not in held) for key in keys)
 
         held: set[tuple[type[Resource], str]] = set()
         while True:
@@ -1600,11 +1566,22 @@ class AgentStudioProject:
         for old_folder, new_folder in sorted(folders):
             if any(old_folder != other and _inside(old_folder, other) for other, _ in folders):
                 continue
-            logger.warning(
+            taken_by = [
+                key for file, keys in saved_in.items() if _inside(file, new_folder) for key in keys
+            ]
+            renamed = (
                 f"Agent Studio renamed {os.path.relpath(old_folder, self.root_path)} to "
-                f"{os.path.relpath(new_folder, self.root_path)}, which is already here. Move or "
-                "delete it, then pull again."
+                f"{os.path.relpath(new_folder, self.root_path)}"
             )
+            if taken_by and all(key in deleted_upstream for key in taken_by):
+                logger.warning(
+                    f"{renamed}, which Agent Studio deleted. Pull again to apply the rename once "
+                    "it is gone here."
+                )
+            else:
+                logger.warning(
+                    f"{renamed}, which is already here. Move or delete it, then pull again."
+                )
             conflicts.append(old_folder)
         moved = {
             key: original_resources[key[0]][key[1]]
@@ -1618,47 +1595,8 @@ class AgentStudioProject:
         } | {
             self._file_of(original_resources[resource_type][resource_id])
             for resource_type, resource_id in freed_by_delete
-            if not issubclass(resource_type, MultiResourceYamlResource)
         }
         return conflicts, vacated, moved
-
-    def _entry_edited_here(
-        self, original: Resource, resource_mappings: list[ResourceMapping]
-    ) -> bool:
-        """Return whether a multi-resource entry differs here from how it was saved."""
-        path = original.get_path(self.root_path)
-        saved_hash = self.file_structure_info.get(os.path.relpath(path, self.root_path), {}).get(
-            "hash"
-        )
-        if not os.path.isfile(self._file_of(original)):
-            return False
-        try:
-            local = self.read_local_resource(
-                resource=self._make_resource_mapping(original),
-                resource_mappings=resource_mappings,
-            )
-        except FileNotFoundError:
-            return False
-        except Exception:
-            return True
-        return local.is_modified(saved_hash or original.compute_hash())
-
-    def _entries_added_here(self, file: str, keys: list[tuple[type[Resource], str]]) -> bool:
-        """Return whether a multi-resource file holds entries that were never saved."""
-        types = {resource_type for resource_type, _ in keys}
-        if not any(issubclass(resource_type, MultiResourceYamlResource) for resource_type in types):
-            return False
-        saved = {
-            os.path.relpath(os.path.join(self.root_path, path), self.root_path)
-            for path in self.file_structure_info
-        }
-        return any(
-            _parse_multi_resource_path(path)[0] == file
-            and os.path.relpath(path, self.root_path) not in saved
-            for resource_type in types
-            if issubclass(resource_type, MultiResourceYamlResource)
-            for path in resource_type.discover_resources(self.root_path)
-        )
 
     def _file_of(self, resource: Resource) -> str:
         """Return the file a resource lives in."""
