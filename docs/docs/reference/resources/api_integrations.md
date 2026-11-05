@@ -148,6 +148,9 @@ response = conv.api.salesforce.update_contact(
 )
 ~~~
 
+
+See [Configure API credentials](../cli/api-integrations.md) for setting credentials from the CLI.
+
 ## Validation
 
 - `name` is required and must match `^[a-z_][a-z0-9_]*$`.
