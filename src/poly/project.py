@@ -1249,8 +1249,7 @@ class AgentStudioProject:
 
         files_with_conflicts.extend(multi_conflicts)
 
-        # For other resources, we follow the usual process. Writes wait until every file
-        # is read, so files that swap paths are each read before either is replaced.
+        # For other resources, we follow the usual process
         writes: list[tuple[Resource, str, str]] = []
         removals: set[str] = set()
         saved_paths = {
