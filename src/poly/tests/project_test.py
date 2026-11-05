@@ -8332,37 +8332,94 @@ class PullRemoteRenameTest(unittest.TestCase):
         with open(os.path.join(self.root, "topics", name), encoding="utf-8") as file:
             return file.read()
 
-    def test_remote_rename_onto_a_file_made_here_keeps_that_file(self):
-        """A file made here at the new name is merged, not overwritten."""
-        path = os.path.join(self.root, "topics", "opening_hours.yaml")
-        with open(path, "w", encoding="utf-8") as file:
-            file.write(
-                self._topic_file("hours.yaml")
-                .replace("Opening hours", "My own topic")
-                .replace("Hours", "Opening hours")
-            )
+    def _write_topic(self, name: str, contents: str) -> None:
+        with open(os.path.join(self.root, "topics", name), "w", encoding="utf-8") as file:
+            file.write(contents)
 
-        self.project.pull_project(projection_json=self._topic_projection("Opening hours"))
+    def _topic_files(self) -> list[str]:
+        return sorted(os.listdir(os.path.join(self.root, "topics")))
 
-        self.assertIn("My own topic", self._topic_file("opening_hours.yaml"))
-
-    def test_remote_rename_onto_a_deleted_topic_edited_here_keeps_the_edit(self):
-        """A topic deleted upstream keeps its local edit when a renamed topic takes its name."""
+    def _pull_hours_and_opening_hours(self) -> None:
         self.project.pull_project(
             projection_json=self._topics_projection(
                 ("TOPIC-1", "Hours", "Open 9 to 5"), ("TOPIC-2", "Opening hours", "Weekdays")
             )
         )
-        path = os.path.join(self.root, "topics", "opening_hours.yaml")
-        edited = self._topic_file("opening_hours.yaml").replace("Weekdays", "Every day")
-        with open(path, "w", encoding="utf-8") as file:
-            file.write(edited)
 
-        self.project.pull_project(
+    def _pull_rename_onto_the_deleted_topic(self) -> list[str]:
+        conflicts, _ = self.project.pull_project(
             projection_json=self._topics_projection(("TOPIC-1", "Opening hours", "Open 9 to 5"))
         )
+        return conflicts
 
+    def test_remote_rename_onto_a_file_made_here_conflicts_and_keeps_both_files(self):
+        """A file made here at the new name is kept in conflict, not overwritten or taken over."""
+        own_topic = (
+            self._topic_file("hours.yaml")
+            .replace("Opening hours", "My own topic")
+            .replace("Hours", "Opening hours")
+        )
+        self._write_topic("opening_hours.yaml", own_topic)
+        hours = self._topic_file("hours.yaml")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._topic_projection("Opening hours")
+        )
+
+        new_path = os.path.join(self.root, "topics", "opening_hours.yaml")
+        self.assertEqual(conflicts, [new_path])
+        self.assertEqual(self._topic_files(), ["hours.yaml", "opening_hours.yaml"])
+        self.assertIn("My own topic", self._topic_file("opening_hours.yaml"))
+        self.assertTrue(
+            resource_utils.contains_merge_conflict(self._topic_file("opening_hours.yaml"))
+        )
+        self.assertEqual(self._topic_file("hours.yaml"), hours)
+
+    def test_remote_delete_and_rename_onto_its_name_moves_the_file_cleanly(self):
+        """A topic deleted upstream frees its name for a topic renamed onto it."""
+        self._pull_hours_and_opening_hours()
+
+        conflicts = self._pull_rename_onto_the_deleted_topic()
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
+        self.assertIn("Open 9 to 5", self._topic_file("opening_hours.yaml"))
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_remote_delete_and_rename_keeps_an_edit_to_the_renamed_topic(self):
+        """A local edit to the renamed topic moves with it."""
+        self._pull_hours_and_opening_hours()
+        self._write_topic(
+            "hours.yaml", self._topic_file("hours.yaml").replace("Open 9 to 5", "Open 8 to 6")
+        )
+
+        conflicts = self._pull_rename_onto_the_deleted_topic()
+
+        new_path = os.path.join(self.root, "topics", "opening_hours.yaml")
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
+        self.assertIn("Open 8 to 6", self._topic_file("opening_hours.yaml"))
+        self.assertEqual(self.project.project_status(), ([], [new_path], [], []))
+
+    def test_remote_delete_and_rename_onto_a_topic_edited_here_conflicts(self):
+        """An edit to the topic deleted upstream is kept in conflict, not merged into another."""
+        self._pull_hours_and_opening_hours()
+        self._write_topic(
+            "opening_hours.yaml",
+            self._topic_file("opening_hours.yaml").replace("Weekdays", "Every day"),
+        )
+        hours = self._topic_file("hours.yaml")
+
+        conflicts = self._pull_rename_onto_the_deleted_topic()
+
+        new_path = os.path.join(self.root, "topics", "opening_hours.yaml")
+        self.assertEqual(conflicts, [new_path])
+        self.assertEqual(self._topic_files(), ["hours.yaml", "opening_hours.yaml"])
         self.assertIn("Every day", self._topic_file("opening_hours.yaml"))
+        self.assertTrue(
+            resource_utils.contains_merge_conflict(self._topic_file("opening_hours.yaml"))
+        )
+        self.assertEqual(self._topic_file("hours.yaml"), hours)
 
     def test_failed_write_after_a_remote_rename_leaves_the_old_file(self):
         """The old file is removed only after the new one is written."""
