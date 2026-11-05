@@ -54,6 +54,8 @@ A campaign that has been published can't be deleted. Pause it, then archive it, 
 | `defaultTimezone` | IANA time zone, used for a contact with none. |
 | `contactWindow` | `daysOfWeek` (`monday` to `sunday`), and `startTime` and `endTime` as `"HH:mm"` in the contact's time zone. |
 
+Settings the ADK doesn't know yet are kept as they were pulled, but the ADK can't send them. A settings change replaces every setting, so change the settings of a campaign that has any in Agent Studio, or update the ADK.
+
 ### Nodes
 
 Each node has a `name`, unique in the campaign, and a `type` with that type's fields. Nodes refer to each other by name. A node's function code lives in `functions/{node_name}.py`, with the name lowercased and punctuation replaced by `_`. Names are compared ignoring case and punctuation, so when Agent Studio has nodes named `Call` and `call`, a pull numbers the second one, as in `call 2`. A node Agent Studio has with no name, or with a name another node has, is named on pull and shows as changed until your next push sends that name.
@@ -142,6 +144,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
     - `defaultTimezone` is a valid IANA time zone.
     - `endDate` is not before `startDate`.
     - `contactWindow` has at least one day, its times are `HH:mm`, and it ends after it starts.
+    - A campaign with settings the ADK doesn't know has no settings changed, and a new campaign has none.
 - `nodes` is a list, every node has a name, and names are unique in the campaign, ignoring case and punctuation.
 - There is at most one `trigger` node, and a campaign that has a trigger in Agent Studio keeps one: rename or replace its trigger rather than delete it.
 - The trigger changes `type` only when another node becomes the trigger in the same push, and a published campaign's trigger keeps its `sourceType`.
