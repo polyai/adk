@@ -9334,21 +9334,27 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             ],
         )
 
-    def test_rename_with_different_nodes_is_a_delete_and_a_create(self):
+    def _assert_push_refused(self, message: str) -> None:
+        success, error, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertEqual(commands, [])
+        self.assertIn(message, error)
+        self.assertIn(message, "\n".join(self.project.validate_project()))
+
+    def test_rename_with_different_nodes_is_refused(self):
         """Only the same node names and types say the new folder is the old campaign."""
         data = self._rename_campaign("Monthly reminders", "monthly_reminders")
         self._node(data, "End")["name"] = "Finish"
         self._node(data, "First call")["defaultRoute"] = "Finish"
         self._write_yaml(data)
 
-        command_types = [command_type for command_type, _ in self._push()]
+        self._assert_push_refused(
+            "'Reminders' would be deleted and 'Monthly reminders' created. To rename a "
+            "campaign's folder, rename it in a push of its own"
+        )
 
-        self.assertIn("outbound_campaign_delete", command_types)
-        self.assertEqual(command_types.count("outbound_campaign_create"), 1)
-        self.assertNotIn("outbound_campaign_update", command_types)
-        self.assertNotIn("outbound_campaign_delete_node", command_types)
-
-    def test_two_copies_of_a_removed_campaign_are_both_created(self):
+    def test_two_copies_of_a_removed_campaign_are_refused(self):
         original = self._yaml()
         for name in ("copy_a", "copy_b"):
             self._write_yaml(
@@ -9356,10 +9362,59 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             )
         shutil.rmtree(self.folder)
 
+        self._assert_push_refused("'Reminders' would be deleted and 'copy_a', 'copy_b' created.")
+
+    def test_new_campaign_beside_a_kept_one_is_created(self):
+        self._write_yaml(
+            {**self._yaml(), "name": "Other"}, os.path.join(self.root, "outbound_campaigns", "other")
+        )
+
         command_types = [command_type for command_type, _ in self._push()]
 
-        self.assertEqual(command_types.count("outbound_campaign_create"), 2)
-        self.assertEqual(command_types.count("outbound_campaign_delete"), 1)
+        self.assertEqual(command_types.count("outbound_campaign_create"), 1)
+        self.assertNotIn("outbound_campaign_delete", command_types)
+
+    def test_settings_the_adk_does_not_know_are_kept_and_pass_validation(self):
+        projection = _campaign_projection()
+        self._entity(projection)["settings"]["quietHours"] = {"start": "21:00"}
+        self._pull_into_new_project(projection)
+        data = self._yaml()
+        data["description"] = "Edited"
+        self._write_yaml(data)
+
+        self.assertEqual(self._yaml()["settings"]["quietHours"], {"start": "21:00"})
+        self.assertEqual(self.project.validate_project(), [])
+        self.assertEqual(
+            [command_type for command_type, _ in self._push()], ["outbound_campaign_update"]
+        )
+
+    def _pull_published(self) -> None:
+        projection = _campaign_projection()
+        self._entity(projection)["status"] = "active"
+        self._pull_into_new_project(projection)
+
+    def test_published_campaign_folder_removed_is_refused(self):
+        self._pull_published()
+        shutil.rmtree(self.folder)
+
+        self._assert_push_refused(
+            "'Reminders' has been published, so it can't be deleted. To retire it, run "
+            "`poly campaign pause` then `poly campaign archive`"
+        )
+
+    def test_published_campaign_keeps_its_status_out_of_the_file(self):
+        self._pull_published()
+
+        self.assertNotIn("status", self._yaml())
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_published_trigger_source_type_change_is_refused(self):
+        self._pull_published()
+        data = self._yaml()
+        self._node(data, "Trigger")["sourceType"] = "api"
+        self._write_yaml(data)
+
+        self._assert_push_refused("The contact source stays 'csv' once the campaign has been published.")
 
     def test_removed_campaign_folder_deletes_just_the_campaign(self):
         """Deleting a campaign deletes its nodes, so no node deletes are sent."""
@@ -10089,6 +10144,14 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                 **data,
                 "nodes": [*data["nodes"], {"type": "end"}],
             },
+            "Node 1 must be a mapping.": lambda data: {
+                **data,
+                "nodes": ["Trigger", *data["nodes"][1:]],
+            },
+            "Node 3 needs a name.": lambda data: {
+                **data,
+                "nodes": [*data["nodes"][:2], {**data["nodes"][2], "name": 5}],
+            },
         }
         original = self._yaml()
         for message, change in cases.items():
@@ -10100,6 +10163,8 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                 self.assertFalse(success)
                 self.assertEqual(commands, [])
                 self.assertIn(message, error)
+                self.assertIn(message, "\n".join(self.project.validate_project()))
+                self.project.project_status()
 
     def test_function_file_left_behind_by_a_node_rename_fails_validation(self):
         data = self._yaml()

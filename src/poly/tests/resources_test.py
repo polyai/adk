@@ -90,7 +90,6 @@ from poly.resources.languages import (
 )
 from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
 from poly.resources.outbound_campaign import (
-    TIMEZONES,
     OutboundCampaign,
     OutboundCampaignFunction,
     OutboundCampaignNode,
@@ -101,6 +100,7 @@ from poly.resources.outbound_campaign import (
     node_data_proto,
     node_names,
     route_targets,
+    timezones,
 )
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
@@ -15734,7 +15734,7 @@ class OutboundCampaignTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, re.escape(message)):
                     campaign.validate(resource_mappings=[])
 
-    @unittest.skipUnless(TIMEZONES, "no IANA time zone database on this system")
+    @unittest.skipUnless(timezones(), "no IANA time zone database on this system")
     def test_validate_rejects_an_unknown_time_zone(self):
         campaign = _campaign()
         campaign.settings = {**campaign.settings, "defaultTimezone": "Mars/Olympus_Mons"}

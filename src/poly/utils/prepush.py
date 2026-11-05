@@ -38,7 +38,13 @@ from poly.resources import (
     Variant,
     VariantAttribute,
 )
-from poly.resources.outbound_campaign import function_file_stem, map_route_targets
+from poly.resources.outbound_campaign import (
+    campaign_nodes,
+    function_file_stem,
+    map_route_targets,
+    node_pairing_key,
+    paired_campaigns,
+)
 from poly.resources.test_suite import (
     TestCaseApiOperationMock,
     TestCaseIntegrationAttributes,
@@ -308,27 +314,10 @@ def group_outbound_campaign_changes(
     drop_settings_only_campaign_updates(updated_resources)
 
 
-def _campaign_nodes(changes: ResourceMap, campaign_id: str) -> dict[str, OutboundCampaignNode]:
-    return {
-        node.name: node
-        for node in changes.get(OutboundCampaignNode, {}).values()
-        if isinstance(node, OutboundCampaignNode) and node.campaign_id == campaign_id
-    }
-
-
-def _pairing_key(node: OutboundCampaignNode) -> tuple[Optional[str], Optional[str]]:
-    node_type = node.data.get("type")
-    return (None if node_type == "trigger" else node.name, node_type)
-
-
 def _nodes_by_pairing_key(
     nodes: dict[str, OutboundCampaignNode],
 ) -> dict[tuple[Optional[str], Optional[str]], OutboundCampaignNode]:
-    return {_pairing_key(node): node for node in nodes.values()}
-
-
-def _node_signature(nodes: dict[str, OutboundCampaignNode]) -> tuple:
-    return tuple(sorted((_pairing_key(node) for node in nodes.values()), key=repr))
+    return {node_pairing_key(node): node for node in nodes.values()}
 
 
 def pair_renamed_campaigns(
@@ -343,28 +332,9 @@ def pair_renamed_campaigns(
     which would replace a live campaign with a new one. A new campaign whose nodes have exactly
     the same names and types as one deleted campaign, and as no other, takes that campaign's id
     and each node takes the id of the node with its name. The trigger is matched by type alone,
-    so it may be renamed too. Anything else stays a delete and a create.
+    so it may be renamed too. Anything else stays a delete and a create, which validation refuses.
     """
-    new_campaigns = new_resources.get(OutboundCampaign, {})
-    deleted_campaigns = deleted_resources.get(OutboundCampaign, {})
-    if not new_campaigns or not deleted_campaigns:
-        return
-
-    new_signatures = {
-        campaign_id: _node_signature(_campaign_nodes(new_resources, campaign_id))
-        for campaign_id in new_campaigns
-    }
-    old_signatures = {
-        campaign_id: _node_signature(_campaign_nodes(deleted_resources, campaign_id))
-        for campaign_id in deleted_campaigns
-    }
-    for old_id, signature in old_signatures.items():
-        matches = [new_id for new_id, other in new_signatures.items() if other == signature]
-        if not signature or len(matches) != 1:
-            continue
-        if list(old_signatures.values()).count(signature) != 1:
-            continue
-        new_id = matches[0]
+    for old_id, new_id in paired_campaigns(new_resources, deleted_resources).items():
         _carry_campaign_ids(
             state, new_resources, updated_resources, deleted_resources, new_id, old_id
         )
@@ -396,8 +366,8 @@ def _carry_campaign_ids(
     state_campaigns.pop(new_id, None)
     state_campaigns[old_id] = campaign
 
-    saved_nodes = _nodes_by_pairing_key(_campaign_nodes(deleted_resources, old_id))
-    new_nodes = _nodes_by_pairing_key(_campaign_nodes(new_resources, new_id))
+    saved_nodes = _nodes_by_pairing_key(campaign_nodes(deleted_resources, old_id))
+    new_nodes = _nodes_by_pairing_key(campaign_nodes(new_resources, new_id))
     carried_ids = {node.node_id: saved_nodes[key].node_id for key, node in new_nodes.items()}
     for key, node in new_nodes.items():
         node.data = map_route_targets(node.data, lambda target: carried_ids.get(target, target))
@@ -433,7 +403,7 @@ def _remap_campaign_routes(
     campaign_id: str,
     node_ids: dict[str, str],
 ) -> None:
-    for node in _campaign_nodes(state, campaign_id).values():
+    for node in campaign_nodes(state, campaign_id).values():
         data = map_route_targets(node.data, lambda target: node_ids.get(target, target))
         if data == node.data:
             continue

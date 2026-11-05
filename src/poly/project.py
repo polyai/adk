@@ -1531,7 +1531,10 @@ class AgentStudioProject:
         # 4. Validate all resources with new state
         if not skip_validation:
             validation_errors = self.validate_resources(
-                resources_dict=new_state, resource_mappings=resource_mappings
+                resources_dict=new_state,
+                resource_mappings=resource_mappings,
+                new_resources=new_resources,
+                deleted_resources=deleted_resources,
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
@@ -2439,6 +2442,9 @@ class AgentStudioProject:
             additional_kwargs["known_label"] = saved_node.platform_name if saved_node else None
             additional_kwargs["known_data"] = saved_node.data if saved_node else None
             additional_kwargs["known_code"] = saved_node.code if saved_node else None
+            additional_kwargs["known_published"] = bool(
+                saved_node and saved_node.campaign_published
+            )
 
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):
@@ -3317,8 +3323,8 @@ class AgentStudioProject:
             list[str]: A list of validation error messages.
         """
         # Read local resources
-        new_resource_mappings, kept_resource_mappings, _ = self.find_new_kept_deleted(
-            self.discover_local_resources()
+        new_resource_mappings, kept_resource_mappings, deleted_resource_mappings = (
+            self.find_new_kept_deleted(self.discover_local_resources())
         )
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
 
@@ -3334,22 +3340,48 @@ class AgentStudioProject:
                 resource_mapping.resource_id
             ] = local_resource
 
+        new_resources: ResourceMap = {}
+        for mapping in new_resource_mappings:
+            new_resources.setdefault(mapping.resource_type, {})[mapping.resource_id] = resources[
+                mapping.resource_type
+            ][mapping.resource_id]
+        deleted_resources: ResourceMap = {}
+        for mapping in deleted_resource_mappings:
+            saved = self.resources.get(mapping.resource_type, {}).get(mapping.resource_id)
+            if saved is not None:
+                deleted_resources.setdefault(mapping.resource_type, {})[mapping.resource_id] = saved
+
         return self.validate_resources(
             resources_dict=resources,
             resource_mappings=resource_mappings,
+            new_resources=new_resources,
+            deleted_resources=deleted_resources,
         )
 
     @staticmethod
     def validate_resources(
         resources_dict: ResourceMap,
         resource_mappings: list[ResourceMapping],
+        new_resources: Optional[ResourceMap] = None,
+        deleted_resources: Optional[ResourceMap] = None,
     ) -> list[str]:
         """Validate all resources in the project.
+
+        Args:
+            resources_dict: Every local resource, by type and id.
+            resource_mappings: The mappings to resolve references with.
+            new_resources: The resources the push would create, to check deletes against.
+            deleted_resources: The saved resources the push would delete.
 
         Returns:
             list[str]: A list of validation error messages.
         """
-        validation_errors = []
+        validation_errors = [
+            f"Validation error: {error}"
+            for resource_type in deleted_resources or {}
+            if issubclass(resource_type, Resource)
+            for error in resource_type.validate_deletions(new_resources or {}, deleted_resources)
+        ]
         for resource_type, resources in resources_dict.items():
             for resource_id, resource in resources.items():
                 try:

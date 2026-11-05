@@ -2,6 +2,7 @@
 
 import ast
 import datetime
+import functools
 import keyword
 import logging
 import os
@@ -152,7 +153,12 @@ PER_CONTACT_PARAMETERS = (
 )
 
 PYTHONIC_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-TIMEZONES = {zone.lower() for zone in zoneinfo.available_timezones()}
+
+
+@functools.cache
+def timezones() -> frozenset[str]:
+    """The IANA time zones this system knows, lowercased; empty with no time zone database."""
+    return frozenset(zone.lower() for zone in zoneinfo.available_timezones())
 
 
 def _plain(value: Any) -> Any:
@@ -550,6 +556,48 @@ def _campaign_folders_on_disk(base_path: str) -> list[str]:
     ]
 
 
+def campaign_nodes(changes: dict, campaign_id: str) -> dict[str, "OutboundCampaignNode"]:
+    """Return the nodes of campaign `campaign_id` among `changes`, by name."""
+    return {
+        node.name: node
+        for node in changes.get(OutboundCampaignNode, {}).values()
+        if isinstance(node, OutboundCampaignNode) and node.campaign_id == campaign_id
+    }
+
+
+def node_pairing_key(node: "OutboundCampaignNode") -> tuple[Optional[str], Optional[str]]:
+    """Return what pairs a node across a campaign rename: its name and type, or the trigger."""
+    node_type = node.data.get("type") if isinstance(node.data, dict) else None
+    return (None if node_type == "trigger" else node.name, node_type)
+
+
+def _node_signature(nodes: dict[str, "OutboundCampaignNode"]) -> tuple:
+    return tuple(sorted((node_pairing_key(node) for node in nodes.values()), key=repr))
+
+
+def paired_campaigns(new_resources: dict, deleted_resources: dict) -> dict[str, str]:
+    """Pair each deleted campaign with the new one its folder was renamed to, by old id.
+
+    A rename reads as a delete and a create. They pair when the new campaign's nodes have
+    exactly the names and types of the deleted campaign's, and no other campaign's on either
+    side has the same.
+    """
+    new_signatures = {
+        campaign_id: _node_signature(campaign_nodes(new_resources, campaign_id))
+        for campaign_id in new_resources.get(OutboundCampaign, {})
+    }
+    old_signatures = {
+        campaign_id: _node_signature(campaign_nodes(deleted_resources, campaign_id))
+        for campaign_id in deleted_resources.get(OutboundCampaign, {})
+    }
+    pairs = {}
+    for old_id, signature in old_signatures.items():
+        matches = [new_id for new_id, other in new_signatures.items() if other == signature]
+        if signature and len(matches) == 1 and list(old_signatures.values()).count(signature) == 1:
+            pairs[old_id] = matches[0]
+    return pairs
+
+
 @register_resource("outbound_campaigns")
 @dataclass
 class OutboundCampaign(MultiResourceYamlResource):
@@ -558,6 +606,7 @@ class OutboundCampaign(MultiResourceYamlResource):
     The same file holds the campaign's nodes under `nodes`, each an `OutboundCampaignNode`;
     this resource reads and writes only its own keys. `platform_label` is set only when pull
     renamed the campaign because another has its name, so the next push sends the new name.
+    `status` is kept from the last pull and never written to the file or sent.
     """
 
     resource_id_prefix = "CMPGN"
@@ -567,6 +616,7 @@ class OutboundCampaign(MultiResourceYamlResource):
     settings: dict = field(default_factory=lambda: normalise_settings({}))
     folder_name: str = ""
     platform_label: Optional[str] = field(default=None, repr=False, compare=False)
+    status: Optional[str] = field(default=None, repr=False, compare=False)
 
     node_entries: Any = field(default=None, init=False, repr=False, compare=False)
     unknown_keys: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
@@ -737,6 +787,7 @@ class OutboundCampaign(MultiResourceYamlResource):
                 settings=utils.strip_strings(normalise_settings(campaign.get("settings"))),
                 folder_name=utils.clean_name(name),
                 platform_label=None if label == name else label,
+                status=campaign.get("status"),
             )
         return resources
 
@@ -856,6 +907,37 @@ class OutboundCampaign(MultiResourceYamlResource):
         """Treat a node list that can't be read as a change, so validation reports it."""
         return super().is_modified(other_hash) or bool(_node_entry_errors(self.node_entries))
 
+    @classmethod
+    def validate_deletions(cls, new_resources: dict, deleted_resources: dict) -> list[str]:
+        """Refuse deleting a published campaign, or one whose folder rename can't be paired.
+
+        A delete and a create in one push would replace a campaign rather than rename it, so
+        they are refused unless pairing makes them a rename. A draft can still be deleted alone.
+        """
+        paired = paired_campaigns(new_resources, deleted_resources)
+        created = [
+            campaign.name
+            for campaign_id, campaign in new_resources.get(cls, {}).items()
+            if campaign_id not in paired.values()
+        ]
+        errors = []
+        for campaign_id, campaign in deleted_resources.get(cls, {}).items():
+            if campaign_id in paired:
+                continue
+            if campaign.status not in (None, "draft"):
+                errors.append(
+                    f"'{campaign.name}' has been published, so it can't be deleted. To retire "
+                    "it, run `poly campaign pause` then `poly campaign archive`, and restore its "
+                    "folder here. It stops being pulled once it's archived."
+                )
+            elif created:
+                errors.append(
+                    f"'{campaign.name}' would be deleted and "
+                    f"{', '.join(repr(name) for name in created)} created. To rename a "
+                    "campaign's folder, rename it in a push of its own, with its nodes as they are."
+                )
+        return errors
+
     def build_create_proto(self) -> campaigns_pb2.OutboundCampaign_Create:
         return campaigns_pb2.OutboundCampaign_Create(
             id=self.resource_id,
@@ -948,9 +1030,6 @@ def _settings_errors(settings: Any) -> list[str]:
     if not isinstance(settings, dict):
         return ["Settings must be a mapping."]
     errors = []
-    unknown = sorted(set(settings) - set(SETTINGS_DEFAULTS))
-    if unknown:
-        errors.append(f"Unknown settings: {', '.join(unknown)}.")
     for key in (
         "startDate",
         "endDate",
@@ -970,7 +1049,7 @@ def _settings_errors(settings: Any) -> list[str]:
             "Setting 'country' must be an ISO 3166-1 alpha-2 country code in capitals, e.g. US."
         )
     timezone = settings.get("defaultTimezone")
-    if isinstance(timezone, str) and TIMEZONES and timezone.lower() not in TIMEZONES:
+    if isinstance(timezone, str) and timezones() and timezone.lower() not in timezones():
         errors.append(f"Setting 'defaultTimezone' must be an IANA time zone, not '{timezone}'.")
     use_case = settings.get("useCase")
     if use_case is not None and use_case not in USE_CASES:
@@ -1219,6 +1298,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     position: Optional[dict] = None
     code: str = ""
     platform_label: Optional[str] = field(default=None, repr=False, compare=False)
+    campaign_published: bool = field(default=False, repr=False, compare=False)
 
     saved_type: Optional[str] = field(default=None, init=False, repr=False, compare=False)
     saved_label: Optional[str] = field(default=None, init=False, repr=False, compare=False)
@@ -1288,6 +1368,13 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     def moved_to(self, other: MultiResourceYamlResource) -> "OutboundCampaignNode":
         return replace(self, campaign_folder=other.campaign_folder)
 
+    @classmethod
+    def _entry_key(cls, entry: Any) -> str:
+        """Match no entry that isn't a mapping with a text name, so validation reports it."""
+        if not isinstance(entry, dict) or not isinstance(entry.get(cls.resource_key), str):
+            return ""
+        return super()._entry_key(entry)
+
     def get_diff(self, other_resource: Resource) -> str:
         """Diff from Agent Studio's label when pull named the node differently."""
         if self.platform_label is None or not other_resource:
@@ -1314,6 +1401,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         known_label: Optional[str] = None,
         known_data: Optional[dict] = None,
         known_code: Optional[str] = None,
+        known_published: bool = False,
         **kwargs,
     ) -> "OutboundCampaignNode":
         yaml_dict = utils.strip_strings(_plain(yaml_dict or {}))
@@ -1328,6 +1416,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         node.saved_label = known_label
         node.saved_data = known_data
         node.saved_code = known_code
+        node.campaign_published = known_published
         return node
 
     @classmethod
@@ -1350,6 +1439,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
                     position=_normalise_position(platform_node.get("position")),
                     code=(data.get("function") or {}).get("code") or "",
                     platform_label=None if label == name else label,
+                    campaign_published=campaign.get("status") not in (None, "draft"),
                 )
                 nodes[node.resource_id] = node
         return nodes
@@ -1463,6 +1553,16 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             and (not isinstance(self.data, dict) or self.data.get("type") != "trigger")
         ):
             errors.append("The trigger can't change type unless another node becomes the trigger.")
+        source = self.saved_data.get("sourceType") if self.saved_data else None
+        if (
+            self.campaign_published
+            and self.saved_type == "trigger"
+            and self.is_trigger
+            and self.data.get("sourceType") != source
+        ):
+            errors.append(
+                f"The contact source stays '{source}' once the campaign has been published."
+            )
         if len(self.name) > 256:
             errors.append("The name must be under 256 characters.")
         if resource_mappings is not None and isinstance(self.data, dict) and self._routes_changed():
