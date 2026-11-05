@@ -10,13 +10,14 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
+from poly.constants import REGION_NAMES
+
 if TYPE_CHECKING:
     from ruamel.yaml import YAML
 
     from poly.project import AgentStudioProject
 
 PROJECT_DEFAULT_OUTPUT = "__project_default__"
-SIP_TRUNK_REGIONS = ("us-1", "euw-1", "uk-1")
 
 
 @dataclass(frozen=True)
@@ -39,8 +40,8 @@ class LoadedManageConfig:
 
 
 def validate_sip_trunk_region(region: str) -> str:
-    """Validate a canonical ADK region supported by the SIP Trunking API."""
-    if region not in SIP_TRUNK_REGIONS:
+    """Validate a canonical enterprise region supported by the SIP Trunking API."""
+    if region not in REGION_NAMES.values() or region == REGION_NAMES["studio"]:
         raise ValueError(f"Unsupported SIP Trunking region: {region}")
     return region
 
