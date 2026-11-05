@@ -23,11 +23,11 @@ outbound_campaigns/
         └── {node_name}.py     # a node function's code, only when it has code
 ~~~
 
-Optional. The folder name is the campaign's name, lowercased, with punctuation replaced by `_`. Agent Studio allows two campaigns with the same name, so a second one gets the end of its id added to its folder, as in `reminders-a1b2c3d4`.
+Optional. The folder name is the campaign's name, lowercased, with punctuation replaced by `_`. Agent Studio allows two campaigns the same name, but each needs its own folder. When two names are the same ignoring case and punctuation, the oldest campaign keeps its name and a pull renames the other `{name} (1)`, numbered on, with a warning. That campaign shows as changed, so a pull followed by a push sends the new name to Agent Studio.
 
-To rename a campaign, change `name` and rename the folder to match. The campaign keeps its identity, contacts and history only when its nodes keep their names and types, though the trigger may be renamed too. Otherwise the push deletes the campaign and creates a new one, so rename the folder in a push of its own.
+To rename a campaign, change `name` and rename the folder to match. The campaign keeps its identity, contacts and history when its nodes keep their names and types, though the trigger may be renamed too. A push that would instead delete one campaign and create another fails validation: rename the folder in a push of its own.
 
-`poly revert outbound_campaigns/{campaign_name}/campaign.yaml` puts the whole file back as it was last pulled or pushed, including one a pull left with conflict markers. A plain `poly revert` puts back the nodes saved in that file and keeps nodes you added, unless the file can't be read, as when it has conflict markers: then it puts the whole file back too.
+A campaign that has been published can't be deleted. Pause it, then archive it, with `poly campaign pause` and `poly campaign archive`. It stops being pulled once it's archived.
 
 ## What a campaign contains
 
@@ -85,7 +85,7 @@ Node positions on the Agent Studio canvas are not in the file. A node keeps its 
 
 !!! warning "Renaming a node"
 
-    A node's name is its identity in your files. Renaming the trigger keeps its id and history. Renaming any other node, or changing its `type`, deletes the node and creates a new one with a new id, which starts its history again. Rename its `.py` file to match.
+    A node's name is its identity in your files. A campaign has one trigger, so renaming or replacing the trigger keeps its id and history. Renaming any other node, or changing its `type`, deletes the node and creates a new one with a new id, which starts its history again. Rename its `.py` file to match.
 
 ### Example
 
@@ -135,6 +135,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 
 - `name` is present and under 256 characters, and `description` under 1024.
 - The folder name matches the campaign's name.
+- A campaign deleted in the push has never been published, and is not replaced by a new one: a renamed folder keeps its nodes' names and types.
 - Settings have the right types and allowed values:
     - `useCase` is `transactional` or `marketing`, and limits are positive whole numbers.
     - `country` is a real ISO 3166-1 alpha-2 code, in capitals.
@@ -143,13 +144,13 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
     - `contactWindow` has at least one day, its times are `HH:mm`, and it ends after it starts.
 - `nodes` is a list, every node has a name, and names are unique in the campaign, ignoring case and punctuation.
 - There is at most one `trigger` node, and a campaign that has a trigger in Agent Studio keeps one: rename or replace its trigger rather than delete it.
-- The trigger changes `type` only when another node becomes the trigger in the same push.
+- The trigger changes `type` only when another node becomes the trigger in the same push, and a published campaign's trigger keeps its `sourceType`.
 - Each node has a known `type`, its required fields, allowed values, and no fields its type doesn't have.
 - `voicemailScript` and `voicemailWhen` are set when `voicemailEnabled` is true.
 - On a node that is new, changed type or had its routes changed, every route names a node in the campaign. Agent Studio keeps a route to a deleted node until you change it.
 - Function names are valid Python names, and `code` is not in the YAML.
 - On a node that is new, changed type, or had its code, function name or parameters changed, the function's `def` line is whole on one line and takes exactly the node's parameters.
-- Every file in `functions/` belongs to a node with a function. A pull keeps the file of a node removed in Agent Studio if you had edited it: delete the file, or add the node back, before you push. If another node takes that file's name in the same pull, the file is left in conflict between your edit and that node's code.
+- Every file in `functions/` belongs to a node with a function, and a node's file is named after it. After renaming a node, rename its file too.
 
 ## Best practices
 
