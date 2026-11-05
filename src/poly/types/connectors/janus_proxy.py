@@ -15,7 +15,9 @@ __all__ = [
     "JanusProxySSRFBlocked",
     "JanusProxyUpstreamError",
     "JanusProxyTimeout",
+    "JanusProxyRateLimited",
     "JanusProxyAuthError",
+    "janus_base_url",
     "normalize_environment",
     "build_response",
     "JanusProxyClient",
@@ -40,9 +42,13 @@ class JanusProxyUpstreamError(JanusProxyError): ...
 class JanusProxyTimeout(JanusProxyError): ...
 
 
+class JanusProxyRateLimited(JanusProxyError): ...
+
+
 class JanusProxyAuthError(JanusProxyError): ...
 
 
+def janus_base_url() -> str: ...
 def normalize_environment(environment: str | None) -> str: ...
 def build_response(
     status_code: int,
