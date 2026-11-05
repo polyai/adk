@@ -10931,6 +10931,51 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertIn("Wait", self._read("reminders", "campaign.yaml"))
         self.assertEqual(self._read("monthly", "functions", "trigger.py"), monthly_code)
 
+    def test_remote_delete_and_rename_onto_a_folder_with_a_function_added_here_is_held_back(self):
+        """Code added here for the deleted campaign must not end up in the campaign moving in."""
+        monthly_code = self._pull_reminders_and_monthly()
+        added = "def call_args(outbound_contact, outbound_campaign):\n    return {'r': 1}\n"
+        self._write_function("first_call", added)
+        renamed = _campaign_projection(campaign_id="CMPGN-TWO", trigger_code=monthly_code)
+
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        monthly = os.path.join(self.root, "outbound_campaigns", "monthly")
+        self.assertIn(monthly, conflicts)
+        self.assertEqual(self._read("reminders", "functions", "first_call.py"), added)
+        self.assertEqual(self._read("monthly", "functions", "trigger.py"), monthly_code)
+        self.assertNotIn(
+            os.path.join("outbound_campaigns", "monthly", "functions", "first_call.py"),
+            self._tree(),
+        )
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-TWO"].folder, "monthly")
+
+    def test_remote_delete_and_rename_onto_a_folder_with_its_code_edited_here_is_held_back(self):
+        """An edit to the deleted campaign's code holds the rename back and is kept."""
+        monthly_code = "def map_contacts(contacts, outbound_campaign):\n    return {'m': 1}\n"
+        monthly = _campaign_projection(
+            name="Monthly", campaign_id="CMPGN-TWO", trigger_code=monthly_code
+        )["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-TWO"]
+        projection = _campaign_projection(extra_campaigns=(monthly,))
+        reminders = projection["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-ONE"]
+        reminders["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
+            "def call_args(outbound_contact, outbound_campaign):\n    return {'a': 1}\n"
+        )
+        self.project.pull_project(projection_json=projection)
+        edited = "def call_args(outbound_contact, outbound_campaign):\n    return {'a': 'here'}\n"
+        self._write_function("first_call", edited)
+        renamed = _campaign_projection(campaign_id="CMPGN-TWO", trigger_code=monthly_code)
+
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertIn(os.path.join(self.root, "outbound_campaigns", "monthly"), conflicts)
+        self.assertIn("'here'", self._read("reminders", "functions", "first_call.py"))
+        self.assertEqual(self._read("monthly", "functions", "trigger.py"), monthly_code)
+        self.assertNotIn(
+            os.path.join("outbound_campaigns", "monthly", "functions", "first_call.py"),
+            self._tree(),
+        )
+
     def test_remote_delete_removes_the_folder(self):
         self.project.pull_project(
             projection_json={
