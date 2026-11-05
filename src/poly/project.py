@@ -136,6 +136,13 @@ def _inside(path: str, folder: str) -> bool:
     return path == folder or path.startswith(folder + os.sep)
 
 
+def _files_under(folder: str) -> list[str]:
+    """Return every file in a folder and its subfolders, or the path itself if it is a file."""
+    if os.path.isfile(folder):
+        return [folder]
+    return [os.path.join(path, name) for path, _, names in os.walk(folder) for name in names]
+
+
 def _non_empty_types(resources: ResourceMap) -> ResourceMap:
     """Return resources without the types that have none."""
     return {resource_type: typed for resource_type, typed in resources.items() if typed}
@@ -1497,9 +1504,10 @@ class AgentStudioProject:
 
         A file is free when nothing is there, or when every resource saved in it moves away or
         is deleted upstream and unedited here, with nothing added here beside the deleted ones.
-        A file no resource is saved in is
-        taken, unless the moving resource's own file is gone here, as it is then that resource
-        renamed here too. A held-back resource stays as saved in `incoming_resources`, so the
+        A folder freed by a multi-resource entry deleted upstream is free only if every file in
+        it is saved and moves away or is deleted upstream unedited. A file no resource is saved
+        in is taken, unless the moving resource's own file is gone here, as it is then that
+        resource renamed here too. A held-back resource stays as saved in `incoming_resources`, so the
         next pull moves it once its target is free. The other moves out of its folder wait with
         it, and so does anything new upstream in either folder.
 
@@ -1551,7 +1559,21 @@ class AgentStudioProject:
             ):
                 return False
             deleted = [key for key in keys if key in freed_by_delete]
-            return not deleted or not self._entries_added_here(new_file, deleted)
+            if not deleted:
+                return True
+            if self._entries_added_here(new_file, deleted):
+                return False
+            if not any(issubclass(key[0], MultiResourceYamlResource) for key in deleted):
+                return True
+            new_folder = _moved_folders(old_file, new_file)[1]
+            return all(
+                saved_in.get(path)
+                and all(
+                    key in freed_by_delete or (key in moves and key not in held)
+                    for key in saved_in[path]
+                )
+                for path in _files_under(new_folder)
+            )
 
         held: set[tuple[type[Resource], str]] = set()
         while True:
