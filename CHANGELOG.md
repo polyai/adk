@@ -1,6 +1,49 @@
 # CHANGELOG
 
 
+## v0.77.1 (2026-11-04)
+
+### Bug Fixes
+
+- Add gpt-6-luna to the prompt_llm type stub ([#396](https://github.com/polyai/adk/pull/396),
+  [`9bd98e8`](https://github.com/polyai/adk/commit/9bd98e8c75058ec2e3d926919d487f00ab2288a2))
+
+## Summary - Adds `"gpt-6-luna"` to the `model` `Literal[...]` of `Utils.prompt_llm` in
+  `src/poly/types/conv_utils.py`. - Stubs regenerated with `scripts/sync_runtime_stubs.py`. Because
+  the stubs were last synced on 2026-10-13, this also brings in runtime changes made since then: 8
+  updated stub modules plus 5 new ones (`outbound_campaign`, `outbound_campaign_engine`,
+  `outbound_campaign_signals`, `pci`, `sanitise`). `_manifest.json` now records 44 modules.
+
+## Test plan - `uv run ruff check src/poly/types` and `uv run ruff format --check src/poly/types`:
+  clean. - `uv run pytest`: 2539 passed. - The sync script's own check passed: all 44 modules import
+  and every `__all__` name is bound.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+### Chores
+
+- Refresh filelock URL in licenses.json ([#397](https://github.com/polyai/adk/pull/397),
+  [`eafe6d7`](https://github.com/polyai/adk/commit/eafe6d705e6daff615c57004e8177fbc38c710e3))
+
+## Summary - `pip-licenses` now reports `filelock`'s repo URL as `github.com/tox-dev/filelock` (PyPI
+  metadata moved off `py-filelock`), so `licenses.json` was stale and failing the "Check
+  licenses.json is up to date" CI job on every PR, unrelated to whatever that PR actually changes —
+  saw it on #396. - One-line fix, applied by hand to match exactly what CI's `uv run pip-licenses`
+  produces (a local regen on macOS pulled in unrelated platform-specific drift, so didn't use that
+  output).
+
+## Test plan - Confirmed this is the exact and only diff CI's `git diff --exit-code licenses.json`
+  step reports on a clean `origin/main`.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
 ## v0.77.0 (2026-10-29)
 
 ### Features

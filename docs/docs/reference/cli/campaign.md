@@ -21,7 +21,7 @@ Outbound campaigns must be turned on for the project; otherwise every subcommand
 
 With `--json`, every `"success": false` result carries a short `error`. Once the project is loaded, it also carries `campaign`.
 
-Two campaigns can share a name. Each then has its own folder, such as `reminders-abcd1234`; name the campaign by its folder.
+Agent Studio lets two campaigns share a name, and a pull renames the newer one `{name} (1)` until a push sends that name. Until then, the shared name matches both: name the campaign by its new name or its folder.
 
 `--field` and `--state` values are read as JSON when they parse as JSON, so `age=30`, `booked=true` and `note=null` give a number, a boolean and `null`. Any other value, such as `plan=gold`, is kept as a string. `--contact`, `--run`, `--last-send` and `--sample-outputs` take a JSON file or JSON written inline.
 

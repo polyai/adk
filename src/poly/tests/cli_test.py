@@ -6850,12 +6850,14 @@ class CampaignCommandTest(unittest.TestCase):
         namesake = dataclasses.replace(
             campaigns[self.CAMPAIGN_ID],
             resource_id="CMPGN-TEST0002",
-            folder_name="appointment_reminders-test0002",
+            name=f"{self.CAMPAIGN} (1)",
+            folder_name="appointment_reminders_1",
+            platform_label=self.CAMPAIGN,
         )
         campaigns[namesake.resource_id] = namesake
 
-    def test_campaigns_sharing_a_name_are_listed_by_folder(self):
-        """A name two campaigns share is refused with the folders to use instead."""
+    def test_campaigns_sharing_a_name_in_agent_studio_are_listed_by_folder(self):
+        """A name two campaigns share in Agent Studio is refused with the folders to use."""
         self._add_namesake()
 
         with self.assertRaises(SystemExit):
@@ -6864,23 +6866,26 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertEqual(
             self._output()["error"],
             f"More than one campaign is named '{self.CAMPAIGN}'. Name it by its folder "
-            "instead: appointment_reminders, appointment_reminders-test0002.",
+            "instead: appointment_reminders, appointment_reminders_1.",
         )
         self.request.assert_not_called()
 
-    def test_campaign_sharing_a_name_is_found_by_its_folder(self):
-        """The folder made for a duplicate name matches as written, before it is cleaned."""
+    def test_campaign_sharing_a_name_is_found_by_its_pulled_name_or_folder(self):
+        """Pull names the second of two namesakes `<name> (1)`, and either names it."""
         self._add_namesake()
-        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
+        for name in (f"{self.CAMPAIGN} (1)", "appointment_reminders_1"):
+            with self.subTest(name=name):
+                self._respond(
+                    make_mock_response(200, {"valid": True, "errors": [], "warnings": []})
+                )
 
-        CampaignCommand.campaign_validate(
-            TEST_DIR, "appointment_reminders-test0002", output_json=True
-        )
+                CampaignCommand.campaign_validate(TEST_DIR, name, output_json=True)
 
-        self.assertEqual(
-            self._request()[1],
-            self.CAMPAIGN_URL.format(branch="main").replace("TEST0001", "TEST0002") + "/validate",
-        )
+                self.assertEqual(
+                    self._request()[1],
+                    self.CAMPAIGN_URL.format(branch="main").replace("TEST0001", "TEST0002")
+                    + "/validate",
+                )
 
     def test_validate_names_nodes_inside_issue_messages(self):
         """A node id inside the platform's message is replaced by the node's name."""

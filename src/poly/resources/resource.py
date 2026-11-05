@@ -195,6 +195,15 @@ class Resource(BaseResource, ABC):
         pass
 
     @classmethod
+    def validate_deletions(cls, new_resources: dict, deleted_resources: dict) -> list[str]:
+        """Return why the resources of this type in `deleted_resources` can't be deleted.
+
+        `new_resources` and `deleted_resources` hold every type's new and deleted resources,
+        for a type whose deletes depend on what is created alongside them.
+        """
+        return []
+
+    @classmethod
     def validate_collection(cls, resources: dict[str, "BaseResource"]) -> None:
         """Validate a collection of resources.
 
@@ -636,6 +645,13 @@ class MultiResourceYamlResource(YamlResource, ABC):
     def _read_yaml_dict(cls, file_path: str) -> dict:
         """Return the single resource's parsed sub-dict from the multi-resource file."""
         return cls._get_matching(file_path)
+
+    def moved_to(self, other: "MultiResourceYamlResource") -> Optional["MultiResourceYamlResource"]:
+        """Return this entry placed in the file `other` lives in, or None if entries can't move.
+
+        A pull uses it to carry local edits to an entry whose file was renamed upstream.
+        """
+        return None
 
     @classmethod
     def _entry_key(cls, entry: dict) -> str:
