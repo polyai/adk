@@ -8650,5 +8650,121 @@ class ApiIntegrationSyncTest(unittest.TestCase):
         self.assertEqual(commands, [])
 
 
+class SIPTrunksProjectTest(unittest.TestCase):
+    """Account-scoped SIP operations use the selected project without branch sync."""
+
+    @staticmethod
+    def _project(root_path=TEST_DIR, *, region="uk-1", account_id="acct-123"):
+        return AgentStudioProject(
+            region=region,
+            account_id=account_id,
+            project_id="agent-1",
+            root_path=root_path,
+            resources={},
+            last_updated=datetime.now(),
+        )
+
+    @patch("poly.handlers.interface.SyncClientHandler")
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_account_operations_use_each_project_scope(self, request, sync_client):
+        cases = (
+            ("export_sip_trunks", (), "", "GET", {"sip_trunks": []}),
+            ("get_sip_trunk", ("tr-123",), "/tr-123", "GET", {"id": "tr-123"}),
+            (
+                "list_sip_trunk_extensions", ("tr-123",), "/tr-123/extensions",
+                "GET", {"extensions": []},
+            ),
+            ("delete_sip_trunk", ("tr-123",), "/tr-123", "DELETE", {}),
+        )
+        for region, account_id in (("uk-1", "acct-123"), ("us-1", "acct-other")):
+            project = self._project(region=region, account_id=account_id)
+            for method, args, suffix, verb, response in cases:
+                with self.subTest(region=region, account_id=account_id, method=method):
+                    request.reset_mock()
+                    request.return_value = response
+
+                    result = getattr(project, method)(*args)
+
+                    expected_args = (
+                        region, f"/v1/accounts/{account_id}/telephony/sip-trunks{suffix}"
+                    )
+                    if verb != "GET":
+                        expected_args += (verb,)
+                    request.assert_called_once_with(*expected_args)
+                    if method == "export_sip_trunks":
+                        self.assertEqual(result, {"account_id": account_id, "sip_trunks": []})
+                    else:
+                        self.assertEqual(result, response)
+                    self.assertIsNone(project._api_handler)
+        sync_client.assert_not_called()
+
+    @patch("poly.handlers.interface.SyncClientHandler")
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_plan_uses_instance_scope_and_root_without_reloading_project_metadata(
+        self, request, sync_client
+    ):
+        request.return_value = {"sip_trunks": []}
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "sip-trunks.yaml")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(
+                    "- name: Example carrier\n  default_route: null\n  outbound: null\n"
+                    "  sip_cidr: [203.0.113.0/24]\n  rtp_cidr: [198.51.100.0/24]\n"
+                )
+            project = self._project(directory, region="euw-1", account_id="acct-other")
+
+            plan = project.build_sip_trunk_plan()
+
+            self.assertEqual((plan.region, plan.account_id), ("euw-1", "acct-other"))
+            self.assertEqual(plan.config_path, path)
+            self.assertEqual(plan.trunks[0].desired["name"], "Example carrier")
+            self.assertIsNotNone(plan.source_digest)
+        request.assert_called_once_with(
+            "euw-1", "/v1/accounts/acct-other/telephony/sip-trunks"
+        )
+        sync_client.assert_not_called()
+
+    @patch("poly.sip_trunks.config.persist_trunk_response")
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_apply_rejects_a_plan_from_another_account_or_region(self, request, persist):
+        from poly.sip_trunks.reconciler import ManagePlan
+
+        project = self._project()
+        prompt = MagicMock()
+        for region, account_id in (("uk-1", "acct-other"), ("us-1", "acct-123")):
+            with self.subTest(region=region, account_id=account_id):
+                plan = ManagePlan(
+                    config_path="sip-trunks.yaml", region=region, account_id=account_id,
+                    trunks=(), changes=(),
+                )
+                with self.assertRaisesRegex(ValueError, "different account or region"):
+                    project.apply_sip_trunk_plan(plan, prompt_auth_secret=prompt)
+        request.assert_not_called()
+        persist.assert_not_called()
+        prompt.assert_not_called()
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_invalid_scope_is_rejected_before_api_calls(self, request):
+        for region, account_id in (("studio", "acct-123"), ("uk-1", "")):
+            project = self._project(region=region, account_id=account_id)
+            for method, args in (
+                ("build_sip_trunk_plan", ()), ("export_sip_trunks", ()),
+                ("get_sip_trunk", ("tr-123",)),
+                ("list_sip_trunk_extensions", ("tr-123",)),
+                ("delete_sip_trunk", ("tr-123",)),
+            ):
+                with self.subTest(region=region, account_id=account_id, method=method):
+                    with self.assertRaises(ValueError):
+                        getattr(project, method)(*args)
+        request.assert_not_called()
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_extension_response_is_validated_for_programmatic_callers(self, request):
+        request.return_value = {"extensions": {}}
+
+        with self.assertRaisesRegex(ValueError, "extensions list"):
+            self._project().list_sip_trunk_extensions("tr-123")
+
+
 if __name__ == "__main__":
     unittest.main()

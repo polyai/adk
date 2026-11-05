@@ -159,6 +159,7 @@ class DeploymentsCommand(BaseCommand):
         )
         deployment_promote_parser.add_argument(
             "--force",
+            "-f",
             action="store_true",
             help="Force the promotion without confirmation. When used, the existing deployment message is kept unless --message is provided. This is default in non-interactive mode (e.g. when --json is used)",
         )
@@ -195,6 +196,7 @@ class DeploymentsCommand(BaseCommand):
         )
         deployment_rollback_parser.add_argument(
             "--force",
+            "-f",
             action="store_true",
             help="Force the rollback without confirmation. When used, the existing deployment message is kept unless --message is provided. This is default in non-interactive mode (e.g. when --json is used)",
         )
@@ -350,6 +352,7 @@ class DeploymentsCommand(BaseCommand):
         )
         experiment_end_parser.add_argument(
             "--force",
+            "-f",
             action="store_true",
             help="End the experiment and redeploy the winner to live without confirmation."
             " This is default in non-interactive mode (e.g. when --json is used)",

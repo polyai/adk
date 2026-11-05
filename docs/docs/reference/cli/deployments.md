@@ -98,7 +98,7 @@ poly deployments promote --from <deployment_id> --to live --force
 | `--from` | ID or environment name of the deployment to promote. Required. |
 | `--to` | Target environment. Choices: `pre-release`, `live`. Required. |
 | `--message`, `-m` | Optional message to include with the promotion (e.g. release notes or changelog). If not specified, the existing deployment message is used. |
-| `--force` | Skip the confirmation prompt. When used without `--message`, the existing deployment message is kept. This is the default in non-interactive mode (e.g. when `--json` is used). |
+| `-f`, `--force` | Skip the confirmation prompt. When used without `--message`, the existing deployment message is kept. This is the default in non-interactive mode (e.g. when `--json` is used). |
 | `--dry-run` | Show what would be promoted without actually promoting. Displays the deployment hash, target environment, and included changes. |
 
 When promoting to `live`, the command searches for the deployment in `pre-release` and uses sandbox as the linear history source for computing included changes. When promoting to `pre-release`, it searches sandbox.
@@ -136,7 +136,7 @@ poly deployments rollback --to <deployment_id> --force
 |---|---|
 | `--to` | ID or environment name of the deployment to roll back to. Required. |
 | `--message`, `-m` | Optional message to include with the rollback. If not specified, the existing deployment message is used. |
-| `--force` | Skip the confirmation prompt. This is the default in non-interactive mode (e.g. when `--json` is used). |
+| `-f`, `--force` | Skip the confirmation prompt. This is the default in non-interactive mode (e.g. when `--json` is used). |
 | `--dry-run` | Show what would be rolled back without actually rolling back. Displays the target deployment and the deployments that would be reverted. |
 
 Without `--force`, the command prompts for confirmation before proceeding.
@@ -277,7 +277,7 @@ poly deployments experiment end
 | Flag | Description |
 |---|---|
 | `--chosen-branch` | Name of the branch to keep as winner: the experiment's control or variant. If omitted, an interactive prompt shows the control and variant branches for selection. |
-| `--force` | End the experiment and redeploy the winner to `live` without confirmation. This is the default with `--json`. |
+| `-f`, `--force` | End the experiment and redeploy the winner to `live` without confirmation. This is the default with `--json`. |
 
 !!! info "`--chosen-branch` is required with `--json`"
 

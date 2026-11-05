@@ -686,3 +686,33 @@ class PrintExperimentDetailTest(unittest.TestCase):
         output = self._render(experiment)
 
         self.assertIn("(— traffic)", output)
+
+
+class PrintSIPTrunkManageResultTest(unittest.TestCase):
+    """Display helpers for SIP trunk management results."""
+
+    @patch("poly.output.console.console")
+    @patch("poly.output.console.info")
+    def test_manage_prints_nothing_changed_without_table(self, info, console):
+        from poly.output.console import print_sip_trunk_manage_result
+
+        print_sip_trunk_manage_result(
+            {
+                "config_file": "/account/sip-trunks.yaml",
+                "trunks": [
+                    {
+                        "key": "tr-123",
+                        "status": "unchanged",
+                        "id": "tr-123",
+                        "hostname": "tr-123.sbc.sip.uk.poly.ai",
+                        "extensions_total": 1,
+                        "extensions_created": 0,
+                        "extensions_updated": 0,
+                        "extensions_deleted": 0,
+                    }
+                ],
+            },
+        )
+
+        info.assert_called_once_with("Nothing changed.")
+        console.print.assert_not_called()
