@@ -232,8 +232,7 @@ def managed_default_route(local_name: str, config: Any) -> dict[str, Any] | None
     if "agent_id" in config and not config["agent_id"].strip():
         raise ValueError(f"SIP trunk '{local_name}' default_route.agent_id must not be empty.")
     agent = managed_agent_data(local_name, config, resource="Default route for SIP trunk")
-    # Make selecting the default variant explicit, including when replacing a
-    # route that previously selected a named variant.
+    # An empty variant ID clears any named variant from the current route.
     agent.setdefault("variant_id", "")
     return agent
 
@@ -591,7 +590,7 @@ def build_manage_plan(
             f"Cannot rotate SIP trunk '{rotate_auth}': its ID is not declared in {config_path}."
         )
 
-    # Validate every local declaration before making any remote request.
+    # Local validation runs first so malformed YAML cannot trigger API calls.
     validated: list[
         tuple[int, dict[str, Any], str, dict[str, Any], list[dict[str, Any]] | None]
     ] = []
