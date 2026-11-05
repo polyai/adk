@@ -1237,13 +1237,19 @@ class AgentStudioProject:
                         os.remove(old_file_path)
 
             # Delete resources that are no longer present in the project
-            original_files = {
-                res.get_path(self.root_path)
-                for res in original_resources.get(resource_type, {}).values()
-            }
             incoming_files = {res.get_path(self.root_path) for res in incoming.values()}
-            deleted_files = set(original_files) - set(incoming_files)
-            for file_path in deleted_files:
+            for original_resource in original_resources.get(resource_type, {}).values():
+                file_path = original_resource.get_path(self.root_path)
+                if file_path in incoming_files:
+                    continue
+                if not force and self._deleted_upstream_but_edited(
+                    original_resource,
+                    original_resource_mappings,
+                    incoming_resource_mappings,
+                    format=format,
+                ):
+                    files_with_conflicts.append(file_path)
+                    continue
                 resource_type.delete_resource(file_path)
 
             if (
@@ -1264,9 +1270,58 @@ class AgentStudioProject:
             ):
                 continue
             for resource in original.values():
+                if not force and self._deleted_upstream_but_edited(
+                    resource, original_resource_mappings, incoming_resource_mappings, format=format
+                ):
+                    files_with_conflicts.append(resource.get_path(self.root_path))
+                    continue
                 resource_type.delete_resource(resource.get_path(self.root_path))
 
         return files_with_conflicts
+
+    def _deleted_upstream_but_edited(
+        self,
+        original_resource: Resource,
+        original_resource_mappings: list[ResourceMapping],
+        incoming_resource_mappings: list[ResourceMapping],
+        format: bool = False,
+    ) -> bool:
+        """Mark a file deleted upstream but edited here as a conflict, instead of deleting it.
+
+        Returns:
+            Whether the file was edited, and so was left in conflict.
+        """
+        file_path = original_resource.get_path(self.root_path)
+        if not os.path.isfile(file_path):
+            return False
+        original_content = original_resource.to_pretty(
+            resource_name=original_resource.name,
+            resource_mappings=original_resource_mappings,
+        )
+        try:
+            local_content = self.read_local_resource(
+                resource=self._make_resource_mapping(original_resource),
+                resource_mappings=incoming_resource_mappings,
+            ).to_pretty(
+                resource_name=original_resource.name,
+                resource_mappings=incoming_resource_mappings,
+            )
+        except Exception:
+            local_content = type(original_resource).read_from_file(file_path)
+        if format:
+            original_content = type(original_resource).format_resource(
+                original_content, file_name=original_resource.name
+            )
+            local_content = type(original_resource).format_resource(
+                local_content, file_name=original_resource.name
+            )
+        if local_content == original_content:
+            return False
+        merged = utils.merge_strings(original_content, local_content, "")
+        if not resource_utils.contains_merge_conflict(merged):
+            return False
+        original_resource.save_to_file(merged, file_path)
+        return True
 
     def _read_pulled_resource_locally(
         self,

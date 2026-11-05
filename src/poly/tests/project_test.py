@@ -9945,6 +9945,35 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertIn("    1", code)
         self.assertIn("    2", code)
 
+    def test_code_edited_here_and_cleared_in_agent_studio_conflicts(self):
+        self._write_function("trigger", self.TRIGGER_CODE + "\n\nLIMIT = 5\n")
+        cleared = self._projection_from_state()
+        self._entity(cleared)["nodes"]["entities"]["trigger-1"]["data"]["function"]["code"] = ""
+
+        conflicts, _ = self.project.pull_project(projection_json=cleared)
+
+        path = os.path.join(self.folder, "functions", "trigger.py")
+        self.assertEqual(conflicts, [path])
+        with open(path, encoding="utf-8") as file:
+            self.assertIn("LIMIT = 5", file.read())
+
+    def test_code_edited_here_of_a_node_removed_in_agent_studio_conflicts(self):
+        projection = _campaign_projection()
+        self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
+            self.CALL_CODE
+        )
+        self._pull_into_new_project(projection)
+        self._write_function("first_call", self.CALL_CODE + "\n\nLIMIT = 5\n")
+        removed = self._projection_from_state()
+        nodes = self._entity(removed)["nodes"]
+        nodes["ids"].remove("call-1")
+        nodes["entities"].pop("call-1")
+        nodes["entities"]["trigger-1"]["data"]["routes"] = []
+
+        conflicts, _ = self.project.pull_project(projection_json=removed)
+
+        self.assertEqual(conflicts, [os.path.join(self.folder, "functions", "first_call.py")])
+
     def test_format_pull_removes_the_unedited_file_of_a_removed_node(self):
         unformatted = "def call_args(outbound_contact,outbound_campaign):\n  return {}\n"
         projection = _campaign_projection()
