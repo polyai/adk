@@ -880,26 +880,27 @@ class AgentStudioProject:
         return taken
 
     @staticmethod
-    def _set_aside_files_added_here(carried: dict[str, str]) -> list[tuple[str, str]]:
+    def _set_aside_files_added_here(
+        carried: dict[str, str], staged: list[tuple[str, str, str]]
+    ) -> None:
         """Move each file added here that moves with its folder out of the way of the pull.
 
-        Returns:
-            Where each file was put, and its new path.
+        Each file's path, where it was put and its new path are added to `staged`.
         """
-        staged = []
         for index, (source, target) in enumerate(carried.items()):
             if os.path.isfile(source):
                 aside = f"{source}.pull-move-{index}"
                 os.rename(source, aside)
-                staged.append((aside, target))
-        return staged
+                staged.append((source, aside, target))
 
     @staticmethod
-    def _place_files_added_here(staged: list[tuple[str, str]]) -> None:
+    def _place_files_added_here(staged: list[tuple[str, str, str]]) -> None:
         """Put each file set aside at the path its folder became upstream."""
-        for aside, target in staged:
+        while staged:
+            _, aside, target = staged[0]
             os.makedirs(os.path.dirname(target), exist_ok=True)
             shutil.move(aside, target)
+            staged.pop(0)
 
     @staticmethod
     def _write_yaml_or_remove(file: str, data: dict) -> None:
@@ -1168,6 +1169,41 @@ class AgentStudioProject:
         original_slim_resources: list[ResourceMapping],
         incoming_slim_resources: list[ResourceMapping],
     ) -> list[str]:
+        """Merge the pulled resources into the files here, putting files set aside back on failure.
+
+        Returns:
+            The files left in conflict.
+        """
+        staged: list[tuple[str, str, str]] = []
+        try:
+            return self._merge_pulled_files(
+                original_resources,
+                incoming_resources,
+                force,
+                format,
+                on_save,
+                original_slim_resources=original_slim_resources,
+                incoming_slim_resources=incoming_slim_resources,
+                staged=staged,
+            )
+        except BaseException:
+            for source, aside, _ in staged:
+                if os.path.isfile(aside) and not os.path.exists(source):
+                    os.rename(aside, source)
+            raise
+
+    def _merge_pulled_files(
+        self,
+        original_resources: ResourceMap,
+        incoming_resources: ResourceMap,
+        force: bool,
+        format: bool,
+        on_save: Callable[[int, int], None] | None,
+        *,
+        original_slim_resources: list[ResourceMapping],
+        incoming_slim_resources: list[ResourceMapping],
+        staged: list[tuple[str, str, str]],
+    ) -> list[str]:
         # Nothing changed upstream, so every merge would keep the local side. Types with
         # no resources are left out: the status file and a projection record them differently.
         if (
@@ -1185,7 +1221,6 @@ class AgentStudioProject:
         moved: dict[tuple[type[Resource], str], Resource] = {}
         vacated: set[str] = set()
         carried: dict[str, str] = {}
-        staged: list[tuple[str, str]] = []
         if not force:
             held_renames, vacated, moved, carried = self._hold_back_taken_moves(
                 original_resources,
@@ -1197,7 +1232,7 @@ class AgentStudioProject:
                 + incoming_slim_resources,
             )
             files_with_conflicts = [old_folder for old_folder, _, _ in held_renames]
-            staged = self._set_aside_files_added_here(carried)
+            self._set_aside_files_added_here(carried, staged)
             original_resources = dict(original_resources)
             for (resource_type, resource_id), original in moved.items():
                 original_resources[resource_type] = {

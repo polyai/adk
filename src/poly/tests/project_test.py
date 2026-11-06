@@ -10827,6 +10827,22 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         )
         self.assertNotIn("CMPGN-TWO", [body["outboundCampaignId"] for _, body in commands])
 
+    def test_a_failed_pull_puts_back_code_added_here(self):
+        self._pull_into_new_project(self._two_campaigns("Reminders", "Other"))
+        code = self._add_second_call()
+        before = self._tree()
+
+        with patch.object(
+            AgentStudioProject,
+            "_update_multi_resource_yaml_resources",
+            side_effect=RuntimeError("disk full"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.project.pull_project(projection_json=self._two_campaigns("Other", "Reminders"))
+
+        self.assertEqual(self._tree(), before)
+        self.assertEqual(self._read("reminders", "functions", "second_call.py"), code)
+
     def test_campaigns_swapping_names_with_the_same_file_added_on_both_sides(self):
         self._pull_into_new_project(self._two_campaigns("Reminders", "Other"))
         other = os.path.join(self.root, "outbound_campaigns", "other")
