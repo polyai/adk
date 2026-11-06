@@ -18,8 +18,6 @@ poly pull --include-rtc
 
 If the branch you are currently on no longer exists in Agent Studio, `poly pull` automatically switches to the `main` branch and displays a warning message with the new branch name.
 
-When a file, flow or campaign was renamed in Agent Studio to a name that is already taken here, `poly pull` leaves it where it is, warns, and lists its old path under conflicts. Move or delete what is at the new name, then pull again. If Agent Studio deleted what had that name and it is unedited here, this pull removes it, and the next pull applies the rename. Files you added at the new name keep the rename waiting until you move or delete them.
-
 | Flag | Description |
 |---|---|
 | `--force`, `-f` | Force pull the project, overwriting all local changes. |
