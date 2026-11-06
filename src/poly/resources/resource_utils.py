@@ -293,8 +293,11 @@ PREFIX_TO_REFERENCE = {prefix: reference for reference, prefix in REFERENCES_PRE
 # Regex matching any {{prefix:value}} reference in a single pass
 _REFERENCE_PATTERN = re.compile(r"\{\{(\w+):([^}]+)\}\}")
 
-# Regex to find variable names defined in function code via conv.state.<name>
-CONV_STATE_DOT_NAME = re.compile(r"(?<![\w.])conv\.state\.([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()")
+# Regex to find variable names defined in function code via conv.state.<name>. The literal
+# comes first so the regex engine can skip to it; the lookbehind after it checks what precedes.
+CONV_STATE_DOT_NAME = re.compile(
+    r"conv\.state\.(?<![\w.]conv\.state\.)([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()"
+)
 
 # Detects the header-ending colon on a def line, ignoring trailing comments
 HEADER_END_COLON_RE = re.compile(r":\s*(#.*)?\s*$")

@@ -100,8 +100,9 @@ class FunctionParameters:
 
 # `functions.<module>` in saved code: another flow's functions (by cleaned flow ID) or a
 # global module. `flows.<name>.functions`: a flow that didn't resolve when it was read.
-_FUNCTIONS_IMPORT = re.compile(r"\bfunctions\.([A-Za-z0-9_]+)")
-_FLOWS_IMPORT = re.compile(r"\bflows\.([A-Za-z0-9_]+)\.functions\b")
+# Each starts with its literal, as in CONV_STATE_DOT_NAME, so scanning large code stays fast.
+_FUNCTIONS_IMPORT = re.compile(r"functions\.(?<!\wfunctions\.)([A-Za-z0-9_]+)")
+_FLOWS_IMPORT = re.compile(r"flows\.(?<!\wflows\.)([A-Za-z0-9_]+)\.functions\b")
 
 
 @dataclass
