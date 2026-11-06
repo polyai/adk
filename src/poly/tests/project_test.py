@@ -75,7 +75,11 @@ from poly.resources.flows import (
 )
 from poly.resources.function import FunctionParameters, FunctionType
 from poly.resources.outbound_campaign import NODE_FIELDS
-from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
+from poly.resources.resource import (
+    MultiResourceYamlResource,
+    ResourceMap,
+    _parse_multi_resource_path,
+)
 from poly.resources.test_suite import TestCaseApiOperationMock
 from poly.tests.testing_utils import mock_read_from_file
 from poly.utils import merge_strings
@@ -8303,6 +8307,18 @@ class PullRemoteRenameTest(unittest.TestCase):
         self.assertEqual(os.listdir(os.path.join(self.root, "topics")), ["opening_hours.yaml"])
         self.assertEqual(self.project.project_status(), ([], [], [], []))
 
+    def test_remote_rename_moves_past_an_unrelated_topic_added_here(self):
+        """Only a file at the new name holds a topic rename back, not others in the folder."""
+        self._write_topic("faq.yaml", "name: FAQ\nactions: ''\ncontent: Ask us\n")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._topic_projection("Opening hours")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["faq.yaml", "opening_hours.yaml"])
+        self.assertEqual(self.project.project_status(), ([], [], [self._path("faq.yaml")], []))
+
     def test_remote_rename_keeps_a_local_edit(self):
         """A local edit moves with the file instead of being lost, which would delete it on push."""
         path = os.path.join(self.root, "topics", "hours.yaml")
@@ -8318,6 +8334,481 @@ class PullRemoteRenameTest(unittest.TestCase):
         ) as file:
             self.assertIn("Open 9 to 5", file.read())
         self.assertFalse(os.path.exists(path))
+
+    def _topics_projection(self, *topics: tuple[str, str, str]) -> dict:
+        projection = self._topic_projection("Hours")
+        entities = {
+            topic_id: {"id": topic_id, "name": name, "actions": "", "content": content}
+            for topic_id, name, content in topics
+        }
+        projection["knowledgeBase"]["topics"] = {"ids": list(entities), "entities": entities}
+        return projection
+
+    def _topic_file(self, name: str) -> str:
+        with open(os.path.join(self.root, "topics", name), encoding="utf-8") as file:
+            return file.read()
+
+    def _write_topic(self, name: str, contents: str) -> None:
+        with open(os.path.join(self.root, "topics", name), "w", encoding="utf-8") as file:
+            file.write(contents)
+
+    def _topic_files(self) -> list[str]:
+        return sorted(os.listdir(os.path.join(self.root, "topics")))
+
+    def _pull_hours_and_opening_hours(self) -> None:
+        self.project.pull_project(
+            projection_json=self._topics_projection(
+                ("TOPIC-1", "Hours", "Open 9 to 5"), ("TOPIC-2", "Opening hours", "Weekdays")
+            )
+        )
+
+    def _pull_rename_onto_the_deleted_topic(self) -> list[str]:
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._topics_projection(("TOPIC-1", "Opening hours", "Open 9 to 5"))
+        )
+        return conflicts
+
+    def _path(self, name: str) -> str:
+        return os.path.join(self.root, "topics", name)
+
+    def _pushed(self) -> list[tuple[str, dict]]:
+        success, message, commands = self.project.push_project(
+            dry_run=True, parent_projection_json={}
+        )
+        if message == "No changes detected":
+            return []
+        self.assertTrue(success, message)
+        return [
+            (command.type, MessageToDict(getattr(command, command.type))) for command in commands
+        ]
+
+    def _assert_push_refused(self, projection: dict) -> None:
+        success, message, commands = self.project.push_project(
+            projection_json=projection, parent_projection_json={}
+        )
+        self.assertFalse(success)
+        self.assertIn("Merge conflicts", message)
+        self.assertEqual(commands, [])
+
+    def test_remote_rename_onto_a_file_made_here_is_held_back(self):
+        """A file made here at the new name holds the rename back until it is moved."""
+        hours = self._topic_file("hours.yaml")
+        own_topic = hours.replace("Opening hours", "My own topic").replace("Hours", "Opening hours")
+        self._write_topic("opening_hours.yaml", own_topic)
+        renamed = self._topic_projection("Opening hours", content="Open 9 to 5")
+
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [self._path("hours.yaml")])
+        self.assertEqual(self._topic_files(), ["hours.yaml", "opening_hours.yaml"])
+        self.assertEqual(self._topic_file("hours.yaml"), hours)
+        self.assertEqual(self._topic_file("opening_hours.yaml"), own_topic)
+        self.assertEqual(
+            self.project.project_status(), ([], [], [self._path("opening_hours.yaml")], [])
+        )
+        self._assert_push_refused(renamed)
+
+        os.remove(self._path("opening_hours.yaml"))
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
+        self.assertIn("Open 9 to 5", self._topic_file("opening_hours.yaml"))
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self._pushed(), [])
+
+    def test_remote_rename_onto_an_identical_file_made_here_is_held_back(self):
+        """A file at the new name is never taken over, even when it matches the incoming one."""
+        self.project.pull_project(projection_json=self._topic_projection("Hours"))
+        renamed = self._topic_projection("Opening hours")
+        hours = self._topic_file("hours.yaml")
+        self._write_topic("opening_hours.yaml", hours.replace("Hours", "Opening hours"))
+
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [self._path("hours.yaml")])
+        self.assertEqual(self._topic_files(), ["hours.yaml", "opening_hours.yaml"])
+        self.assertEqual(self._topic_file("hours.yaml"), hours)
+        self.assertEqual(
+            self.project.project_status(), ([], [], [self._path("opening_hours.yaml")], [])
+        )
+
+    def test_remote_delete_and_rename_onto_its_name_moves_the_file_cleanly(self):
+        """A topic deleted upstream frees its name for a topic renamed onto it."""
+        self._pull_hours_and_opening_hours()
+
+        conflicts = self._pull_rename_onto_the_deleted_topic()
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
+        self.assertIn("Open 9 to 5", self._topic_file("opening_hours.yaml"))
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self._pushed(), [])
+
+    def test_remote_delete_and_rename_onto_a_topic_naming_a_function_pulls_clean(self):
+        """A function sent without its code still names the topics that call it."""
+
+        def projection(*topics: tuple[str, str, str]) -> dict:
+            projection = self._topics_projection(*topics)
+            projection["functions"] = {
+                "functions": {
+                    "ids": ["FN-1"],
+                    "entities": {"FN-1": {"id": "FN-1", "name": "lookup"}},
+                }
+            }
+            return projection
+
+        self.project.pull_project(
+            projection_json=projection(
+                ("TOPIC-1", "Hours", "Open 9 to 5"),
+                ("TOPIC-2", "Opening hours", "Call {{fn:FN-1}}"),
+            )
+        )
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=projection(("TOPIC-1", "Opening hours", "Open 9 to 5"))
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
+        self.assertIn("Open 9 to 5", self._topic_file("opening_hours.yaml"))
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self._pushed(), [])
+
+    def test_remote_rename_changing_only_case_calls_rename_for_the_same_file(self):
+        """When the old and new names are one file, as on a case-insensitive file system, the
+        file is renamed with os.rename rather than written and then removed."""
+
+        def projection(name: str) -> dict:
+            projection = self._topic_projection("Hours")
+            projection["functions"] = {
+                "functions": {
+                    "ids": ["FN-1"],
+                    "entities": {
+                        "FN-1": {
+                            "id": "FN-1",
+                            "name": name,
+                            "description": "",
+                            "code": f"def {name}(conv):\n    return None\n",
+                        }
+                    },
+                }
+            }
+            return projection
+
+        self.project.pull_project(projection_json=projection("lookup"))
+        functions = os.path.join(self.root, "functions")
+        old = os.path.join(functions, "lookup.py")
+        new = os.path.join(functions, "Lookup.py")
+        os.link(old, new)
+
+        with patch("poly.project.os.rename", wraps=os.rename) as rename:
+            conflicts, _ = self.project.pull_project(projection_json=projection("Lookup"))
+
+        self.assertEqual(conflicts, [])
+        rename.assert_called_once_with(old, new)
+        with open(new, encoding="utf-8") as file:
+            self.assertIn("def Lookup(conv)", file.read())
+
+    def test_remote_delete_and_rename_keeps_an_edit_to_the_renamed_topic(self):
+        """A local edit to the renamed topic moves with it."""
+        self._pull_hours_and_opening_hours()
+        self._write_topic(
+            "hours.yaml", self._topic_file("hours.yaml").replace("Open 9 to 5", "Open 8 to 6")
+        )
+
+        conflicts = self._pull_rename_onto_the_deleted_topic()
+
+        new_path = self._path("opening_hours.yaml")
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
+        self.assertIn("Open 8 to 6", self._topic_file("opening_hours.yaml"))
+        self.assertEqual(self.project.project_status(), ([], [new_path], [], []))
+        pushed = self._pushed()
+        self.assertEqual([command_type for command_type, _ in pushed], ["update_topic"])
+        self.assertEqual(pushed[0][1]["id"], "TOPIC-1")
+        self.assertIn("Open 8 to 6", str(pushed[0][1]))
+
+    def test_remote_delete_and_rename_onto_a_topic_edited_here_is_held_back(self):
+        """An edit to the topic deleted upstream is kept in conflict, and holds the rename back."""
+        self._pull_hours_and_opening_hours()
+        self._write_topic(
+            "opening_hours.yaml",
+            self._topic_file("opening_hours.yaml").replace("Weekdays", "Every day"),
+        )
+        hours = self._topic_file("hours.yaml")
+        renamed = self._topics_projection(("TOPIC-1", "Opening hours", "Open 9 to 5"))
+
+        conflicts = self._pull_rename_onto_the_deleted_topic()
+
+        self.assertEqual(
+            sorted(conflicts), [self._path("hours.yaml"), self._path("opening_hours.yaml")]
+        )
+        self.assertEqual(self._topic_files(), ["hours.yaml", "opening_hours.yaml"])
+        self.assertEqual(self._topic_file("hours.yaml"), hours)
+        self.assertIn("Every day", self._topic_file("opening_hours.yaml"))
+        self.assertTrue(
+            resource_utils.contains_merge_conflict(self._topic_file("opening_hours.yaml"))
+        )
+        self._assert_push_refused(renamed)
+
+        os.remove(self._path("opening_hours.yaml"))
+        conflicts = self._pull_rename_onto_the_deleted_topic()
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self._pushed(), [])
+
+    def test_remote_chain_onto_a_file_made_here_holds_every_link_back(self):
+        """Each rename in a chain waits when the last one's target is taken, losing no edit."""
+        self._pull_hours_and_opening_hours()
+        self._write_topic(
+            "opening_hours.yaml",
+            self._topic_file("opening_hours.yaml").replace("Weekdays", "B LOCAL EDIT"),
+        )
+        self._write_topic("times.yaml", self._topic_file("hours.yaml").replace("Hours", "Times"))
+        before = {name: self._topic_file(name) for name in self._topic_files()}
+        chain = self._topics_projection(
+            ("TOPIC-1", "Opening hours", "Open 9 to 5"), ("TOPIC-2", "Times", "Weekdays")
+        )
+
+        conflicts, _ = self.project.pull_project(projection_json=chain)
+
+        self.assertEqual(
+            sorted(conflicts), [self._path("hours.yaml"), self._path("opening_hours.yaml")]
+        )
+        self.assertEqual({name: self._topic_file(name) for name in self._topic_files()}, before)
+        self.assertEqual(
+            self.project.project_status(),
+            ([], [self._path("opening_hours.yaml")], [self._path("times.yaml")], []),
+        )
+        self._assert_push_refused(chain)
+
+        os.remove(self._path("times.yaml"))
+        conflicts, _ = self.project.pull_project(projection_json=chain)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml", "times.yaml"])
+        self.assertIn("Open 9 to 5", self._topic_file("opening_hours.yaml"))
+        self.assertIn("B LOCAL EDIT", self._topic_file("times.yaml"))
+        self.assertEqual(self.project.project_status(), ([], [self._path("times.yaml")], [], []))
+        pushed = self._pushed()
+        self.assertEqual([command_type for command_type, _ in pushed], ["update_topic"])
+        self.assertEqual(pushed[0][1]["id"], "TOPIC-2")
+
+    def test_remote_rename_also_made_here_is_pulled_clean(self):
+        """A topic renamed alike here and in Agent Studio merges with its file at the new name."""
+        os.rename(self._path("hours.yaml"), self._path("opening_hours.yaml"))
+        self._write_topic(
+            "opening_hours.yaml",
+            self._topic_file("opening_hours.yaml").replace("Hours", "Opening hours"),
+        )
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._topic_projection("Opening hours")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["opening_hours.yaml"])
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self._pushed(), [])
+
+    def test_remote_rename_of_a_topic_deleted_here_onto_a_held_back_name_waits(self):
+        """A topic deleted here never takes over the file of a topic whose rename is held back."""
+        self._pull_hours_and_opening_hours()
+        hours = self._topic_file("hours.yaml")
+        os.remove(self._path("opening_hours.yaml"))
+        self._write_topic("times.yaml", hours.replace("Hours", "Times"))
+        chain = self._topics_projection(
+            ("TOPIC-1", "Times", "Open 9 to 5"), ("TOPIC-2", "Hours", "Weekdays")
+        )
+
+        conflicts, _ = self.project.pull_project(projection_json=chain)
+
+        self.assertEqual(
+            sorted(conflicts), [self._path("hours.yaml"), self._path("opening_hours.yaml")]
+        )
+        self.assertEqual(self._topic_files(), ["hours.yaml", "times.yaml"])
+        self.assertEqual(self._topic_file("hours.yaml"), hours)
+        self.assertEqual(
+            self.project.project_status(),
+            ([], [], [self._path("times.yaml")], [self._path("opening_hours.yaml")]),
+        )
+        self._assert_push_refused(chain)
+
+    def test_remote_swap_keeps_each_topic_and_its_edit(self):
+        """Two topics swapping names upstream each keep their own content and edits."""
+        self._pull_hours_and_opening_hours()
+        self._write_topic(
+            "hours.yaml", self._topic_file("hours.yaml").replace("Open 9 to 5", "Open 8 to 6")
+        )
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._topics_projection(
+                ("TOPIC-1", "Opening hours", "Open 9 to 5"), ("TOPIC-2", "Hours", "Weekdays")
+            )
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._topic_files(), ["hours.yaml", "opening_hours.yaml"])
+        self.assertIn("Open 8 to 6", self._topic_file("opening_hours.yaml"))
+        self.assertIn("Weekdays", self._topic_file("hours.yaml"))
+        self.assertEqual(
+            self.project.project_status(), ([], [self._path("opening_hours.yaml")], [], [])
+        )
+        pushed = self._pushed()
+        self.assertEqual([command_type for command_type, _ in pushed], ["update_topic"])
+        self.assertEqual(pushed[0][1]["id"], "TOPIC-1")
+
+    def test_failed_write_after_a_remote_rename_leaves_the_old_file(self):
+        """The old file is removed only after the new one is written."""
+        path = os.path.join(self.root, "topics", "hours.yaml")
+        edited = self._topic_file("hours.yaml").replace("Opening hours", "Open 9 to 5")
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(edited)
+        save_to_file = Resource.save_to_file
+
+        def fail_for_the_new_file(contents, file_path, *args, **kwargs):
+            if file_path.endswith("opening_hours.yaml"):
+                raise OSError("No space left on device")
+            return save_to_file(contents, file_path, *args, **kwargs)
+
+        with (
+            patch.object(Resource, "save_to_file", side_effect=fail_for_the_new_file),
+            self.assertRaises(OSError),
+        ):
+            self.project.pull_project(projection_json=self._topic_projection("Opening hours"))
+
+        self.assertIn("Open 9 to 5", self._topic_file("hours.yaml"))
+
+
+class PullRemoteFlowRenameTest(unittest.TestCase):
+    """Pulling a flow whose folder was renamed in Agent Studio."""
+
+    def setUp(self):
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+        self.root = tempfile.mkdtemp()
+        shutil.rmtree(self.root)
+        shutil.copytree(TEST_DIR, self.root)
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, self.root)
+        self.step = os.path.join(
+            self.root, "flows", "test_flow", "function_steps", "process_payment.py"
+        )
+        with open(self.step, encoding="utf-8") as file:
+            code = file.read()
+        with open(self.step, "w", encoding="utf-8") as file:
+            file.write(code + "\nLIMIT = 5\n")
+
+    def _renamed(self) -> ResourceMap:
+        incoming = deepcopy(self.project.resources)
+        for resource_type, resources in incoming.items():
+            for resource in resources.values():
+                if getattr(resource, "flow_name", None) == "test_flow":
+                    resource.flow_name = "moved flow"
+                elif resource_type is FlowConfig and resource.name == "test_flow":
+                    resource.name = "moved flow"
+                else:
+                    continue
+                resource.__dict__.pop("file_path", None)
+        return incoming
+
+    def _pull(self, incoming: ResourceMap) -> list[str]:
+        conflicts = self.project._update_pulled_resources(
+            self.project.resources,
+            incoming,
+            force=False,
+            original_slim_resources=self.project.slim_resources,
+            incoming_slim_resources=self.project.slim_resources,
+        )
+        self.project.resources = incoming
+        self.project.file_structure_info = self.project.compute_file_structure_info(incoming)
+        return conflicts
+
+    def _flow_files(self) -> dict[str, str]:
+        files = {}
+        for directory, _, names in os.walk(os.path.join(self.root, "flows")):
+            for name in names:
+                path = os.path.join(directory, name)
+                with open(path, encoding="utf-8") as file:
+                    files[os.path.relpath(path, self.root)] = file.read()
+        return files
+
+    def test_remote_flow_rename_moves_every_file_with_a_local_edit(self):
+        """Every file of the flow moves, and the edit to a function step goes with it."""
+        before = self._flow_files()
+
+        conflicts = self._pull(self._renamed())
+
+        moved = os.path.join(self.root, "flows", "moved_flow", "function_steps")
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            sorted(self._flow_files()),
+            sorted(path.replace("test_flow" + os.sep, "moved_flow" + os.sep) for path in before),
+        )
+        self.assertIn(
+            "LIMIT = 5",
+            self._flow_files()[
+                os.path.relpath(os.path.join(moved, "process_payment.py"), self.root)
+            ],
+        )
+        self.assertEqual(
+            self.project.project_status(),
+            ([], [os.path.join(moved, "process_payment.py")], [], []),
+        )
+
+    def test_remote_flow_rename_onto_a_folder_made_here_is_held_back(self):
+        """A flow made here at the new name holds every file of the renamed flow back."""
+        own = os.path.join(self.root, "flows", "moved_flow", "flow_config.yaml")
+        os.makedirs(os.path.dirname(own))
+        with open(own, "w", encoding="utf-8") as file:
+            file.write("name: moved flow\ndescription: Made here\nstart_step: Start\n")
+        before = self._flow_files()
+        saved = self.project.resources
+
+        conflicts = self._pull(self._renamed())
+
+        self.assertEqual(conflicts, [os.path.join(self.root, "flows", "test_flow")])
+        self.assertEqual(self._flow_files(), before)
+        old_folder = os.path.join(self.root, "flows", "test_flow") + os.sep
+        for resource_type, resources in saved.items():
+            for resource_id, resource in resources.items():
+                if resource.get_path(self.root).startswith(old_folder):
+                    self.assertEqual(
+                        self.project.resources[resource_type][resource_id].get_path(self.root),
+                        resource.get_path(self.root),
+                    )
+        self.assertTrue(
+            any(
+                resource.get_path(self.root).startswith(old_folder)
+                for resource in self.project.resources[FlowConfig].values()
+            )
+        )
+        status = self.project.project_status()
+        self.assertEqual(status[0], [])
+        self.assertEqual(status[1], [self.step])
+        self.assertEqual(status[2], [own])
+        self.assertEqual(status[3], [])
+
+        shutil.rmtree(os.path.dirname(own))
+        conflicts = self._pull(self._renamed())
+
+        moved = os.path.join(self.root, "flows", "moved_flow", "function_steps")
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            sorted(self._flow_files()),
+            sorted(
+                path.replace("test_flow" + os.sep, "moved_flow" + os.sep)
+                for path in before
+                if path != os.path.relpath(own, self.root)
+            ),
+        )
+        self.assertEqual(
+            self.project.project_status(),
+            ([], [os.path.join(moved, "process_payment.py")], [], []),
+        )
 
 
 def _campaign_projection(
@@ -8722,7 +9213,9 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             }
         )
         self._write_yaml(data)
-        self._write_function("trigger", "def call_args(outbound_contact, outbound_campaign):\n    return {}\n")
+        self._write_function(
+            "trigger", "def call_args(outbound_contact, outbound_campaign):\n    return {}\n"
+        )
 
         success, message = self._push_for_real()
 
@@ -9395,7 +9888,8 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def test_new_campaign_beside_a_kept_one_is_created(self):
         self._write_yaml(
-            {**self._yaml(), "name": "Other"}, os.path.join(self.root, "outbound_campaigns", "other")
+            {**self._yaml(), "name": "Other"},
+            os.path.join(self.root, "outbound_campaigns", "other"),
         )
 
         command_types = [command_type for command_type, _ in self._push()]
@@ -9490,16 +9984,22 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self._node(data, "Trigger")["sourceType"] = "api"
         self._write_yaml(data)
 
-        self._assert_push_refused("The contact source stays 'csv' once the campaign has been published.")
+        self._assert_push_refused(
+            "The contact source stays 'csv' once the campaign has been published."
+        )
 
     def test_published_trigger_source_type_change_with_a_folder_rename_is_refused(self):
         self._pull_published()
         data = self._rename_campaign("Monthly", "monthly")
         self._node(data, "Trigger")["sourceType"] = "api"
         self._write_yaml(data)
-        self._write_function("trigger", "def map_contacts(outbound_campaign, sync):\n    return {}\n")
+        self._write_function(
+            "trigger", "def map_contacts(outbound_campaign, sync):\n    return {}\n"
+        )
 
-        self._assert_push_refused("The contact source stays 'csv' once the campaign has been published.")
+        self._assert_push_refused(
+            "The contact source stays 'csv' once the campaign has been published."
+        )
 
     def test_removed_campaign_folder_deletes_just_the_campaign(self):
         """Deleting a campaign deletes its nodes, so no node deletes are sent."""
@@ -9674,7 +10174,9 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self._assert_pushed_code_survives_a_remote_rename("reminders", "First Call", "Second")
 
     def _pull_two_campaigns(self, first: str, second: str) -> None:
-        projection = _campaign_projection(name=first, trigger_code="def map_contacts(a, b):\n    1\n")
+        projection = _campaign_projection(
+            name=first, trigger_code="def map_contacts(a, b):\n    1\n"
+        )
         other = _campaign_projection(
             campaign_id="CMPGN-TWO", name=second, trigger_code="def map_contacts(a, b):\n    2\n"
         )
@@ -9728,7 +10230,9 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                 call["id"] = "call-2"
                 call["data"]["function"]["code"] = code
                 nodes["entities"]["call-2"] = call
-                nodes["ids"] = [node_id if node_id != "call-1" else "call-2" for node_id in nodes["ids"]]
+                nodes["ids"] = [
+                    node_id if node_id != "call-1" else "call-2" for node_id in nodes["ids"]
+                ]
                 nodes["entities"]["trigger-1"]["data"]["routes"] = [{"targetNodeId": "call-2"}]
 
                 conflicts, _ = self.project.pull_project(projection_json=projection)
@@ -9838,11 +10342,14 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(self.project.project_status(), ([], [], [stray], []))
         self.assertIn("+x = 1", self.project.get_diffs()[os.path.relpath(stray, self.root)])
         self.assertIn(
-            "functions/stray.py has no node of that name", "\n".join(self.project.validate_project())
+            "functions/stray.py has no node of that name",
+            "\n".join(self.project.validate_project()),
         )
 
     def test_format_includes_campaign_function_files(self):
-        self._write_function("trigger", "def map_contacts(contacts,outbound_campaign):\n  return {}\n")
+        self._write_function(
+            "trigger", "def map_contacts(contacts,outbound_campaign):\n  return {}\n"
+        )
         trigger_file = os.path.join(self.folder, "functions", "trigger.py")
 
         affected, errors = self.project.format_files([trigger_file])
@@ -9945,6 +10452,35 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertIn("    1", code)
         self.assertIn("    2", code)
 
+    def test_code_edited_here_and_cleared_in_agent_studio_conflicts(self):
+        self._write_function("trigger", self.TRIGGER_CODE + "\n\nLIMIT = 5\n")
+        cleared = self._projection_from_state()
+        self._entity(cleared)["nodes"]["entities"]["trigger-1"]["data"]["function"]["code"] = ""
+
+        conflicts, _ = self.project.pull_project(projection_json=cleared)
+
+        path = os.path.join(self.folder, "functions", "trigger.py")
+        self.assertEqual(conflicts, [path])
+        with open(path, encoding="utf-8") as file:
+            self.assertIn("LIMIT = 5", file.read())
+
+    def test_code_edited_here_of_a_node_removed_in_agent_studio_conflicts(self):
+        projection = _campaign_projection()
+        self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
+            self.CALL_CODE
+        )
+        self._pull_into_new_project(projection)
+        self._write_function("first_call", self.CALL_CODE + "\n\nLIMIT = 5\n")
+        removed = self._projection_from_state()
+        nodes = self._entity(removed)["nodes"]
+        nodes["ids"].remove("call-1")
+        nodes["entities"].pop("call-1")
+        nodes["entities"]["trigger-1"]["data"]["routes"] = []
+
+        conflicts, _ = self.project.pull_project(projection_json=removed)
+
+        self.assertEqual(conflicts, [os.path.join(self.folder, "functions", "first_call.py")])
+
     def test_format_pull_removes_the_unedited_file_of_a_removed_node(self):
         unformatted = "def call_args(outbound_contact,outbound_campaign):\n  return {}\n"
         projection = _campaign_projection()
@@ -10015,7 +10551,9 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
                 self.assertEqual(path in conflicts, conflict)
                 if expected is not None:
-                    self.assertEqual(self._read("reminders", "functions", "first_call.py"), expected)
+                    self.assertEqual(
+                        self._read("reminders", "functions", "first_call.py"), expected
+                    )
                 elif not conflict:
                     self.assertFalse(os.path.exists(path))
 
@@ -10093,6 +10631,126 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             [kind for kind, _ in self._push()],
             ["outbound_campaign_update_node", "outbound_campaign_update_node"],
         )
+
+    def test_remote_campaign_rename_carries_nodes_added_here(self):
+        data = self._yaml()
+        self._node(data, "First call")["defaultRoute"] = "Text"
+        data["nodes"].append(
+            {
+                "name": "Text",
+                "type": "sms",
+                "function": {"name": "sms_args", "description": ""},
+                "messageTemplate": "Hi",
+                "defaultRoute": "End",
+            }
+        )
+        self._write_yaml(data)
+        code = "def sms_args(outbound_contact, outbound_campaign):\n    return {}\n"
+        self._write_function("text", code)
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=_campaign_projection(name="Monthly")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertFalse(os.path.exists(self.folder))
+        self.folder = os.path.join(self.root, "outbound_campaigns", "monthly")
+        pulled = self._yaml()
+        self.assertEqual(self._node(pulled, "Text")["messageTemplate"], "Hi")
+        self.assertEqual(self._node(pulled, "First call")["defaultRoute"], "Text")
+        self.assertEqual(self._read("monthly", "functions", "text.py"), code)
+        self.assertEqual(self.project.validate_project(), [])
+
+    @staticmethod
+    def _two_campaigns(first: str, second: str) -> dict:
+        other = _campaign_projection(
+            name=second,
+            campaign_id="CMPGN-TWO",
+            trigger_code="def map_contacts(contacts, outbound_campaign):\n    return {'two': 2}\n",
+        )["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-TWO"]
+        return _campaign_projection(name=first, extra_campaigns=(other,))
+
+    def test_campaigns_swapping_names_keep_their_own_files(self):
+        self._pull_into_new_project(self._two_campaigns("Reminders", "Other"))
+        one_code = self.TRIGGER_CODE + "\n\nLIMIT = 5\n"
+        self._write_function("trigger", one_code)
+        data = self._yaml()
+        self._node(data, "First call")["greeting"] = "Edited here"
+        self._write_yaml(data)
+        two_code = self._read("other", "functions", "trigger.py")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._two_campaigns("Other", "Reminders")
+        )
+
+        self.assertEqual(conflicts, [])
+        other = os.path.join(self.root, "outbound_campaigns", "other")
+        self.assertEqual(self._yaml(other)["name"], "Other")
+        self.assertEqual(self._node(self._yaml(other), "First call")["greeting"], "Edited here")
+        self.assertEqual(self._read("other", "functions", "trigger.py"), one_code)
+        self.assertEqual(self._yaml()["name"], "Reminders")
+        self.assertEqual(self._node(self._yaml(), "First call")["greeting"], "Hi")
+        self.assertEqual(self._read("reminders", "functions", "trigger.py"), two_code)
+        _, modified, new, deleted = self.project.project_status()
+        self.assertEqual(
+            sorted(modified),
+            [
+                os.path.join(other, "campaign.yaml", "nodes", "First_call"),
+                os.path.join(other, "functions", "trigger.py"),
+            ],
+        )
+        self.assertEqual((new, deleted), ([], []))
+
+    def test_new_campaign_taking_a_renamed_campaigns_folder_is_pulled_clean(self):
+        data = self._yaml()
+        self._node(data, "First call")["greeting"] = "Edited here"
+        self._write_yaml(data)
+        edited_code = self.TRIGGER_CODE + "\n\nLIMIT = 5\n"
+        self._write_function("trigger", edited_code)
+        new_code = "def map_contacts(contacts, outbound_campaign):\n    return {'new': 1}\n"
+        new = _campaign_projection(name="Reminders", campaign_id="CMPGN-NEW", trigger_code=new_code)
+        new_campaign = new["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-NEW"]
+        new_campaign["nodes"]["entities"]["call-1"]["data"]["greeting"] = "Brand new"
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=_campaign_projection(name="Monthly", extra_campaigns=(new_campaign,))
+        )
+
+        self.assertEqual(conflicts, [])
+        monthly = os.path.join(self.root, "outbound_campaigns", "monthly")
+        self.assertEqual(self._node(self._yaml(monthly), "First call")["greeting"], "Edited here")
+        self.assertEqual(self._read("monthly", "functions", "trigger.py"), edited_code)
+        self.assertEqual(self._node(self._yaml(), "First call")["greeting"], "Brand new")
+        self.assertEqual(self._read("reminders", "functions", "trigger.py"), new_code)
+        commands = self._push()
+        self.assertEqual(
+            sorted(
+                (command, body["outboundCampaignId"], body["nodeId"]) for command, body in commands
+            ),
+            [
+                ("outbound_campaign_update_node", "CMPGN-ONE", "call-1"),
+                ("outbound_campaign_update_node", "CMPGN-ONE", "trigger-1"),
+            ],
+        )
+
+    def test_campaigns_swapping_names_carry_nodes_added_here(self):
+        self._pull_into_new_project(self._two_campaigns("Reminders", "Other"))
+        data = self._yaml()
+        self._node(data, "First call")["defaultRoute"] = "Wait"
+        data["nodes"].append(
+            {"name": "Wait", "type": "wait", "amount": 1, "unit": "days", "next": "End"}
+        )
+        self._write_yaml(data)
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._two_campaigns("Other", "Reminders")
+        )
+
+        self.assertEqual(conflicts, [])
+        other = self._yaml(os.path.join(self.root, "outbound_campaigns", "other"))
+        self.assertEqual([node["name"] for node in other["nodes"]][-1], "Wait")
+        self.assertNotIn("Wait", [node["name"] for node in self._yaml()["nodes"]])
+        self.assertEqual(self.project.validate_project(), [])
 
     def test_status_lists_a_campaign_file_left_in_conflict_by_a_pull(self):
         data = self._yaml()
@@ -10178,6 +10836,246 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(moved, "functions", "trigger.py")))
         self.assertEqual(self.project.project_status(), ([], [], [], []))
 
+    def test_remote_rename_onto_a_folder_made_here_is_held_back(self):
+        """A campaign folder made here at the new name holds the rename back until it moves."""
+        monthly = os.path.join(self.root, "outbound_campaigns", "monthly")
+        shutil.copytree(self.folder, monthly)
+        own = self._yaml(monthly)
+        own["name"] = "Monthly"
+        self._write_yaml(own, monthly)
+        data = self._yaml()
+        self._node(data, "First call")["greeting"] = "Edited here"
+        self._write_yaml(data)
+        before = self._tree()
+        renamed = _campaign_projection(name="Monthly")
+
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [self.folder])
+        self.assertEqual(self._tree(), before)
+        status = self.project.project_status()
+        self.assertEqual(status[0], [])
+        self.assertEqual(
+            status[1], [os.path.join(self.folder, "campaign.yaml", "nodes", "First_call")]
+        )
+        self.assertTrue(status[2])
+        self.assertTrue(all(path.startswith(monthly + os.sep) for path in status[2]))
+        self.assertEqual(status[3], [])
+        success, message, commands = self.project.push_project(projection_json=renamed)
+        self.assertFalse(success)
+        self.assertIn("Merge conflicts", message)
+        self.assertEqual(commands, [])
+
+        shutil.rmtree(monthly)
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [])
+        self.assertFalse(os.path.exists(self.folder))
+        self.assertEqual(self._node(self._yaml(monthly), "First call")["greeting"], "Edited here")
+        self.assertEqual(self._read("monthly", "functions", "trigger.py"), self.TRIGGER_CODE)
+        self.assertEqual(
+            self.project.project_status(),
+            ([], [os.path.join(monthly, "campaign.yaml", "nodes", "First_call")], [], []),
+        )
+        self.assertEqual(
+            [(command, body["nodeId"]) for command, body in self._push()],
+            [("outbound_campaign_update_node", "call-1")],
+        )
+
+    def _monthly_with_its_own_node_ids(self, name: str, code: str) -> dict:
+        campaign = _campaign_projection(name=name, campaign_id="CMPGN-TWO", trigger_code=code)[
+            "outboundCampaigns"
+        ]["outboundCampaigns"]["entities"]["CMPGN-TWO"]
+        text = json.dumps(campaign)
+        for node_id in ("trigger-1", "call-1", "end-1"):
+            text = text.replace(f'"{node_id}"', f'"m-{node_id}"')
+        return json.loads(text)
+
+    def test_remote_delete_and_rename_onto_its_folder_waits_for_the_next_pull(self):
+        """A campaign renamed onto the folder of one deleted upstream moves on the next pull."""
+        monthly_code = "def map_contacts(contacts, outbound_campaign):\n    return {'m': 1}\n"
+        self.project.pull_project(
+            projection_json=_campaign_projection(
+                extra_campaigns=(self._monthly_with_its_own_node_ids("Monthly", monthly_code),)
+            )
+        )
+        campaigns = [self._monthly_with_its_own_node_ids("Reminders", monthly_code)]
+        renamed = {
+            "outboundCampaigns": {
+                "outboundCampaigns": {
+                    "ids": ["CMPGN-TWO"],
+                    "entities": {"CMPGN-TWO": campaigns[0]},
+                }
+            }
+        }
+        monthly = os.path.join("outbound_campaigns", "monthly")
+
+        with self.assertLogs("poly.project", level="WARNING") as logs:
+            conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertIn("which Agent Studio deleted. Pull again", "\n".join(logs.output))
+        self.assertEqual(conflicts, [os.path.join(self.root, monthly)])
+        self.assertEqual(
+            sorted(self._tree()),
+            [
+                os.path.join(monthly, "campaign.yaml"),
+                os.path.join(monthly, "functions", "trigger.py"),
+            ],
+        )
+        self.assertEqual(self._read("monthly", "functions", "trigger.py"), monthly_code)
+        self.assertEqual(list(self.project.resources[OutboundCampaign]), ["CMPGN-TWO"])
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-TWO"].folder, "monthly")
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        _, message, _ = self.project.push_project(dry_run=True)
+        self.assertEqual(message, "No changes detected")
+
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            sorted(self._tree()),
+            [
+                os.path.join("outbound_campaigns", "reminders", "campaign.yaml"),
+                os.path.join("outbound_campaigns", "reminders", "functions", "trigger.py"),
+            ],
+        )
+        self.assertEqual(self._read("reminders", "functions", "trigger.py"), monthly_code)
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-TWO"].folder, "reminders")
+        self.assertEqual(
+            {node.node_id for node in self.project.resources[OutboundCampaignNode].values()},
+            {"m-trigger-1", "m-call-1", "m-end-1"},
+        )
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        _, message, _ = self.project.push_project(dry_run=True)
+        self.assertEqual(message, "No changes detected")
+
+    def test_remote_rename_onto_a_deleted_folder_with_a_file_added_here_waits_for_it(self):
+        """Code added here for a deleted campaign must not become the code of the campaign that
+        takes its folder."""
+        monthly_code = "def map_contacts(contacts, outbound_campaign):\n    return {'m': 1}\n"
+        self.project.pull_project(
+            projection_json=_campaign_projection(
+                extra_campaigns=(self._monthly_with_its_own_node_ids("Monthly", monthly_code),)
+            )
+        )
+        added = "def call_args(outbound_contact, outbound_campaign):\n    return {'r': 1}\n"
+        added_path = os.path.join(self.folder, "functions", "first_call.py")
+        with open(added_path, "w", encoding="utf-8") as file:
+            file.write(added)
+        renamed = {
+            "outboundCampaigns": {
+                "outboundCampaigns": {
+                    "ids": ["CMPGN-TWO"],
+                    "entities": {
+                        "CMPGN-TWO": self._monthly_with_its_own_node_ids("Reminders", monthly_code)
+                    },
+                }
+            }
+        }
+        monthly = os.path.join("outbound_campaigns", "monthly")
+        reminders = os.path.join("outbound_campaigns", "reminders")
+        held_tree = [
+            os.path.join(monthly, "campaign.yaml"),
+            os.path.join(monthly, "functions", "trigger.py"),
+            os.path.join(reminders, "functions", "first_call.py"),
+        ]
+
+        for _ in range(2):
+            with self.assertLogs("poly.project", level="WARNING") as logs:
+                conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+            self.assertIn("which holds files that aren't part of it", "\n".join(logs.output))
+            self.assertEqual(conflicts, [os.path.join(self.root, monthly)])
+            self.assertEqual(sorted(self._tree()), held_tree)
+            self.assertEqual(self._read("reminders", "functions", "first_call.py"), added)
+            self.assertEqual(
+                self.project.resources[OutboundCampaign]["CMPGN-TWO"].folder, "monthly"
+            )
+            self.assertEqual(self.project.project_status(), ([], [], [], []))
+            _, push_message, _ = self.project.push_project(dry_run=True)
+            self.assertEqual(push_message, "No changes detected")
+
+        os.remove(added_path)
+        conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            sorted(self._tree()),
+            [
+                os.path.join(reminders, "campaign.yaml"),
+                os.path.join(reminders, "functions", "trigger.py"),
+            ],
+        )
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-TWO"].folder, "reminders")
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        _, push_message, _ = self.project.push_project(dry_run=True)
+        self.assertEqual(push_message, "No changes detected")
+
+    def test_remote_rename_onto_a_deleted_folder_edited_here_says_it_is_still_here(self):
+        """An edit to the deleted campaign keeps its folder, so pulling again alone won't help."""
+        monthly_code = "def map_contacts(contacts, outbound_campaign):\n    return {'m': 1}\n"
+        self.project.pull_project(
+            projection_json=_campaign_projection(
+                extra_campaigns=(self._monthly_with_its_own_node_ids("Monthly", monthly_code),)
+            )
+        )
+        trigger = os.path.join(self.folder, "functions", "trigger.py")
+        with open(trigger, "w", encoding="utf-8") as file:
+            file.write("def map_contacts(contacts, outbound_campaign):\n    return {'r': 2}\n")
+        renamed = {
+            "outboundCampaigns": {
+                "outboundCampaigns": {
+                    "ids": ["CMPGN-TWO"],
+                    "entities": {
+                        "CMPGN-TWO": self._monthly_with_its_own_node_ids("Reminders", monthly_code)
+                    },
+                }
+            }
+        }
+
+        with self.assertLogs("poly.project", level="WARNING") as logs:
+            conflicts, _ = self.project.pull_project(projection_json=renamed)
+
+        output = "\n".join(logs.output)
+        self.assertIn("which is already here", output)
+        self.assertNotIn("which Agent Studio deleted", output)
+        self.assertIn(os.path.join(self.root, "outbound_campaigns", "monthly"), conflicts)
+        self.assertIn(trigger, conflicts)
+        self.assertIn("{'r': 2}", self._read("reminders", "functions", "trigger.py"))
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-TWO"].folder, "monthly")
+
+    def test_remote_rename_onto_a_folder_with_only_hidden_files_moves(self):
+        """Files the system makes, such as .DS_Store and caches, don't hold a rename back."""
+        target = os.path.join(self.root, "outbound_campaigns", "monthly")
+        os.makedirs(os.path.join(target, "functions", "__pycache__"))
+        for path in (
+            os.path.join(target, ".DS_Store"),
+            os.path.join(target, "functions", "__pycache__", "trigger.cpython-312.pyc"),
+        ):
+            with open(path, "w", encoding="utf-8") as file:
+                file.write("x")
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=_campaign_projection(name="Monthly")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertFalse(os.path.exists(self.folder))
+        monthly = os.path.join("outbound_campaigns", "monthly")
+        self.assertEqual(
+            sorted(self._tree()),
+            [
+                os.path.join(monthly, ".DS_Store"),
+                os.path.join(monthly, "campaign.yaml"),
+                os.path.join(monthly, "functions", "__pycache__", "trigger.cpython-312.pyc"),
+                os.path.join(monthly, "functions", "trigger.py"),
+            ],
+        )
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-ONE"].folder, "monthly")
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        _, message, _ = self.project.push_project(dry_run=True)
+        self.assertEqual(message, "No changes detected")
+
     def test_remote_delete_removes_the_folder(self):
         self.project.pull_project(
             projection_json={
@@ -10201,10 +11099,10 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(conflicts, [])
         self.assertTrue(os.path.isfile(renamed))
         self.assertEqual(self.project.project_status()[1], [os.path.join(renamed, "campaign")])
-        update = [
-            payload for kind, payload in self._push() if kind == "outbound_campaign_update"
-        ]
-        self.assertEqual(update, [{"id": "CMPGN-TWO", "name": "Reminders (1)", "clearDescription": True}])
+        update = [payload for kind, payload in self._push() if kind == "outbound_campaign_update"]
+        self.assertEqual(
+            update, [{"id": "CMPGN-TWO", "name": "Reminders (1)", "clearDescription": True}]
+        )
         success, message = self._push_for_real()
         self.assertTrue(success, message)
         self.assertEqual(self.project.project_status(), ([], [], [], []))
