@@ -10,8 +10,6 @@ import webbrowser
 from collections.abc import Callable
 from typing import Optional
 
-import requests
-
 from poly.handlers.auth0_handler import Auth0Handler, AuthDetails
 
 logger = logging.getLogger(__name__)
@@ -50,6 +48,8 @@ def signin_with_device_flow(
     Raises:
         DeviceFlowError: The flow could not start, timed out, or was rejected.
     """
+    import requests
+
     from poly.output.console import console, info
 
     try:

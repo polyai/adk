@@ -4984,6 +4984,25 @@ def _help_body(help_text: str) -> str:
     return body
 
 
+class StartupImportsTest(unittest.TestCase):
+    """Tests for what building the CLI imports before any command runs."""
+
+    def test_requests_is_not_imported_at_startup(self):
+        """Commands that never call the API (status, diff, validate) skip importing requests."""
+        script = (
+            "import sys\n"
+            "from poly.cli import AgentStudioCLI\n"
+            "cli = AgentStudioCLI()\n"
+            "cli.register_commands()\n"
+            "cli._create_parser()\n"
+            "print('requests' in sys.modules)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, check=True
+        )
+        self.assertEqual(result.stdout.strip(), "False")
+
+
 class GroupedHelpOutputTest(unittest.TestCase):
     """Tests for the grouped section headers in `poly --help`."""
 

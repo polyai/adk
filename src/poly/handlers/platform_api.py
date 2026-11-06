@@ -11,7 +11,6 @@ import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import requests
 from ruamel.yaml import YAML
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
@@ -148,6 +147,8 @@ class PlatformAPIHandler:
         Returns:
             dict: The parsed response.
         """
+        import requests
+
         url = PlatformAPIHandler.get_base_url(region, use_jupiter_api) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
 
@@ -1140,6 +1141,8 @@ class PlatformAPIHandler:
         Returns:
             bytes: The raw WAV audio data.
         """
+        import requests
+
         endpoint = CONVERSATION_AUDIO_URL.format(
             project_id=project_id, conversation_id=conversation_id
         )
@@ -1210,6 +1213,8 @@ class PlatformAPIHandler:
         Returns:
             bytes: The raw WAV audio data.
         """
+        import requests
+
         endpoint = AUDIO_CACHE_FILE_URL.format(project_id=project_id, entry_id=entry_id)
         url = PlatformAPIHandler.get_base_url(region) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -1256,6 +1261,8 @@ class PlatformAPIHandler:
             audio_bytes: Raw WAV audio bytes (max 6MB).
             filename: Optional filename, sent via the X-Filename header.
         """
+        import requests
+
         endpoint = AUDIO_CACHE_FILE_URL.format(project_id=project_id, entry_id=entry_id)
         url = PlatformAPIHandler.get_base_url(region) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -1307,6 +1314,8 @@ class PlatformAPIHandler:
             settings: Dict with "text" and "config" keys (voice tuning settings).
             filename: Filename to use for the multipart file part.
         """
+        import requests
+
         endpoint = AUDIO_CACHE_DETAILS_URL.format(project_id=project_id, entry_id=entry_id)
         url = PlatformAPIHandler.get_base_url(region) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -1393,6 +1402,8 @@ class PlatformAPIHandler:
         Returns:
             bytes: The raw WAV audio data (preview only, not saved to cache).
         """
+        import requests
+
         endpoint = AUDIO_CACHE_SYNTHESIZE_URL.format(project_id=project_id, entry_id=entry_id)
         url = PlatformAPIHandler.get_base_url(region) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"

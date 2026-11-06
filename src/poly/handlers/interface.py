@@ -6,7 +6,6 @@ import json
 import uuid
 from typing import Any, NoReturn, Optional
 
-import requests
 from google.protobuf.message import Message
 
 from poly.handlers.platform_api import PlatformAPIHandler
@@ -360,6 +359,8 @@ class AgentStudioInterface:
                 2. A list of slim resources.
 
         """
+        import requests
+
         from poly.resources.resource import load_resources_from_projection
 
         try:
@@ -383,6 +384,8 @@ class AgentStudioInterface:
                 2. A list of slim resources.
                 3. The projection JSON.
         """
+        import requests
+
         from poly.resources.resource import load_resources_from_projection
 
         if projection_json is not None:
@@ -486,6 +489,8 @@ class AgentStudioInterface:
         Returns:
             list[Message]: A list of queued Command protobuf messages.
         """
+        import requests
+
         try:
             metadata = self.sync_client.sdk.create_metadata()
             commands: list[Command] = []
@@ -539,6 +544,8 @@ class AgentStudioInterface:
         Args:
             command (Message): The Command protobuf message to queue
         """
+        import requests
+
         try:
             self.sync_client.queue_command(command)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -550,6 +557,8 @@ class AgentStudioInterface:
         Returns:
             bool: True if the commands were sent successfully, False otherwise
         """
+        import requests
+
         try:
             return self.sync_client.send_queued_commands()
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -557,6 +566,8 @@ class AgentStudioInterface:
 
     def clear_command_queue(self) -> None:
         """Clear all queued commands without sending."""
+        import requests
+
         try:
             self.sync_client.clear_command_queue()
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -568,6 +579,8 @@ class AgentStudioInterface:
         Returns:
             list[Message]: A list of queued Command protobuf messages.
         """
+        import requests
+
         try:
             return self.sync_client.get_queued_commands()
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -581,6 +594,8 @@ class AgentStudioInterface:
             Each value contains at least ``branchId``, and may include
             ``parentBranchId``, ``parentSequence``, ``isDiverged``, etc.
         """
+        import requests
+
         try:
             return self.sync_client.get_branches()
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -598,6 +613,8 @@ class AgentStudioInterface:
         Returns:
             str: The ID of the newly created branch
         """
+        import requests
+
         try:
             return self.sync_client.create_branch(branch_name, source_branch_id=source_branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -612,6 +629,8 @@ class AgentStudioInterface:
         Returns:
             bool: True if the branch was switched successfully, False otherwise
         """
+        import requests
+
         try:
             return self.sync_client.switch_branch(branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -634,6 +653,8 @@ class AgentStudioInterface:
             list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
             list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
         """
+        import requests
+
         try:
             return self.sync_client.merge_branch(message, conflict_resolutions)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -655,6 +676,8 @@ class AgentStudioInterface:
             list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
             list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
         """
+        import requests
+
         try:
             return self.sync_client.sync_branch(conflict_resolutions)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -669,6 +692,8 @@ class AgentStudioInterface:
         Returns:
             bool: True if the branch was deleted successfully, False otherwise
         """
+        import requests
+
         try:
             return self.sync_client.delete_branch(branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -688,6 +713,8 @@ class AgentStudioInterface:
                 1. A dictionary mapping resource types to their resources.
                 2. A list of slim resources.
         """
+        import requests
+
         from poly.resources.resource import load_resources_from_projection
 
         try:
@@ -782,6 +809,8 @@ class AgentStudioInterface:
         Returns:
             dict with 'artifactVersion', 'lambdaDeploymentVersion', etc.
         """
+        import requests
+
         try:
             return self.sync_client.get_branch_chat_info(branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -800,6 +829,8 @@ class AgentStudioInterface:
         Returns:
             dict with 'artifactVersion', 'lambdaDeploymentVersion' and 'authToken'.
         """
+        import requests
+
         try:
             return self.sync_client.get_branch_call_info(branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -1480,6 +1511,8 @@ class AgentStudioInterface:
         Raises:
             ValueError: If the metric already exists, or the API call fails.
         """
+        import requests
+
         try:
             return PlatformAPIHandler.create_custom_metric(region, account_id, project_id, data)
         except requests.HTTPError as e:
@@ -1539,6 +1572,8 @@ class AgentStudioInterface:
         Raises:
             ValueError: If the metric does not exist, or the API call fails.
         """
+        import requests
+
         try:
             return PlatformAPIHandler.update_custom_metric(
                 region, account_id, project_id, metric_name, data
@@ -1795,6 +1830,8 @@ class AgentStudioInterface:
         Returns:
             list[dict[str, Any]]: A list of commit history entries for the branch
         """
+        import requests
+
         try:
             return self.sync_client.get_branch_history(branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -1809,6 +1846,8 @@ class AgentStudioInterface:
         Returns:
             bool: True if the branch was renamed successfully, False otherwise
         """
+        import requests
+
         try:
             return self.sync_client.rename_branch(new_branch_name)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -1820,6 +1859,8 @@ class AgentStudioInterface:
         Returns:
             list[dict[str, Any]]: A list of archived branch entries.
         """
+        import requests
+
         try:
             return self.sync_client.list_archived_branches()
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -1834,6 +1875,8 @@ class AgentStudioInterface:
         Returns:
             bool: True if the branch was restored successfully, False otherwise.
         """
+        import requests
+
         try:
             return self.sync_client.restore_branch(branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -1848,6 +1891,8 @@ class AgentStudioInterface:
         Returns:
             bool: True if the branch was tagged successfully, False otherwise.
         """
+        import requests
+
         try:
             return self.sync_client.tag_branch(branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
@@ -1862,6 +1907,8 @@ class AgentStudioInterface:
         Returns:
             bool: True if the branch was untagged successfully, False otherwise.
         """
+        import requests
+
         try:
             return self.sync_client.untag_branch(branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
