@@ -29,7 +29,9 @@ To rename a campaign, change `name` and rename the folder to match. The campaign
 
 A campaign that has been published can't be deleted. Pause it, then archive it, with `poly campaign pause` and `poly campaign archive`. It stops being pulled once it's archived.
 
-When a campaign is renamed in Agent Studio, a pull moves its folder, and your edits to it move too, as for a renamed flow. Pull before editing when campaigns have swapped names in Agent Studio, or when one was deleted and another renamed to its name: edits made before such a pull may not carry over.
+When a campaign is renamed in Agent Studio, a pull moves its folder, and your edits to its saved nodes and code move too, as for a renamed flow. Nodes and function files you added since the last pull stay in the old folder: move them across by hand.
+
+When two campaigns swap names in Agent Studio, or one is deleted and another renamed to its name, the folder then holds a different campaign. Edits you made there before the pull now apply to the campaign that has that name, and the next push sends them to it. A pull warns when this happens. Pull before editing after such changes.
 
 ## What a campaign contains
 

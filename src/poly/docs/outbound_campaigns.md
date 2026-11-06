@@ -18,7 +18,7 @@ The folder name is the campaign's name, lowercased with punctuation replaced by 
 
 Renaming a campaign means changing `name` and renaming the folder to match. The campaign keeps its identity when its nodes keep their names and types (the trigger may be renamed too). A push that would instead delete one campaign and create another fails validation: rename the folder in a push of its own. A published campaign can't be deleted: pause it, then archive it (`poly campaign pause`, `poly campaign archive`).
 
-A campaign renamed in Agent Studio moves folder on pull, and your edits move with it, as for a renamed flow. Pull before editing when campaigns have swapped names in Agent Studio, or one was deleted and another renamed to its name: edits made before such a pull may not carry over.
+A campaign renamed in Agent Studio moves folder on pull, and edits to its saved nodes and code move with it, as for a renamed flow. Nodes and function files added since the last pull stay in the old folder: move them across by hand. When two campaigns swap names in Agent Studio, or one is deleted and another renamed to its name, edits made in that folder before the pull apply to the campaign that now has the name, and the next push sends them to it. Pull warns when this happens. Pull before editing after such changes.
 
 ## campaign.yaml
 

@@ -610,6 +610,8 @@ class AgentStudioProject:
             self.branch_id = self.api_handler.branch_id
 
         self._check_no_duplicate_resource_paths(incoming_resources)
+        if not force:
+            self._warn_reused_campaign_folders(incoming_resources)
         # -------
         # Update resources
         # -------
@@ -1060,6 +1062,39 @@ class AgentStudioProject:
         MultiResourceYamlResource._file_cache.clear()
 
         return files_with_conflicts, progress_offset
+
+    def _warn_reused_campaign_folders(self, incoming_resources: ResourceMap) -> None:
+        saved = {
+            campaign.folder: campaign
+            for campaign in self.resources.get(OutboundCampaign, {}).values()
+        }
+        reused = [
+            (folder, saved[folder], campaign)
+            for campaign in incoming_resources.get(OutboundCampaign, {}).values()
+            if (folder := campaign.folder) in saved
+            and saved[folder].resource_id != campaign.resource_id
+        ]
+        if not reused:
+            return
+        _, modified, new, deleted = self.project_status()
+        changed = [
+            os.path.relpath(path, self.root_path).replace(os.sep, "/")
+            for path in modified + new + deleted
+        ]
+        for folder, before, after in reused:
+            if not any(path.startswith(f"outbound_campaigns/{folder}/") for path in changed):
+                continue
+            known = self.resources[OutboundCampaign].get(after.resource_id)
+            source = (
+                f"'{known.name}' was renamed to '{after.name}'"
+                if known
+                else f"'{after.name}' was created"
+            )
+            logger.warning(
+                f"outbound_campaigns/{folder} now holds a different campaign: {source} in "
+                f"Agent Studio. Edits made here to '{before.name}' before this pull now apply "
+                "to it: check them before pushing."
+            )
 
     def _update_pulled_resources(
         self,
