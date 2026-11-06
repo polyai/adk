@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 from google.protobuf.json_format import MessageToDict
 
+import poly.project as project_module
 import poly.resources.resource_utils as resource_utils
 from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
@@ -9478,6 +9479,23 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         self._assert_push_refused("'Reminders' has been published, so it can't be deleted.")
 
+    def test_published_campaign_keeps_its_status_across_a_pushed_folder_rename(self):
+        self._pull_published()
+        self._rename_campaign("Monthly", "monthly")
+        success, message = self._push_for_real()
+        self.assertTrue(success, message)
+        self._handler_patch.stop()
+
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-ONE"].status, "active")
+        data = self._yaml()
+        self._node(data, "Trigger")["sourceType"] = "api"
+        self._write_yaml(data)
+        self._assert_push_refused(
+            "The contact source stays 'csv' once the campaign has been published."
+        )
+        shutil.rmtree(self.folder)
+        self._assert_push_refused("'Monthly' has been published, so it can't be deleted.")
+
     def test_published_campaign_keeps_its_status_out_of_the_file(self):
         self._pull_published()
 
@@ -10177,6 +10195,83 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(moved, "campaign.yaml")))
         self.assertTrue(os.path.isfile(os.path.join(moved, "functions", "trigger.py")))
         self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def _campaign_entity(self, campaign_id: str, name: str) -> dict:
+        return _campaign_projection(campaign_id=campaign_id, name=name)["outboundCampaigns"][
+            "outboundCampaigns"
+        ]["entities"][campaign_id]
+
+    def _pull_with_a_greeting_edit_and_warnings(self, projection: dict) -> list[str]:
+        data = self._yaml()
+        self._node(data, "First call")["greeting"] = "Hello there"
+        self._write_yaml(data)
+        with patch.object(project_module.logger, "warning") as warning:
+            conflicts, _ = self.project.pull_project(projection_json=projection)
+        self.assertEqual(conflicts, [])
+        return [call.args[0] for call in warning.call_args_list]
+
+    def test_remote_swap_with_edits_here_warns_that_they_now_apply_to_the_other_campaign(self):
+        self._pull_into_new_project(
+            _campaign_projection(
+                extra_campaigns=(self._campaign_entity("CMPGN-TWO", "Followups"),)
+            )
+        )
+        swapped = _campaign_projection(
+            name="Followups",
+            extra_campaigns=(self._campaign_entity("CMPGN-TWO", "Reminders"),),
+        )
+
+        warnings = self._pull_with_a_greeting_edit_and_warnings(swapped)
+
+        self.assertIn(
+            "outbound_campaigns/reminders now holds a different campaign: 'Followups' was "
+            "renamed to 'Reminders' in Agent Studio. Edits made here to 'Reminders' before this "
+            "pull now apply to it: check them before pushing.",
+            warnings,
+        )
+
+    def test_remote_delete_and_rename_onto_a_folder_with_edits_here_warns(self):
+        self._pull_into_new_project(
+            _campaign_projection(
+                extra_campaigns=(self._campaign_entity("CMPGN-TWO", "Followups"),)
+            )
+        )
+        renamed = _campaign_projection(campaign_id="CMPGN-TWO", name="Reminders")
+
+        warnings = self._pull_with_a_greeting_edit_and_warnings(renamed)
+
+        self.assertIn(
+            "outbound_campaigns/reminders now holds a different campaign: 'Followups' was "
+            "renamed to 'Reminders' in Agent Studio. Edits made here to 'Reminders' before this "
+            "pull now apply to it: check them before pushing.",
+            warnings,
+        )
+
+    def test_remote_rename_with_edits_here_does_not_warn_about_another_campaign(self):
+        warnings = self._pull_with_a_greeting_edit_and_warnings(
+            _campaign_projection(name="Monthly")
+        )
+
+        self.assertFalse(any("now holds a different campaign" in text for text in warnings))
+
+    def test_remote_swap_without_edits_here_does_not_warn(self):
+        self._pull_into_new_project(
+            _campaign_projection(
+                extra_campaigns=(self._campaign_entity("CMPGN-TWO", "Followups"),)
+            )
+        )
+        swapped = _campaign_projection(
+            name="Followups",
+            extra_campaigns=(self._campaign_entity("CMPGN-TWO", "Reminders"),),
+        )
+
+        with patch.object(project_module.logger, "warning") as warning:
+            conflicts, _ = self.project.pull_project(projection_json=swapped)
+
+        self.assertEqual(conflicts, [])
+        self.assertFalse(
+            any("now holds a different campaign" in call.args[0] for call in warning.call_args_list)
+        )
 
     def test_remote_delete_removes_the_folder(self):
         self.project.pull_project(
