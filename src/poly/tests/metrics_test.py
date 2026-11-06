@@ -37,7 +37,7 @@ class ParseBoolFlagTest(unittest.TestCase):
 class MetricsListTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_list."""
 
-    @patch("poly.cli_commands.metrics.print_metrics")
+    @patch("poly.output.console.print_metrics")
     @patch("poly.cli_commands.metrics.load_project")
     def test_list_calls_print_metrics(self, mock_load, mock_print):
         """metrics_list fetches metrics and prints them in table mode."""
@@ -96,7 +96,7 @@ class MetricsExportTest(unittest.TestCase):
 
             mock_ry.dump.assert_called_once_with({"SCORE": {"type": "int"}}, sys.stdout)
 
-    @patch("poly.cli_commands.metrics.success")
+    @patch("poly.output.console.success")
     @patch("poly.cli_commands.metrics.load_project")
     def test_export_to_file(self, mock_load, mock_success):
         """With a file path, YAML is written to file and success message shown."""
@@ -135,7 +135,7 @@ class MetricsExportTest(unittest.TestCase):
 class MetricsAddTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_add."""
 
-    @patch("poly.cli_commands.metrics.success")
+    @patch("poly.output.console.success")
     @patch("poly.cli_commands.metrics.load_project")
     def test_add_with_all_args(self, mock_load, mock_success):
         """Non-interactive add passes all fields to project.create_custom_metric."""
@@ -239,7 +239,7 @@ class MetricsAddTest(unittest.TestCase):
         printed = mock_json.call_args[0][0]
         self.assertIn("--type", printed["error"])
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_add_expected_values_rejected_for_non_string(self, mock_load, mock_error):
         """Expected values are rejected for non-string metric types."""
@@ -305,7 +305,7 @@ class MetricsAddTest(unittest.TestCase):
 
         mock_json.assert_called_once_with({"success": True, "metric": result})
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_add_duplicate_metric_friendly_error(self, mock_load, mock_error):
         """409 from the server shows 'already exists' instead of raw HTTP error."""
@@ -347,7 +347,7 @@ class MetricsAddTest(unittest.TestCase):
 class MetricsEditTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_edit."""
 
-    @patch("poly.cli_commands.metrics.success")
+    @patch("poly.output.console.success")
     @patch("poly.cli_commands.metrics.load_project")
     def test_edit_with_description(self, mock_load, mock_success):
         """Editing description passes it through to project.update_custom_metric."""
@@ -361,7 +361,7 @@ class MetricsEditTest(unittest.TestCase):
 
         project.update_custom_metric.assert_called_once_with("SCORE", {"description": "New desc"})
 
-    @patch("poly.cli_commands.metrics.success")
+    @patch("poly.output.console.success")
     @patch("poly.cli_commands.metrics.load_project")
     def test_edit_deactivate_metric(self, mock_load, mock_success):
         """Setting active=False prints 'Deactivated' message."""
@@ -375,7 +375,7 @@ class MetricsEditTest(unittest.TestCase):
         mock_success.assert_called_once()
         self.assertIn("Deactivated", mock_success.call_args[0][0])
 
-    @patch("poly.cli_commands.metrics.success")
+    @patch("poly.output.console.success")
     @patch("poly.cli_commands.metrics.load_project")
     def test_edit_multiple_flags(self, mock_load, mock_success):
         """Multiple flags are combined into one update call."""
@@ -424,7 +424,7 @@ class MetricsEditTest(unittest.TestCase):
         printed = mock_json.call_args[0][0]
         self.assertFalse(printed["success"])
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_edit_not_found_friendly_error(self, mock_load, mock_error):
         """404 from the server shows 'not found' instead of raw HTTP error."""
@@ -457,7 +457,7 @@ class MetricsEditTest(unittest.TestCase):
         self.assertFalse(printed["success"])
         self.assertIn("not found", printed["error"])
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_edit_expected_values_rejected_for_non_string(self, mock_load, mock_error):
         """Expected values flag is rejected when the metric type is not string."""
@@ -514,7 +514,7 @@ class InteractiveEditTest(unittest.TestCase):
         },
     ]
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     def test_metric_not_found_exits(self, mock_error):
         """Exits with error when the named metric does not exist."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
@@ -606,7 +606,7 @@ class InteractiveEditTest(unittest.TestCase):
 class MetricsImportTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_import."""
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_import_file_not_found(self, mock_load, mock_error):
         """Exits with error when the import file does not exist."""
@@ -643,7 +643,7 @@ class MetricsImportTest(unittest.TestCase):
         printed = mock_json.call_args[0][0]
         self.assertFalse(printed["success"])
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_import_invalid_yaml(self, mock_load, mock_error):
         """Exits with error when YAML parsing fails."""
@@ -666,7 +666,7 @@ class MetricsImportTest(unittest.TestCase):
             "metadata": {"created": ["SCORE"], "ignored": []},
         }
 
-        with patch("poly.cli_commands.metrics.success"), patch("poly.cli_commands.metrics.plain"):
+        with patch("poly.output.console.success"), patch("poly.output.console.plain"):
             MetricsCommand.metrics_import("/tmp/test", file_path="metrics.yaml", output_json=False)
 
         project.import_metrics_from_file.assert_called_once_with("metrics.yaml", False)
@@ -685,8 +685,8 @@ class MetricsImportTest(unittest.TestCase):
         }
 
         with (
-            patch("poly.cli_commands.metrics.success") as mock_success,
-            patch("poly.cli_commands.metrics.plain") as mock_plain,
+            patch("poly.output.console.success") as mock_success,
+            patch("poly.output.console.plain") as mock_plain,
         ):
             MetricsCommand.metrics_import("/tmp/test", file_path="m.yaml", output_json=False)
 
@@ -717,8 +717,8 @@ class PrintDryRunTest(unittest.TestCase):
         self.assertEqual(result["would_skip"], ["B"])
         self.assertEqual(result["remote_only"], ["D"])
 
-    @patch("poly.cli_commands.metrics.warning")
-    @patch("poly.cli_commands.metrics.plain")
+    @patch("poly.output.console.warning")
+    @patch("poly.output.console.plain")
     def test_dry_run_text_output(self, mock_plain, mock_warning):
         """Text dry-run shows create, skip, and remote-only warnings."""
         preview = {
@@ -734,7 +734,7 @@ class PrintDryRunTest(unittest.TestCase):
         self.assertTrue(any("Would skip" in c for c in calls))
         mock_warning.assert_called_once()
 
-    @patch("poly.cli_commands.metrics.plain")
+    @patch("poly.output.console.plain")
     def test_dry_run_empty_preview(self, mock_plain):
         """With empty lists, only the dim header is printed."""
         preview = {"would_create": [], "would_skip": [], "remote_only": []}

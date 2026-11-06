@@ -6,11 +6,11 @@ Copyright PolyAI Limited
 from datetime import datetime
 from typing import Optional
 
-from dateutil import parser as date_parser
-
 
 def _is_active_and_unexpired(key: dict, now: datetime) -> bool:
     """Whether a key record is active and either has no expiry or expires after `now`."""
+    from dateutil import parser as date_parser
+
     if key.get("active") is not True:
         return False
 

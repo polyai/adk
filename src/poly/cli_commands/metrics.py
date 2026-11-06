@@ -11,7 +11,6 @@ from ruamel.yaml import YAML
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
-from poly.output.console import error, plain, print_metrics, success, warning
 from poly.output.json_output import json_print
 
 logger = logging.getLogger(__name__)
@@ -238,7 +237,7 @@ class MetricsCommand(BaseCommand):
     @classmethod
     def metrics_list(cls, base_path: str, output_json: bool = False) -> None:
         """List all custom metrics for the project."""
-        from poly.output.console import paged_output
+        from poly.output.console import paged_output, print_metrics
 
         project = load_project(base_path, output_json=output_json)
         metrics = project.get_custom_metrics()
@@ -257,6 +256,8 @@ class MetricsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Export all custom metrics as YAML."""
+        from poly.output.console import success
+
         project = load_project(base_path, output_json=output_json)
         metrics = project.export_custom_metrics()
 
@@ -284,6 +285,8 @@ class MetricsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Create a new custom metric."""
+        from poly.output.console import error, success
+
         project = load_project(base_path, output_json=output_json)
 
         if name is None:
@@ -360,6 +363,8 @@ class MetricsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Update an existing custom metric."""
+        from poly.output.console import error, success
+
         project = load_project(base_path, output_json=output_json)
 
         data: dict = {}
@@ -408,6 +413,8 @@ class MetricsCommand(BaseCommand):
             A dict of fields to update.
         """
         import questionary
+
+        from poly.output.console import error, plain
 
         metrics = project.get_custom_metrics()
 
@@ -494,6 +501,8 @@ class MetricsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Bulk-import metrics from a YAML file."""
+        from poly.output.console import error, plain, success, warning
+
         project = load_project(base_path, output_json=output_json)
 
         try:
@@ -541,6 +550,8 @@ class MetricsCommand(BaseCommand):
         output_json: bool,
     ) -> None:
         """Display the results of a dry-run import."""
+        from poly.output.console import plain, warning
+
         if output_json:
             json_print({"dry_run": True, **preview})
         else:

@@ -4987,20 +4987,23 @@ def _help_body(help_text: str) -> str:
 class StartupImportsTest(unittest.TestCase):
     """Tests for what building the CLI imports before any command runs."""
 
-    def test_requests_is_not_imported_at_startup(self):
-        """Commands that never call the API (status, diff, validate) skip importing requests."""
+    # Heavy modules that only some commands need. Each command imports them where it
+    # uses them, so every other command, --help and shell completion skip the cost.
+    DEFERRED_MODULES = ["requests", "rich", "asyncio", "webbrowser", "dateutil"]
+
+    def test_heavy_modules_are_not_imported_at_startup(self):
         script = (
             "import sys\n"
             "from poly.cli import AgentStudioCLI\n"
             "cli = AgentStudioCLI()\n"
             "cli.register_commands()\n"
             "cli._create_parser()\n"
-            "print('requests' in sys.modules)\n"
+            f"print(' '.join(m for m in {self.DEFERRED_MODULES!r} if m in sys.modules))\n"
         )
         result = subprocess.run(
             [sys.executable, "-c", script], capture_output=True, text=True, check=True
         )
-        self.assertEqual(result.stdout.strip(), "False")
+        self.assertEqual(result.stdout.strip(), "", msg="imported at startup")
 
 
 class GroupedHelpOutputTest(unittest.TestCase):
