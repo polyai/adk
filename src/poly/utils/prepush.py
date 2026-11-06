@@ -10,7 +10,9 @@ Copyright PolyAI Limited
 """
 
 import copy
-from typing import Callable, TypeAlias
+import graphlib
+import uuid
+from typing import Callable, Optional, TypeAlias
 
 from poly.resources import (
     AsrSettings,
@@ -23,6 +25,10 @@ from poly.resources import (
     FlowStep,
     Function,
     FunctionStep,
+    OutboundCampaign,
+    OutboundCampaignFunction,
+    OutboundCampaignNode,
+    OutboundCampaignSettings,
     Resource,
     ResourceMapping,
     StepType,
@@ -32,6 +38,13 @@ from poly.resources import (
     Variable,
     Variant,
     VariantAttribute,
+)
+from poly.resources.outbound_campaign import (
+    campaign_nodes,
+    function_file_stem,
+    map_route_targets,
+    node_pairing_key,
+    paired_campaigns,
 )
 from poly.resources.test_suite import (
     TestCaseApiOperationMock,
@@ -274,6 +287,297 @@ _TEST_CASE_SUBRESOURCE_TYPES = (
     TestCaseIntegrationAttributes,
     TestCaseApiOperationMock,
 )
+
+
+def group_outbound_campaign_changes(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+    pre_push_updated_resources: ResourceMap,
+    pre_push_deleted_resources: ResourceMap,
+) -> None:
+    """Finish the campaign changes in place.
+
+    The steps run in this order because each relies on the ids the one before settles. A
+    renamed folder keeps its campaign's and nodes' ids first, so a node that changes type is
+    replaced under its kept campaign. Code changes then go out with the node that has its
+    final id. Deleting a campaign deletes its nodes with it, and the label changes left go
+    before any create, since Agent Studio refuses a label another node still has.
+    """
+    pair_renamed_campaigns(state, new_resources, updated_resources, deleted_resources)
+    replace_retyped_campaign_nodes(state, new_resources, updated_resources, deleted_resources)
+    push_campaign_code_with_nodes(state, new_resources, updated_resources, deleted_resources)
+    prune_cascade_deleted_campaign_nodes(deleted_resources)
+    relabel_campaign_nodes_first(
+        updated_resources, deleted_resources, pre_push_updated_resources, pre_push_deleted_resources
+    )
+    drop_settings_only_campaign_updates(updated_resources)
+
+
+def _nodes_by_pairing_key(
+    nodes: dict[str, OutboundCampaignNode],
+) -> dict[tuple[Optional[str], Optional[str]], OutboundCampaignNode]:
+    return {node_pairing_key(node): node for node in nodes.values()}
+
+
+def pair_renamed_campaigns(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+) -> None:
+    """Push a renamed campaign folder as an update of the saved campaign, keeping its ids.
+
+    The folder name comes from the campaign name, so a rename reads as a delete and a create,
+    which would replace a live campaign with a new one. A new campaign whose nodes have exactly
+    the same names and types as one deleted campaign, and as no other, takes that campaign's id
+    and each node takes the id of the node with its name. The trigger is matched by type alone,
+    so it may be renamed too. Anything else stays a delete and a create, which validation refuses.
+    """
+    for old_id, new_id in paired_campaigns(new_resources, deleted_resources).items():
+        _carry_campaign_ids(
+            state, new_resources, updated_resources, deleted_resources, new_id, old_id
+        )
+
+    _prune_empty(
+        (new_resources, updated_resources, deleted_resources),
+        (OutboundCampaign, OutboundCampaignSettings, OutboundCampaignNode),
+    )
+
+
+def _carry_campaign_ids(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+    new_id: str,
+    old_id: str,
+) -> None:
+    campaign = new_resources[OutboundCampaign].pop(new_id)
+    saved_campaign = deleted_resources[OutboundCampaign].pop(old_id)
+    new_resources.get(OutboundCampaignSettings, {}).pop(new_id, None)
+    campaign.resource_id = old_id
+    campaign.status = saved_campaign.status
+    updated_resources.setdefault(OutboundCampaign, {})[old_id] = campaign
+    _stage(
+        (new_resources, updated_resources, deleted_resources),
+        campaign.get_new_updated_deleted_subresources(old_resource=saved_campaign),
+    )
+    state_campaigns = state.setdefault(OutboundCampaign, {})
+    state_campaigns.pop(new_id, None)
+    state_campaigns[old_id] = campaign
+
+    saved_nodes = _nodes_by_pairing_key(campaign_nodes(deleted_resources, old_id))
+    new_nodes = _nodes_by_pairing_key(campaign_nodes(new_resources, new_id))
+    carried_ids = {node.node_id: saved_nodes[key].node_id for key, node in new_nodes.items()}
+    for key, node in new_nodes.items():
+        node.data = map_route_targets(node.data, lambda target: carried_ids.get(target, target))
+        _carry_node_id(
+            state, new_resources, updated_resources, deleted_resources, node, saved_nodes[key]
+        )
+
+
+def _carry_node_id(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+    node: OutboundCampaignNode,
+    saved: OutboundCampaignNode,
+) -> None:
+    new_resources[OutboundCampaignNode].pop(node.resource_id)
+    deleted_resources[OutboundCampaignNode].pop(saved.resource_id)
+    state_nodes = state.setdefault(OutboundCampaignNode, {})
+    state_nodes.pop(node.resource_id, None)
+    node.resource_id = saved.resource_id
+    node.position = saved.position
+    node.saved_code = saved.code
+    node.campaign_published = saved.campaign_published
+    state_nodes[node.resource_id] = node
+    if node.compute_hash() != saved.compute_hash():
+        updated_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
+
+
+def _remap_campaign_routes(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    campaign_id: str,
+    node_ids: dict[str, str],
+) -> None:
+    for node in campaign_nodes(state, campaign_id).values():
+        data = map_route_targets(node.data, lambda target: node_ids.get(target, target))
+        if data == node.data:
+            continue
+        node.data = data
+        if node.resource_id not in new_resources.get(OutboundCampaignNode, {}):
+            updated_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
+
+
+def replace_retyped_campaign_nodes(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+) -> None:
+    """Push a node whose type changed as a delete and a create under a new id.
+
+    Agent Studio refuses to change a node's type, so the node is replaced as a rename would
+    replace it, and the routes leading to it follow it to its new id. Validation lets the
+    trigger change type only when the campaign has another trigger.
+    """
+    updated_nodes = updated_resources.get(OutboundCampaignNode, {})
+    for resource_id, node in list(updated_nodes.items()):
+        node_type = node.data.get("type")
+        if node.saved_type in (None, node_type):
+            continue
+        updated_nodes.pop(resource_id)
+        saved = copy.copy(node)
+        saved.data = {**node.data, "type": node.saved_type}
+        deleted_resources.setdefault(OutboundCampaignNode, {})[resource_id] = saved
+        old_node_id = node.node_id
+        state_nodes = state.setdefault(OutboundCampaignNode, {})
+        state_nodes.pop(resource_id, None)
+        node.resource_id = f"{node.campaign_id}:{node_type}-{uuid.uuid4()}"
+        node.saved_type = None
+        state_nodes[node.resource_id] = node
+        new_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
+        _remap_campaign_routes(
+            state,
+            new_resources,
+            updated_resources,
+            node.campaign_id,
+            {old_node_id: node.node_id},
+        )
+    _prune_empty((updated_resources,), (OutboundCampaignNode,))
+
+
+def push_campaign_code_with_nodes(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+) -> None:
+    """Send a change to a campaign function file as an update of its node.
+
+    Function files have no command of their own, the same way ASR settings go out by
+    section. A node being created or deleted carries its code already. Each function file
+    also takes its node's final id, so a later pull matches the two.
+    """
+    node_ids = {
+        (node.campaign_folder, function_file_stem(node.name)): node.resource_id
+        for node in state.get(OutboundCampaignNode, {}).values()
+    }
+    if OutboundCampaignFunction in state:
+        functions = {}
+        for function in state[OutboundCampaignFunction].values():
+            function.resource_id = node_ids.get(
+                (function.campaign_folder, function_file_stem(function.name)),
+                function.resource_id,
+            )
+            functions[function.resource_id] = function
+        state[OutboundCampaignFunction] = functions
+    touched = {
+        (function.campaign_folder, function_file_stem(function.name))
+        for changes in (new_resources, updated_resources, deleted_resources)
+        for function in changes.pop(OutboundCampaignFunction, {}).values()
+    }
+    if not touched:
+        return
+    created = new_resources.get(OutboundCampaignNode, {})
+    for node in state.get(OutboundCampaignNode, {}).values():
+        if (
+            (node.campaign_folder, function_file_stem(node.name)) in touched
+            and node.resource_id not in created
+            and node.code != (node.saved_code or "")
+        ):
+            updated_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
+
+
+def relabel_campaign_nodes_first(
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+    pre_push_updated_resources: ResourceMap,
+    pre_push_deleted_resources: ResourceMap,
+) -> None:
+    """Send node deletes and label changes before anything is created.
+
+    Agent Studio refuses a label another node still has. A kept node changes label when its
+    trigger is renamed, when pull gave it a name, or when only the case or punctuation of its
+    name changed. A node taking a label other relabelled nodes give up goes after them.
+    """
+    if OutboundCampaignNode in deleted_resources:
+        pre_push_deleted_resources.setdefault(OutboundCampaignNode, {}).update(
+            deleted_resources.pop(OutboundCampaignNode)
+        )
+    updated_nodes = updated_resources.get(OutboundCampaignNode, {})
+    relabelled = [
+        updated_nodes.pop(resource_id)
+        for resource_id, node in list(updated_nodes.items())
+        if node.saved_label is not None and node.saved_label != node.name
+    ]
+    by_id = {node.resource_id: node for node in relabelled}
+    givers: dict[tuple[str, str], list[str]] = {}
+    for node in relabelled:
+        givers.setdefault((node.campaign_id, node.saved_label.strip()), []).append(node.resource_id)
+    order = graphlib.TopologicalSorter(
+        {
+            node.resource_id: [
+                giver
+                for giver in givers.get((node.campaign_id, node.name.strip()), [])
+                if giver != node.resource_id
+            ]
+            for node in relabelled
+        }
+    )
+    try:
+        ordered = list(order.static_order())
+    except graphlib.CycleError:
+        ordered = list(by_id)
+    for resource_id in ordered:
+        pre_push_updated_resources.setdefault(OutboundCampaignNode, {})[resource_id] = by_id[
+            resource_id
+        ]
+    _prune_empty((updated_resources,), (OutboundCampaignNode,))
+
+
+def drop_settings_only_campaign_updates(updated_resources: ResourceMap) -> None:
+    """Send a campaign update only when its name or description changed.
+
+    Settings go out as their own command, so a settings-only change needs no campaign update.
+    """
+    campaigns = updated_resources.get(OutboundCampaign, {})
+    for resource_id, campaign in list(campaigns.items()):
+        if campaign.saved_identity == campaign.identity:
+            campaigns.pop(resource_id)
+    _prune_empty((updated_resources,), (OutboundCampaign,))
+
+
+def prune_cascade_deleted_campaign_nodes(deleted_resources: ResourceMap) -> None:
+    """Drop node deletes covered by deleting their campaign, which deletes its nodes too."""
+    deleted_campaign_ids = set(deleted_resources.get(OutboundCampaign, {}))
+    nodes = deleted_resources.get(OutboundCampaignNode, {})
+    for resource_id, node in list(nodes.items()):
+        if isinstance(node, OutboundCampaignNode) and node.campaign_id in deleted_campaign_ids:
+            nodes.pop(resource_id)
+    _prune_empty((deleted_resources,), (OutboundCampaignNode,))
+
+
+def _stage(
+    changes: tuple[ResourceMap, ResourceMap, ResourceMap],
+    sub_changes: tuple[list[Resource], list[Resource], list[Resource]],
+) -> None:
+    for resource_map, sub_resources in zip(changes, sub_changes):
+        for sub_resource in sub_resources:
+            resource_map.setdefault(type(sub_resource), {})[sub_resource.resource_id] = sub_resource
+
+
+def _prune_empty(changes: tuple[ResourceMap, ...], resource_types: tuple[type, ...]) -> None:
+    for resource_map in changes:
+        for resource_type in resource_types:
+            if resource_type in resource_map and not resource_map[resource_type]:
+                resource_map.pop(resource_type)
 
 
 def push_asr_settings_by_section(

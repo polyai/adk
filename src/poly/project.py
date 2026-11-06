@@ -11,7 +11,7 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
@@ -43,6 +43,9 @@ from poly.resources import (
     FunctionStep,
     MCPServer,
     MultiResourceYamlResource,
+    OutboundCampaign,
+    OutboundCampaignFunction,
+    OutboundCampaignNode,
     Pronunciation,
     Resource,
     ResourceMap,
@@ -51,6 +54,11 @@ from poly.resources import (
     SubResourceMap,
     TestCase,
     Topic,
+)
+from poly.resources.outbound_campaign import (
+    campaign_folder_of,
+    function_file_stem,
+    route_targets,
 )
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
@@ -602,6 +610,8 @@ class AgentStudioProject:
             self.branch_id = self.api_handler.branch_id
 
         self._check_no_duplicate_resource_paths(incoming_resources)
+        if not force:
+            self._warn_reused_campaign_folders(incoming_resources)
         # -------
         # Update resources
         # -------
@@ -620,9 +630,11 @@ class AgentStudioProject:
         # Deal with empty flow folders
         # -------
 
-        flow_folder = os.path.join(self.root_path, "flows")
-        if os.path.exists(flow_folder):
-            self._delete_empty_folders(flow_folder)
+        OutboundCampaign.remove_empty_files(self.root_path)
+        for folder in ("flows", "outbound_campaigns"):
+            folder_path = os.path.join(self.root_path, folder)
+            if os.path.exists(folder_path):
+                self._delete_empty_folders(folder_path)
 
         # Save the updated project configuration
         self.resources = incoming_resources
@@ -783,6 +795,47 @@ class AgentStudioProject:
             for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
         }
 
+    def _follow_moved_multi_resources(
+        self, original_resources: ResourceMap, incoming_resources: ResourceMap
+    ) -> tuple[ResourceMap, dict[tuple[type[Resource], str], Resource]]:
+        """Find saved multi-resource entries that moved to a file not yet on disk.
+
+        Returns:
+            The original resources with each moved entry placed where it now lives, so it
+            merges there, and each moved entry as it was saved, by type and id.
+        """
+        moved: dict[tuple[type[Resource], str], Resource] = {}
+        followed = dict(original_resources)
+        for resource_type, originals in original_resources.items():
+            if not issubclass(resource_type, MultiResourceYamlResource):
+                continue
+            incoming = incoming_resources.get(resource_type) or {}
+            for resource_id, original in originals.items():
+                if resource_id not in incoming:
+                    continue
+                old_file = _parse_multi_resource_path(original.get_path(self.root_path))[0]
+                new_file = _parse_multi_resource_path(
+                    incoming[resource_id].get_path(self.root_path)
+                )[0]
+                relocated = original.moved_to(incoming[resource_id])
+                if (
+                    old_file == new_file
+                    or relocated is None
+                    or not os.path.isfile(old_file)
+                    or os.path.exists(new_file)
+                ):
+                    continue
+                moved[(resource_type, resource_id)] = original
+                followed[resource_type] = {**followed[resource_type], resource_id: relocated}
+        return followed, moved
+
+    @staticmethod
+    def _write_yaml_or_remove(file: str, data: dict) -> None:
+        if data:
+            MultiResourceYamlResource.save_to_file(resource_utils.dump_yaml(data), file)
+        elif os.path.exists(file):
+            os.remove(file)
+
     def _update_multi_resource_yaml_resources(
         self,
         original_resources: ResourceMap,
@@ -794,6 +847,7 @@ class AgentStudioProject:
         on_save: Callable[[int, int], None] | None = None,
         progress_offset: int = 0,
         progress_total: int = 0,
+        moved: Optional[dict[tuple[type[Resource], str], Resource]] = None,
     ) -> tuple[list[str], int]:
         """Merge MultiResourceYaml resources when pulling
 
@@ -802,8 +856,13 @@ class AgentStudioProject:
         - From the incoming resources
         - From what's currently on disk (read + applying formatting)
         Then perform the merge with that and the current file contents.
+
+        `moved` holds, by type and id, the saved entries that moved to another file upstream.
+        Their local version is read from the old file, so local edits move with them.
         """
         files_with_conflicts = []
+        moved = moved or {}
+        moved_from: set[str] = set()
 
         # Merge MultiResourceYaml:
         # Compute original file data
@@ -897,11 +956,17 @@ class AgentStudioProject:
                     continue
                 for resource in resources.values():
                     try:
-                        mapping = self._make_resource_mapping(resource)
+                        old = moved.get((resource_type, resource.resource_id))
+                        mapping = self._make_resource_mapping(old or resource)
                         local_resource = self.read_local_resource(
                             resource=mapping,
                             resource_mappings=incoming_resource_mappings,
                         )
+                        if old is not None:
+                            local_resource = local_resource.moved_to(resource)
+                            old_path = old.get_path(self.root_path)
+                            resource_type.delete_resource(old_path, save_to_cache=True)
+                            moved_from.add(_parse_multi_resource_path(old_path)[0])
                         local_resource.save(
                             self.root_path,
                             resource_name=local_resource.name,
@@ -941,6 +1006,8 @@ class AgentStudioProject:
                     original_data is not None
                     and resource_utils.same_yaml_data(original_data, incoming_data)
                 ):
+                    if file in moved_from:
+                        self._write_yaml_or_remove(file, local_data)
                     continue
                 # Only incoming changed: take incoming
                 if original_data is not None and resource_utils.same_yaml_data(
@@ -965,7 +1032,7 @@ class AgentStudioProject:
                 os.remove(file)
                 continue
 
-            if merged_contents == local_content:
+            if merged_contents == local_content and file not in moved_from:
                 continue
 
             if resource_utils.contains_merge_conflict(merged_contents):
@@ -996,6 +1063,39 @@ class AgentStudioProject:
 
         return files_with_conflicts, progress_offset
 
+    def _warn_reused_campaign_folders(self, incoming_resources: ResourceMap) -> None:
+        saved = {
+            campaign.folder: campaign
+            for campaign in self.resources.get(OutboundCampaign, {}).values()
+        }
+        reused = [
+            (folder, saved[folder], campaign)
+            for campaign in incoming_resources.get(OutboundCampaign, {}).values()
+            if (folder := campaign.folder) in saved
+            and saved[folder].resource_id != campaign.resource_id
+        ]
+        if not reused:
+            return
+        _, modified, new, deleted = self.project_status()
+        changed = [
+            os.path.relpath(path, self.root_path).replace(os.sep, "/")
+            for path in modified + new + deleted
+        ]
+        for folder, before, after in reused:
+            if not any(path.startswith(f"outbound_campaigns/{folder}/") for path in changed):
+                continue
+            known = self.resources[OutboundCampaign].get(after.resource_id)
+            source = (
+                f"'{known.name}' was renamed to '{after.name}'"
+                if known
+                else f"'{after.name}' was created"
+            )
+            logger.warning(
+                f"outbound_campaigns/{folder} now holds a different campaign: {source} in "
+                f"Agent Studio. Edits made here to '{before.name}' before this pull now apply "
+                "to it: check them before pushing."
+            )
+
     def _update_pulled_resources(
         self,
         original_resources: ResourceMap,
@@ -1020,6 +1120,11 @@ class AgentStudioProject:
             return []
 
         files_with_conflicts = []
+        moved: dict[tuple[type[Resource], str], Resource] = {}
+        if not force:
+            original_resources, moved = self._follow_moved_multi_resources(
+                original_resources, incoming_resources
+            )
 
         # Generate resource mappings
         incoming_resource_mappings: list[ResourceMapping] = (
@@ -1047,6 +1152,7 @@ class AgentStudioProject:
             on_save=on_save,
             progress_offset=0,
             progress_total=total,
+            moved=moved,
         )
 
         files_with_conflicts.extend(multi_conflicts)
@@ -1252,6 +1358,7 @@ class AgentStudioProject:
             updated_resources,
             new_state,
         )
+        self._assign_campaign_positions(new_state, new_resources, post_changes.new)
 
         # Queue new/updated/deleted resources
         commands = self.api_handler.get_queued_commands()
@@ -1459,7 +1566,10 @@ class AgentStudioProject:
         # 4. Validate all resources with new state
         if not skip_validation:
             validation_errors = self.validate_resources(
-                resources_dict=new_state, resource_mappings=resource_mappings
+                resources_dict=new_state,
+                resource_mappings=resource_mappings,
+                new_resources=new_resources,
+                deleted_resources=deleted_resources,
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
@@ -1495,6 +1605,22 @@ class AgentStudioProject:
             self.save_config()
 
         return True, "Resources pushed successfully.", commands
+
+    @staticmethod
+    def _assign_campaign_positions(new_state: ResourceMap, *new_resources: ResourceMap) -> None:
+        """Lay out the new nodes of each campaign around the nodes it already has."""
+        campaign_ids = {
+            node.campaign_id
+            for changes in new_resources
+            for node in changes.get(OutboundCampaignNode, {}).values()
+        }
+        for campaign_id in campaign_ids:
+            nodes = [
+                node
+                for node in new_state.get(OutboundCampaignNode, {}).values()
+                if node.campaign_id == campaign_id
+            ]
+            resource_utils.assign_campaign_positions(nodes, lambda node: route_targets(node.data))
 
     @staticmethod
     def _assign_flow_positions(
@@ -1663,6 +1789,14 @@ class AgentStudioProject:
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
         prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
+        prepush.group_outbound_campaign_changes(
+            state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            pre_push_updated_resources,
+            pre_push_deleted_resources,
+        )
         prepush.fix_orphaned_variables(
             state,
             new_resources,
@@ -2323,6 +2457,35 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == OutboundCampaign:
+            saved_campaign = (
+                original_resource if isinstance(original_resource, OutboundCampaign) else None
+            )
+            additional_kwargs["known_identity"] = (
+                saved_campaign.identity if saved_campaign else None
+            )
+            additional_kwargs["known_status"] = saved_campaign.status if saved_campaign else None
+            additional_kwargs["known_settings"] = (
+                saved_campaign.settings if saved_campaign else None
+            )
+            additional_kwargs["had_trigger"] = any(
+                node.campaign_id == resource.resource_id and node.data.get("type") == "trigger"
+                for node in self.resources.get(OutboundCampaignNode, {}).values()
+            )
+
+        if resource_class == OutboundCampaignNode:
+            saved_node = (
+                original_resource if isinstance(original_resource, OutboundCampaignNode) else None
+            )
+            additional_kwargs["known_position"] = saved_node.position if saved_node else None
+            additional_kwargs["known_type"] = saved_node.data.get("type") if saved_node else None
+            additional_kwargs["known_label"] = saved_node.platform_name if saved_node else None
+            additional_kwargs["known_data"] = saved_node.data if saved_node else None
+            additional_kwargs["known_code"] = saved_node.code if saved_node else None
+            additional_kwargs["known_published"] = bool(
+                saved_node and saved_node.campaign_published
+            )
+
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):
                 raise TypeError(f"Original resource is not an MCPServer: {original_resource}")
@@ -2422,6 +2585,21 @@ class AgentStudioProject:
                     parent_flow.resource_id if parent_flow else self.generate_uuid(FlowConfig)
                 )
 
+        node_types: dict[str, Optional[str]] = {}
+        campaign_folders_to_ids = {
+            campaign.folder: campaign_id
+            for campaign_id, campaign in self.resources.get(OutboundCampaign, {}).items()
+        }
+        for campaign_path in discovered_resources.get(OutboundCampaign, []):
+            folder = campaign_folder_of(campaign_path)
+            if folder not in campaign_folders_to_ids:
+                parent_campaign = parent_lookup.get(campaign_path)
+                campaign_folders_to_ids[folder] = (
+                    parent_campaign.resource_id
+                    if parent_campaign
+                    else self.generate_uuid(OutboundCampaign)
+                )
+
         if not self.file_structure_info:
             self.file_structure_info = self.compute_file_structure_info(self.resources)
 
@@ -2480,6 +2658,8 @@ class AgentStudioProject:
                         resource_mappings=[],
                     )
                     resource_name = resource.name
+                    if isinstance(resource, OutboundCampaignNode):
+                        node_types[file_path] = resource.data.get("type")
 
                 if file_path in known_files:
                     resource_info = self.file_structure_info.get(
@@ -2522,6 +2702,16 @@ class AgentStudioProject:
                         resource_id = flow_id
                     elif resource_type == Document:
                         resource_id = os.path.basename(file_path).upper()
+                    elif resource_type == OutboundCampaign:
+                        resource_id = campaign_folders_to_ids[campaign_folder_of(file_path)]
+                    elif resource_type == OutboundCampaignNode:
+                        campaign_id = campaign_folders_to_ids.get(campaign_folder_of(file_path), "")
+                        node_id = (
+                            parent_resource.node_id
+                            if isinstance(parent_resource, OutboundCampaignNode)
+                            else f"{resource.data.get('type') or 'node'}-{uuid.uuid4()}"
+                        )
+                        resource_id = f"{campaign_id}:{node_id}"
                     elif parent_resource:
                         resource_id = parent_resource.resource_id
                     else:
@@ -2575,7 +2765,120 @@ class AgentStudioProject:
             )
             deleted_resource_mappings.append(resource_mapping)
 
+        self._keep_campaign_trigger_ids(
+            node_types, new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
+        )
+        self._key_campaign_functions(
+            new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
+        )
         return new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
+
+    def _keep_campaign_trigger_ids(
+        self,
+        node_types: dict[str, Optional[str]],
+        new_resource_mappings: list[ResourceMapping],
+        kept_resource_mappings: list[ResourceMapping],
+        deleted_resource_mappings: list[ResourceMapping],
+    ) -> None:
+        """Give a campaign's trigger the saved trigger's id, whatever its name.
+
+        A campaign has at most one trigger, so a new trigger in place of the saved one is the
+        same node, renamed or replaced. A node that becomes the trigger hands its own id to a
+        delete, and a node left at the old trigger's name is created anew.
+        """
+        saved = self.resources.get(OutboundCampaignNode, {})
+
+        def campaign_of(mapping: ResourceMapping) -> str:
+            return mapping.resource_id.split(":", 1)[0]
+
+        def saved_trigger(mapping: ResourceMapping) -> bool:
+            node = saved.get(mapping.resource_id)
+            return mapping.resource_type is OutboundCampaignNode and bool(node and node.is_trigger)
+
+        sources: dict[str, list[ResourceMapping]] = {}
+        candidates: dict[str, list[ResourceMapping]] = {}
+        for mapping in deleted_resource_mappings:
+            if saved_trigger(mapping):
+                sources.setdefault(campaign_of(mapping), []).append(mapping)
+        for mapping in new_resource_mappings + kept_resource_mappings:
+            is_trigger = node_types.get(mapping.file_path, "") == "trigger"
+            if is_trigger and not saved_trigger(mapping):
+                candidates.setdefault(campaign_of(mapping), []).append(mapping)
+            elif not is_trigger and mapping.file_path in node_types and saved_trigger(mapping):
+                sources.setdefault(campaign_of(mapping), []).append(mapping)
+        for campaign_id, mappings in candidates.items():
+            triggers = sources.get(campaign_id, [])
+            if len(mappings) != 1 or not triggers:
+                continue
+            [mapping] = mappings
+            source = next(
+                (m for m in triggers if saved[m.resource_id].name == mapping.resource_name),
+                triggers[0],
+            )
+            trigger_id = source.resource_id
+            if source in deleted_resource_mappings:
+                deleted_resource_mappings.remove(source)
+            else:
+                kept_resource_mappings.remove(source)
+                node_type = node_types[source.file_path] or "node"
+                source.resource_id = f"{campaign_id}:{node_type}-{uuid.uuid4()}"
+                new_resource_mappings.append(source)
+            if mapping in new_resource_mappings:
+                new_resource_mappings.remove(mapping)
+                kept_resource_mappings.append(mapping)
+            else:
+                deleted_resource_mappings.append(replace(mapping))
+            mapping.resource_id = trigger_id
+
+    def _key_campaign_functions(
+        self,
+        new_resource_mappings: list[ResourceMapping],
+        kept_resource_mappings: list[ResourceMapping],
+        deleted_resource_mappings: list[ResourceMapping],
+    ) -> None:
+        """Give each campaign function file its node's id, as pull does.
+
+        A file keyed by its node can change id when its node does, as when a new node takes
+        a renamed trigger's old name, so each file is sorted again into new, kept or deleted.
+        """
+        node_ids = {
+            (campaign_folder_of(mapping.file_path), function_file_stem(mapping.resource_name)): (
+                mapping.resource_id
+            )
+            for mapping in new_resource_mappings + kept_resource_mappings
+            if mapping.resource_type is OutboundCampaignNode
+        }
+        saved = self.resources.get(OutboundCampaignFunction, {})
+        functions = [
+            mapping
+            for mapping in new_resource_mappings + kept_resource_mappings
+            if mapping.resource_type is OutboundCampaignFunction
+        ]
+        before = {mapping.resource_id: replace(mapping) for mapping in functions}
+        for mapping in functions:
+            for mappings in (new_resource_mappings, kept_resource_mappings):
+                if mapping in mappings:
+                    mappings.remove(mapping)
+            mapping.resource_id = node_ids.get(
+                (campaign_folder_of(mapping.file_path), mapping.resource_name),
+                mapping.resource_id,
+            )
+            (
+                kept_resource_mappings if mapping.resource_id in saved else new_resource_mappings
+            ).append(mapping)
+        taken = {mapping.resource_id for mapping in functions}
+        deleted_resource_mappings[:] = [
+            mapping
+            for mapping in deleted_resource_mappings
+            if mapping.resource_type is not OutboundCampaignFunction
+            or mapping.resource_id not in taken
+        ]
+        deleted = {mapping.resource_id for mapping in deleted_resource_mappings}
+        deleted_resource_mappings.extend(
+            mapping
+            for resource_id, mapping in before.items()
+            if resource_id in saved and resource_id not in taken | deleted
+        )
 
     @staticmethod
     def generate_uuid(resource_type: type[Resource]) -> str:
@@ -3092,8 +3395,8 @@ class AgentStudioProject:
             list[str]: A list of validation error messages.
         """
         # Read local resources
-        new_resource_mappings, kept_resource_mappings, _ = self.find_new_kept_deleted(
-            self.discover_local_resources()
+        new_resource_mappings, kept_resource_mappings, deleted_resource_mappings = (
+            self.find_new_kept_deleted(self.discover_local_resources())
         )
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
 
@@ -3109,22 +3412,50 @@ class AgentStudioProject:
                 resource_mapping.resource_id
             ] = local_resource
 
+        new_resources: ResourceMap = {}
+        for mapping in new_resource_mappings:
+            new_resources.setdefault(mapping.resource_type, {})[mapping.resource_id] = resources[
+                mapping.resource_type
+            ][mapping.resource_id]
+        deleted_resources: ResourceMap = {}
+        for mapping in deleted_resource_mappings:
+            saved = self.resources.get(mapping.resource_type, {}).get(mapping.resource_id)
+            if saved is not None:
+                deleted_resources.setdefault(mapping.resource_type, {})[mapping.resource_id] = saved
+
         return self.validate_resources(
             resources_dict=resources,
             resource_mappings=resource_mappings,
+            new_resources=new_resources,
+            deleted_resources=deleted_resources,
         )
 
     @staticmethod
     def validate_resources(
         resources_dict: ResourceMap,
         resource_mappings: list[ResourceMapping],
+        new_resources: Optional[ResourceMap] = None,
+        deleted_resources: Optional[ResourceMap] = None,
     ) -> list[str]:
         """Validate all resources in the project.
+
+        Args:
+            resources_dict: Every local resource, by type and id.
+            resource_mappings: The mappings to resolve references with.
+            new_resources: The resources the push would create, to check deletes against.
+            deleted_resources: The saved resources the push would delete.
 
         Returns:
             list[str]: A list of validation error messages.
         """
-        validation_errors = []
+        validation_errors = [
+            f"Validation error: {error}"
+            for resource_type in {**(new_resources or {}), **(deleted_resources or {})}
+            if issubclass(resource_type, Resource)
+            for error in resource_type.validate_creates_and_deletes(
+                new_resources or {}, deleted_resources or {}
+            )
+        ]
         for resource_type, resources in resources_dict.items():
             for resource_id, resource in resources.items():
                 try:

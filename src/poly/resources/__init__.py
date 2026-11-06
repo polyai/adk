@@ -55,6 +55,12 @@ from poly.resources.handoff import (
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage
 from poly.resources.mcp import MCPAuth, MCPOAuth, MCPServer
+from poly.resources.outbound_campaign import (
+    OutboundCampaign,
+    OutboundCampaignFunction,
+    OutboundCampaignNode,
+    OutboundCampaignSettings,
+)
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (

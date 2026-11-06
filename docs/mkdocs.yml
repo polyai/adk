@@ -157,6 +157,7 @@ nav:
           - Topics: reference/resources/topics.md
           - Functions: reference/resources/functions.md
           - Flows: reference/resources/flows.md
+          - Outbound campaigns: reference/resources/outbound_campaigns.md
           - API integrations: reference/resources/api_integrations.md
           - MCP servers: reference/resources/mcp.md
           - Entities: reference/resources/entities.md

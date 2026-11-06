@@ -778,6 +778,39 @@ def clean_name(name: str, lowercase: bool = True) -> str:
     return name
 
 
+def drop_unset(values: dict) -> dict:
+    """Drop keys whose value is None, so unset optional fields don't surface as nulls."""
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def resource_name_for_id(
+    resource_id: str, resource_type: type, resource_mappings: Optional[list["ResourceMapping"]]
+) -> Optional[str]:
+    """Return the name of the `resource_type` resource with `resource_id`, or None if unknown."""
+    return next(
+        (
+            mapping.resource_name
+            for mapping in resource_mappings or []
+            if mapping.resource_type == resource_type and mapping.resource_id == resource_id
+        ),
+        None,
+    )
+
+
+def resource_id_for_name(
+    resource_name: str, resource_type: type, resource_mappings: Optional[list["ResourceMapping"]]
+) -> Optional[str]:
+    """Return the id of the `resource_type` resource named `resource_name`, or None if unknown."""
+    return next(
+        (
+            mapping.resource_id
+            for mapping in resource_mappings or []
+            if mapping.resource_type == resource_type and mapping.resource_name == resource_name
+        ),
+        None,
+    )
+
+
 def to_camel_case(s: str) -> str:
     """Convert a string to camelCase from snake_case"""
     word = "".join(word.capitalize() for word in s.split("_"))
@@ -1081,6 +1114,57 @@ _WEBCHAT_CONFIG_TYPES: list[str] = [
     "ChatSafetyFilters",
     "ChatStylePrompt",
 ]
+
+
+def assign_campaign_positions(
+    nodes: list,
+    targets: Callable[[object], list[str]],
+    x_gap: float = 400.0,
+    y_gap: float = 200.0,
+) -> None:
+    """Give every campaign node without a `position` one, keeping the positions already set.
+
+    A node is placed `x_gap` to the right of the first placed node that routes to it, one
+    `y_gap` lower for each sibling already placed there. A node nothing placed routes to goes
+    to the right of everything placed so far. Nodes are visited from the trigger along routes,
+    so parents are placed before their children.
+
+    Args:
+        nodes: Objects with `node_id`, `position` (a `{x, y}` dict or None) and `data`.
+        targets: Returns the node ids a node routes to.
+    """
+    by_id = {node.node_id: node for node in nodes}
+    order: list = []
+    queue = [node for node in nodes if (node.data or {}).get("type") == "trigger"]
+    queue += [node for node in nodes if node not in queue]
+    while queue:
+        node = queue.pop(0)
+        if node in order:
+            continue
+        order.append(node)
+        queue[:0] = [by_id[target] for target in targets(node) if target in by_id]
+
+    parents: dict[str, str] = {}
+    for node in order:
+        for target in targets(node):
+            parents.setdefault(target, node.node_id)
+
+    children_placed: dict[str, int] = {}
+    placed_x = [node.position["x"] for node in nodes if node.position]
+    for node in order:
+        if node.position:
+            continue
+        parent = by_id.get(parents.get(node.node_id, ""))
+        if parent is not None and parent.position:
+            count = children_placed.get(parent.node_id, 0)
+            children_placed[parent.node_id] = count + 1
+            node.position = {
+                "x": float(parent.position["x"] + x_gap),
+                "y": float(parent.position["y"] + count * y_gap),
+            }
+        else:
+            node.position = {"x": float(max(placed_x) + x_gap) if placed_x else 0.0, "y": 0.0}
+        placed_x.append(node.position["x"])
 
 
 def validate_webchat_siblings(
