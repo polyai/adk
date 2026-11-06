@@ -199,6 +199,11 @@ class SMSTemplate(MultiResourceYamlResource):
             active=True,
         )
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Template references in the message text."""
+        return utils.template_references(self.text)
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if not self.name:
             raise ValueError("Name is required")

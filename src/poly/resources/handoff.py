@@ -238,6 +238,11 @@ class Handoff(MultiResourceYamlResource):
             active=True,
         )
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Handoffs reference nothing else in the project."""
+        return set()
+
     def validate(self, **kwargs) -> None:
         if not self.name:
             raise ValueError("Handoff name is required")

@@ -175,6 +175,11 @@ class Entity(MultiResourceYamlResource):
             config=yaml_data.get("config", {}),
         )
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Entities reference nothing else in the project."""
+        return set()
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         """Validate the topic resource."""
         # Validate config fields based on entity type

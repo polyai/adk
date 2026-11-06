@@ -48,6 +48,11 @@ class Document(Resource):
         """Replace resource names with resource IDs in the provided contents."""
         return contents
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Documents reference nothing else in the project."""
+        return set()
+
     def validate(self, **kwargs) -> None:
         """Validate the resource."""
         if self.path.upper() == PLATFORM_CONTEXT_FILE and self.path != PLATFORM_CONTEXT_FILE:

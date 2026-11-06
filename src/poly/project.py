@@ -10,8 +10,9 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
@@ -53,6 +54,7 @@ from poly.resources import (
     TestCase,
     Topic,
 )
+from poly.resources.references import KnownIds
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
     RESOURCE_NAME_TO_CLASS,
@@ -126,8 +128,8 @@ class AgentStudioProject:
     account_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
-    # Files a full comparison found unchanged, so status can skip reading them again while
-    # nothing else that affects reading them changes. See _unchanged_files.
+    # Fingerprints of files the ADK last wrote from, or read into, their saved resources.
+    # See _record_fingerprints and _unchanged_files.
     file_fingerprints: dict[str, Any] = field(default_factory=dict)
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
@@ -256,7 +258,9 @@ class AgentStudioProject:
             root_path=root_path,
             last_updated=last_updated,
             file_structure_info=file_structure_info,
-            file_fingerprints=status_dict.get("file_fingerprints") or {},
+            file_fingerprints=cls._saved_file_fingerprints(
+                status_dict, migrated=migration_flags != loaded_flags
+            ),
             slim_resources=slim_resources,
             branch_id=status_dict.get("branch_id", "main"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
@@ -312,7 +316,9 @@ class AgentStudioProject:
             root_path=root_path,
             last_updated=datetime.fromisoformat(data.get("last_updated", "1970-01-01T00:00:00")),
             file_structure_info=file_structure_info,
-            file_fingerprints=data.get("file_fingerprints") or {},
+            file_fingerprints=cls._saved_file_fingerprints(
+                data, migrated=migration_flags != loaded_flags
+            ),
             branch_id=data.get("branch_id", "main"),
             project_name=data.get("project_name"),
             account_name=data.get("account_name"),
@@ -330,98 +336,182 @@ class AgentStudioProject:
             return path[len(root_prefix) :]
         return os.path.relpath(path, self.root_path)
 
-    def _fingerprint_key(
-        self, new_mappings: list[ResourceMapping], kept_mappings: list[ResourceMapping]
+    def _file_bytes_hash(
+        self, rel_path: str, resource_type: type[Resource], cache: dict[str, str]
     ) -> str:
-        """Digest of the ADK version and every resource mapping, which references resolve against.
+        """SHA-256 of the file holding a resource, read once per file. Empty if it's missing."""
+        path = os.path.join(self.root_path, rel_path)
+        if issubclass(resource_type, MultiResourceYamlResource):
+            path = _parse_multi_resource_path(path)[0]
+        if path not in cache:
+            try:
+                with open(path, "rb") as f:
+                    cache[path] = hashlib.sha256(f.read()).hexdigest()
+            except OSError:
+                cache[path] = ""
+        return cache[path]
 
-        New resources get a fresh ID on every run, so only their type, name and path count.
+    def _fingerprint(
+        self,
+        resource: Resource,
+        rel_path: str,
+        known: KnownIds,
+        bytes_hashes: dict[str, str],
+        bytes_hash: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """The fingerprint recording that a file with these bytes means `resource`.
+
+        `bytes_hash` defaults to the file's current bytes. None when it can't be recorded: the
+        type doesn't declare its references, or the resource has no saved hash or no file.
         """
-        rows = []
-        for mapping, keep_ids in (
-            *((m, True) for m in kept_mappings),
-            *((m, True) for m in self.slim_resources),
-            *((m, False) for m in new_mappings),
-        ):
-            values = (
-                mapping.resource_type.__name__,
-                mapping.resource_name,
-                mapping.flow_name,
-                mapping.resource_prefix,
-                mapping.file_path and self._relative_path(mapping.file_path),
-                mapping.resource_id if keep_ids else "",
-                mapping.flow_id if keep_ids else "",
-            )
-            rows.append("\0".join(str(value or "") for value in values))
-        digest = hashlib.sha256(ADK_VERSION.encode("utf-8"))
-        digest.update("\n".join(sorted(rows)).encode("utf-8"))
-        return digest.hexdigest()
+        references = resource.refers_to
+        saved_hash = self.file_structure_info.get(rel_path, {}).get("hash")
+        if references is None or not saved_hash:
+            return None
+        bytes_hash = bytes_hash or self._file_bytes_hash(rel_path, type(resource), bytes_hashes)
+        if not bytes_hash:
+            return None
+        refs, unresolved = set(), set()
+        for kind, value in references:
+            ids, resolved = known.resolve(kind, value)
+            if resolved:
+                refs.update((kind, resource_id) for resource_id in ids)
+            else:
+                unresolved.add((kind, value))
+        return {
+            "bytes": bytes_hash,
+            "saved": saved_hash,
+            "refs": sorted(list(ref) for ref in refs),
+            "unresolved": sorted(list(ref) for ref in unresolved),
+        }
+
+    def _record_fingerprints(self) -> None:
+        """Record every file's current bytes as meaning its saved resource.
+
+        Call only when that's true by construction: at the end of a push, whose saved resources
+        were just read from these files. Types that don't declare their references aren't
+        recorded, so they're always read.
+        """
+        known = KnownIds.from_mappings(
+            self._make_resource_mappings(self.resources) + self.slim_resources
+        )
+        files: dict[str, dict[str, Any]] = {}
+        bytes_hashes: dict[str, str] = {}
+        for resources in self.resources.values():
+            for resource in resources.values():
+                if fingerprint := self._fingerprint(
+                    resource, resource.file_path, known, bytes_hashes
+                ):
+                    files[resource.file_path] = fingerprint
+        self.file_fingerprints = {"files": files}
+
+    def _record_pulled_fingerprints(self, format: bool = False) -> None:
+        """Record, for every saved resource, the bytes a pull writes for it.
+
+        A file with exactly those bytes means its saved resource. One with local edits, merged
+        or kept by a merge pull, has other bytes, so it's read as before. Fingerprints whose
+        saved resource hasn't changed are kept. The rest are recomputed by rendering their files
+        through the same write code into a scratch directory, so nothing local is read.
+        """
+        recorded = self.file_fingerprints.get("files", {})
+        stale_files: set[str] = set()
+        rendered: dict[str, str] = {}
+        for resource in self._all_saved_resources():
+            rel_path = resource.file_path
+            fingerprint = recorded.get(rel_path)
+            saved_hash = self.file_structure_info.get(rel_path, {}).get("hash")
+            if not isinstance(fingerprint, dict) or fingerprint.get("saved") != saved_hash:
+                stale_files.add(self._real_rel_path(rel_path, type(resource)))
+        if stale_files:
+            rendered = self._rendered_bytes_hashes(stale_files, format=format)
+        known = KnownIds.from_mappings(
+            self._make_resource_mappings(self.resources) + self.slim_resources
+        )
+        files: dict[str, dict[str, Any]] = {}
+        for resource in self._all_saved_resources():
+            rel_path = resource.file_path
+            real_path = self._real_rel_path(rel_path, type(resource))
+            if real_path not in stale_files:
+                if rel_path in recorded:
+                    files[rel_path] = recorded[rel_path]
+                continue
+            if rendered.get(real_path) and (
+                fingerprint := self._fingerprint(resource, rel_path, known, {}, rendered[real_path])
+            ):
+                files[rel_path] = fingerprint
+        self.file_fingerprints = {"files": files}
+
+    def _all_saved_resources(self) -> Iterator[Resource]:
+        for resources in self.resources.values():
+            yield from resources.values()
+
+    @staticmethod
+    def _real_rel_path(rel_path: str, resource_type: type[Resource]) -> str:
+        """The file a resource lives in: multi-resource paths name a part of a YAML file."""
+        if issubclass(resource_type, MultiResourceYamlResource):
+            return _parse_multi_resource_path(rel_path)[0]
+        return rel_path
+
+    def _rendered_bytes_hashes(self, real_paths: set[str], format: bool = False) -> dict[str, str]:
+        """SHA-256 of each file as a pull writes it from the saved resources, by relative path."""
+        mappings = self._make_resource_mappings(self.resources) + self.slim_resources
+        MultiResourceYamlResource._file_cache.clear()
+        try:
+            with tempfile.TemporaryDirectory() as scratch:
+                for resource in self._all_saved_resources():
+                    if self._real_rel_path(resource.file_path, type(resource)) not in real_paths:
+                        continue
+                    resource.save(
+                        scratch,
+                        resource_name=resource.name,
+                        resource_mappings=mappings,
+                        format=format,
+                        save_to_cache=isinstance(resource, MultiResourceYamlResource),
+                    )
+                MultiResourceYamlResource.write_cache_to_file()
+                hashes = {}
+                for real_path in real_paths:
+                    try:
+                        with open(os.path.join(scratch, real_path), "rb") as f:
+                            hashes[real_path] = hashlib.sha256(f.read()).hexdigest()
+                    except OSError:
+                        continue
+                return hashes
+        finally:
+            MultiResourceYamlResource._file_cache.clear()
 
     def _unchanged_files(
         self, new_mappings: list[ResourceMapping], kept_mappings: list[ResourceMapping]
-    ) -> tuple[str, dict[str, list[str]], set[str]]:
-        """Fingerprint the kept files and find those already known to be unchanged.
+    ) -> set[str]:
+        """Kept files that still mean exactly their saved resource, so needn't be read.
 
-        A full comparison that finds a file matches its saved resource records its
-        fingerprint: the hash of its bytes and the saved hash it was compared with. The file
-        is then known to be unchanged, without being read, while its fingerprint and a key
-        covering everything else that affects reading it (see _fingerprint_key) still match.
+        A file qualifies when its bytes and its saved hash are as recorded, every ID its saved
+        resource references still exists, and no name it couldn't resolve now does.
 
         Returns:
-            The key, each kept file's fingerprint by relative path, and the relative paths
-            known to be unchanged. Callers add the files their own comparison finds unchanged,
-            then pass all three to _save_unchanged_files.
+            Their paths, relative to the project root.
         """
-        key = self._fingerprint_key(new_mappings, kept_mappings)
-        trusted = {}
-        if self.file_fingerprints.get("key") == key:
-            trusted = self.file_fingerprints.get("files", {})
-        fingerprints: dict[str, list[str]] = {}
+        known = KnownIds.from_mappings([*new_mappings, *kept_mappings, *self.slim_resources])
+        recorded = self.file_fingerprints.get("files", {})
         unchanged: set[str] = set()
         bytes_hashes: dict[str, str] = {}
         for mapping in kept_mappings:
             rel_path = self._relative_path(mapping.file_path)
-            original_hash = self.file_structure_info.get(rel_path, {}).get("hash")
-            if not original_hash:
+            fingerprint = recorded.get(rel_path)
+            if not isinstance(fingerprint, dict):
                 continue
-            path = mapping.file_path
-            if issubclass(mapping.resource_type, MultiResourceYamlResource):
-                path = _parse_multi_resource_path(path)[0]
-            if path not in bytes_hashes:
-                try:
-                    with open(path, "rb") as f:
-                        bytes_hashes[path] = hashlib.sha256(f.read()).hexdigest()
-                except OSError:
-                    bytes_hashes[path] = ""
-            fingerprints[rel_path] = [bytes_hashes[path], original_hash]
-            if trusted.get(rel_path) == fingerprints[rel_path]:
-                unchanged.add(rel_path)
-        return key, fingerprints, unchanged
-
-    def _save_unchanged_files(
-        self, key: str, fingerprints: dict[str, list[str]], unchanged: set[str]
-    ) -> None:
-        """Save the fingerprints of the files known to be unchanged."""
-        files = {path: fingerprints[path] for path in sorted(unchanged) if path in fingerprints}
-        self._save_file_fingerprints({"key": key, "files": files})
-
-    def _save_file_fingerprints(self, fingerprints: dict[str, Any]) -> None:
-        """Write `fingerprints` to the status file if they changed, leaving the rest of it.
-
-        Unlike save_config, this doesn't write the in-memory resources or change the last
-        pulled time, so status can call it.
-        """
-        if fingerprints == self.file_fingerprints:
-            return
-        self.file_fingerprints = fingerprints
-        status_file_path = os.path.join(self.root_path, STATUS_FILE)
-        if not os.path.exists(status_file_path):
-            return
-        with open(status_file_path, "rb") as f:
-            status_dict = json.loads(base64.b64decode(f.read()).decode("utf-8"))
-        status_dict["file_fingerprints"] = fingerprints
-        with open(status_file_path, "wb") as f:
-            f.write(base64.b64encode(json.dumps(status_dict).encode("utf-8")))
+            if fingerprint["saved"] != self.file_structure_info.get(rel_path, {}).get("hash"):
+                continue
+            if fingerprint["bytes"] != self._file_bytes_hash(
+                rel_path, mapping.resource_type, bytes_hashes
+            ):
+                continue
+            if not all(known.exists(kind, value) for kind, value in fingerprint["refs"]):
+                continue
+            if any(known.name_exists(kind, value) for kind, value in fingerprint["unresolved"]):
+                continue
+            unchanged.add(rel_path)
+        return unchanged
 
     @staticmethod
     def _saved_file_structure_info(
@@ -447,6 +537,17 @@ class AgentStudioProject:
         if len(saved_ids) != len(loaded) or set(saved_ids) != loaded:
             return {}
         return saved
+
+    @staticmethod
+    def _saved_file_fingerprints(status_dict: dict, migrated: bool) -> dict[str, Any]:
+        """Return the fingerprints saved in the status file, if this ADK version wrote them.
+
+        Another version may read the same bytes into a different resource, and a migration on
+        this load may have changed the files, so in either case this returns {}.
+        """
+        if migrated or status_dict.get("adk_version") != ADK_VERSION:
+            return {}
+        return status_dict.get("file_fingerprints") or {}
 
     @staticmethod
     def compute_file_structure_info(
@@ -774,6 +875,7 @@ class AgentStudioProject:
         # Delete all new resources
         if force:
             self._delete_new_resources()
+        self._record_pulled_fingerprints(format=format)
 
         utils.export_decorators(DECORATORS, self.root_path)
         utils.save_imports(self.root_path)
@@ -1524,7 +1626,7 @@ class AgentStudioProject:
         # 2. Read all new/kept resources from disk. A file known to be unchanged reads to its
         # saved resource, so that is used instead.
         new_state: ResourceMap = {}
-        _, _, unchanged = self._unchanged_files(new_resource_mappings, kept_resource_mappings)
+        unchanged = self._unchanged_files(new_resource_mappings, kept_resource_mappings)
 
         new_file_paths = {rm.file_path for rm in new_resource_mappings}
         for resource_mapping in local_resource_mappings:
@@ -1641,6 +1743,7 @@ class AgentStudioProject:
         else:
             self.resources = new_state
             self.file_structure_info = self.compute_file_structure_info(self.resources)
+            self._record_fingerprints()
             self.save_config()
 
         return True, "Resources pushed successfully.", commands
@@ -1900,9 +2003,7 @@ class AgentStudioProject:
         local_resources_mappings = new_resources_mappings + kept_resources_mappings
         local_resources_mappings.extend(self.slim_resources)
 
-        key, fingerprints, unchanged = self._unchanged_files(
-            new_resources_mappings, kept_resources_mappings
-        )
+        unchanged = self._unchanged_files(new_resources_mappings, kept_resources_mappings)
 
         for kept_local_resource_mapping in kept_resources_mappings:
             rel_path = self._relative_path(kept_local_resource_mapping.file_path)
@@ -1922,10 +2023,6 @@ class AgentStudioProject:
             modified = local_resource.is_modified(original_hash)
             if modified:
                 modified_files.append(kept_local_resource_mapping.file_path)
-            else:
-                unchanged.add(rel_path)
-
-        self._save_unchanged_files(key, fingerprints, unchanged)
 
         # dedupe: several resources can share one conflicted multi-resource file
         files_with_conflicts = list(dict.fromkeys(files_with_conflicts))
@@ -1977,9 +2074,7 @@ class AgentStudioProject:
         )
         local_resources_mappings = new_resources_mappings + kept_resources_mappings
         local_resources_mappings.extend(self.slim_resources)
-        key, fingerprints, unchanged = self._unchanged_files(
-            new_resources_mappings, kept_resources_mappings
-        )
+        unchanged = self._unchanged_files(new_resources_mappings, kept_resources_mappings)
 
         for local_resource_mapping in kept_resources_mappings:
             if not all_files and file_paths and local_resource_mapping.file_path not in file_paths:
@@ -2000,7 +2095,6 @@ class AgentStudioProject:
 
             modified = local_resource.is_modified(original_hash)
             if not modified:
-                unchanged.add(rel_path)
                 continue
 
             original_resource = self.resources.get(type(local_resource), {}).get(
@@ -2011,8 +2105,6 @@ class AgentStudioProject:
 
             if diff := original_resource.get_diff(local_resource):
                 diffs[local_resource.file_path] = diff
-
-        self._save_unchanged_files(key, fingerprints, unchanged)
 
         for resource_mapping in new_resources_mappings:
             try:
@@ -3263,7 +3355,7 @@ class AgentStudioProject:
 
         resource_mappings = local_resource_mappings + self.slim_resources
         # A file known to be unchanged reads to its saved resource, so validate that instead.
-        _, _, unchanged = self._unchanged_files(new_resource_mappings, kept_resource_mappings)
+        unchanged = self._unchanged_files(new_resource_mappings, kept_resource_mappings)
 
         resources: ResourceMap = {}
         for resource_mapping in local_resource_mappings:

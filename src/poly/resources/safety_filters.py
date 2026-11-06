@@ -265,6 +265,11 @@ class GeneralSafetyFilters(_BaseSafetyFilters):
 
     _hide_global_enable: ClassVar[bool] = True  # enabled derived from categories
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Safety filters reference nothing else in the project."""
+        return set()
+
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "GeneralSafetyFilters"]:
         """Parse general safety filters from a projection dict."""
@@ -315,6 +320,11 @@ class ChannelSafetyFilters(_BaseSafetyFilters):
 
     channel_type: ClassVar[ChannelType] = ChannelType.VOICE
     channel_subpath: ClassVar[str] = "voice"
+
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Safety filters reference nothing else in the project."""
+        return set()
 
     @property
     def file_path(self) -> str:

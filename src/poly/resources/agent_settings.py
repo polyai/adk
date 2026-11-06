@@ -71,6 +71,11 @@ class SettingsPersona(Resource):
         """Replace resource names with resource IDs in the provided contents."""
         return utils.replace_resource_names_with_ids(contents, resource_mappings or [])
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Template references in the persona."""
+        return utils.template_references(self.content)
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the persona resource."""
         references = utils.get_references_from_prompt(
@@ -189,6 +194,11 @@ class SettingsRules(Resource):
     ) -> str:
         """Replace resource names with resource IDs in the provided contents."""
         return utils.replace_resource_names_with_ids(contents, resource_mappings or [])
+
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Template references in the rules."""
+        return utils.template_references(self.behaviour)
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the rules resource."""

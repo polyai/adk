@@ -143,6 +143,11 @@ class Variable(Resource):
     def build_delete_proto(self) -> Variable_Delete:
         return Variable_Delete(id=self.resource_id)
 
+    @property
+    def refers_to(self) -> None:
+        """Variables have no file of their own: they're found in function code, so always read."""
+        return None
+
     def validate(self, **kwargs) -> None:
         pass
 

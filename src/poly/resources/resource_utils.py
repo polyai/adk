@@ -343,6 +343,17 @@ def get_references_from_prompt(
     return references
 
 
+def template_references(text: str) -> set[tuple[str, str]]:
+    """Every {{prefix:value}} reference in `text`, as (kind, value).
+
+    Reading swaps names for IDs for every kind, not only the kinds a field allows, so this
+    covers them all. The kind is a reference name such as "global_functions". The value is an
+    ID, or a name that didn't resolve.
+    """
+    found = get_references_from_prompt(text)
+    return {(kind, value) for kind, values in found.items() for value in values}
+
+
 def validate_references(
     references: dict[str, dict[str, bool]],
     resource_mappings: list["ResourceMapping"],

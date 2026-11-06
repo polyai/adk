@@ -92,6 +92,11 @@ class ExperimentalConfig(Resource):
     def build_create_proto(self):
         return NotImplementedError("ExperimentalConfig does not support creation.")
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Experimental config references nothing else in the project."""
+        return set()
+
     def validate(self, **kwargs):
         import jsonschema
 

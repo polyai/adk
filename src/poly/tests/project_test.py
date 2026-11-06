@@ -15,7 +15,7 @@ import unittest
 from copy import deepcopy
 from datetime import datetime
 from typing import Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import poly.resources.resource_utils as resource_utils
 from poly.call.session import DEFAULT_CALL_MODE
@@ -70,7 +70,12 @@ from poly.resources.flows import (
     StepType,
 )
 from poly.resources.function import FunctionParameters, FunctionType
-from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
+from poly.resources.references import KnownIds
+from poly.resources.resource import (
+    RESOURCE_NAME_TO_CLASS,
+    MultiResourceYamlResource,
+    _parse_multi_resource_path,
+)
 from poly.resources.test_suite import TestCaseApiOperationMock
 from poly.tests.testing_utils import mock_read_from_file
 from poly.utils import merge_strings
@@ -2863,7 +2868,11 @@ class SavedFileHashesTest(unittest.TestCase):
 
 
 class UnchangedFilesTest(unittest.TestCase):
-    """status and diff skip reading files a full comparison already found unchanged."""
+    """Files recorded at pull or push skip reading while they still mean their saved resource.
+
+    Every scenario is checked against a full read: the same project with its fingerprints
+    cleared, which is what main does.
+    """
 
     TOPIC = os.path.join("topics", "topic_1.yaml")
 
@@ -2871,25 +2880,41 @@ class UnchangedFilesTest(unittest.TestCase):
         MultiResourceYamlResource._file_cache.clear()
         self.addCleanup(MultiResourceYamlResource._file_cache.clear)
         self.root = _copy_test_project(self)
-        AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root).save_config(
-            write_project_yaml=True
-        )
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        project.save_config(write_project_yaml=True)
+        # The fixture's files are hand-written. Rewrite them as a pull would, which is the state
+        # a real project is in.
+        project.revert_changes()
         self.status_file = os.path.join(self.root, STATUS_FILE)
 
-    def _run(self, method: str = "project_status", *args) -> tuple[object, int]:
-        """Run a project method on a fresh load; return its result and how many kept files it read."""
+    def _record(self) -> None:
+        """Record every file, as a forced pull does after writing them."""
         project = AgentStudioProject.from_file_path(self.root)
+        project._record_fingerprints()
+        project.save_config()
+
+    def _run(self, method: str = "project_status", *args, full: bool = False):
+        """Run a project method on a fresh load; return its result and the kept files it read."""
+        project = AgentStudioProject.from_file_path(self.root)
+        if full:
+            project.file_fingerprints = {}
         read = AgentStudioProject.read_local_resource
         reads = []
 
         def counting_read(self_, resource, resource_mappings, *a, **k):
             if resource_mappings:  # matching reads pass no mappings; the comparison passes them all
-                reads.append(resource.file_path)
+                reads.append(os.path.relpath(resource.file_path, self.root))
             return read(self_, resource, resource_mappings, *a, **k)
 
         with patch.object(AgentStudioProject, "read_local_resource", counting_read):
             result = getattr(project, method)(*args)
-        return result, len(reads)
+        return result, reads
+
+    def _assert_same_as_full_read(self, method: str = "project_status", *args):
+        result, reads = self._run(method, *args)
+        expected, full_reads = self._run(method, *args, full=True)
+        self.assertEqual(result, expected)
+        return result, reads, full_reads
 
     def _edit(self, rel_path: str, old: str, new: str) -> None:
         path = os.path.join(self.root, rel_path)
@@ -2899,124 +2924,245 @@ class UnchangedFilesTest(unittest.TestCase):
         with open(path, "w", encoding="utf-8") as f:
             f.write(contents.replace(old, new, 1))
 
-    def _saved_status(self) -> dict:
-        with open(self.status_file, "rb") as f:
-            return json.loads(base64.b64decode(f.read()))
+    def test_recorded_files_are_not_read(self):
+        self._record()
 
-    def test_unchanged_files_are_not_read_again(self):
-        first, first_reads = self._run()
-        second, second_reads = self._run()
+        _, reads, full_reads = self._assert_same_as_full_read()
 
-        self.assertEqual(second, first)
-        self.assertGreater(first_reads, 0)
-        self.assertEqual(second_reads, len(first[1]))  # only the files that are modified
+        self.assertNotIn(self.TOPIC, reads)
+        self.assertLess(len(reads), len(full_reads))
+
+    def test_types_that_dont_declare_references_are_always_read(self):
+        with patch.object(Function, "refers_to", new_callable=PropertyMock, return_value=None):
+            self._record()
+
+        _, reads, _ = self._assert_same_as_full_read()
+
+        self.assertIn(os.path.join("functions", "format_date.py"), reads)
+        self.assertNotIn(self.TOPIC, reads)
 
     def test_an_edited_file_is_read_and_reported(self):
-        self._run()
+        self._record()
         self._edit(self.TOPIC, "uses global functions.", "edited locally.")
 
-        (_, modified, _, _), reads = self._run()
+        (_, modified, _, _), reads, _ = self._assert_same_as_full_read()
 
+        self.assertIn(self.TOPIC, reads)
         self.assertIn(os.path.join(self.root, self.TOPIC), modified)
-        self.assertGreaterEqual(reads, 1)
 
-    def test_a_changed_saved_copy_is_reported(self):
-        """A pull that changes the saved resource must not be hidden by the file's old fingerprint."""
-        self._run()
+    def test_deleting_a_referenced_function_reads_the_topic(self):
+        """The topic's saved ID is gone, so it must resolve its names again, as main does."""
+        self._record()
+        os.remove(os.path.join(self.root, "functions", "format_date.py"))
+
+        (_, modified, _, _), reads, _ = self._assert_same_as_full_read()
+
+        self.assertIn(self.TOPIC, reads)
+        self.assertIn(os.path.join(self.root, self.TOPIC), modified)
+
+    def test_an_unresolved_name_that_now_exists_reads_the_topic(self):
+        """A reference that didn't resolve when recorded must be read once it can."""
+        self._edit(self.TOPIC, "uses global functions.", "calls {{fn:new_helper}}.")
+        project = AgentStudioProject.from_file_path(self.root)
+        new, kept, _ = project.find_new_kept_deleted(project.discover_local_resources())
+        mapping = next(m for m in kept if m.file_path.endswith(self.TOPIC))
+        topic = project.read_local_resource(mapping, new + kept + project.slim_resources)
+        project.resources[Topic][topic.resource_id] = topic
+        project.file_structure_info = project.compute_file_structure_info(project.resources)
+        project._record_fingerprints()
+        project.save_config()
+        self.assertIn(["global_functions", "new_helper"], project.file_fingerprints["files"][self.TOPIC]["unresolved"])
+        shutil.copy(
+            os.path.join(self.root, "functions", "format_date.py"),
+            os.path.join(self.root, "functions", "new_helper.py"),
+        )
+        self._edit(os.path.join("functions", "new_helper.py"), "def format_date(", "def new_helper(")
+
+        _, reads, _ = self._assert_same_as_full_read()
+
+        self.assertIn(self.TOPIC, reads)
+
+    def test_a_changed_saved_copy_is_read(self):
+        """A fetch that changes the saved resource must not be hidden by the file's fingerprint."""
+        self._record()
         project = AgentStudioProject.from_file_path(self.root)
         topic = next(t for t in project.resources[Topic].values() if t.name == "Topic 1")
         topic.content += " changed on the platform"
         project.file_structure_info = project.compute_file_structure_info(project.resources)
         project.save_config()
 
-        (_, modified, _, _), _ = self._run()
+        (_, modified, _, _), reads, _ = self._assert_same_as_full_read()
 
+        self.assertIn(self.TOPIC, reads)
         self.assertIn(os.path.join(self.root, self.TOPIC), modified)
-
-    def test_a_new_resource_means_every_file_is_read_again(self):
-        """References resolve against the mappings, so any change to them invalidates every file."""
-        first, first_reads = self._run()
-        shutil.copy(
-            os.path.join(self.root, self.TOPIC), os.path.join(self.root, "topics", "topic_new.yaml")
-        )
-        self._edit(os.path.join("topics", "topic_new.yaml"), "name: Topic 1", "name: Topic New")
-
-        (_, _, new, _), reads = self._run()
-
-        self.assertIn(os.path.join(self.root, "topics", "topic_new.yaml"), new)
-        self.assertEqual(reads, first_reads)
-
-    def test_fingerprints_from_another_adk_version_are_ignored(self):
-        _, first_reads = self._run()
-
-        with patch("poly.project.ADK_VERSION", "0.0.1"):
-            _, reads = self._run()
-
-        self.assertEqual(reads, first_reads)
-
-    def test_diff_of_one_file_keeps_the_other_fingerprints(self):
-        self._run()
-        before = self._saved_status()["file_fingerprints"]["files"]
-
-        self._run("get_diffs", [os.path.join(self.root, self.TOPIC)])
-
-        self.assertEqual(self._saved_status()["file_fingerprints"]["files"], before)
 
     def test_fingerprints_survive_the_project_moving(self):
         """The ADK service loads every request from a new temporary directory."""
-        first, first_reads = self._run()
+        self._record()
         moved = os.path.join(os.path.dirname(self.root), "moved")
         shutil.move(self.root, moved)
         self.root = moved
-        self.status_file = os.path.join(moved, STATUS_FILE)
 
-        (_, modified, _, _), reads = self._run()
+        _, reads, _ = self._assert_same_as_full_read()
 
-        self.assertEqual(len(modified), len(first[1]))
-        self.assertEqual(reads, len(modified))
-        self.assertLess(reads, first_reads)
+        self.assertNotIn(self.TOPIC, reads)
 
-    def test_validate_reads_only_files_not_known_to_be_unchanged(self):
-        (_, modified, new, _), _ = self._run()
-        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
+    def test_another_adk_versions_fingerprints_are_ignored(self):
+        """Another version may read the same bytes into a different resource."""
+        self._record()
 
-        errors, reads = self._run("validate_project")
+        with patch("poly.project.ADK_VERSION", "0.0.0"):
+            _, reads, full_reads = self._assert_same_as_full_read()
 
-        self.assertEqual(errors, [])
-        self.assertEqual(reads, len(set(modified) | {os.path.join(self.root, self.TOPIC)}) + len(new))
+        self.assertIn(self.TOPIC, reads)
+        self.assertEqual(len(reads), len(full_reads))
 
-    def test_dry_run_push_reads_only_files_not_known_to_be_unchanged(self):
-        (_, modified, new, _), _ = self._run()
-        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
-        project = AgentStudioProject.from_file_path(self.root)
-        api_handler = MagicMock(branch_id=project.branch_id)
-        api_handler.queue_resources.return_value = []
-        project._api_handler = api_handler
-        read = AgentStudioProject.read_local_resource
-        reads = []
-
-        def counting_read(self_, resource, resource_mappings, *a, **k):
-            if resource_mappings:
-                reads.append(resource.file_path)
-            return read(self_, resource, resource_mappings, *a, **k)
-
-        with patch.object(AgentStudioProject, "read_local_resource", counting_read):
-            success, message, _ = project.push_project(dry_run=True, parent_projection_json={})
-
-        self.assertTrue(success, message)
-        self.assertEqual(len(reads), len(set(modified) | {os.path.join(self.root, self.TOPIC)}) + len(new))
-        updated = api_handler.queue_resources.call_args.kwargs["updated_resources"]
-        self.assertIn("Topic 1", [r.name for r in updated.get(Topic, {}).values()])
-
-    def test_status_changes_nothing_else_in_the_status_file(self):
-        before = self._saved_status()
+    def test_status_and_diff_dont_write_the_status_file(self):
+        self._record()
+        with open(self.status_file, "rb") as f:
+            before = f.read()
 
         self._run()
+        self._run("get_diffs")
 
-        after = self._saved_status()
-        before.pop("file_fingerprints")
-        after.pop("file_fingerprints")
-        self.assertEqual(after, before)
+        with open(self.status_file, "rb") as f:
+            self.assertEqual(f.read(), before)
+
+    def test_validate_uses_saved_resources_for_unedited_files(self):
+        self._record()
+        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
+
+        _, reads, full_reads = self._assert_same_as_full_read("validate_project")
+
+        self.assertIn(self.TOPIC, reads)
+        self.assertNotIn(os.path.join("topics", "topic_2.yaml"), reads)
+        self.assertLess(len(reads), len(full_reads))
+
+    def _plain_pull(self, change_upstream=None) -> None:
+        """Run `poly pull` (a merge pull) with the API returning the saved resources, changed."""
+        project = AgentStudioProject.from_file_path(self.root)
+        incoming = deepcopy(project.resources)
+        if change_upstream:
+            change_upstream(incoming)
+        api_handler = MagicMock(branch_id=project.branch_id)
+        api_handler.pull_resources.return_value = (incoming, list(project.slim_resources), {})
+        project._api_handler = api_handler
+        conflicts, _ = project.pull_project(force=False)
+        self.assertEqual(conflicts, [])
+
+    @staticmethod
+    def _change_topic_upstream(resources) -> None:
+        topic = next(t for t in resources[Topic].values() if t.name == "Topic 1")
+        topic.example_queries = [*topic.example_queries, "Asked on the platform"]
+
+    def test_a_plain_pull_records_files_that_match(self):
+        """With nothing new upstream, files you haven't edited are recorded."""
+        self._plain_pull()
+
+        _, reads, full_reads = self._assert_same_as_full_read()
+
+        self.assertNotIn(self.TOPIC, reads)
+        self.assertLess(len(reads), len(full_reads))
+
+    def test_a_plain_pull_doesnt_record_your_edits(self):
+        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
+
+        self._plain_pull()
+
+        (_, modified, _, _), reads, _ = self._assert_same_as_full_read()
+        self.assertIn(self.TOPIC, reads)
+        self.assertIn(os.path.join(self.root, self.TOPIC), modified)
+
+    def test_a_plain_pull_records_a_file_it_updated(self):
+        """A file changed upstream and unedited here is rewritten, then recorded."""
+        self._plain_pull(self._change_topic_upstream)
+
+        (_, modified, _, _), reads, _ = self._assert_same_as_full_read()
+        self.assertNotIn(self.TOPIC, reads)
+        self.assertEqual(modified, [])
+
+    def test_a_plain_pull_doesnt_record_a_file_merged_with_your_edit(self):
+        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
+
+        self._plain_pull(self._change_topic_upstream)
+
+        (_, modified, _, _), reads, _ = self._assert_same_as_full_read()
+        self.assertIn(self.TOPIC, reads)
+        self.assertIn(os.path.join(self.root, self.TOPIC), modified)
+
+    def test_a_real_push_records_the_files_it_saved(self):
+        project = AgentStudioProject.from_file_path(self.root)
+        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
+        api_handler = MagicMock(branch_id=project.branch_id)
+        api_handler.queue_resources.return_value = []
+        api_handler.send_queued_commands.return_value = True
+        project._api_handler = api_handler
+
+        with (
+            patch.object(AgentStudioProject, "load_project"),
+            patch.object(AgentStudioProject, "pull_project", return_value=([], {})),
+        ):
+            success, message, _ = project.push_project(parent_projection_json={})
+
+        self.assertTrue(success, message)
+        _, reads, _ = self._assert_same_as_full_read()
+        self.assertNotIn(self.TOPIC, reads)
+
+
+class ReferencesTest(unittest.TestCase):
+    """refers_to lists everything a resource's read depends on."""
+
+    def test_every_type_declares_refers_to_itself(self):
+        """Inheriting another registered type's refers_to can silently miss what the subclass adds."""
+        registered = set(RESOURCE_NAME_TO_CLASS.values())
+        for resource_type in registered:
+            owner = next(c for c in resource_type.__mro__ if "refers_to" in c.__dict__)
+            with self.subTest(resource_type.__name__):
+                self.assertIsNot(owner, Resource, "declare refers_to, or return None to always read")
+                self.assertTrue(
+                    owner is resource_type or owner not in registered,
+                    f"inherits refers_to from {owner.__name__}; declare its own",
+                )
+
+    def test_reading_needs_only_what_references_lists(self):
+        """Read each declared resource with only its own mappings and those it references."""
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        root = _copy_test_project(self)
+        AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), root).save_config(
+            write_project_yaml=True
+        )
+        project = AgentStudioProject.from_file_path(root)
+        new, kept, _ = project.find_new_kept_deleted(project.discover_local_resources())
+        everything = new + kept + project.slim_resources
+        known = KnownIds.from_mappings(everything)
+        checked = 0
+        for mapping in kept:
+            saved = project.resources[mapping.resource_type][mapping.resource_id]
+            if saved.refers_to is None:
+                continue
+            needed = {
+                resource_id
+                for kind, value in saved.refers_to
+                for resource_id in known.resolve(kind, value)[0]
+            }
+            reduced = [
+                m
+                for m in everything
+                if m is mapping
+                or m.resource_id in needed
+                or (m.resource_type is FlowConfig and resource_utils.clean_name(m.resource_id) in needed)
+            ]
+            with self.subTest(mapping.file_path):
+                MultiResourceYamlResource._file_cache.clear()
+                full = resource_utils.resource_to_dict(project.read_local_resource(mapping, everything))
+                MultiResourceYamlResource._file_cache.clear()
+                only_needed = resource_utils.resource_to_dict(
+                    project.read_local_resource(mapping, reduced)
+                )
+                self.assertEqual(only_needed, full)
+            checked += 1
+        self.assertGreater(checked, 10)
 
 
 class StageSetDefaultCommandsTest(unittest.TestCase):
