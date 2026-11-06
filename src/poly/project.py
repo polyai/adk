@@ -127,7 +127,7 @@ class AgentStudioProject:
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
     # Files a full comparison found unchanged, so status can skip reading them again while
-    # nothing else that affects reading them changes. See UnchangedFiles.
+    # nothing else that affects reading them changes. See _unchanged_files.
     file_fingerprints: dict[str, Any] = field(default_factory=dict)
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
@@ -321,6 +321,89 @@ class AgentStudioProject:
             slim_resources=slim_resources,
             rtc_metadata=data.get("rtc_metadata"),
         )
+
+    def _relative_path(self, path: str) -> str:
+        """`path` relative to the project root. Mapping paths are joined onto the root, so
+        slicing off its prefix matches relpath without its cost."""
+        root_prefix = os.path.join(self.root_path, "")
+        if path.startswith(root_prefix):
+            return path[len(root_prefix) :]
+        return os.path.relpath(path, self.root_path)
+
+    def _fingerprint_key(
+        self, new_mappings: list[ResourceMapping], kept_mappings: list[ResourceMapping]
+    ) -> str:
+        """Digest of the ADK version and every resource mapping, which references resolve against.
+
+        New resources get a fresh ID on every run, so only their type, name and path count.
+        """
+        rows = []
+        for mapping, keep_ids in (
+            *((m, True) for m in kept_mappings),
+            *((m, True) for m in self.slim_resources),
+            *((m, False) for m in new_mappings),
+        ):
+            values = (
+                mapping.resource_type.__name__,
+                mapping.resource_name,
+                mapping.flow_name,
+                mapping.resource_prefix,
+                mapping.file_path and self._relative_path(mapping.file_path),
+                mapping.resource_id if keep_ids else "",
+                mapping.flow_id if keep_ids else "",
+            )
+            rows.append("\0".join(str(value or "") for value in values))
+        digest = hashlib.sha256(ADK_VERSION.encode("utf-8"))
+        digest.update("\n".join(sorted(rows)).encode("utf-8"))
+        return digest.hexdigest()
+
+    def _unchanged_files(
+        self, new_mappings: list[ResourceMapping], kept_mappings: list[ResourceMapping]
+    ) -> tuple[str, dict[str, list[str]], set[str]]:
+        """Fingerprint the kept files and find those already known to be unchanged.
+
+        A full comparison that finds a file matches its saved resource records its
+        fingerprint: the hash of its bytes and the saved hash it was compared with. The file
+        is then known to be unchanged, without being read, while its fingerprint and a key
+        covering everything else that affects reading it (see _fingerprint_key) still match.
+
+        Returns:
+            The key, each kept file's fingerprint by relative path, and the relative paths
+            known to be unchanged. Callers add the files their own comparison finds unchanged,
+            then pass all three to _save_unchanged_files.
+        """
+        key = self._fingerprint_key(new_mappings, kept_mappings)
+        trusted = {}
+        if self.file_fingerprints.get("key") == key:
+            trusted = self.file_fingerprints.get("files", {})
+        fingerprints: dict[str, list[str]] = {}
+        unchanged: set[str] = set()
+        bytes_hashes: dict[str, str] = {}
+        for mapping in kept_mappings:
+            rel_path = self._relative_path(mapping.file_path)
+            original_hash = self.file_structure_info.get(rel_path, {}).get("hash")
+            if not original_hash:
+                continue
+            path = mapping.file_path
+            if issubclass(mapping.resource_type, MultiResourceYamlResource):
+                path = _parse_multi_resource_path(path)[0]
+            if path not in bytes_hashes:
+                try:
+                    with open(path, "rb") as f:
+                        bytes_hashes[path] = hashlib.sha256(f.read()).hexdigest()
+                except OSError:
+                    bytes_hashes[path] = ""
+            fingerprints[rel_path] = [bytes_hashes[path], original_hash]
+            if trusted.get(rel_path) == fingerprints[rel_path]:
+                unchanged.add(rel_path)
+        return key, fingerprints, unchanged
+
+    def _save_unchanged_files(
+        self, key: str, fingerprints: dict[str, list[str]], unchanged: set[str]
+    ) -> None:
+        """Save the fingerprints of the files known to be unchanged."""
+        files = {path: fingerprints[path] for path in sorted(unchanged) if path in fingerprints}
+        self._save_file_fingerprints({"key": key, "files": files})
 
     def _save_file_fingerprints(self, fingerprints: dict[str, Any]) -> None:
         """Write `fingerprints` to the status file if they changed, leaving the rest of it.
@@ -1438,11 +1521,18 @@ class AgentStudioProject:
             for rt in set(rm.resource_type for rm in new_resource_mappings)
         }
 
-        # 2. Read all new/kept resources from disk
+        # 2. Read all new/kept resources from disk. A file known to be unchanged reads to its
+        # saved resource, so that is used instead.
         new_state: ResourceMap = {}
+        _, _, unchanged = self._unchanged_files(new_resource_mappings, kept_resource_mappings)
 
         new_file_paths = {rm.file_path for rm in new_resource_mappings}
         for resource_mapping in local_resource_mappings:
+            if self._relative_path(resource_mapping.file_path) in unchanged:
+                new_state.setdefault(resource_mapping.resource_type, {})[
+                    resource_mapping.resource_id
+                ] = self.resources[resource_mapping.resource_type][resource_mapping.resource_id]
+                continue
             # The parent resource supplies known_* subresource ids (function parameters,
             # step conditions): new resources take the parent's wholesale, kept resources
             # only inherit subresources they do not already have by name.
@@ -1482,6 +1572,8 @@ class AgentStudioProject:
                     new_resources.setdefault(resource_type, {})[resource_id] = resource
                     continue
 
+                if resource.file_path in unchanged:
+                    continue
                 original_resource_hash = self.file_structure_info.get(resource.file_path, {}).get(
                     "hash"
                 )
@@ -1808,13 +1900,15 @@ class AgentStudioProject:
         local_resources_mappings = new_resources_mappings + kept_resources_mappings
         local_resources_mappings.extend(self.slim_resources)
 
-        unchanged = UnchangedFiles(self, new_resources_mappings, kept_resources_mappings)
+        key, fingerprints, unchanged = self._unchanged_files(
+            new_resources_mappings, kept_resources_mappings
+        )
 
         for kept_local_resource_mapping in kept_resources_mappings:
-            rel_path = os.path.relpath(kept_local_resource_mapping.file_path, self.root_path)
-            original_hash = self.file_structure_info.get(rel_path, {}).get("hash")
-            if unchanged.check(kept_local_resource_mapping, rel_path, original_hash):
+            rel_path = self._relative_path(kept_local_resource_mapping.file_path)
+            if rel_path in unchanged:
                 continue
+            original_hash = self.file_structure_info.get(rel_path, {}).get("hash")
 
             try:
                 local_resource = self.read_local_resource(
@@ -1829,9 +1923,9 @@ class AgentStudioProject:
             if modified:
                 modified_files.append(kept_local_resource_mapping.file_path)
             else:
-                unchanged.record(rel_path)
+                unchanged.add(rel_path)
 
-        unchanged.save()
+        self._save_unchanged_files(key, fingerprints, unchanged)
 
         # dedupe: several resources can share one conflicted multi-resource file
         files_with_conflicts = list(dict.fromkeys(files_with_conflicts))
@@ -1883,16 +1977,18 @@ class AgentStudioProject:
         )
         local_resources_mappings = new_resources_mappings + kept_resources_mappings
         local_resources_mappings.extend(self.slim_resources)
-        unchanged = UnchangedFiles(self, new_resources_mappings, kept_resources_mappings)
+        key, fingerprints, unchanged = self._unchanged_files(
+            new_resources_mappings, kept_resources_mappings
+        )
 
         for local_resource_mapping in kept_resources_mappings:
             if not all_files and file_paths and local_resource_mapping.file_path not in file_paths:
                 continue
 
-            rel_path = os.path.relpath(local_resource_mapping.file_path, self.root_path)
-            original_hash = self.file_structure_info.get(rel_path, {}).get("hash")
-            if unchanged.check(local_resource_mapping, rel_path, original_hash):
+            rel_path = self._relative_path(local_resource_mapping.file_path)
+            if rel_path in unchanged:
                 continue
+            original_hash = self.file_structure_info.get(rel_path, {}).get("hash")
 
             try:
                 local_resource = self.read_local_resource(
@@ -1904,7 +2000,7 @@ class AgentStudioProject:
 
             modified = local_resource.is_modified(original_hash)
             if not modified:
-                unchanged.record(rel_path)
+                unchanged.add(rel_path)
                 continue
 
             original_resource = self.resources.get(type(local_resource), {}).get(
@@ -1916,7 +2012,7 @@ class AgentStudioProject:
             if diff := original_resource.get_diff(local_resource):
                 diffs[local_resource.file_path] = diff
 
-        unchanged.save(checked_all=all_files)
+        self._save_unchanged_files(key, fingerprints, unchanged)
 
         for resource_mapping in new_resources_mappings:
             try:
@@ -3166,13 +3262,20 @@ class AgentStudioProject:
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
 
         resource_mappings = local_resource_mappings + self.slim_resources
+        # A file known to be unchanged reads to its saved resource, so validate that instead.
+        _, _, unchanged = self._unchanged_files(new_resource_mappings, kept_resource_mappings)
 
         resources: ResourceMap = {}
         for resource_mapping in local_resource_mappings:
-            local_resource = self.read_local_resource(
-                resource=resource_mapping,
-                resource_mappings=resource_mappings,
-            )
+            if self._relative_path(resource_mapping.file_path) in unchanged:
+                local_resource = self.resources[resource_mapping.resource_type][
+                    resource_mapping.resource_id
+                ]
+            else:
+                local_resource = self.read_local_resource(
+                    resource=resource_mapping,
+                    resource_mappings=resource_mappings,
+                )
             resources.setdefault(resource_mapping.resource_type, {})[
                 resource_mapping.resource_id
             ] = local_resource
@@ -4645,106 +4748,3 @@ class AgentStudioProject:
             return datetime.strptime(deployment["created_at"], "%a, %d %b %Y %H:%M:%S %Z")
 
         return max(deployments, key=created_at, default=None)
-
-
-class UnchangedFiles:
-    """Tracks kept files that can skip a full read, for one status or diff run.
-
-    A file is recorded once a full comparison finds it matches its saved resource. It then
-    counts as unchanged without being read while three things stay the same: its bytes, its
-    saved hash, and a key covering everything else that affects reading it (the ADK version
-    and every resource mapping, which references resolve against).
-    """
-
-    def __init__(
-        self,
-        project: "AgentStudioProject",
-        new_mappings: list[ResourceMapping],
-        kept_mappings: list[ResourceMapping],
-    ):
-        self.project = project
-        self.key = self._key(project, new_mappings, kept_mappings)
-        saved = project.file_fingerprints
-        self.trusted: dict[str, list[str]] = (
-            saved.get("files", {}) if saved.get("key") == self.key else {}
-        )
-        self.verified: dict[str, list[str]] = {}
-        self.checked: dict[str, list[str]] = {}
-        self._file_hashes: dict[str, str] = {}
-
-    @staticmethod
-    def _key(
-        project: "AgentStudioProject",
-        new_mappings: list[ResourceMapping],
-        kept_mappings: list[ResourceMapping],
-    ) -> str:
-        """Digest of the ADK version and every resource mapping.
-
-        New resources get a fresh ID on every run, so only their type, name and path count.
-        """
-        # Paths relative to the root, so the key survives the project moving (the ADK service
-        # loads every request from a new temporary directory). Mapping paths are joined onto
-        # the root, so slicing off its prefix gives the same result as relpath, much faster.
-        root_prefix = os.path.join(project.root_path, "")
-        rows = []
-        for mapping, keep_ids in (
-            *((m, True) for m in kept_mappings),
-            *((m, True) for m in project.slim_resources),
-            *((m, False) for m in new_mappings),
-        ):
-            path = mapping.file_path or ""
-            if path.startswith(root_prefix):
-                path = path[len(root_prefix) :]
-            elif path:
-                path = os.path.relpath(path, project.root_path)
-            values = (
-                mapping.resource_type.__name__,
-                mapping.resource_name,
-                mapping.flow_name,
-                mapping.resource_prefix,
-                path,
-                mapping.resource_id if keep_ids else "",
-                mapping.flow_id if keep_ids else "",
-            )
-            rows.append("\0".join(str(value or "") for value in values))
-        digest = hashlib.sha256(ADK_VERSION.encode("utf-8"))
-        digest.update("\n".join(sorted(rows)).encode("utf-8"))
-        return digest.hexdigest()
-
-    def _bytes_hash(self, mapping: ResourceMapping) -> str:
-        """SHA-256 of the file holding `mapping`, read once per file per run."""
-        path = mapping.file_path
-        if issubclass(mapping.resource_type, MultiResourceYamlResource):
-            path = _parse_multi_resource_path(path)[0]
-        if path not in self._file_hashes:
-            try:
-                with open(path, "rb") as f:
-                    self._file_hashes[path] = hashlib.sha256(f.read()).hexdigest()
-            except OSError:
-                self._file_hashes[path] = ""
-        return self._file_hashes[path]
-
-    def check(self, mapping: ResourceMapping, rel_path: str, original_hash: Optional[str]) -> bool:
-        """Return True if the file is known to be unchanged, so it needn't be read."""
-        if not original_hash:
-            return False
-        fingerprint = [self._bytes_hash(mapping), original_hash]
-        self.checked[rel_path] = fingerprint
-        if self.trusted.get(rel_path) == fingerprint:
-            self.verified[rel_path] = fingerprint
-            return True
-        return False
-
-    def record(self, rel_path: str) -> None:
-        """Record that a full comparison found the file checked as `rel_path` unchanged."""
-        if rel_path in self.checked:
-            self.verified[rel_path] = self.checked[rel_path]
-
-    def save(self, checked_all: bool = True) -> None:
-        """Save the fingerprints. Files this run didn't check keep theirs unless it checked all."""
-        files = dict(self.verified)
-        if not checked_all:
-            files = {
-                path: fp for path, fp in self.trusted.items() if path not in self.checked
-            } | files
-        self.project._save_file_fingerprints({"key": self.key, "files": files})

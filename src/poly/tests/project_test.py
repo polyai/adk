@@ -2976,6 +2976,38 @@ class UnchangedFilesTest(unittest.TestCase):
         self.assertEqual(reads, len(modified))
         self.assertLess(reads, first_reads)
 
+    def test_validate_reads_only_files_not_known_to_be_unchanged(self):
+        (_, modified, new, _), _ = self._run()
+        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
+
+        errors, reads = self._run("validate_project")
+
+        self.assertEqual(errors, [])
+        self.assertEqual(reads, len(set(modified) | {os.path.join(self.root, self.TOPIC)}) + len(new))
+
+    def test_dry_run_push_reads_only_files_not_known_to_be_unchanged(self):
+        (_, modified, new, _), _ = self._run()
+        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
+        project = AgentStudioProject.from_file_path(self.root)
+        api_handler = MagicMock(branch_id=project.branch_id)
+        api_handler.queue_resources.return_value = []
+        project._api_handler = api_handler
+        read = AgentStudioProject.read_local_resource
+        reads = []
+
+        def counting_read(self_, resource, resource_mappings, *a, **k):
+            if resource_mappings:
+                reads.append(resource.file_path)
+            return read(self_, resource, resource_mappings, *a, **k)
+
+        with patch.object(AgentStudioProject, "read_local_resource", counting_read):
+            success, message, _ = project.push_project(dry_run=True, parent_projection_json={})
+
+        self.assertTrue(success, message)
+        self.assertEqual(len(reads), len(set(modified) | {os.path.join(self.root, self.TOPIC)}) + len(new))
+        updated = api_handler.queue_resources.call_args.kwargs["updated_resources"]
+        self.assertIn("Topic 1", [r.name for r in updated.get(Topic, {}).values()])
+
     def test_status_changes_nothing_else_in_the_status_file(self):
         before = self._saved_status()
 
