@@ -8759,6 +8759,27 @@ class PullRemoteFlowRenameTest(unittest.TestCase):
             ([], [os.path.join(moved, "process_payment.py")], [], []),
         )
 
+    def test_remote_flow_rename_carries_a_step_added_here(self):
+        """A step made here moves with its flow, so it isn't left in the old folder."""
+        steps = os.path.join(self.root, "flows", "test_flow", "steps")
+        with open(os.path.join(steps, "final_step.yaml"), encoding="utf-8") as file:
+            body = file.read()
+        with open(os.path.join(steps, "extra.yaml"), "w", encoding="utf-8") as file:
+            file.write(body.replace("name: final_step", "name: extra"))
+        before = self._flow_files()
+
+        conflicts = self._pull(self._renamed())
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            sorted(self._flow_files()),
+            sorted(path.replace("test_flow" + os.sep, "moved_flow" + os.sep) for path in before),
+        )
+        status = self.project.project_status()
+        self.assertEqual(
+            status[2], [os.path.join(self.root, "flows", "moved_flow", "steps", "extra.yaml")]
+        )
+
     def test_remote_flow_rename_onto_a_folder_made_here_is_held_back(self):
         """A flow made here at the new name holds every file of the renamed flow back."""
         own = os.path.join(self.root, "flows", "moved_flow", "flow_config.yaml")
@@ -10751,6 +10772,137 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual([node["name"] for node in other["nodes"]][-1], "Wait")
         self.assertNotIn("Wait", [node["name"] for node in self._yaml()["nodes"]])
         self.assertEqual(self.project.validate_project(), [])
+
+    def _add_second_call(self, folder: Optional[str] = None) -> str:
+        data = self._yaml(folder) if folder else self._yaml()
+        self._node(data, "First call")["defaultRoute"] = "Second call"
+        second = dict(self._node(data, "First call"))
+        second["name"] = "Second call"
+        second["defaultRoute"] = "End"
+        data["nodes"].append(second)
+        if folder:
+            self._write_yaml(data, folder)
+        else:
+            self._write_yaml(data)
+        code = "def call_args(outbound_contact, outbound_campaign):\n    return {'x': 1}\n"
+        self._write_function("second_call", code, folder=folder)
+        return code
+
+    def test_campaigns_swapping_names_carry_code_added_here(self):
+        self._pull_into_new_project(self._two_campaigns("Reminders", "Other"))
+        code = self._add_second_call()
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._two_campaigns("Other", "Reminders")
+        )
+
+        self.assertEqual(conflicts, [])
+        other = os.path.join("outbound_campaigns", "other")
+        reminders = os.path.join("outbound_campaigns", "reminders")
+        self.assertEqual(
+            sorted(self._tree()),
+            [
+                os.path.join(other, "campaign.yaml"),
+                os.path.join(other, "functions", "second_call.py"),
+                os.path.join(other, "functions", "trigger.py"),
+                os.path.join(reminders, "campaign.yaml"),
+                os.path.join(reminders, "functions", "trigger.py"),
+            ],
+        )
+        self.assertEqual(self._read("other", "functions", "second_call.py"), code)
+        self.assertNotIn("Second call", [node["name"] for node in self._yaml()["nodes"]])
+        _, modified, new, deleted = self.project.project_status()
+        self.assertEqual(
+            sorted(new),
+            [
+                os.path.join(self.root, other, "campaign.yaml", "nodes", "Second_call"),
+                os.path.join(self.root, other, "functions", "second_call.py"),
+            ],
+        )
+        self.assertEqual(deleted, [])
+        commands = self._push()
+        self.assertIn(
+            ("outbound_campaign_create_node", "CMPGN-ONE"),
+            [(command, body["outboundCampaignId"]) for command, body in commands],
+        )
+        self.assertNotIn("CMPGN-TWO", [body["outboundCampaignId"] for _, body in commands])
+
+    def test_campaigns_swapping_names_with_the_same_file_added_on_both_sides(self):
+        self._pull_into_new_project(self._two_campaigns("Reminders", "Other"))
+        other = os.path.join(self.root, "outbound_campaigns", "other")
+        self._write_function("notes", "ONE = 1\n")
+        self._write_function("notes", "TWO = 2\n", folder=other)
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=self._two_campaigns("Other", "Reminders")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._read("other", "functions", "notes.py"), "ONE = 1\n")
+        self.assertEqual(self._read("reminders", "functions", "notes.py"), "TWO = 2\n")
+        self.assertFalse(any("pull-move" in path for path in self._tree()))
+
+    def test_a_campaign_moving_out_carries_code_added_here_for_the_one_moving_in(self):
+        self._pull_into_new_project(self._two_campaigns("Reminders", "Other"))
+        other = os.path.join(self.root, "outbound_campaigns", "other")
+        code = "NOTE = 1\n"
+        self._write_function("helper_note", code, folder=other)
+
+        with self.assertNoLogs("poly.project", level="WARNING"):
+            conflicts, _ = self.project.pull_project(
+                projection_json=self._two_campaigns("Other", "Third")
+            )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._read("third", "functions", "helper_note.py"), code)
+        self.assertNotIn(
+            os.path.join("outbound_campaigns", "other", "functions", "helper_note.py"),
+            self._tree(),
+        )
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-ONE"].folder, "other")
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-TWO"].folder, "third")
+        _, modified, new, deleted = self.project.project_status()
+        self.assertEqual(
+            new,
+            [os.path.join(self.root, "outbound_campaigns", "third", "functions", "helper_note.py")],
+        )
+        self.assertEqual((modified, deleted), ([], []))
+
+    def test_remote_rename_where_code_added_here_takes_a_new_file_name_is_held_back(self):
+        added = "def call_args(outbound_contact, outbound_campaign):\n    return {'here': 1}\n"
+        self._write_function("second_call", added)
+        projection = _campaign_projection(name="Monthly")
+        nodes = self._entity(projection)["nodes"]
+        upstream = deepcopy(nodes["entities"]["call-1"])
+        upstream["id"] = "call-2"
+        upstream["label"] = "Second call"
+        upstream["data"]["function"] = {
+            "name": "call_args",
+            "code": "def call_args(outbound_contact, outbound_campaign):\n    return {'up': 1}\n",
+            "parameters": [],
+        }
+        nodes["ids"].append("call-2")
+        nodes["entities"]["call-2"] = upstream
+        before = self._tree()
+
+        with self.assertLogs("poly.project", level="WARNING") as logs:
+            conflicts, _ = self.project.pull_project(projection_json=projection)
+
+        self.assertEqual(conflicts, [self.folder])
+        self.assertIn("a file you added here would take the name", "\n".join(logs.output))
+        self.assertEqual(self._tree(), before)
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-ONE"].folder, "reminders")
+
+        os.rename(
+            os.path.join(self.folder, "functions", "second_call.py"),
+            os.path.join(self.folder, "functions", "kept.py"),
+        )
+        conflicts, _ = self.project.pull_project(projection_json=projection)
+
+        self.assertEqual(conflicts, [])
+        self.assertIn("'up': 1", self._read("monthly", "functions", "second_call.py"))
+        self.assertEqual(self._read("monthly", "functions", "kept.py"), added)
+        self.assertFalse(os.path.exists(self.folder))
 
     def test_status_lists_a_campaign_file_left_in_conflict_by_a_pull(self):
         data = self._yaml()

@@ -879,46 +879,27 @@ class AgentStudioProject:
                 taken.append(relocated)
         return taken
 
-    def _move_files_added_here(
-        self,
-        moved: dict[tuple[type[Resource], str], Resource],
-        incoming_resources: ResourceMap,
-        original_resources: ResourceMap,
-        conflicts: list[str],
-    ) -> None:
-        """Move the files added here into the folder a moved file's folder became upstream."""
-        folders: dict[str, Optional[str]] = {}
-        for (resource_type, resource_id), old in moved.items():
-            old_folder = os.path.dirname(
-                _parse_multi_resource_path(old.get_path(self.root_path))[0]
-            )
-            new_folder = os.path.dirname(
-                _parse_multi_resource_path(
-                    incoming_resources[resource_type][resource_id].get_path(self.root_path)
-                )[0]
-            )
-            folders[old_folder] = (
-                new_folder if folders.get(old_folder, new_folder) == new_folder else None
-            )
-        known_paths = {
-            resource.get_path(self.root_path)
-            for resource_map in (original_resources, incoming_resources)
-            for resource_type, resources in resource_map.items()
-            if not issubclass(resource_type, MultiResourceYamlResource)
-            for resource in resources.values()
-        }
-        moves = [
-            (path, os.path.join(new_folder, os.path.relpath(path, old_folder)))
-            for old_folder, new_folder in folders.items()
-            if new_folder is not None and old_folder != new_folder and os.path.isdir(old_folder)
-            for directory, _, names in os.walk(old_folder)
-            for path in (os.path.join(directory, name) for name in names)
-            if path not in known_paths and path not in conflicts
-        ]
-        for path, target in moves:
-            if not os.path.exists(target):
-                os.makedirs(os.path.dirname(target), exist_ok=True)
-                shutil.move(path, target)
+    @staticmethod
+    def _set_aside_files_added_here(carried: dict[str, str]) -> list[tuple[str, str]]:
+        """Move each file added here that moves with its folder out of the way of the pull.
+
+        Returns:
+            Where each file was put, and its new path.
+        """
+        staged = []
+        for index, (source, target) in enumerate(carried.items()):
+            if os.path.isfile(source):
+                aside = f"{source}.pull-move-{index}"
+                os.rename(source, aside)
+                staged.append((aside, target))
+        return staged
+
+    @staticmethod
+    def _place_files_added_here(staged: list[tuple[str, str]]) -> None:
+        """Put each file set aside at the path its folder became upstream."""
+        for aside, target in staged:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.move(aside, target)
 
     @staticmethod
     def _write_yaml_or_remove(file: str, data: dict) -> None:
@@ -1200,11 +1181,13 @@ class AgentStudioProject:
             return []
 
         files_with_conflicts: list[str] = []
-        held_renames: list[tuple[str, str, bool]] = []
+        held_renames: list[tuple[str, str, str]] = []
         moved: dict[tuple[type[Resource], str], Resource] = {}
         vacated: set[str] = set()
+        carried: dict[str, str] = {}
+        staged: list[tuple[str, str]] = []
         if not force:
-            held_renames, vacated, moved = self._hold_back_taken_moves(
+            held_renames, vacated, moved, carried = self._hold_back_taken_moves(
                 original_resources,
                 incoming_resources,
                 format=format,
@@ -1214,6 +1197,7 @@ class AgentStudioProject:
                 + incoming_slim_resources,
             )
             files_with_conflicts = [old_folder for old_folder, _, _ in held_renames]
+            staged = self._set_aside_files_added_here(carried)
             original_resources = dict(original_resources)
             for (resource_type, resource_id), original in moved.items():
                 original_resources[resource_type] = {
@@ -1433,22 +1417,25 @@ class AgentStudioProject:
                     continue
                 resource_type.delete_resource(resource.get_path(self.root_path))
 
-        self._move_files_added_here(
-            moved, incoming_resources, original_resources, files_with_conflicts
-        )
+        self._place_files_added_here(staged)
         self._warn_held_renames(held_renames)
         return files_with_conflicts
 
-    def _warn_held_renames(self, held_renames: list[tuple[str, str, bool]]) -> None:
+    def _warn_held_renames(self, held_renames: list[tuple[str, str, str]]) -> None:
         """Say why each held-back rename waits, and what lets the next pull apply it."""
         if held_renames:
             OutboundCampaign.remove_empty_files(self.root_path)
-        for old_folder, new_folder, holds_other_files in held_renames:
+        for old_folder, new_folder, reason in held_renames:
             renamed = (
                 f"Agent Studio renamed {os.path.relpath(old_folder, self.root_path)} to "
                 f"{os.path.relpath(new_folder, self.root_path)}"
             )
-            if holds_other_files:
+            if reason == "clash":
+                logger.warning(
+                    f"{renamed}, where a file you added here would take the name of a file "
+                    "already there. Rename the file you added, then pull again."
+                )
+            elif reason == "other_files":
                 logger.warning(
                     f"{renamed}, which holds files that aren't part of it. Move or delete them, "
                     "then pull again."
@@ -1518,7 +1505,12 @@ class AgentStudioProject:
         format: bool,
         original_mappings: list[ResourceMapping],
         incoming_mappings: list[ResourceMapping],
-    ) -> tuple[list[tuple[str, str, bool]], set[str], dict[tuple[type[Resource], str], Resource]]:
+    ) -> tuple[
+        list[tuple[str, str, str]],
+        set[str],
+        dict[tuple[type[Resource], str], Resource],
+        dict[str, str],
+    ]:
         """Hold back each upstream move onto a file that is taken here.
 
         A file is free when nothing is there, or when every resource saved in it moves away or
@@ -1527,13 +1519,16 @@ class AgentStudioProject:
         unless the moving resource's own file is gone here, as it is then that resource renamed
         here too. A held-back resource stays as saved in `incoming_resources`, so the
         next pull moves it once its target is free. The other moves out of its folder wait with
-        it, and so does anything new upstream in either folder.
+        it, and so does anything new upstream in either folder. Files added here in a folder
+        that moves go with it, so they don't take its new folder, unless one would take the
+        name of a file already there.
 
         Returns:
-            Each held-back rename's old and new folder, and whether the new one holds files no
-            resource is saved in, so the old folder is reported as a conflict; the saved files
-            of single-file resources that free their path; and each multi-resource entry that
-            moves to another file, as it was saved, by type and id.
+            Each held-back rename's old and new folder, and why it waits ("taken",
+            "other_files" or "clash"), so the old folder is reported as a conflict; the saved
+            files of single-file resources that free their path; each multi-resource entry that
+            moves to another file, as it was saved, by type and id; and the new path of each
+            file added here that moves with its folder.
         """
         moves: dict[tuple[type[Resource], str], tuple[str, str]] = {}
         saved_in: dict[str, list[tuple[type[Resource], str]]] = {}
@@ -1567,14 +1562,49 @@ class AgentStudioProject:
                 return not os.path.exists(old_file)
             return all(key in freed_by_delete or (key in moves and key not in held) for key in keys)
 
-        def other_files(old_file: str, new_file: str) -> list[str]:
+        folder_moves = {
+            key: folders
+            for key, (old_file, new_file) in moves.items()
+            if (folders := _moved_folders(old_file, new_file))[1] != new_file
+        }
+        files_in: dict[str, list[str]] = {}
+
+        def listing(folder: str) -> list[str]:
+            if folder not in files_in:
+                files_in[folder] = _files_in(folder) if os.path.exists(folder) else []
+            return files_in[folder]
+
+        incoming_files = {
+            self._file_of(resource)
+            for resources in incoming_resources.values()
+            for resource in resources.values()
+        }
+
+        def carried_by(held: set) -> dict[str, dict[str, str]]:
+            targets: dict[str, set[str]] = {}
+            for key, (old_folder, new_folder) in folder_moves.items():
+                if key not in held:
+                    targets.setdefault(old_folder, set()).add(new_folder)
+            return {
+                old_folder: {
+                    file: os.path.join(next(iter(new_folders)), os.path.relpath(file, old_folder))
+                    for file in listing(old_folder)
+                    if file not in saved_in
+                }
+                for old_folder, new_folders in targets.items()
+                if len(new_folders) == 1
+            }
+
+        def other_files(old_file: str, new_file: str, carried: set[str]) -> list[str]:
             old_folder, new_folder = _moved_folders(old_file, new_file)
             if new_folder == new_file or not os.path.exists(old_folder):
                 return []
-            return [file for file in _files_in(new_folder) if file not in saved_in]
+            return [
+                file for file in listing(new_folder) if file not in saved_in and file not in carried
+            ]
 
-        def folder_free(old_file: str, new_file: str, held: set) -> bool:
-            if other_files(old_file, new_file):
+        def folder_free(old_file: str, new_file: str, held: set, carried: set[str]) -> bool:
+            if other_files(old_file, new_file, carried):
                 return False
             new_folder = _moved_folders(old_file, new_file)[1]
             return all(
@@ -1584,22 +1614,48 @@ class AgentStudioProject:
                 for key in keys
             )
 
-        held: set[tuple[type[Resource], str]] = set()
-        while True:
-            held_folders = [_moved_folders(*moves[key])[0] for key in held]
-            newly = {
-                key
-                for key, (old_file, new_file) in moves.items()
-                if key not in held
-                and (
-                    not free(old_file, new_file, held)
-                    or not folder_free(old_file, new_file, held)
-                    or any(_inside(old_file, folder) for folder in held_folders)
-                )
+        def clashes(carry: dict[str, dict[str, str]], held: set) -> set[str]:
+            targets = [target for files in carry.values() for target in files.values()]
+            moving_away = {
+                file
+                for file, keys in saved_in.items()
+                if all(key in freed_by_delete or (key in moves and key not in held) for key in keys)
             }
+            carried = {file for files in carry.values() for file in files}
+            return {
+                old_folder
+                for old_folder, files in carry.items()
+                for target in files.values()
+                if target in incoming_files
+                or targets.count(target) > 1
+                or (os.path.exists(target) and target not in moving_away and target not in carried)
+            }
+
+        held: set[tuple[type[Resource], str]] = set()
+        reasons: dict[tuple[type[Resource], str], str] = {}
+        while True:
+            carry = carried_by(held)
+            carried = {file for files in carry.values() for file in files}
+            clashing = clashes(carry, held)
+            held_folders = [_moved_folders(*moves[key])[0] for key in held]
+            newly: dict[tuple[type[Resource], str], str] = {}
+            for key, (old_file, new_file) in moves.items():
+                if key in held:
+                    continue
+                if not free(old_file, new_file, held) or any(
+                    _inside(old_file, folder) for folder in held_folders
+                ):
+                    newly[key] = "taken"
+                elif other_files(old_file, new_file, carried):
+                    newly[key] = "other_files"
+                elif not folder_free(old_file, new_file, held, carried):
+                    newly[key] = "taken"
+                elif key in folder_moves and folder_moves[key][0] in clashing:
+                    newly[key] = "clash"
             if not newly:
                 break
-            held |= newly
+            held |= set(newly)
+            reasons.update(newly)
 
         folders = {_moved_folders(*moves[key]) for key in held}
         for resource_type, resource_id in held:
@@ -1618,14 +1674,19 @@ class AgentStudioProject:
             ]:
                 del incoming[resource_id]
 
+        reason_order = ["clash", "other_files", "taken"]
         held_renames = [
             (
                 old_folder,
                 new_folder,
-                any(
-                    other_files(*moves[key])
-                    for key in held
-                    if _moved_folders(*moves[key]) == (old_folder, new_folder)
+                min(
+                    (
+                        reasons[key]
+                        for key in held
+                        if _moved_folders(*moves[key]) == (old_folder, new_folder)
+                    ),
+                    key=reason_order.index,
+                    default="taken",
                 ),
             )
             for old_folder, new_folder in sorted(folders)
@@ -1644,7 +1705,10 @@ class AgentStudioProject:
             self._file_of(original_resources[resource_type][resource_id])
             for resource_type, resource_id in freed_by_delete
         }
-        return held_renames, vacated, moved
+        carried_files = {
+            file: target for files in carried_by(held).values() for file, target in files.items()
+        }
+        return held_renames, vacated, moved, carried_files
 
     def _file_of(self, resource: Resource) -> str:
         """Return the file a resource lives in."""

@@ -27,7 +27,7 @@ Optional. The folder name is the campaign's name, lowercased, with punctuation r
 
 To rename a campaign, change `name` and rename the folder to match. The campaign keeps its identity, contacts and history when its nodes keep their names and types, though the trigger may be renamed too. A push that would instead delete one campaign and create another fails validation: rename the folder in a push of its own.
 
-When a campaign is renamed in Agent Studio, a pull moves its folder and carries your edits. If a folder already has the new name here, the pull leaves the campaign where it is and reports it as a conflict: move or delete that folder, then pull again. If the folder belongs to a campaign deleted in Agent Studio and is unedited here, this pull removes it and the next pull moves the renamed campaign. Files you added to that folder keep the rename waiting until you move or delete them.
+When a campaign is renamed in Agent Studio, a pull moves its folder and carries your edits. If a folder already has the new name here, the pull leaves the campaign where it is and reports it as a conflict: move or delete that folder, then pull again. If the folder belongs to a campaign deleted in Agent Studio and is unedited here, this pull removes it and the next pull moves the renamed campaign. Files you added to that folder keep the rename waiting until you move or delete them. Files you added to the renamed campaign's own folder move with it, unless one has the name of a file Agent Studio added to the campaign: then the rename waits until you rename yours.
 
 A campaign that has been published can't be deleted. Pause it, then archive it, with `poly campaign pause` and `poly campaign archive`. It stops being pulled once it's archived.
 
