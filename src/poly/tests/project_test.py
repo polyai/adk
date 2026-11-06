@@ -2962,6 +2962,20 @@ class UnchangedFilesTest(unittest.TestCase):
 
         self.assertEqual(self._saved_status()["file_fingerprints"]["files"], before)
 
+    def test_fingerprints_survive_the_project_moving(self):
+        """The ADK service loads every request from a new temporary directory."""
+        first, first_reads = self._run()
+        moved = os.path.join(os.path.dirname(self.root), "moved")
+        shutil.move(self.root, moved)
+        self.root = moved
+        self.status_file = os.path.join(moved, STATUS_FILE)
+
+        (_, modified, _, _), reads = self._run()
+
+        self.assertEqual(len(modified), len(first[1]))
+        self.assertEqual(reads, len(modified))
+        self.assertLess(reads, first_reads)
+
     def test_status_changes_nothing_else_in_the_status_file(self):
         before = self._saved_status()
 

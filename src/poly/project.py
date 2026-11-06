@@ -4682,18 +4682,27 @@ class UnchangedFiles:
 
         New resources get a fresh ID on every run, so only their type, name and path count.
         """
+        # Paths relative to the root, so the key survives the project moving (the ADK service
+        # loads every request from a new temporary directory). Mapping paths are joined onto
+        # the root, so slicing off its prefix gives the same result as relpath, much faster.
+        root_prefix = os.path.join(project.root_path, "")
         rows = []
         for mapping, keep_ids in (
             *((m, True) for m in kept_mappings),
             *((m, True) for m in project.slim_resources),
             *((m, False) for m in new_mappings),
         ):
+            path = mapping.file_path or ""
+            if path.startswith(root_prefix):
+                path = path[len(root_prefix) :]
+            elif path:
+                path = os.path.relpath(path, project.root_path)
             values = (
                 mapping.resource_type.__name__,
                 mapping.resource_name,
                 mapping.flow_name,
                 mapping.resource_prefix,
-                mapping.file_path,
+                path,
                 mapping.resource_id if keep_ids else "",
                 mapping.flow_id if keep_ids else "",
             )
