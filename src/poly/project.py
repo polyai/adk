@@ -488,6 +488,20 @@ class AgentStudioProject:
         finally:
             MultiResourceYamlResource._file_cache.clear()
 
+    def _is_as_recorded(
+        self, rel_path: str, resource_type: type[Resource], bytes_hashes: dict[str, str]
+    ) -> bool:
+        """Whether a file's bytes and its saved hash are both as its fingerprint recorded.
+
+        Such a file holds exactly what was recorded, so its saved name is the one inside it.
+        """
+        fingerprint = self.file_fingerprints.get("files", {}).get(rel_path)
+        if not isinstance(fingerprint, dict):
+            return False
+        if fingerprint["saved"] != self.file_structure_info.get(rel_path, {}).get("hash"):
+            return False
+        return fingerprint["bytes"] == self._file_bytes_hash(rel_path, resource_type, bytes_hashes)
+
     def _unchanged_files(
         self, new_mappings: list[ResourceMapping], kept_mappings: list[ResourceMapping]
     ) -> set[str]:
@@ -500,20 +514,13 @@ class AgentStudioProject:
             Their paths, relative to the project root.
         """
         known = KnownIds.from_mappings([*new_mappings, *kept_mappings, *self.slim_resources])
-        recorded = self.file_fingerprints.get("files", {})
         unchanged: set[str] = set()
         bytes_hashes: dict[str, str] = {}
         for mapping in kept_mappings:
             rel_path = self._relative_path(mapping.file_path)
-            fingerprint = recorded.get(rel_path)
-            if not isinstance(fingerprint, dict):
+            if not self._is_as_recorded(rel_path, mapping.resource_type, bytes_hashes):
                 continue
-            if fingerprint["saved"] != self.file_structure_info.get(rel_path, {}).get("hash"):
-                continue
-            if fingerprint["bytes"] != self._file_bytes_hash(
-                rel_path, mapping.resource_type, bytes_hashes
-            ):
-                continue
+            fingerprint = self.file_fingerprints["files"][rel_path]
             if not all(known.exists(kind, value) for kind, value in fingerprint["refs"]):
                 continue
             if any(known.name_exists(kind, value) for kind, value in fingerprint["unresolved"]):
@@ -2653,10 +2660,32 @@ class AgentStudioProject:
         new_resource_mappings: list[ResourceMapping] = []
         kept_resource_mappings: list[ResourceMapping] = []
 
+        if not self.file_structure_info:
+            self.file_structure_info = self.compute_file_structure_info(self.resources)
+        # A file exactly as recorded holds its saved name, so it needn't be parsed for it. Some
+        # types save a fixed name instead, so the saved name must be the one the path was
+        # cleaned from.
+        bytes_hashes: dict[str, str] = {}
+
+        def recorded_name(
+            file_path: str, resource_type: type[Resource], path_name: str
+        ) -> Optional[str]:
+            rel_path = self._relative_path(file_path)
+            if not self._is_as_recorded(rel_path, resource_type, bytes_hashes):
+                return None
+            name = self.file_structure_info[rel_path].get("resource_name")
+            if name and resource_utils.clean_name(name) == resource_utils.clean_name(path_name):
+                return name
+            return None
+
         # Build a map of flow config paths to flow names
         flow_configs = discovered_resources.get(FlowConfig, {})
         flow_paths_to_names: dict[str, str] = {}
         for flow_config_path in flow_configs:
+            path_name = resource_utils.get_flow_name_from_path(flow_config_path)
+            if name := recorded_name(flow_config_path, FlowConfig, path_name):
+                flow_paths_to_names[resource_utils.clean_name(name)] = name
+                continue
             flow_config: FlowConfig = self.read_local_resource(
                 ResourceMapping(
                     resource_id="temp_id",
@@ -2686,9 +2715,6 @@ class AgentStudioProject:
                     parent_flow.resource_id if parent_flow else self.generate_uuid(FlowConfig)
                 )
 
-        if not self.file_structure_info:
-            self.file_structure_info = self.compute_file_structure_info(self.resources)
-
         known_files = set(
             os.path.join(self.root_path, file_path) for file_path in self.file_structure_info.keys()
         )
@@ -2709,29 +2735,17 @@ class AgentStudioProject:
                     resource_utils.get_flow_name_from_path(file_path),
                 )
 
-                if resource_type == FlowStep:
-                    flow_step: FlowStep = self.read_local_resource(
-                        ResourceMapping(
-                            resource_id="temp_id",
-                            resource_type=FlowStep,
-                            resource_name=resource_name,
-                            file_path=file_path,
-                            flow_name=flow_name,
-                            resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
-                        ),
-                        resource_mappings=[],
-                    )
-                    resource_name = flow_step.name
-
+                # Paths hold cleaned names, so these types take their real name from the file.
+                named_in_file = resource_type in (FlowStep, Topic, ChildTopic) or issubclass(
+                    resource_type, MultiResourceYamlResource
+                )
                 if resource_type == FlowConfig:
                     resource_name = flow_name
-
-                # Resource name in file path is cleaned, so we need to get the original name
-                if (
-                    issubclass(resource_type, MultiResourceYamlResource)
-                    or resource_type == Topic
-                    or resource_type == ChildTopic
+                elif named_in_file and (
+                    saved_name := recorded_name(file_path, resource_type, resource_name)
                 ):
+                    resource_name = saved_name
+                elif named_in_file:
                     resource = self.read_local_resource(
                         ResourceMapping(
                             resource_id="temp_id",

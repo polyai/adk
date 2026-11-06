@@ -2971,12 +2971,17 @@ class UnchangedFilesTest(unittest.TestCase):
         project.file_structure_info = project.compute_file_structure_info(project.resources)
         project._record_fingerprints()
         project.save_config()
-        self.assertIn(["global_functions", "new_helper"], project.file_fingerprints["files"][self.TOPIC]["unresolved"])
+        self.assertIn(
+            ["global_functions", "new_helper"],
+            project.file_fingerprints["files"][self.TOPIC]["unresolved"],
+        )
         shutil.copy(
             os.path.join(self.root, "functions", "format_date.py"),
             os.path.join(self.root, "functions", "new_helper.py"),
         )
-        self._edit(os.path.join("functions", "new_helper.py"), "def format_date(", "def new_helper(")
+        self._edit(
+            os.path.join("functions", "new_helper.py"), "def format_date(", "def new_helper("
+        )
 
         _, reads, _ = self._assert_same_as_full_read()
 
@@ -3006,6 +3011,45 @@ class UnchangedFilesTest(unittest.TestCase):
         _, reads, _ = self._assert_same_as_full_read()
 
         self.assertNotIn(self.TOPIC, reads)
+
+    def _match(self, full: bool = False):
+        """Match local files to resources; return the mappings and the files parsed for names."""
+        project = AgentStudioProject.from_file_path(self.root)
+        if full:
+            project.file_fingerprints = {}
+        read = AgentStudioProject.read_local_resource
+        parsed = []
+
+        def counting_read(self_, resource, resource_mappings, *a, **k):
+            parsed.append(os.path.relpath(resource.file_path, self.root))
+            return read(self_, resource, resource_mappings, *a, **k)
+
+        with patch.object(AgentStudioProject, "read_local_resource", counting_read):
+            mappings = project.find_new_kept_deleted(project.discover_local_resources())
+        return mappings, parsed
+
+    def test_matching_takes_recorded_names_without_parsing(self):
+        self._record()
+
+        mappings, parsed = self._match()
+        full_mappings, full_parsed = self._match(full=True)
+
+        self.assertEqual(mappings, full_mappings)
+        self.assertIn(self.TOPIC, full_parsed)
+        self.assertNotIn(self.TOPIC, parsed)
+
+    def test_a_topic_renamed_in_its_file_is_parsed_for_its_new_name(self):
+        self._record()
+        self._edit(self.TOPIC, "name: Topic 1", "name: TOPIC 1")
+
+        mappings, parsed = self._match()
+        full_mappings, _ = self._match(full=True)
+
+        self.assertEqual(mappings, full_mappings)
+        self.assertIn(self.TOPIC, parsed)
+        _, kept, _ = mappings
+        topic = next(m for m in kept if m.file_path == os.path.join(self.root, self.TOPIC))
+        self.assertEqual(topic.resource_name, "TOPIC 1")
 
     def test_another_adk_versions_fingerprints_are_ignored(self):
         """Another version may read the same bytes into a different resource."""
@@ -3133,7 +3177,9 @@ class ReferencesTest(unittest.TestCase):
         for resource_type in registered:
             owner = next(c for c in resource_type.__mro__ if "refers_to" in c.__dict__)
             with self.subTest(resource_type.__name__):
-                self.assertIsNot(owner, Resource, "declare refers_to, or return None to always read")
+                self.assertIsNot(
+                    owner, Resource, "declare refers_to, or return None to always read"
+                )
                 self.assertTrue(
                     owner is resource_type or owner not in registered,
                     f"inherits refers_to from {owner.__name__}; declare its own",
@@ -3166,11 +3212,16 @@ class ReferencesTest(unittest.TestCase):
                 for m in everything
                 if m is mapping
                 or m.resource_id in needed
-                or (m.resource_type is FlowConfig and resource_utils.clean_name(m.resource_id) in needed)
+                or (
+                    m.resource_type is FlowConfig
+                    and resource_utils.clean_name(m.resource_id) in needed
+                )
             ]
             with self.subTest(mapping.file_path):
                 MultiResourceYamlResource._file_cache.clear()
-                full = resource_utils.resource_to_dict(project.read_local_resource(mapping, everything))
+                full = resource_utils.resource_to_dict(
+                    project.read_local_resource(mapping, everything)
+                )
                 MultiResourceYamlResource._file_cache.clear()
                 only_needed = resource_utils.resource_to_dict(
                     project.read_local_resource(mapping, reduced)
