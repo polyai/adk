@@ -9478,6 +9478,23 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         self._assert_push_refused("'Reminders' has been published, so it can't be deleted.")
 
+    def test_published_campaign_keeps_its_status_across_a_pushed_folder_rename(self):
+        self._pull_published()
+        self._rename_campaign("Monthly", "monthly")
+        success, message = self._push_for_real()
+        self.assertTrue(success, message)
+        self._handler_patch.stop()
+
+        self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-ONE"].status, "active")
+        data = self._yaml()
+        self._node(data, "Trigger")["sourceType"] = "api"
+        self._write_yaml(data)
+        self._assert_push_refused(
+            "The contact source stays 'csv' once the campaign has been published."
+        )
+        shutil.rmtree(self.folder)
+        self._assert_push_refused("'Monthly' has been published, so it can't be deleted.")
+
     def test_published_campaign_keeps_its_status_out_of_the_file(self):
         self._pull_published()
 
