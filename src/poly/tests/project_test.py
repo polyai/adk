@@ -5,6 +5,7 @@ Uses test project in tests/test_project
 Copyright PolyAI Limited
 """
 
+import base64
 import dataclasses
 import json
 import os
@@ -4465,6 +4466,7 @@ class SwitchBranchTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(projection, {"fetched": True})
         self.assertEqual(self.project.branch_id, "id-a")
+        self.assertEqual(self.project.get_current_branch(), "feature-a")
         self.mock_api.switch_branch.assert_called_once_with("id-a")
         self.mock_pull.assert_not_called()
 
@@ -4483,6 +4485,7 @@ class SwitchBranchTest(unittest.TestCase):
         self.mock_api.create_branch.assert_called_once_with("feature-b", "main")
         self.mock_api.switch_branch.assert_not_called()
         self.assertEqual(self.project.branch_id, "id-new")
+        self.assertEqual(self.project.get_current_branch(), "feature-b")
         self.mock_pull.assert_not_called()
 
     def test_create_from_source_branch(self):
@@ -5389,6 +5392,86 @@ class GetBranchHistoryProject(unittest.TestCase):
 
         self.assertEqual(result, expected)
         mock_api.get_branch_history.assert_called_once_with("branch-1")
+
+
+class BranchNameTest(unittest.TestCase):
+    """Tests for the current branch name saved in the status file, so status needs no API call."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        self.project.branch_id = "branch-abc"
+        self.project.save_config()
+        self.mock_api = MagicMock(branch_id="branch-abc")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "my-feature": {"branchId": "branch-abc"},
+        }
+        self.project._api_handler = self.mock_api
+
+    def _saved_status(self) -> dict:
+        with open(os.path.join(self.root, STATUS_FILE), "rb") as f:
+            return json.loads(base64.b64decode(f.read()))
+
+    def _saved_branch_name(self) -> tuple[str, str]:
+        status = self._saved_status()
+        return status["branch_name"], status["branch_name_id"]
+
+    def test_saved_name_is_used_without_an_api_call(self):
+        self.project.branch_name, self.project.branch_name_id = "my-feature", "branch-abc"
+
+        self.assertEqual(self.project.get_current_branch(), "my-feature")
+        self.mock_api.get_branches.assert_not_called()
+
+    def test_missing_name_is_fetched_and_saved(self):
+        self.assertEqual(self.project.get_current_branch(), "my-feature")
+
+        self.assertEqual(self._saved_branch_name(), ("my-feature", "branch-abc"))
+
+    def test_name_saved_for_another_branch_is_ignored(self):
+        """After any branch change, the old branch's name must not be shown."""
+        self.project.branch_name, self.project.branch_name_id = "old-branch", "branch-old"
+
+        self.assertEqual(self.project.get_current_branch(), "my-feature")
+        self.mock_api.get_branches.assert_called_once()
+
+    def test_saving_the_name_leaves_the_rest_of_the_status_file_alone(self):
+        """A branch lookup mid-operation must not save unsaved resources or the pull time."""
+        before = self._saved_status()
+        self.project.resources = {}
+        self.project.last_updated = datetime(2000, 1, 1)
+
+        self.project.get_branches()
+
+        after = self._saved_status()
+        self.assertEqual((after.pop("branch_name"), after.pop("branch_name_id")), ("my-feature", "branch-abc"))
+        before.pop("branch_name")
+        before.pop("branch_name_id")
+        self.assertEqual(after, before)
+
+    def test_name_survives_reloading_the_project(self):
+        self.project.get_branches()
+
+        reloaded = AgentStudioProject.from_dict(self._saved_status(), self.root)
+
+        self.assertEqual(reloaded.get_current_branch(), "my-feature")
+
+    def test_create_branch_saves_the_new_name(self):
+        self.project.branch_id = "main"
+        self.mock_api.create_branch.return_value = "branch-new"
+        with patch.object(AgentStudioProject, "deployment_mode", new=DeploymentMode.RELEASES):
+            self.project.create_branch("new-feature")
+
+        self.assertEqual(self._saved_branch_name(), ("new-feature", "branch-new"))
+
+    def test_rename_branch_saves_the_new_name(self):
+        self.mock_api.rename_branch.return_value = True
+
+        self.project.rename_branch("renamed")
+
+        self.assertEqual(self.project.get_current_branch(), "renamed")
+        self.assertEqual(self._saved_branch_name(), ("renamed", "branch-abc"))
 
 
 class RenameBranchProject(unittest.TestCase):
