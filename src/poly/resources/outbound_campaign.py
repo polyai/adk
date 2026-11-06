@@ -464,7 +464,8 @@ def campaign_names(campaigns: list[dict]) -> dict[str, str]:
 
     Agent Studio allows two campaigns the same name, but each needs its own folder. The oldest
     keeps its name, and a later one whose name cleans to a name taken becomes `<name> (1)`,
-    numbered past any name another campaign already has. A name with nothing left once cleaned becomes `Campaign`, numbered the same way.
+    numbered past any name another campaign already has. A name with nothing left once cleaned
+    becomes `Campaign`, numbered the same way.
     """
     order = sorted(
         range(len(campaigns)),
@@ -788,7 +789,10 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "OutboundCampaign"]:
-        """Parse campaigns from a projection, skipping archived ones. Returns `{}` if it has none."""
+        """Parse campaigns from a projection, skipping archived ones.
+
+        Returns `{}` if it has none.
+        """
         campaigns = _projection_campaigns(projection)
         if campaigns is None:
             logger.debug("No outbound campaigns in projection - they will not be pulled.")
@@ -890,7 +894,10 @@ class OutboundCampaign(MultiResourceYamlResource):
             raise ValueError("; ".join(errors))
 
     def validation_errors(self, resource_mappings: list[ResourceMapping] = None) -> list[str]:
-        """Return every problem the platform would reject, so `validate` can report them all at once."""
+        """Return every problem the platform would reject.
+
+        `validate` reports them all at once.
+        """
         errors: list[str] = []
         if not isinstance(self.name, str) or not self.name.strip():
             errors.append(

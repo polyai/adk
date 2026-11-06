@@ -358,6 +358,7 @@ def _carry_campaign_ids(
     saved_campaign = deleted_resources[OutboundCampaign].pop(old_id)
     new_resources.get(OutboundCampaignSettings, {}).pop(new_id, None)
     campaign.resource_id = old_id
+    campaign.status = saved_campaign.status
     updated_resources.setdefault(OutboundCampaign, {})[old_id] = campaign
     _stage(
         (new_resources, updated_resources, deleted_resources),
@@ -392,6 +393,7 @@ def _carry_node_id(
     node.resource_id = saved.resource_id
     node.position = saved.position
     node.saved_code = saved.code
+    node.campaign_published = saved.campaign_published
     state_nodes[node.resource_id] = node
     if node.compute_hash() != saved.compute_hash():
         updated_resources.setdefault(OutboundCampaignNode, {})[node.resource_id] = node
