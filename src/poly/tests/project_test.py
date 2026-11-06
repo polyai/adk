@@ -3038,7 +3038,7 @@ class UnchangedFilesTest(unittest.TestCase):
         self.assertNotIn(os.path.join("topics", "topic_2.yaml"), reads)
         self.assertLess(len(reads), len(full_reads))
 
-    def _plain_pull(self, change_upstream=None) -> None:
+    def _plain_pull(self, change_upstream=None, force: bool = False) -> None:
         """Run `poly pull` (a merge pull) with the API returning the saved resources, changed."""
         project = AgentStudioProject.from_file_path(self.root)
         incoming = deepcopy(project.resources)
@@ -3047,7 +3047,7 @@ class UnchangedFilesTest(unittest.TestCase):
         api_handler = MagicMock(branch_id=project.branch_id)
         api_handler.pull_resources.return_value = (incoming, list(project.slim_resources), {})
         project._api_handler = api_handler
-        conflicts, _ = project.pull_project(force=False)
+        conflicts, _ = project.pull_project(force=force)
         self.assertEqual(conflicts, [])
 
     @staticmethod
@@ -3089,6 +3089,21 @@ class UnchangedFilesTest(unittest.TestCase):
         (_, modified, _, _), reads, _ = self._assert_same_as_full_read()
         self.assertIn(self.TOPIC, reads)
         self.assertIn(os.path.join(self.root, self.TOPIC), modified)
+
+    def test_a_pull_that_rewrites_a_recorded_file_records_it_again(self):
+        """A push records the bytes it read; a forced pull then writes the ADK's own formatting."""
+        path = os.path.join(self.root, self.TOPIC)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("# formatted by hand\n")
+        self._record()
+
+        self._plain_pull(force=True)
+
+        with open(path, encoding="utf-8") as f:
+            self.assertNotIn("# formatted by hand", f.read())
+        (_, modified, _, _), reads, _ = self._assert_same_as_full_read()
+        self.assertNotIn(self.TOPIC, reads)
+        self.assertEqual(modified, [])
 
     def test_a_real_push_records_the_files_it_saved(self):
         project = AgentStudioProject.from_file_path(self.root)

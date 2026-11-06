@@ -409,18 +409,26 @@ class AgentStudioProject:
         """Record, for every saved resource, the bytes a pull writes for it.
 
         A file with exactly those bytes means its saved resource. One with local edits, merged
-        or kept by a merge pull, has other bytes, so it's read as before. Fingerprints whose
-        saved resource hasn't changed are kept. The rest are recomputed by rendering their files
-        through the same write code into a scratch directory, so nothing local is read.
+        or kept by a merge pull, has other bytes, so it's read as before. A fingerprint is kept
+        while its saved resource and the file's bytes are as recorded. The rest are recomputed by
+        rendering their files through the same write code into a scratch directory, because a
+        pull can rewrite a file whose saved resource didn't change (a push records the bytes it
+        read, which needn't be how the ADK writes them). No local file is parsed.
         """
         recorded = self.file_fingerprints.get("files", {})
         stale_files: set[str] = set()
         rendered: dict[str, str] = {}
+        bytes_hashes: dict[str, str] = {}
         for resource in self._all_saved_resources():
             rel_path = resource.file_path
             fingerprint = recorded.get(rel_path)
             saved_hash = self.file_structure_info.get(rel_path, {}).get("hash")
-            if not isinstance(fingerprint, dict) or fingerprint.get("saved") != saved_hash:
+            if (
+                not isinstance(fingerprint, dict)
+                or fingerprint.get("saved") != saved_hash
+                or fingerprint.get("bytes")
+                != self._file_bytes_hash(rel_path, type(resource), bytes_hashes)
+            ):
                 stale_files.add(self._real_rel_path(rel_path, type(resource)))
         if stale_files:
             rendered = self._rendered_bytes_hashes(stale_files, format=format)
