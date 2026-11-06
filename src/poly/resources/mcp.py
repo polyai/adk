@@ -288,6 +288,11 @@ class MCPServer(MultiResourceYamlResource):
             last_discovered_tool_count=known_last_discovered_tool_count,
         )
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """MCP servers reference nothing else in the project."""
+        return set()
+
     def validate(self, **kwargs) -> None:
         if not self.name:
             raise ValueError("provider_id is required.")

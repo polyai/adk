@@ -192,6 +192,11 @@ class Topic(YamlResource):
         d["content"] = utils.replace_resource_ids_with_names(d["content"], resource_mappings or [])
         return d
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Template references in the topic's actions and content."""
+        return utils.template_references(self.actions + self.content)
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         """Validate the topic resource."""
 

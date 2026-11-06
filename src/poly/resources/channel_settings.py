@@ -121,6 +121,11 @@ class VoiceDisclaimerMessage(MultiResourceYamlResource):
             language_code=yaml_dict.get("language_code", "en-GB"),
         )
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Template references in the disclaimer."""
+        return utils.template_references(self.message)
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the disclaimer message resource."""
 
@@ -245,6 +250,11 @@ class ChannelGreeting(MultiResourceYamlResource):
             welcome_message=yaml_dict.get("welcome_message", ""),
             language_code=yaml_dict.get("language_code", "en-GB"),
         )
+
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Template references in the welcome message."""
+        return utils.template_references(self.welcome_message)
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the greeting resource."""
@@ -401,6 +411,11 @@ class ChannelStylePrompt(MultiResourceYamlResource):
             name=name,
             prompt=yaml_dict.get("prompt", ""),
         )
+
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Template references in the style prompt."""
+        return utils.template_references(self.prompt)
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         utils.get_references_from_prompt(self.prompt, [], raise_on_invalid=True)
@@ -581,6 +596,11 @@ class VoiceFillerPhrases(MultiResourceYamlResource):
             )
         }
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Filler phrases reference nothing else in the project."""
+        return set()
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if self.enabled and not any(phrase.strip() for phrase in self.phrases):
             raise ValueError("filler_phrases needs at least one phrase when enabled.")
@@ -686,6 +706,11 @@ class VoiceBackgroundAmbience(MultiResourceYamlResource):
                 loudness=ambience.get("loudness", -50),
             )
         }
+
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Background ambience references nothing else in the project."""
+        return set()
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if not self.preset:

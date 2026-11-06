@@ -350,6 +350,11 @@ class Variant(MultiResourceYamlResource):
             ),
         )
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Variants reference nothing else in the project."""
+        return set()
+
     def validate(self, resource_mappings: list[ResourceMapping], **kwargs):
         same_name_ids = _variant_ids_by_name(resource_mappings).get(self.name, ())
         if any(variant_id != self.resource_id for variant_id in same_name_ids):
@@ -628,6 +633,11 @@ class VariantAttribute(MultiResourceYamlResource):
             type=self.build_type_proto(),
             references={},
         )
+
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """The variants the attribute has values for."""
+        return {("Variant", variant_id) for variant_id in self.mappings or {}}
 
     def validate(self, resource_mappings: list[ResourceMapping], **kwargs):
         if not self.name:
