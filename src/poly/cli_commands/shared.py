@@ -435,13 +435,9 @@ def get_package_version() -> str:
     Returns:
         The version string of the package.
     """
-    from importlib.metadata import version
+    from poly.version import __version__
 
-    try:
-        _version = version(PACKAGE_NAME)
-    except Exception:
-        _version = "unknown"
-    return _version
+    return __version__
 
 
 def get_latest_version(timeout: float = PYPI_TIMEOUT_SECONDS) -> str:

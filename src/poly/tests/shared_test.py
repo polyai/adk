@@ -4,14 +4,17 @@ Copyright PolyAI Limited
 """
 
 import argparse
+import tomllib
 import unittest
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from poly.cli import AgentStudioCLI
-from poly.cli_commands.shared import REGION_CHOICES, region_type
+from poly.cli_commands.shared import REGION_CHOICES, get_package_version, region_type
 from poly.constants import REGION_NAMES
 from poly.handlers.interface import REGIONS
+from poly.version import __version__
 
 
 def _parser():
@@ -160,3 +163,16 @@ def _subparser_for(parser: argparse.ArgumentParser, argv: list[str]) -> argparse
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PackageVersionTest(unittest.TestCase):
+    """Tests for the version constant that semantic-release stamps on each release."""
+
+    def test_version_matches_pyproject(self):
+        """Saved file hashes are validated against this, so it must not drift."""
+        pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
+        with pyproject.open("rb") as f:
+            self.assertEqual(__version__, tomllib.load(f)["project"]["version"])
+
+    def test_get_package_version_returns_the_constant(self):
+        self.assertEqual(get_package_version(), __version__)
