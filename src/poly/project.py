@@ -388,9 +388,10 @@ class AgentStudioProject:
     def _record_fingerprints(self) -> None:
         """Record every file's current bytes as meaning its saved resource.
 
-        Call only when that's true by construction: at the end of a push, whose saved resources
-        were just read from these files. Types that don't declare their references aren't
-        recorded, so they're always read.
+        Call only when that's true by construction: after a forced pull, which wrote these files
+        from the saved resources, or at the end of a push, whose saved resources were just read
+        from them. Types that don't declare their references aren't recorded, so they're always
+        read.
         """
         known = KnownIds.from_mappings(
             self._make_resource_mappings(self.resources) + self.slim_resources
@@ -890,7 +891,12 @@ class AgentStudioProject:
         # Delete all new resources
         if force:
             self._delete_new_resources()
-        self._record_pulled_fingerprints(format=format)
+        # A forced pull has just written every file from the saved resources, so their bytes
+        # are what a pull writes. A merge pull can leave local edits, so it renders instead.
+        if force:
+            self._record_fingerprints()
+        else:
+            self._record_pulled_fingerprints(format=format)
 
         utils.export_decorators(DECORATORS, self.root_path)
         utils.save_imports(self.root_path)

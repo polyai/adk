@@ -3149,6 +3149,19 @@ class UnchangedFilesTest(unittest.TestCase):
         self.assertNotIn(self.TOPIC, reads)
         self.assertEqual(modified, [])
 
+    def test_a_forced_pull_records_what_it_wrote_without_rendering_again(self):
+        """The ADK service renders every pull this way, into a new directory."""
+        render = AgentStudioProject._rendered_bytes_hashes
+        with patch.object(
+            AgentStudioProject, "_rendered_bytes_hashes", autospec=True, side_effect=render
+        ) as rendered:
+            self._plain_pull(force=True)
+
+        rendered.assert_not_called()
+        _, reads, full_reads = self._assert_same_as_full_read()
+        self.assertNotIn(self.TOPIC, reads)
+        self.assertLess(len(reads), len(full_reads))
+
     def test_a_real_push_records_the_files_it_saved(self):
         project = AgentStudioProject.from_file_path(self.root)
         self._edit(self.TOPIC, "uses global functions.", "edited locally.")
@@ -3170,6 +3183,13 @@ class UnchangedFilesTest(unittest.TestCase):
 
 class ReferencesTest(unittest.TestCase):
     """refers_to lists everything a resource's read depends on."""
+
+    def test_function_import_patterns_start_at_a_word_boundary(self):
+        from poly.resources.function import _FLOWS_IMPORT, _FUNCTIONS_IMPORT
+
+        code = "functions.a\nmyfunctions.b\nx.functions.c\nflows.d.functions\nmyflows.e.functions"
+        self.assertEqual(_FUNCTIONS_IMPORT.findall(code), ["a", "c"])
+        self.assertEqual(_FLOWS_IMPORT.findall(code), ["d"])
 
     def test_every_type_declares_refers_to_itself(self):
         """Inheriting another registered type's refers_to can silently miss what the subclass adds."""
