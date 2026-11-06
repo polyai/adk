@@ -8,8 +8,9 @@ import uuid
 from copy import deepcopy
 from typing import Any, Optional
 
+from poly.handlers.platform_api import OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
 from poly.handlers.protobuf.commands_pb2 import Command
-from poly.handlers.sdk import SourcererAPIError, SourcererSDK
+from poly.handlers.sdk import CommandBatchNotSent, SourcererAPIError, SourcererSDK
 
 logger = logging.getLogger(__name__)
 
@@ -527,3 +528,33 @@ class SyncClientHandler:
 
         logger.info(f"Successfully removed staging tag from branch ID:'{branch_id}'")
         return True
+
+    def send_command_to_main(self, command: Command) -> dict[str, Any]:
+        """Send one command straight to main, bypassing the branch.
+
+        A batch refused because main moved on since its sequence number was read is sent once
+        more, with the sequence read again.
+
+        Raises:
+            SourcererAPIError: if commands are already queued for the branch, or main refuses it.
+        """
+        if self.sdk.get_queue_size():
+            raise CommandBatchNotSent("Commands are queued for the branch; push them first.")
+        command.metadata.CopyFrom(self.sdk.create_metadata())
+        command.command_id = str(uuid.uuid4())
+        logger.info(f"Sending {command.type} to main")
+        self.sdk.add_command_to_queue(command)
+        try:
+            try:
+                return self.sdk.send_command_batch(
+                    branch_id="main", timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
+                )
+            except SourcererAPIError as e:
+                if e.error_code != "SEQUENCE_MISMATCH":
+                    raise
+                logger.info(f"Main moved on while sending {command.type}; sending again")
+                return self.sdk.send_command_batch(
+                    branch_id="main", timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
+                )
+        finally:
+            self.sdk.clear_queue()
