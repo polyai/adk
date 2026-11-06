@@ -2862,6 +2862,117 @@ class SavedFileHashesTest(unittest.TestCase):
         self.assertEqual(project.file_structure_info, self.expected)
 
 
+class UnchangedFilesTest(unittest.TestCase):
+    """status and diff skip reading files a full comparison already found unchanged."""
+
+    TOPIC = os.path.join("topics", "topic_1.yaml")
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        self.root = _copy_test_project(self)
+        AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root).save_config(
+            write_project_yaml=True
+        )
+        self.status_file = os.path.join(self.root, STATUS_FILE)
+
+    def _run(self, method: str = "project_status", *args) -> tuple[object, int]:
+        """Run a project method on a fresh load; return its result and how many kept files it read."""
+        project = AgentStudioProject.from_file_path(self.root)
+        read = AgentStudioProject.read_local_resource
+        reads = []
+
+        def counting_read(self_, resource, resource_mappings, *a, **k):
+            if resource_mappings:  # matching reads pass no mappings; the comparison passes them all
+                reads.append(resource.file_path)
+            return read(self_, resource, resource_mappings, *a, **k)
+
+        with patch.object(AgentStudioProject, "read_local_resource", counting_read):
+            result = getattr(project, method)(*args)
+        return result, len(reads)
+
+    def _edit(self, rel_path: str, old: str, new: str) -> None:
+        path = os.path.join(self.root, rel_path)
+        with open(path, encoding="utf-8") as f:
+            contents = f.read()
+        self.assertIn(old, contents)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(contents.replace(old, new, 1))
+
+    def _saved_status(self) -> dict:
+        with open(self.status_file, "rb") as f:
+            return json.loads(base64.b64decode(f.read()))
+
+    def test_unchanged_files_are_not_read_again(self):
+        first, first_reads = self._run()
+        second, second_reads = self._run()
+
+        self.assertEqual(second, first)
+        self.assertGreater(first_reads, 0)
+        self.assertEqual(second_reads, len(first[1]))  # only the files that are modified
+
+    def test_an_edited_file_is_read_and_reported(self):
+        self._run()
+        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
+
+        (_, modified, _, _), reads = self._run()
+
+        self.assertIn(os.path.join(self.root, self.TOPIC), modified)
+        self.assertGreaterEqual(reads, 1)
+
+    def test_a_changed_saved_copy_is_reported(self):
+        """A pull that changes the saved resource must not be hidden by the file's old fingerprint."""
+        self._run()
+        project = AgentStudioProject.from_file_path(self.root)
+        topic = next(t for t in project.resources[Topic].values() if t.name == "Topic 1")
+        topic.content += " changed on the platform"
+        project.file_structure_info = project.compute_file_structure_info(project.resources)
+        project.save_config()
+
+        (_, modified, _, _), _ = self._run()
+
+        self.assertIn(os.path.join(self.root, self.TOPIC), modified)
+
+    def test_a_new_resource_means_every_file_is_read_again(self):
+        """References resolve against the mappings, so any change to them invalidates every file."""
+        first, first_reads = self._run()
+        shutil.copy(
+            os.path.join(self.root, self.TOPIC), os.path.join(self.root, "topics", "topic_new.yaml")
+        )
+        self._edit(os.path.join("topics", "topic_new.yaml"), "name: Topic 1", "name: Topic New")
+
+        (_, _, new, _), reads = self._run()
+
+        self.assertIn(os.path.join(self.root, "topics", "topic_new.yaml"), new)
+        self.assertEqual(reads, first_reads)
+
+    def test_fingerprints_from_another_adk_version_are_ignored(self):
+        _, first_reads = self._run()
+
+        with patch("poly.project.ADK_VERSION", "0.0.1"):
+            _, reads = self._run()
+
+        self.assertEqual(reads, first_reads)
+
+    def test_diff_of_one_file_keeps_the_other_fingerprints(self):
+        self._run()
+        before = self._saved_status()["file_fingerprints"]["files"]
+
+        self._run("get_diffs", [os.path.join(self.root, self.TOPIC)])
+
+        self.assertEqual(self._saved_status()["file_fingerprints"]["files"], before)
+
+    def test_status_changes_nothing_else_in_the_status_file(self):
+        before = self._saved_status()
+
+        self._run()
+
+        after = self._saved_status()
+        before.pop("file_fingerprints")
+        after.pop("file_fingerprints")
+        self.assertEqual(after, before)
+
+
 class StageSetDefaultCommandsTest(unittest.TestCase):
     """Tests for the set-default commands _stage_commands emits for handoffs and variants."""
 
