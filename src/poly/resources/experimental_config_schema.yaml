@@ -18,6 +18,15 @@ components:
           type: boolean
           description: Whether the send email experimental feature is enabled
 
+    pci_capture:
+      type: object
+      description: PCI payment capture through conv.pci. Staff set this per project.
+      additionalProperties: false
+      properties:
+        enabled:
+          type: boolean
+          description: Whether llemur signs a per-call pci-api token for this project's functions
+
     asr_provider_enum:
       type: string
       enum:
@@ -48,7 +57,7 @@ components:
             - openai: OpenAI realtime API
             - deepgram: Deepgram cloud speech recognition
             - soniox: Soniox real-time cloud speech recognition
-            - assemblyai: AssemblyAI v3 Streaming speech recognition
+            - assemblyai: AssemblyAI v3 Streaming or synchronous HTTP speech recognition
             - raven: PolyAI Raven Omni speech recognition
             - qwen: PolyAI-hosted Qwen3-ASR speech recognition
         model:
@@ -64,8 +73,8 @@ components:
             - openai: "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"
             - deepgram: "nova-3", "nova-2"
             - soniox: "stt-rt-v5"
-            - assemblyai: "universal-3-5-pro" (GA), "u3-rt-pro-beta-1" (private beta);
-              other AssemblyAI streaming model IDs are passed through
+            - assemblyai: "universal-3-6-pro" for Streaming, "universal-3-5-pro" for Streaming or Sync STT;
+              other streaming model IDs are passed through
             - raven: "raven-omni"
             - qwen: "qwen3-asr-1.7b"
         language:
@@ -175,6 +184,7 @@ components:
         - sms.polyai
         - rcs.polyai
         - whatsapp.polyai
+        - email.polyai
       description: |-
         Recognized channel names in the platform:
         - webchat.polyai: Web chat channel
@@ -183,6 +193,56 @@ components:
         - sms.polyai: SMS conversational channel
         - rcs.polyai: RCS conversational channel
         - whatsapp.polyai: WhatsApp conversational channel
+        - email.polyai: Email conversational channel
+
+    llm_model_config:
+      type: object
+      description: |
+        Upstream model settings for a customer-registered LLM gateway, used when
+        `provider_model_id` is a `byo-` routing handle. The registration owns the
+        endpoint and credentials; this only says which model to ask it for and
+        how much context that model takes. Sent to the gateway with every request.
+      additionalProperties: false
+      properties:
+        model:
+          type: string
+          description: The model name the customer's gateway serves, sent verbatim in the request.
+          minLength: 1
+          maxLength: 256
+          pattern: "^[^\\s]+$"
+          # `$` matches before a trailing newline in some engines; searching for
+          # any whitespace or control character closes that gap.
+          not:
+            pattern: "[\\s\\x00-\\x1f\\x7f]"
+        context_length:
+          type: integer
+          description: The model's context window, in tokens.
+          minimum: 1
+          maximum: 100000000
+      required: [model, context_length]
+
+    llm_gateway_binding:
+      description: |
+        A `byo-` routing handle and its model settings are one binding: a level
+        that names a customer gateway supplies its settings, and settings never
+        appear without the gateway they describe.
+      allOf:
+        - if:
+            properties:
+              provider_model_id:
+                type: string
+                pattern: "^byo-"
+            required: [provider_model_id]
+          then:
+            required: [model_config]
+        - if:
+            required: [model_config]
+          then:
+            properties:
+              provider_model_id:
+                type: string
+                pattern: "^byo-"
+            required: [provider_model_id]
 
     llm_inference_parameters:
       type: object
@@ -729,6 +789,21 @@ components:
               description: Apply to all chunks of a turn, not just the first chunk. False by default
           required:
             - is_enabled
+
+    tts:
+      type: object
+      description: |
+        Configure speech synthesis. Only read by the voice agent.
+      additionalProperties: false
+      properties:
+        cache_mode:
+          type: string
+          enum: [read_write, read_only, disabled]
+          description: |-
+            How the call uses the TTS recording cache. read_write serves cached
+            audio and stores what it synthesizes, read_only serves cached audio
+            without adding to it, and disabled synthesizes every turn.
+            Defaults to read_write if unset.
 
     backchannelling:
       type: object
@@ -1285,6 +1360,8 @@ components:
     llm:
       type: object
       description: Configure the LLM for the agent.
+      allOf:
+        - $ref: "#/components/schemas/llm_gateway_binding"
       not:
         # Only allow at most 1 of the following, but also allow none.
         anyOf:
@@ -1298,6 +1375,8 @@ components:
             The provider model ID to use for the LLM. You can find the list of available models in the LLM Gateway dynamic configs.
             eg for us-1 prod, the keys are the same as in this yaml
             https://github.com/PolyAI-LDN/poly_core/blob/master/src/poly_platform/llm_gateway/dynamic_configs/models.us-1.platform-prod.yaml
+        model_config:
+          $ref: "#/components/schemas/llm_model_config"
         safety:
           type: object
           description: >
@@ -1381,24 +1460,32 @@ components:
           additionalProperties:
             type: object
             description: Configuration for a specific variant.
+            allOf:
+              - $ref: "#/components/schemas/llm_gateway_binding"
             additionalProperties: false
             properties:
               provider_model_id:
                 type: string
               inference_parameters:
                 $ref: "#/components/schemas/llm_inference_parameters"
+              model_config:
+                $ref: "#/components/schemas/llm_model_config"
         flow_overrides:
           type: object
           description: Flow-specific LLM configuration overrides. Each key should be a flow name.
           additionalProperties:
             type: object
             description: Configuration for a specific flow
+            allOf:
+              - $ref: "#/components/schemas/llm_gateway_binding"
             additionalProperties: false
             properties:
               provider_model_id:
                 type: string
               inference_parameters:
                 $ref: "#/components/schemas/llm_inference_parameters"
+              model_config:
+                $ref: "#/components/schemas/llm_model_config"
               include_kb_functions_in_flows:
                 type: boolean
                 description: Whether to include knowledge base functions from retrieved RAG topics when showing functions to the model in this flow.
@@ -1408,12 +1495,16 @@ components:
                 additionalProperties:
                   type: object
                   description: Configuration for a specific step
+                  allOf:
+                    - $ref: "#/components/schemas/llm_gateway_binding"
                   additionalProperties: false
                   properties:
                     provider_model_id:
                       type: string
                     inference_parameters:
                       $ref: "#/components/schemas/llm_inference_parameters"
+                    model_config:
+                      $ref: "#/components/schemas/llm_model_config"
                     include_kb_functions_in_flows:
                       type: boolean
                       description: Whether to include knowledge base functions from retrieved RAG topics when showing functions to the model in this step.
@@ -1425,6 +1516,8 @@ components:
           additionalProperties:
             type: object
             description: Override settings for a specific channel
+            allOf:
+              - $ref: "#/components/schemas/llm_gateway_binding"
             additionalProperties: false
             properties:
               provider_model_id:
@@ -1432,6 +1525,8 @@ components:
                 description: Model identifier to use for this channel
               inference_parameters:
                 $ref: "#/components/schemas/llm_inference_parameters"
+              model_config:
+                $ref: "#/components/schemas/llm_model_config"
             required:
               - provider_model_id
 
@@ -1464,12 +1559,13 @@ components:
       type: object
       description: Configuration for agentic dial feature
       additionalProperties: false
-      required:
-        - connector_token_secret_name
       properties:
         connector_token_secret_name:
           type: string
-          description: Secret name containing a dict mapping agent names to connector tokens
+          description: >-
+            Secret name containing a dict mapping agent names to connector
+            tokens. Only required for the legacy connector path; omit when every
+            agent dials over a SIP trunk.
         bridge_ended_function:
           type: string
           description: Name of the project function to trigger when a bridge ends
@@ -1488,7 +1584,18 @@ components:
                 description: Unique name identifier for the agent
               outbound_endpoint:
                 type: string
-                description: The outbound agent's outbound endpoint
+                description: >-
+                  The outbound agent's outbound endpoint. A SIP trunk id
+                  (tr-<24 base36 chars>) routes the dial over that trunk using
+                  agent_id/variant_id instead of a connector token.
+              agent_id:
+                type: string
+                description: >-
+                  Agent (project) id the outbound leg runs as when dialling over
+                  a SIP trunk. Required for the SIP trunk path.
+              variant_id:
+                type: string
+                description: Variant id the outbound leg runs as on the SIP trunk path
               outbound_caller_id:
                 type: string
                 description: Caller ID to use for outbound calls from this agent
@@ -1497,6 +1604,9 @@ components:
                 description: SIP headers to include in calls from this agent
                 additionalProperties:
                   type: string
+              record_handoff:
+                type: boolean
+                description: Record the call once it is bridged to this agent's dial
         destinations:
           type: array
           description: List of destinations available for agentic dial
@@ -1525,6 +1635,9 @@ components:
               outbound_caller_id:
                 type: string
                 description: Override the agent's caller ID for this destination
+              record_handoff:
+                type: boolean
+                description: Override the agent's record_handoff for this destination
 
     webhook_config:
       type: object
@@ -1578,7 +1691,7 @@ components:
       properties:
         on_draft_published:
           type: array
-          description: Webhooks to trigger when a draft is published to sandbox
+          description: Webhooks to trigger when a draft is published, to sandbox under the legacy model or to live under simplified deployments
           items:
             $ref: "#/components/schemas/webhook_config"
         on_deployment:
@@ -1633,6 +1746,8 @@ components:
           $ref: "#/components/schemas/handoff_api"
         ragdoll:
           $ref: "#/components/schemas/ragdoll"
+        tts:
+          $ref: "#/components/schemas/tts"
         tts_postprocessing:
           $ref: "#/components/schemas/tts_postprocessing"
         smart_vad:
@@ -1675,6 +1790,8 @@ components:
           $ref: "#/components/schemas/ab"
         email:
           $ref: "#/components/schemas/email"
+        pci_capture:
+          $ref: "#/components/schemas/pci_capture"
         agentic_dial:
           $ref: "#/components/schemas/agentic_dial"
         webhooks:
