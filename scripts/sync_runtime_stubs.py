@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync type stubs from genai_lambda_runtime into src/poly/types/.
+"""Sync type stubs from the agent runtime into src/poly/types/.
 
 Uses mypy's ``stubgen`` to generate stubs, then post-processes them into
 runtime-safe ``.py`` modules — the committed files are byte-identical to what
@@ -25,9 +25,9 @@ Two lists control what ships beyond ``imports.json``:
   entry, so nothing advertises them to users.
 
 Usage:
-    python scripts/sync_runtime_stubs.py [--python-root PATH] [--skip-git-check]
+    python scripts/sync_runtime_stubs.py --python-root PATH [--skip-git-check]
 
-Default python root: ../genai_lambda_runtime/python
+``--python-root`` is the ``python/`` directory of a runtime checkout.
 """
 
 from __future__ import annotations
@@ -401,8 +401,8 @@ def main() -> None:
     parser.add_argument(
         "--python-root",
         type=Path,
-        default=Path(__file__).resolve().parent.parent.parent / "genai_lambda_runtime" / "python",
-        help="Path to the genai_lambda_runtime/python directory",
+        required=True,
+        help="Path to the python directory of a runtime checkout",
     )
     parser.add_argument(
         "--skip-git-check",

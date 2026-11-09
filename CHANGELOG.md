@@ -1860,7 +1860,7 @@ The custom script (~600 lines) reimplemented stub generation with edge cases aro
   modules aren't advertised in `__init__`; import-walk the committed `poly.types` modules directly;
   assert no stub carries absolute `runtime.`/`utils.` imports
 
-Usage: `python scripts/sync_runtime_stubs.py [--python-root /path/to/genai_lambda_runtime/python]`
+Usage: `python scripts/sync_runtime_stubs.py [--python-root /path/to/runtime/python]`
 
 ## Test strategy
 
@@ -5456,7 +5456,7 @@ Closes AM-960
   100–599, `body` follows the same type rules as `integration_attributes`, each operation needs at
   least one response rule, and `repeat` must be a positive integer or `-1` (respond forever) — `-1`
   only valid on the last rule in an operation's list. - Cross-checked `repeat`/`-1` semantics and
-  rename/delete cascading behavior against the platform runtime (`genai_lambda_runtime`) and the web
+  rename/delete cascading behavior against the platform runtime and the web
   app to make sure the CLI's validation and docs match
   actual platform behavior. - Docs: new "API mocks" section in `tests.md` with a YAML example,
   cross-linked from `api_integrations.md`.
@@ -9117,7 +9117,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 ## Summary
 
-Add a script to auto-generate type stubs from `genai_lambda_runtime/python/runtime` and update all
+Add a script to auto-generate type stubs from the platform runtime and update all
   stubs to match current source.
 
 ## Motivation
@@ -9140,7 +9140,7 @@ The type stubs in `src/poly/types/` were manually maintained and had drifted fro
   `Utils.prompt_llm` model list with GPT-4.1/5 and Claude models
 
 Usage: `python scripts/sync_runtime_stubs.py --runtime-path
-  /path/to/genai_lambda_runtime/python/runtime`
+  /path/to/runtime/python/runtime`
 
 ## Test strategy
 
