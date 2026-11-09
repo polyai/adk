@@ -84,7 +84,7 @@ The table has one row per bucket and group: a `bucket` column when `--interval` 
 | `--agg` | Aggregation to compute: `sum`, `avg`, `min`, `max`, `p50`, `p95`, `p99`, `conversation_count`, `distinct_count`. Repeatable. Defaults to `avg` and `conversation_count`. |
 | `--from` | Inclusive window start, `YYYY-MM-DD` or an ISO 8601 datetime. Defaults to no lower bound. |
 | `--to` | Exclusive window end. A bare date includes the whole of that day. |
-| `--interval` | Time bucket: `hourly`, `daily`, `weekly`, `monthly`. Omit for one total. |
+| `--interval` | Time bucket: `hourly`, `daily`, `weekly`, `monthly`. Omit for one total. Weekly and monthly buckets are whole weeks (from Monday, UTC) and whole months, so the window is widened to match: see below. |
 | `--timezone` | IANA timezone for hourly and daily buckets, e.g. `Europe/London`. |
 | `--by` | Group by `channel`, `deployment_id`, `variant_id`, `client_env`, `experiment_id`, `experiment_version_id` or, for a string metric, `value_string`. Repeatable. |
 | `--filter METRIC OP VALUE` | Only count conversations where the condition holds. `OP` is `eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ex`, `exists`; `in`/`ex` take a comma-separated list. Repeatable. |
@@ -107,6 +107,12 @@ The table has one row per bucket and group: a `bucket` column when `--interval` 
 }
 ~~~
 
+### Weekly and monthly windows
+
+Weekly buckets are whole calendar weeks starting on Monday (UTC) and monthly buckets are whole calendar months. With `--interval weekly` or `--interval monthly` the window is widened to whole buckets: `--from` moves back to the start of its week or month, and a `--to` in the past moves forward to the end of its week or month. `--from 2026-10-01 --interval weekly` (a Thursday) therefore queries from Monday 28 September.
+
+When this happens the table is preceded by a line such as `Weekly buckets are whole weeks, so the window is from 2026-09-28.`, and `--json` output gains a `window` object with the `from_datetime` and `to_datetime` that were sent. `poly metrics score` uses the widened window for its headline as well, so the headline and the table rows always add up.
+
 ## `poly metrics score`
 
 Poly Score for the project: a one-line headline (average and conversation count over the whole window) above the bucketed table. Shortcut for `poly metrics query poly_score --agg avg --agg conversation_count`, defaulting to the last 7 days bucketed daily. The headline comes from a separate unbucketed request, so it covers the full window whatever `--limit` and `--offset` leave in the table.
@@ -123,7 +129,7 @@ poly metrics score --json
 | Flag | Description |
 |---|---|
 | `--from`, `--to` | Window bounds as for `query`. Defaults to the last 7 days. |
-| `--interval` | Time bucket. Defaults to `daily`. |
+| `--interval` | Time bucket. Defaults to `daily`. Weekly and monthly widen the window to whole buckets, as for `query`. |
 | `--timezone` | IANA timezone for hourly and daily buckets. |
 | `--by` | Group by a dimension, as for `query`. Repeatable. |
 | `--channel`, `--env` | Restrict to channels or environments, as for `query`. Repeatable. |

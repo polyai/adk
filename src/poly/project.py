@@ -146,6 +146,55 @@ def _window_bound(value: str, *, exclusive_end: bool = False) -> str:
     return parsed.isoformat()
 
 
+def _bucket_window(
+    from_dt: Optional[str], to_dt: Optional[str], interval: Optional[str]
+) -> tuple[Optional[str], Optional[str], bool]:
+    """Normalise a window and widen it to whole weekly or monthly buckets.
+
+    Weekly and monthly buckets are whole calendar weeks (Monday, UTC) and
+    months, and the Data API keeps a bucket only when the bucket's start is
+    inside the window. A window that cuts through a bucket would lose its
+    first bucket and over-count its last, so the start moves back to the
+    bucket boundary and a past end moves forward to the next one. An end that
+    has not happened yet is left alone: nothing lies beyond it.
+
+    Returns:
+        The ``from`` and ``to`` bounds as ISO 8601 strings (``None`` when not
+        given) and whether either bound moved.
+
+    Raises:
+        ValueError: If a bound is not a date or datetime.
+    """
+    start = _window_bound(from_dt) if from_dt else None
+    end = _window_bound(to_dt, exclusive_end=True) if to_dt else None
+    if interval not in ("weekly", "monthly"):
+        return start, end, False
+
+    def floor(moment: datetime) -> datetime:
+        midnight = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        if interval == "weekly":
+            return midnight - timedelta(days=midnight.weekday())
+        return midnight.replace(day=1)
+
+    def as_utc(text: str) -> datetime:
+        moment = datetime.fromisoformat(text)
+        return moment.astimezone(UTC) if moment.tzinfo else moment
+
+    snapped_start, snapped_end = start, end
+    if start:
+        snapped_start = floor(as_utc(start)).isoformat()
+    if end:
+        moment = as_utc(end)
+        now = datetime.now(UTC) if moment.tzinfo else datetime.now(UTC).replace(tzinfo=None)
+        if moment < now and floor(moment) != moment:
+            following = floor(moment) + timedelta(days=7 if interval == "weekly" else 32)
+            snapped_end = floor(following).isoformat()
+    widened = (snapped_start, snapped_end) != (start, end)
+    if not widened:
+        return start, end, False
+    return snapped_start, snapped_end, True
+
+
 def _check_choices(name: str, values: Optional[list[str]], allowed: list[str]) -> None:
     """Raise ``ValueError`` if any of ``values`` is not in ``allowed``."""
     for value in values or []:
@@ -172,8 +221,12 @@ def _build_metric_query(
     sort: Optional[dict],
     limit: int,
     offset: int,
+    widen: bool = True,
 ) -> dict:
     """Validate the arguments of :meth:`AgentStudioProject.query_metric` and build the body.
+
+    ``widen=False`` sends the window as given, for a caller that has already
+    widened it with :func:`_bucket_window`.
 
     Raises:
         ValueError: On anything the Data API would reject.
@@ -231,6 +284,7 @@ def _build_metric_query(
             raise ValueError("Sort needs a field.")
         checked_sort = {"field": sort["field"], "order": order}
 
+    window_from, window_to, _ = _bucket_window(from_dt, to_dt, interval if widen else None)
     body: dict[str, Any] = {
         "metric": str(metric).strip(),
         "aggs": aggs,
@@ -238,8 +292,8 @@ def _build_metric_query(
         "offset": offset,
     }
     optional = {
-        "from_datetime": _window_bound(from_dt) if from_dt else None,
-        "to_datetime": _window_bound(to_dt, exclusive_end=True) if to_dt else None,
+        "from_datetime": window_from,
+        "to_datetime": window_to,
         "interval": interval,
         "timezone": timezone,
         "group_by": list(group_by) if group_by else None,
@@ -4442,7 +4496,9 @@ class AgentStudioProject:
             from_dt: Inclusive start, ``YYYY-MM-DD`` or an ISO 8601 datetime.
             to_dt: Exclusive end. A bare date includes the whole of that day.
             interval: Time bucket (``hourly``, ``daily``, ``weekly``, ``monthly``), or
-                ``None`` for one total.
+                ``None`` for one total. Weekly and monthly buckets are whole
+                weeks (from Monday, UTC) and months, so the window is widened
+                to the bucket boundaries.
             timezone: IANA timezone for hourly and daily buckets.
             group_by: Dimensions to group by.
             channel: Restrict to these channels.
@@ -4457,12 +4513,13 @@ class AgentStudioProject:
             offset: Rows to skip, up to 1000.
 
         Returns:
-            dict: Columns, rows and paging from the Data API.
+            dict: Columns, rows and paging from the Data API, plus ``window``
+            (``{"from_datetime", "to_datetime"}``) when the window was widened.
 
         Raises:
             ValueError: If any argument is outside what the Data API accepts.
         """
-        body = _build_metric_query(
+        result = self._query_metric(
             metric,
             aggs,
             from_dt=from_dt,
@@ -4481,6 +4538,32 @@ class AgentStudioProject:
             limit=limit,
             offset=offset,
         )
+        window_from, window_to, widened = _bucket_window(from_dt, to_dt, interval)
+        if widened:
+            result = {**result, "window": {"from_datetime": window_from, "to_datetime": window_to}}
+        return result
+
+    def _query_metric(self, metric: str, aggs: Optional[list[str]], **query: Any) -> dict:
+        """Validate one metric query, scope it to this project and send it."""
+        query = {
+            "from_dt": None,
+            "to_dt": None,
+            "interval": None,
+            "timezone": None,
+            "group_by": None,
+            "channel": None,
+            "client_env": None,
+            "deployment_id": None,
+            "variant_id": None,
+            "filters": None,
+            "match_any": False,
+            "having": None,
+            "sort": None,
+            "limit": 20,
+            "offset": 0,
+            **query,
+        }
+        body = _build_metric_query(metric, aggs, **query)
         return AgentStudioInterface.query_metric(
             self.region, body={**body, "project_id": self.project_id}
         )
@@ -4502,6 +4585,8 @@ class AgentStudioProject:
 
         The summary comes from its own unbucketed, ungrouped query, so it covers
         the whole window whatever ``limit`` and ``offset`` leave in the table.
+        For weekly and monthly buckets both queries use the window widened to
+        whole buckets, as in :meth:`query_metric`.
         With neither bound given, the window is the last
         ``POLY_SCORE_DEFAULT_DAYS`` days.
 
@@ -4518,31 +4603,38 @@ class AgentStudioProject:
 
         Returns:
             dict: The bucketed table (``columns``, ``rows``, ``limit``, ``offset``) plus
-            ``summary``: ``{"average", "conversations", "from_datetime", "to_datetime"}``.
+            ``summary``: ``{"average", "conversations", "from_datetime", "to_datetime"}``,
+            and ``window`` when the window was widened.
 
         Raises:
             ValueError: If any argument is outside what the Data API accepts.
         """
+        default_end = None
         if from_dt is None and to_dt is None:
             now = datetime.now(UTC).replace(microsecond=0)
             from_dt = (now - timedelta(days=POLY_SCORE_DEFAULT_DAYS)).isoformat()
-            to_dt = now.isoformat()
+            default_end = now.isoformat()
+        # Widen here, not only in the table query, so the summary and the
+        # table always cover the same window.
+        from_dt, to_dt, widened = _bucket_window(from_dt, to_dt, interval)
+        to_dt = to_dt or default_end
         cohort = {
             "from_dt": from_dt,
             "to_dt": to_dt,
             "channel": channel,
             "client_env": client_env,
+            "widen": False,
         }
         aggs = ["avg", "conversation_count"]
 
-        overall = self.query_metric(POLY_SCORE_METRIC, aggs, limit=1, **cohort)
+        overall = self._query_metric(POLY_SCORE_METRIC, aggs, limit=1, **cohort)
         columns = overall.get("columns") or []
         rows = overall.get("rows") or []
         summary: dict[str, Any] = {
             "average": None,
             "conversations": 0,
-            "from_datetime": _window_bound(from_dt) if from_dt else None,
-            "to_datetime": _window_bound(to_dt, exclusive_end=True) if to_dt else None,
+            "from_datetime": from_dt,
+            "to_datetime": to_dt,
         }
         if rows:
             row = dict(zip(columns, rows[0]))
@@ -4550,7 +4642,7 @@ class AgentStudioProject:
             summary["average"] = round(float(average), 2) if average is not None else None
             summary["conversations"] = int(row.get("conversation_count") or 0)
 
-        table = self.query_metric(
+        table = self._query_metric(
             POLY_SCORE_METRIC,
             aggs,
             interval=interval,
@@ -4560,7 +4652,10 @@ class AgentStudioProject:
             offset=offset,
             **cohort,
         )
-        return {**table, "summary": summary}
+        result = {**table, "summary": summary}
+        if widened:
+            result["window"] = {"from_datetime": from_dt, "to_datetime": to_dt}
+        return result
 
     def create_custom_metric(self, data: dict) -> dict:
         """Validate and create a new custom metric.

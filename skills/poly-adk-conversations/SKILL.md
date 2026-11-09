@@ -51,6 +51,7 @@ poly metrics query CSAT --agg avg --filter channel eq VOICE-SIP --having avg gte
 
 - `score` is a shortcut for `query poly_score --agg avg --agg conversation_count`. Its headline is computed over the whole window in a separate request, so it does not change with `--limit` or `--offset`.
 - `query` takes `--from` / `--to` (a bare `--to` date includes the whole day), `--interval`, `--by`, `--filter METRIC OP VALUE` (`eq gt gte lt lte in ex exists`), `--having`, and the `--channel` / `--env` / `--deployment` / `--variant` restrictors. Metric names are case-insensitive and come from `poly metrics available`.
+- `--interval weekly` and `--interval monthly` use whole weeks (from Monday, UTC) and whole months, so the window is widened to match: `--from 2026-10-01 --interval weekly` queries from Monday 28 September. The output says so, and `--json` carries the window used in `window`. The `score` headline covers the same widened window as its table.
 - Use `--json` when feeding the numbers into analysis. `poly metrics list` is different: it lists the custom metric *definitions*, not values.
 
 ## Instrumenting functions

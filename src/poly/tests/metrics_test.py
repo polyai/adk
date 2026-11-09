@@ -1015,6 +1015,49 @@ class MetricsQueryTest(MetricsReadCommandTest):
         self.assertIn("1,318", output)
 
 
+class MetricsQueryWindowTest(MetricsReadCommandTest):
+    """A widened weekly or monthly window is reported by `poly metrics query`."""
+
+    def test_monthly_query_prints_the_widened_window(self):
+        """--from mid-month and a past --to mid-month become whole months, with a note."""
+        self.mock_request.return_value = {
+            "columns": ["bucket", "avg"],
+            "rows": [["2026-09-01T00:00:00+00:00", 4.2]],
+            "limit": 20,
+            "offset": 0,
+        }
+
+        output = self._render(
+            MetricsCommand.metrics_query,
+            TEST_DIR,
+            "poly_score",
+            _query_args(interval="monthly", from_dt="2026-09-15", to_dt="2026-10-06"),
+            output_json=False,
+        )
+
+        body = self.mock_request.call_args.kwargs["data"]
+        self.assertEqual(body["from_datetime"], "2026-09-01T00:00:00")
+        self.assertEqual(body["to_datetime"], "2026-11-01T00:00:00")
+        self.assertIn(
+            "Monthly buckets are whole months, so the window is from 2026-09-01 to 2026-10-31.",
+            output,
+        )
+
+    def test_daily_query_has_no_note(self):
+        """Daily buckets are not widened, so nothing is added to the output."""
+        self.mock_request.return_value = {"columns": ["avg"], "rows": [[4.2]], "limit": 20}
+
+        output = self._render(
+            MetricsCommand.metrics_query,
+            TEST_DIR,
+            "poly_score",
+            _query_args(interval="daily", from_dt="2026-10-01"),
+            output_json=False,
+        )
+
+        self.assertNotIn("buckets are whole", output)
+
+
 class MetricsScoreTest(MetricsReadCommandTest):
     """Tests for MetricsCommand.metrics_score."""
 
@@ -1085,16 +1128,36 @@ class MetricsScoreTest(MetricsReadCommandTest):
         self.assertIn("no scored conversations", payload["summary"]["text"])
         self.assertEqual(payload["rows"], [])
 
+    def test_weekly_window_is_widened_and_says_so(self):
+        """--from on a Thursday queries from Monday; the headline and a note show it."""
+        self._responses(
+            [[2.12, 57]],
+            [["2026-09-28T00:00:00+00:00", 1.4, 45], ["2026-10-05T00:00:00+00:00", 4.83, 12]],
+        )
+
+        output = self._render(
+            MetricsCommand.metrics_score,
+            TEST_DIR,
+            _query_args(interval="weekly", from_dt="2026-10-01"),
+            output_json=False,
+        )
+
+        overall, table = (c.kwargs["data"] for c in self.mock_request.call_args_list)
+        self.assertEqual(overall["from_datetime"], "2026-09-28T00:00:00")
+        self.assertEqual(table["from_datetime"], "2026-09-28T00:00:00")
+        self.assertIn("Poly Score from 2026-09-28 to now: 2.12 average over 57", output)
+        self.assertIn("Weekly buckets are whole weeks, so the window is from 2026-09-28.", output)
+
     def test_explicit_window_is_respected(self):
         """When --from is given, no default window is applied."""
         self._responses([], [])
 
         MetricsCommand.metrics_score(
-            TEST_DIR, _query_args(interval="weekly", from_dt="2026-09-01"), output_json=True
+            TEST_DIR, _query_args(interval="weekly", from_dt="2026-08-31"), output_json=True
         )
 
         body = self.mock_request.call_args_list[1].kwargs["data"]
-        self.assertEqual(body["from_datetime"], "2026-09-01T00:00:00")
+        self.assertEqual(body["from_datetime"], "2026-08-31T00:00:00")
         self.assertNotIn("to_datetime", body)
         self.assertEqual(body["interval"], "weekly")
 

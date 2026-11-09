@@ -1834,18 +1834,24 @@ def _format_aggregate_cell(column: str, value: Any) -> str:
     return str(value)
 
 
-def print_aggregate(result: dict[str, Any], headline: str | None = None) -> None:
+def print_aggregate(
+    result: dict[str, Any], headline: str | None = None, note: str | None = None
+) -> None:
     """Print a tabular aggregate result from the Data API.
 
     Args:
         result: ``{"columns": [...], "rows": [[...]], "limit", "offset"}``.
         headline: Optional one-line summary printed above the table.
+        note: Optional remark about the query, printed dimmed above the table.
     """
     columns = result.get("columns") or []
     rows = result.get("rows") or []
 
     if headline:
         console.print(f"[bold]{headline}[/bold]")
+    if note:
+        console.print(f"[dim]{note}[/dim]")
+    if headline or note:
         console.print()
 
     if not rows:

@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import logging
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
+from datetime import datetime, timedelta
 from typing import Any
 
 import requests
@@ -456,7 +457,7 @@ class MetricsCommand(BaseCommand):
         if output_json:
             json_print(result)
         else:
-            print_aggregate(result)
+            print_aggregate(result, note=cls._window_note(result, args.interval))
 
     @classmethod
     def metrics_score(cls, base_path: str, args: Namespace, output_json: bool = False) -> None:
@@ -479,27 +480,49 @@ class MetricsCommand(BaseCommand):
         except requests.HTTPError as e:
             cls._fail(describe_data_api_error(e), output_json)
 
-        headline = cls._score_headline(result["summary"], args.from_dt, args.to_dt)
+        headline = cls._score_headline(result["summary"])
         if output_json:
             json_print({**result, "summary": {**result["summary"], "text": headline}})
         else:
-            print_aggregate(result, headline=headline)
+            print_aggregate(result, headline=headline, note=cls._window_note(result, args.interval))
 
     @staticmethod
-    def _score_headline(summary: dict[str, Any], from_flag: str | None, to_flag: str | None) -> str:
-        """One line for the overall Poly Score.
+    def _window_dates(from_datetime: str | None, to_datetime: str | None) -> tuple[str, str]:
+        """The first and last day of a window, for display.
 
-        The window is shown as the user gave it, so ``--to 2026-09-30`` reads
-        "to 2026-09-30" even though the request's exclusive end is the next day.
+        The end bound is exclusive, so an end at midnight reads as the day
+        before: ``--to 2026-09-30`` is sent as 1 October and shown as
+        "to 2026-09-30".
         """
-        start = (from_flag or summary.get("from_datetime") or "")[:10]
-        end = (to_flag or summary.get("to_datetime") or "")[:10]
+        start = (from_datetime or "")[:10]
+        end = (to_datetime or "")[:10]
+        if to_datetime and to_datetime[10:].lstrip("T").startswith("00:00:00"):
+            end = (datetime.fromisoformat(to_datetime) - timedelta(days=1)).date().isoformat()
+        return start, end
+
+    @classmethod
+    def _score_headline(cls, summary: dict[str, Any]) -> str:
+        """One line for the overall Poly Score over the window that was queried."""
+        start, end = cls._window_dates(summary.get("from_datetime"), summary.get("to_datetime"))
         window = f" from {start or '…'} to {end or 'now'}" if start or end else ""
         average = summary.get("average")
         if average is None:
             return f"Poly Score{window}: no scored conversations."
         count = summary["conversations"]
         return f"Poly Score{window}: {average} average over {count:,} conversations."
+
+    @classmethod
+    def _window_note(cls, result: dict[str, Any], interval: str | None) -> str | None:
+        """Say so when the project widened the window to whole weeks or months."""
+        window = result.get("window")
+        if not window:
+            return None
+        start, end = cls._window_dates(window.get("from_datetime"), window.get("to_datetime"))
+        unit = "weeks" if interval == "weekly" else "months"
+        span = " ".join(
+            part for part in (f"from {start}" if start else "", f"to {end}" if end else "") if part
+        )
+        return f"{interval.capitalize()} buckets are whole {unit}, so the window is {span}."
 
     @staticmethod
     def _fail(message: str, output_json: bool) -> None:
