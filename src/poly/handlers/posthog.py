@@ -109,25 +109,6 @@ def capture_event(region: str | None, event: str, properties: dict, distinct_id:
     return True
 
 
-def alias_identity(region: str | None, anonymous_id: str, distinct_id: str) -> bool:
-    """Link an anonymous id to a known identity in PostHog. Fire-and-forget: never raises.
-
-    Events sent under ``anonymous_id`` before sign-in then count towards
-    ``distinct_id`` (the account id) in funnels.
-
-    Returns:
-        True if the alias was handed to the client, False otherwise.
-    """
-    if telemetry_disabled():
-        return False
-    try:
-        get_posthog_client(region or "").alias(previous_id=anonymous_id, distinct_id=distinct_id)
-    except Exception as exc:
-        logger.warning("PostHog alias failed", exc_info=exc)
-        return False
-    return True
-
-
 def get_user_identity() -> str:
     """Get the user identity for Posthog feature flag evaluation.
 

@@ -1,4 +1,4 @@
-"""Tests for the PostHog handler: feature flags, event capture and identity aliasing.
+"""Tests for the PostHog handler: feature flags and event capture.
 
 Copyright PolyAI Limited
 """
@@ -11,7 +11,6 @@ from poly.handlers import posthog as posthog_module
 from poly.handlers.posthog import (
     TELEMETRY_OPT_OUT_ENV_VARS,
     PosthogHandler,
-    alias_identity,
     get_posthog_client,
     get_user_identity,
 )
@@ -359,37 +358,3 @@ class CaptureEventTest(unittest.TestCase):
 
         with patch.dict(os.environ, {"DO_NOT_TRACK": ""}):
             self.assertTrue(capture_event("studio", "e", {}, "acc-1"))
-
-
-class AliasIdentityTest(unittest.TestCase):
-    """Tests for alias_identity, which links a run's anonymous id to the account id."""
-
-    def setUp(self):
-        self.client = MagicMock()
-        patch("poly.handlers.posthog.get_posthog_client", return_value=self.client).start()
-        env = {k: v for k, v in os.environ.items() if k not in TELEMETRY_OPT_OUT_ENV_VARS}
-        patch.dict(os.environ, env, clear=True).start()
-        self.addCleanup(patch.stopall)
-
-    def test_aliases_anonymous_id_to_the_account(self):
-        """The anonymous id becomes the previous id of the account's identity."""
-        self.assertTrue(alias_identity("studio", "anon:1", "acc-1"))
-
-        self.client.alias.assert_called_once_with(previous_id="anon:1", distinct_id="acc-1")
-
-    def test_client_failure_is_swallowed_and_reported(self):
-        """An alias failure never reaches the caller."""
-        self.client.alias.side_effect = RuntimeError("connection reset")
-
-        self.assertFalse(alias_identity("studio", "anon:1", "acc-1"))
-
-    def test_opt_out_suppresses_the_alias(self):
-        """Opting out of telemetry also means no identity linking."""
-        with patch.dict(os.environ, {"POLY_NO_TELEMETRY": "yes"}):
-            self.assertFalse(alias_identity("studio", "anon:1", "acc-1"))
-
-        self.client.alias.assert_not_called()
-
-
-if __name__ == "__main__":
-    unittest.main()

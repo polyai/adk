@@ -37,9 +37,9 @@ The four steps, in order:
 
     Skill installation shells out to `npx`, which requires Node.js 18 or newer. Without it, the step is skipped with a warning and the rest of setup completes normally — install Node and re-run `poly setup` to add the skills later.
 
-!!! info "Setup reports anonymous usage, and you can turn it off"
+!!! info "Anonymous usage telemetry"
 
-    Each run sends three events to PolyAI's PostHog: that setup started (operating system, ADK version, which coding agent ran it, which agents were found, whether credentials already existed), the outcome and duration of each step, and completion. The run is keyed by a random id until sign-in succeeds, then by your account id. No email, key value, file path or command argument is ever sent. Set `POLY_NO_TELEMETRY=1` or `DO_NOT_TRACK=1` to send nothing.
+    `poly setup` sends anonymous usage telemetry. Set `POLY_NO_TELEMETRY=1` or `DO_NOT_TRACK=1` to turn it off.
 
 !!! tip "Re-run after anything changes"
 
