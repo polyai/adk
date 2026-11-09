@@ -70,6 +70,7 @@ class Utils:
             "gpt-5-mini",
             "gpt-5-nano",
             "gpt-5-chat",
+            "gpt-6-luna",
             "claude-sonnet-4",
             "claude-3.5-haiku",
             "claude-haiku-4.5",

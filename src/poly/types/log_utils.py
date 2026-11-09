@@ -6,6 +6,11 @@ from __future__ import annotations
 
 __all__ = ["ConversationLogger"]
 
+REDACTED_URL_SECRET: str = ...
+
+
+def scrub_url_secrets(value): ...
+
 
 class ConversationLogger:
     def __init__(self) -> None: ...
