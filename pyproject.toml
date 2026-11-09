@@ -147,6 +147,8 @@ tag_format = "v{version}"
 # templates/.release_notes.md.j2 prepends a "Getting started" block to every
 # GitHub release (DEVP-790); CHANGELOG.md generation is unaffected.
 template_dir = "templates"
+mode = "update"
+insertion_flag = "<!-- version list -->"
 
 [project]
 name = "polyai-adk"

@@ -921,7 +921,7 @@ components:
 
     prompts:
       type: object
-      description: Configure the default LLeMur prompts. See the default prompts at https://github.com/PolyAI-LDN/poly_core/blob/master/src/poly_platform/llemur/prompts.yaml
+      description: Configure the default LLeMur prompts.
       properties:
         silence:
           type: string
@@ -1295,9 +1295,7 @@ components:
         provider_model_id:
           type: string
           description: >
-            The provider model ID to use for the LLM. You can find the list of available models in the LLM Gateway dynamic configs.
-            eg for us-1 prod, the keys are the same as in this yaml
-            https://github.com/PolyAI-LDN/poly_core/blob/master/src/poly_platform/llm_gateway/dynamic_configs/models.us-1.platform-prod.yaml
+            The provider model ID to use for the LLM.
         safety:
           type: object
           description: >
