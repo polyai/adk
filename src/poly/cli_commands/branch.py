@@ -181,8 +181,7 @@ class BranchCommand(BaseCommand):
             project = read_project_config(base_path)
             if project is None:
                 return []
-            _, branches = project.get_branches()
-            return [name for name in branches if name != "main" and name.startswith(prefix)]
+            return project.branch_names_starting_with(prefix, exclude=("main",))
         except Exception:
             return []
 

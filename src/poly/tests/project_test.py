@@ -5452,6 +5452,26 @@ class BranchNamesTest(unittest.TestCase):
 
         self.assertEqual(self.project.get_current_branch(), "main")
 
+    def test_completion_uses_saved_names_without_an_api_call(self):
+        self.project.branch_names = {"main": "main", "branch-abc": "my-feature"}
+
+        self.assertEqual(self.project.branch_names_starting_with("my"), ["my-feature"])
+        self.mock_api.get_branches.assert_not_called()
+
+    def test_completion_fetches_when_no_saved_name_matches(self):
+        """A branch created elsewhere still completes, and the saved names catch up."""
+        self.project.branch_names = {"main": "main", "branch-abc": "my-feature"}
+        self.mock_api.get_branches.return_value["new-elsewhere"] = {"branchId": "branch-new"}
+
+        self.assertEqual(self.project.branch_names_starting_with("new"), ["new-elsewhere"])
+        self.assertEqual(self._saved_status()["branch_names"]["branch-new"], "new-elsewhere")
+
+    def test_completion_leaves_out_excluded_names(self):
+        self.project.branch_names = {"main": "main", "branch-abc": "my-feature"}
+
+        self.assertEqual(self.project.branch_names_starting_with("", exclude=("main",)), ["my-feature"])
+        self.assertEqual(self.project.branch_names_starting_with("ma", exclude=("main",)), [])
+
     def test_create_branch_saves_the_new_name(self):
         self.project.branch_id = "main"
         self.mock_api.create_branch.return_value = "branch-new"

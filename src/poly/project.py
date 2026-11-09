@@ -2770,6 +2770,26 @@ class AgentStudioProject:
             return self.branch_names[self.branch_id]
         return self.get_branches()[0]
 
+    def branch_names_starting_with(self, prefix: str, exclude: tuple[str, ...] = ()) -> list[str]:
+        """Branch names starting with `prefix`, for tab-completion.
+
+        Uses the names saved from the last branch listing, and fetches the list only when none of
+        them match, so a branch created elsewhere still completes. Fetching refreshes the names.
+
+        Args:
+            prefix: The text typed so far.
+            exclude: Names never to return.
+        """
+        names = [
+            name
+            for name in self.branch_names.values()
+            if name.startswith(prefix) and name not in exclude
+        ]
+        if names:
+            return names
+        _, branches = self.get_branches()
+        return [name for name in branches if name.startswith(prefix) and name not in exclude]
+
     @classmethod
     def discover_docs(cls) -> list[str]:
         """Discover the documentation files in the docs directory.
