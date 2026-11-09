@@ -3242,6 +3242,39 @@ class InitProjectTest(unittest.TestCase):
         )
 
 
+class ListProjectsTest(unittest.TestCase):
+    """Tests for the list project command."""
+
+    @patch("poly.cli_commands.project.json_print")
+    @patch("poly.cli_commands.project.AgentStudioInterface")
+    def test_json_rows_carry_the_agent_id_as_project_id(self, mock_iface_cls, mock_json_print):
+        """The API names the id agentId; the row must not come out with a null project_id."""
+        mock_iface_cls.return_value.list_agents.return_value = [
+            {
+                "agentId": "AGENT-1",
+                "agentName": "My First Agent",
+                "updatedAt": "2026-11-03T19:06:16Z",
+                "branchCount": 2,
+            }
+        ]
+
+        ProjectCommand.list_projects(region="us-1", account_id="acc-456", output_json=True)
+
+        mock_json_print.assert_called_once_with(
+            {
+                "success": True,
+                "agents": [
+                    {
+                        "project_id": "AGENT-1",
+                        "agent_name": "My First Agent",
+                        "updated_at": "2026-11-03T19:06:16Z",
+                        "branch_count": 2,
+                    }
+                ],
+            }
+        )
+
+
 class CreateProjectTest(unittest.TestCase):
     """Tests for the create project command."""
 
