@@ -12,7 +12,7 @@ import requests
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import REGION_CHOICES, region_type
-from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS, AuthDetails
+from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS
 from poly.handlers.interface import AgentStudioInterface
 from poly.utils import (
     CREDENTIALS_FILE_PATH,
@@ -65,16 +65,12 @@ def authorise_or_explain(
         raise
 
 
-def _authenticate_and_save_key(jwt_access_token: str, region: str) -> dict[str, str]:
+def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
     """Authorise the user, fetch or create a PAT, and save it to the credential file.
 
     Waits for the key to become active before returning, so a command run
     immediately afterwards (e.g. project creation) does not fail against a key
     the platform has not finished activating.
-
-    Returns:
-        The accounts the key reaches, ``{account_id: name}``, as read while
-        waiting for activation; empty if the key never activated.
     """
     import time
 
@@ -119,11 +115,10 @@ def _authenticate_and_save_key(jwt_access_token: str, region: str) -> dict[str, 
 
     # A newly created PAT can take a few seconds to activate. Wait here so that
     # 'poly login' and 'poly setup' hand back a key that actually works.
-    accounts: dict[str, str] = {}
     with console.status("[info]Verifying API key is active...[/info]"):
         for _ in range(20):
             try:
-                accounts = api_handler.get_accounts(region=region) or {}
+                api_handler.get_accounts(region=region)
                 break
             except Exception:
                 time.sleep(1)
@@ -132,21 +127,13 @@ def _authenticate_and_save_key(jwt_access_token: str, region: str) -> dict[str, 
                 "API key was saved but is not active yet."
                 " If your next command fails, wait a moment and retry."
             )
-    return accounts
 
 
-def _signin(region: str, auth_details: AuthDetails | None = None) -> str:
-    """Sign in via the Auth0 device authorization flow and return a JWT access token.
-
-    Args:
-        region: The region to sign in to; picks the Auth0 client unless overridden.
-        auth_details: An Auth0 client to use instead of the region's default, for
-            example the GitHub-only client ``poly setup`` uses on studio.
-    """
+def _signin(region: str) -> str:
+    """Sign in via the Auth0 device authorization flow and return a JWT access token."""
     from poly.output.console import error, success
 
-    if auth_details is None:
-        auth_details = REGION_TO_AUTH_DETAILS.get(region)
+    auth_details = REGION_TO_AUTH_DETAILS.get(region)
     if auth_details is None:
         error(
             f"Failed to start authorization: Unknown region '{region}'. "

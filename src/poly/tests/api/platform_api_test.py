@@ -58,31 +58,6 @@ class JwtAuthedAccountAndKeyCalls(unittest.TestCase):
         self.assertEqual(kwargs["headers"]["X-Poly-Source"], "apikey")
 
     @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
-    def test_list_account_api_keys_internal_hits_expected_url(self, mock_make_request):
-        """list_account_api_keys_internal() GETs the account's api-keys endpoint."""
-        mock_make_request.return_value = [{"key": "sk-1"}]
-
-        result = PlatformAPIHandler.list_account_api_keys_internal("studio", "jwt-token", "acc-1")
-
-        args, kwargs = mock_make_request.call_args
-        self.assertEqual(args[0], "studio")
-        self.assertEqual(args[1], "/jupiter/v2/accounts/acc-1/api-keys")
-        self.assertEqual(args[2], "GET")
-        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer jwt-token")
-        self.assertTrue(kwargs["use_jupiter_api"])
-        self.assertEqual(result, [{"key": "sk-1"}])
-
-    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
-    def test_list_account_api_keys_internal_sends_given_source(self, mock_make_request):
-        """list_account_api_keys_internal() sends the caller-supplied X-Poly-Source."""
-        PlatformAPIHandler.list_account_api_keys_internal(
-            "studio", "jwt-token", "acc-1", source="apikey"
-        )
-
-        kwargs = mock_make_request.call_args.kwargs
-        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "apikey")
-
-    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_create_account_api_key_internal_posts_name(self, mock_make_request):
         """create_account_api_key_internal() POSTs {"name": ...} to the api-keys endpoint."""
         mock_make_request.return_value = {"key": "sk-new", "name": ""}
@@ -331,31 +306,6 @@ class GetAccountsWithKey(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             PlatformAPIHandler.get_accounts_with_key("studio", "explicit-key-123")
-
-
-class GetProjectsWithKey(unittest.TestCase):
-    """Tests for PlatformAPIHandler.get_projects_with_key, the setup verify call."""
-
-    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
-    def test_authenticates_with_the_given_key_against_the_account_projects(self, mock_make_request):
-        mock_make_request.return_value = {
-            "projects": [{"id": "p1", "name": "Agent One"}, {"id": "p2"}]
-        }
-
-        projects = PlatformAPIHandler.get_projects_with_key("studio", "explicit-key-123", "acc-1")
-
-        self.assertEqual(projects, {"p1": "Agent One"})
-        args, kwargs = mock_make_request.call_args
-        self.assertEqual(args[:3], ("studio", "/adk/v1/accounts/acc-1/projects", "GET"))
-        self.assertEqual(kwargs["headers"]["X-API-KEY"], "explicit-key-123")
-        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "setup")
-
-    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
-    def test_non_list_projects_raises_value_error(self, mock_make_request):
-        mock_make_request.return_value = {"projects": "nope"}
-
-        with self.assertRaises(ValueError):
-            PlatformAPIHandler.get_projects_with_key("studio", "explicit-key-123", "acc-1")
 
 
 class GetProjects(unittest.TestCase):

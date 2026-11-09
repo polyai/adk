@@ -239,6 +239,46 @@ class WriteEnvVarFish(unittest.TestCase):
         self.assertIn("already set", message)
 
 
+class ReadEnvVar(unittest.TestCase):
+    """Tests for reading back what write_env_var compares against."""
+
+    def _write_profile(self, home: Path, relative: str, content: str) -> None:
+        path = home / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    def test_missing_profile_is_none(self):
+        with _home_env(), patch.dict(os.environ, {"SHELL": "/bin/zsh"}):
+            self.assertIsNone(read_env_var("POLY_API_KEY"))
+
+    def test_unset_variable_is_none(self):
+        with _home_env() as home, patch.dict(os.environ, {"SHELL": "/bin/zsh"}):
+            self._write_profile(home, ".zshrc", 'export OTHER="x"\n')
+            self.assertIsNone(read_env_var("POLY_API_KEY"))
+
+    def test_reads_the_last_assignment_without_quotes(self):
+        with _home_env() as home, patch.dict(os.environ, {"SHELL": "/bin/zsh"}):
+            self._write_profile(
+                home, ".zshrc", 'export POLY_API_KEY="old"\nexport POLY_API_KEY="new"\n'
+            )
+            self.assertEqual(read_env_var("POLY_API_KEY"), "new")
+
+    def test_reads_fish_syntax(self):
+        with _home_env() as home, patch.dict(os.environ, {"SHELL": "/usr/bin/fish"}):
+            self._write_profile(home, ".config/fish/config.fish", 'set -gx POLY_API_KEY "val"\n')
+            self.assertEqual(read_env_var("POLY_API_KEY"), "val")
+
+    def test_reads_the_windows_registry(self):
+        backend = MagicMock()
+        backend.read.return_value = "from-registry"
+        with (
+            patch("poly.utils.env_profile._is_windows", return_value=True),
+            patch("poly.utils.env_profile._get_windows_registry_backend", return_value=backend),
+        ):
+            self.assertEqual(read_env_var("POLY_API_KEY"), "from-registry")
+        backend.read.assert_called_once_with("POLY_API_KEY")
+
+
 class WriteEnvVarWindows(unittest.TestCase):
     """Tests for the Windows registry path, using an injected fake backend."""
 
@@ -310,46 +350,3 @@ class WriteEnvVarWindows(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class ReadEnvVar(unittest.TestCase):
-    """Tests for read_env_var, the done-state check before an export is offered."""
-
-    def setUp(self):
-        self._tmp_dir = tempfile.TemporaryDirectory()
-        self.home = Path(self._tmp_dir.name)
-        patch.dict(
-            os.environ,
-            {"HOME": str(self.home), "USERPROFILE": str(self.home), "SHELL": "/bin/zsh"},
-        ).start()
-        patch("poly.utils.env_profile._is_windows", return_value=False).start()
-        self.addCleanup(patch.stopall)
-        self.addCleanup(self._tmp_dir.cleanup)
-
-    def test_missing_profile_reads_as_unset(self):
-        self.assertIsNone(read_env_var("POLY_API_KEY"))
-
-    def test_reads_back_what_write_env_var_wrote(self):
-        write_env_var("POLY_API_KEY", "sk-abcdefgh1234")
-
-        self.assertEqual(read_env_var("POLY_API_KEY"), "sk-abcdefgh1234")
-
-    def test_reads_a_hand_written_line_and_takes_the_last_one(self):
-        (self.home / ".zshrc").write_text(
-            "export POLY_API_KEY='first'\nexport OTHER=1\nPOLY_API_KEY=\"second\"\n",
-            encoding="utf-8",
-        )
-
-        self.assertEqual(read_env_var("POLY_API_KEY"), "second")
-
-    def test_process_environment_is_not_consulted(self):
-        with patch.dict(os.environ, {"POLY_API_KEY": "sk-live"}):
-            self.assertIsNone(read_env_var("POLY_API_KEY"))
-
-    @patch("poly.utils.env_profile._is_windows", new=lambda: True)
-    @patch("poly.utils.env_profile._get_windows_registry_backend")
-    def test_windows_reads_the_registry_backend(self, mock_get_backend):
-        mock_get_backend.return_value.read.return_value = "sk-registry"
-
-        self.assertEqual(read_env_var("POLY_API_KEY"), "sk-registry")
-        mock_get_backend.return_value.read.assert_called_once_with("POLY_API_KEY")

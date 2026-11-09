@@ -23,6 +23,7 @@ from poly.utils.env_profile import EnvVarConflict, ProfileTarget
 FAKE_JWT = "jwt-fresh-5e1f0c7a"
 CACHED_JWT = "jwt-cached-9b2d4e61"
 FAKE_KEY = "sk-newkey1234567890"
+PROFILE_KEY = "sk-profile0987654321"
 FAKE_ACCOUNT = "acc-1"
 ME = "me@x.com"
 
@@ -64,10 +65,7 @@ class ApiKeyTestCase(unittest.TestCase):
                 "poly.cli_commands.apikey.AgentStudioInterface.get_accounts_with_key",
                 return_value={FAKE_ACCOUNT: "Account One"},
             ),
-            "list_keys": patch(
-                "poly.cli_commands.apikey.AgentStudioInterface.list_account_api_keys_internal",
-                return_value=[],
-            ),
+            "read_env": patch("poly.cli_commands.apikey.read_env_var", return_value=None),
             "create_key": patch(
                 "poly.cli_commands.apikey.AgentStudioInterface.create_account_api_key_internal",
                 return_value={"key": FAKE_KEY},
@@ -132,17 +130,6 @@ class HappyPath(ApiKeyTestCase):
         ApiKeyCommand.apikey(region="studio")
 
         self.mocks["save_cred"].assert_not_called()
-
-    def test_reuse_path_does_not_create_new_key(self):
-        """A matching existing key is reused instead of creating a new one."""
-        self.mocks["list_keys"].return_value = [
-            {"key": "sk-existing", "active": True, "policies": [{"name": "cli-generated-key"}]}
-        ]
-
-        ApiKeyCommand.apikey(region="studio")
-
-        self.mocks["create_key"].assert_not_called()
-        self.mocks["write_env"].assert_called_once_with("POLY_API_KEY", "sk-existing", force=False)
 
     def test_account_id_flag_skips_the_poll(self):
         """--account-id bypasses polling GET /jupiter/v2/accounts entirely."""
@@ -623,7 +610,7 @@ class TokenNeverInOutput(ApiKeyTestCase):
             ("several accounts", set_("get_accounts", "return_value", two), {}),
             ("accounts 500", set_("get_accounts", "side_effect", _http_error(500)), {}),
             ("no key", set_("create_key", "return_value", {}), {}),
-            ("list keys 500", set_("list_keys", "side_effect", _http_error(500)), {}),
+            ("create key 500", set_("create_key", "side_effect", _http_error(500)), {}),
             (
                 "env conflict",
                 set_("write_env", "side_effect", EnvVarConflict("o", "n", Path("/p"))),
@@ -757,6 +744,87 @@ class KeyActivationWait(ApiKeyTestCase):
             ApiKeyCommand.apikey(region="studio")
 
         self.mocks["get_accounts_with_key"].assert_called_with(region="studio", api_key=FAKE_KEY)
+
+
+class ProfileKeyReuse(ApiKeyTestCase):
+    """Reusing the POLY_API_KEY already in the profile."""
+
+    def test_working_profile_key_is_reused_without_creating_one(self):
+        """A profile key accepted for the chosen account is kept and nothing is created."""
+        self.mocks["read_env"].return_value = PROFILE_KEY
+
+        stdout, _, code = self.run_apikey(region="studio", output_json=True)
+
+        self.assertIsNone(code)
+        self.mocks["create_key"].assert_not_called()
+        self.mocks["get_accounts_with_key"].assert_called_with(region="studio", api_key=PROFILE_KEY)
+        self.mocks["write_env"].assert_called_once_with("POLY_API_KEY", PROFILE_KEY, force=False)
+        payload = json.loads(stdout)
+        self.assertTrue(payload["key_reused"])
+        self.assertIsNone(payload["key_name"])
+        self.assertNotIn(PROFILE_KEY, stdout)
+
+    def _assert_stops_before_creating(self) -> None:
+        stdout, _, code = self.run_apikey(region="studio", output_json=True)
+
+        self.assertEqual(code, 2)
+        self.mocks["create_key"].assert_not_called()
+        self.mocks["write_env"].assert_not_called()
+        payload = json.loads(stdout)
+        self.assertEqual(payload["step"], "key")
+        self.assertIn(f"isn't accepted for account {FAKE_ACCOUNT} on studio", payload["error"])
+        self.assertIn("--force", payload["error"])
+        self.assertNotIn("different value", payload["error"])
+        self.assertNotIn(PROFILE_KEY, stdout)
+
+    def test_refused_profile_key_stops_before_creating_one(self):
+        """A refused key may be good on another region, so it needs --force to replace."""
+        for status in (401, 403):
+            with self.subTest(status=status):
+                self.setUp()
+                self.mocks["read_env"].return_value = PROFILE_KEY
+                self.mocks["get_accounts_with_key"].side_effect = _http_error(status)
+
+                self._assert_stops_before_creating()
+
+    def test_profile_key_for_another_account_stops_before_creating_one(self):
+        """A key that can't reach the chosen account isn't reused or silently replaced."""
+        self.mocks["read_env"].return_value = PROFILE_KEY
+        self.mocks["get_accounts_with_key"].return_value = {"acc-other": "Other"}
+
+        self._assert_stops_before_creating()
+
+    def test_failed_check_is_a_real_error(self):
+        """A check that says nothing about the key exits 1 and doesn't suggest --force."""
+        failures = {
+            "server error": _http_error(503),
+            "connection": requests.ConnectionError("connection dropped"),
+            "timeout": requests.Timeout("timed out"),
+        }
+        for name, failure in failures.items():
+            with self.subTest(failure=name):
+                self.setUp()
+                self.mocks["read_env"].return_value = PROFILE_KEY
+                self.mocks["get_accounts_with_key"].side_effect = failure
+
+                stdout, _, code = self.run_apikey(region="studio", output_json=True)
+
+                self.assertEqual(code, 1)
+                self.mocks["create_key"].assert_not_called()
+                self.mocks["write_env"].assert_not_called()
+                payload = json.loads(stdout)
+                self.assertEqual(payload["step"], "key")
+                self.assertNotIn("--force", payload["error"])
+
+    def test_force_creates_a_new_key_without_reading_the_profile(self):
+        """--force replaces the profile key, even a working one."""
+        self.mocks["read_env"].return_value = PROFILE_KEY
+
+        ApiKeyCommand.apikey(region="studio", force=True)
+
+        self.mocks["read_env"].assert_not_called()
+        self.mocks["create_key"].assert_called_once()
+        self.mocks["write_env"].assert_called_once_with("POLY_API_KEY", FAKE_KEY, force=True)
 
 
 class EnvConflict(ApiKeyTestCase):
