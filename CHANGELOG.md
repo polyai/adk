@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.77.2 (2026-11-09)
+
+### Bug Fixes
+
+- Remove internal references from type stubs and schema descriptions
+  ([#412](https://github.com/polyai/adk/pull/412),
+  [`e52cba5`](https://github.com/polyai/adk/commit/e52cba555fa03f330bc909cce8f6dd114484ed31))
+
+
 ## v0.77.1 (2026-11-04)
 
 ### Bug Fixes
