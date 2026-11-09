@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.77.3 (2026-11-09)
+
+### Bug Fixes
+
+- **project**: Return the agent id as project_id in poly project list --json
+  ([#400](https://github.com/polyai/adk/pull/400),
+  [`7641a68`](https://github.com/polyai/adk/commit/7641a68e580d86a0277fa617940855b884daf42f))
+
+
 ## v0.77.2 (2026-11-09)
 
 ### Bug Fixes
