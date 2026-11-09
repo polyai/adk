@@ -18,6 +18,7 @@ import contextlib
 import sys
 import time
 from argparse import ArgumentParser, Namespace, _SubParsersAction
+from pathlib import Path
 from typing import Callable
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
@@ -69,6 +70,16 @@ class MultipleAccountsError(ValueError):
         self.raw_accounts = accounts
 
 
+class ProfileKeyRefused(Exception):
+    """The POLY_API_KEY in the profile isn't accepted for the chosen account and region."""
+
+    def __init__(self, masked_key: str, account_id: str, region: str, path: Path):
+        super().__init__(
+            f"POLY_API_KEY in {path} ({masked_key}) isn't accepted for account {account_id}"
+            f" on {region}."
+        )
+
+
 def _default_key_name(region: str) -> str:
     """The default API key name - disambiguated by region so keys never collide."""
     return DEFAULT_KEY_NAME if region == "studio" else f"{DEFAULT_KEY_NAME}-{region}"
@@ -113,7 +124,7 @@ def _fail(exc: Exception, step: str, exit_code: int, *, output_json: bool, verbo
     if verbose:
         raise exc
     message = str(exc)
-    if isinstance(exc, EnvVarConflict):
+    if isinstance(exc, (EnvVarConflict, ProfileKeyRefused)):
         message = f"{exc} Re-run with --force to replace it."
     if output_json:
         from poly.output.json_output import json_print
@@ -168,11 +179,20 @@ def _resolve_account_id(
 def _key_works_for_account(
     api: AgentStudioInterface, region: str, api_key: str, account_id: str
 ) -> bool:
-    """Whether `api_key` is accepted on `region` and can reach `account_id`."""
+    """Whether `api_key` is accepted on `region` and can reach `account_id`.
+
+    Raises:
+        requests.RequestException: The check failed for any reason other than the key being
+            refused, so it says nothing about the key.
+    """
+    import requests
+
     try:
         return account_id in api.get_accounts_with_key(region=region, api_key=api_key)
-    except Exception:
-        return False
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code in (401, 403):
+            return False
+        raise
 
 
 def _get_or_create_key(
@@ -193,9 +213,10 @@ def _get_or_create_key(
         tuple[str, bool]: The key, and whether it was reused rather than created.
 
     Raises:
-        EnvVarConflict: The profile holds a key that doesn't work for this account and `force`
-            is false. Raised before creating anything, so a re-run doesn't leave another
-            unused key behind.
+        ProfileKeyRefused: The profile holds a key that isn't accepted for this account and
+            `force` is false. Raised before creating anything, so a re-run doesn't leave
+            another unused key behind.
+        requests.RequestException: The check on the profile's key failed.
         ValueError: The create call succeeded but returned no key.
     """
     from poly.output.console import mask_secret
@@ -204,7 +225,9 @@ def _get_or_create_key(
     if existing_key is not None:
         if _key_works_for_account(api, region, existing_key, account_id):
             return existing_key, True
-        raise EnvVarConflict(mask_secret(existing_key), "a new key", detect_profile().path)
+        raise ProfileKeyRefused(
+            mask_secret(existing_key), account_id, region, detect_profile().path
+        )
 
     response = api.create_account_api_key_internal(
         region=region,
@@ -597,7 +620,7 @@ class ApiKeyCommand(BaseCommand):
                     masked_line,
                 )
 
-        except EnvVarConflict as e:
+        except (EnvVarConflict, ProfileKeyRefused) as e:
             _fail(e, step, exit_code=2, output_json=output_json, verbose=verbose)
-        except (DeviceFlowError, requests.HTTPError, ValueError) as e:
+        except (DeviceFlowError, requests.RequestException, ValueError) as e:
             _fail(e, step, exit_code=1, output_json=output_json, verbose=verbose)

@@ -772,15 +772,20 @@ class ProfileKeyReuse(ApiKeyTestCase):
         self.mocks["write_env"].assert_not_called()
         payload = json.loads(stdout)
         self.assertEqual(payload["step"], "key")
+        self.assertIn(f"isn't accepted for account {FAKE_ACCOUNT} on studio", payload["error"])
         self.assertIn("--force", payload["error"])
+        self.assertNotIn("different value", payload["error"])
         self.assertNotIn(PROFILE_KEY, stdout)
 
     def test_refused_profile_key_stops_before_creating_one(self):
         """A refused key may be good on another region, so it needs --force to replace."""
-        self.mocks["read_env"].return_value = PROFILE_KEY
-        self.mocks["get_accounts_with_key"].side_effect = _http_error(401)
+        for status in (401, 403):
+            with self.subTest(status=status):
+                self.setUp()
+                self.mocks["read_env"].return_value = PROFILE_KEY
+                self.mocks["get_accounts_with_key"].side_effect = _http_error(status)
 
-        self._assert_stops_before_creating()
+                self._assert_stops_before_creating()
 
     def test_profile_key_for_another_account_stops_before_creating_one(self):
         """A key that can't reach the chosen account isn't reused or silently replaced."""
@@ -789,12 +794,27 @@ class ProfileKeyReuse(ApiKeyTestCase):
 
         self._assert_stops_before_creating()
 
-    def test_failed_check_does_not_replace_the_profile_key(self):
-        """A platform error during the check leaves the profile alone."""
-        self.mocks["read_env"].return_value = PROFILE_KEY
-        self.mocks["get_accounts_with_key"].side_effect = _http_error(500)
+    def test_failed_check_is_a_real_error(self):
+        """A check that says nothing about the key exits 1 and doesn't suggest --force."""
+        failures = {
+            "server error": _http_error(503),
+            "connection": requests.ConnectionError("connection dropped"),
+            "timeout": requests.Timeout("timed out"),
+        }
+        for name, failure in failures.items():
+            with self.subTest(failure=name):
+                self.setUp()
+                self.mocks["read_env"].return_value = PROFILE_KEY
+                self.mocks["get_accounts_with_key"].side_effect = failure
 
-        self._assert_stops_before_creating()
+                stdout, _, code = self.run_apikey(region="studio", output_json=True)
+
+                self.assertEqual(code, 1)
+                self.mocks["create_key"].assert_not_called()
+                self.mocks["write_env"].assert_not_called()
+                payload = json.loads(stdout)
+                self.assertEqual(payload["step"], "key")
+                self.assertNotIn("--force", payload["error"])
 
     def test_force_creates_a_new_key_without_reading_the_profile(self):
         """--force replaces the profile key, even a working one."""
