@@ -1,5 +1,6 @@
 # CHANGELOG
 
+<!-- version list -->
 
 ## v0.77.1 (2026-11-04)
 
@@ -852,15 +853,15 @@ Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
   [`56c70c6`](https://github.com/polyai/adk/commit/56c70c67bd58caf8c3a78c50f38d1c9d02974e3a))
 
 ## Summary - `jupiter_region_to_base_url["staging"]` in `src/poly/handlers/platform_api.py` pointed
-  to `jupiter-api.staging.us-1.platform.polyai.app`, which 503s during account activation. -
+  to a host that 503s during account activation. -
   Captured a HAR from `studio.staging.poly.ai` (the real platform UI) and confirmed every Jupiter
   API call — including `/jupiter/v1/authorise` itself (200 OK) — goes to
-  `jupiter-api.staging.polyai.app`, with no `us-1`/`platform` segment. - Independently verified
-  `jupiter-api.staging.polyai.app/jupiter/v1/authorise` returns 401 (healthy, needs auth) — same
+  a different staging host. - Independently verified
+  the new host returns 401 (healthy, needs auth) — same
   signature as the working prod region hosts.
 
 ## Test plan - [ ] Run `adk login`/activation flow against staging and confirm it hits
-  `jupiter-api.staging.polyai.app` and succeeds
+  the new host and succeeds
 
 
 ## v0.73.3 (2026-10-27)
@@ -2624,7 +2625,7 @@ Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
 
 The ADK still posted the legacy `{ testCaseIds, branchId }` body. The platform converts that body to
   `{ branchId, select }` and drops any other field, so a run name could never arrive. Agent Studio
-  now names runs and shows who started them (PolyAI-LDN/platform_ui#10837), so ADK runs should be
+  now names runs and shows who started them, so ADK runs should be
   nameable too.
 
 Linear:
@@ -5456,7 +5457,7 @@ Closes AM-960
   least one response rule, and `repeat` must be a positive integer or `-1` (respond forever) — `-1`
   only valid on the last rule in an operation's list. - Cross-checked `repeat`/`-1` semantics and
   rename/delete cascading behavior against the platform runtime (`genai_lambda_runtime`) and the web
-  app (`platform_ui/apps/agent-stream` + `jupiter`) to make sure the CLI's validation and docs match
+  app to make sure the CLI's validation and docs match
   actual platform behavior. - Docs: new "API mocks" section in `tests.md` with a YAML example,
   cross-linked from `api_integrations.md`.
 
@@ -5790,27 +5791,27 @@ Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
 
 ### Bug Fixes
 
-- Include X-PolyAI-Email header on audio cache and test run requests
+- Include the acting-user header on audio cache and test run requests
   ([#275](https://github.com/polyai/adk/pull/275),
   [`9a0f98e`](https://github.com/polyai/adk/commit/9a0f98e5e896460246e9601327e525a3bf5d2b33))
 
 ## Summary
 
 Several `PlatformAPIHandler` methods built their request headers without forwarding
-  `ADK_COMMAND_USER_OVERRIDE`, so those calls skipped the user-email attribution that every other
+  the acting user, so those calls skipped the user-email attribution that every other
   request in the file already sends.
 
 ## Motivation
 
-The generic `make_request` path (and other handler methods) forward `ADK_COMMAND_USER_OVERRIDE` as
-  an `X-PolyAI-Email` header so the platform can attribute requests to the acting user. The
+The generic `make_request` path (and other handler methods) forward the acting user in a
+  header so the platform can attribute requests to the acting user. The
   audio-cache preview/synthesize and test-run listing methods built their headers independently and
   had missed this, so those specific endpoints silently skipped attribution whenever the override
   was set.
 
 ## Changes
 
-- Add the `X-PolyAI-Email` header (from `ADK_COMMAND_USER_OVERRIDE`) to the header-building blocks
+- Add the acting-user header to the header-building blocks
   in `get_conversation_audio`, `get_audio_cache_file`, `update_audio_cache_file`,
   `update_audio_cache_details`, and `synthesize_audio_cache` in `src/poly/handlers/platform_api.py`
   - Add test coverage in `src/poly/tests/api/platform_api_test.py` asserting the header is sent (or
@@ -6234,7 +6235,7 @@ Companion to poly_core#44868, which does the same for its copy of these protos.
 Generated output only, no hand edits.
 
 There is **no proto generation script in this repo** — `scripts/` holds only `sync_runtime_stubs.py`
-  — so this reproduces what platform_ui's `apps/agent-stream/generate_protos.sh` does for poly_core:
+  — so this reproduces the platform's proto generation:
   protoc 25.5, the same include paths against a poly_core checkout on master (`6d2f8d717a`), then
   the relative-to-absolute import rewrite pointed at `poly.handlers.protobuf` instead of the
   sourcerer_sdk package.
@@ -6559,7 +6560,7 @@ Closes
 
 ## Screenshots / Logs
 
-``` (polyai-adk) jamesosullivan@JAMES-O-C63L909T4T PROJECT-0Z28NPOM % poly template list --region
+``` $ poly template list --region
   dev Available templates (5):
 
 Retail Customer Service Agent - Order & Shipping Support Tracks orders, handles returns, and
@@ -6571,14 +6572,13 @@ Retail Customer Service Agent - Order & Shipping Support Tracks orders, handles 
   Handles banking queries, processes payments, manages cards, and resolves account issues on the
   call
 
-(polyai-adk) jamesosullivan@JAMES-O-C63L909T4T PROJECT-0Z28NPOM % poly template load "Retail
+$ poly template load "Retail
   Customer Service Agent - Order & Shipping Support" --region dev ? Loading 'Retail Customer Service
   Agent - Order & Shipping Support' will overwrite local project resources. Continue? Yes Loaded
   template Retail Customer Service Agent - Order & Shipping Support into
-  ws-fd112d8f/PROJECT-0Z28NPOM (polyai-adk) jamesosullivan@JAMES-O-C63L909T4T PROJECT-0Z28NPOM %
-  poly push Pushing local changes for ws-fd112d8f/PROJECT-0Z28NPOM... Pushed
-  ws-fd112d8f/PROJECT-0Z28NPOM to Agent Studio. (polyai-adk) jamesosullivan@JAMES-O-C63L909T4T
-  PROJECT-0Z28NPOM % ```
+  <workspace>/<project> $
+  poly push Pushing local changes for <workspace>/<project>... Pushed
+  <workspace>/<project> to Agent Studio. $ ```
 
 ---------
 
@@ -8045,7 +8045,7 @@ Adds `soniox` as a supported ASR provider in the experimental config schema.
 The Soniox speech recognition provider (poly_core #43628) needs to be a valid option in the
   experimental config schema so projects using it pass validation. Agent Studio already accepts
   `soniox` in published configs, so the reverse-synced `experimental_config.json` currently fails
-  ADK validation in agent-deployments CI (e.g. PolyAI-LDN/agent-deployments#8033) until the config
+  ADK validation in deployment CI until the config
   is manually stripped.
 
 ## Changes
@@ -8214,7 +8214,7 @@ The deployed adk_service (poly_core) is stateless: callers (Glot) fetch projecti
   with their own session auth and post them in the request body. To give Glot a branch-vs-main
   `branch_diff` tool with the same semantic, pretty-rendered diffs as `poly diff --before main
   --after <branch>`, adk_service needs a `/diff` endpoint following the `/pull`/`/push` pattern
-  (PolyAI-LDN/poly_core#43520) — which needs this projection-based entry point.
+  — which needs this projection-based entry point.
 
 ## Changes
 
@@ -8403,7 +8403,7 @@ Automate release announcements so the team gets notified in Slack whenever a new
 
 ### To test
 
-1. Add `SLACK_WEBHOOK_URL` secret pointing at a test channel 2. Run: `gh workflow run
+1. Add the webhook secret pointing at a test channel 2. Run: `gh workflow run
   slack-release-notification.yaml -f tag=v0.31.0`
 
 ## Checklist
@@ -9169,7 +9169,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ## Summary
 
 - Adds `dtmf.global` section to `experimental_config_schema.yaml`, syncing with
-  [poly_core#42747](https://github.com/PolyAI-LDN/poly_core/pull/42747) - Global DTMF enables digit
+  the platform - Global DTMF enables digit
   collection on every turn; step-level DTMF takes precedence when enabled - New properties:
   `is_enabled`, `max_digits`, `end_key`, `collect_while_agent_speaking`
 
@@ -9186,7 +9186,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 - Correct GitHub Issues link in README ([#181](https://github.com/polyai/adk/pull/181),
   [`ac93113`](https://github.com/polyai/adk/commit/ac93113d7c49e3711c3196b3cb00959b6b047d30))
 
-## Summary - The GitHub Issues link in README.md pointed to `PolyAI-LDN/adk` which is inaccessible
+## Summary - The GitHub Issues link in README.md pointed to a private repo which is inaccessible
   to public users - Updated to `PolyAI/adk` to match the actual public repository
 
 ## Test plan - [x] Verify the new link resolves to the correct repo
@@ -9965,8 +9965,6 @@ The platform can return adjectives not in the local allowed set (e.g. deprecated
 - [x] Added/updated unit tests (`SettingsPersonalityTests`) - [ ] Manual CLI testing (`poly
   <command>`) - [ ] Tested against a live Agent Studio project
 
-Replicates https://github.com/PolyAI-LDN/local_agent_studio/pull/141
-
 Made with [Cursor](https://cursor.com)
 
 Co-authored-by: Cursor <cursoragent@cursor.com>
@@ -10034,7 +10032,7 @@ Closes #DEVP-181
 ## Summary
 
 Replace the `email` parameter that was threaded through the entire call chain (CLI -> project ->
-  interface -> sync_client -> SDK) with a single `ADK_COMMAND_USER_OVERRIDE` environment variable
+  interface -> sync_client -> SDK) with a single environment variable
   read once in `SourcererSDK.__init__`.
 
 ## Motivation
@@ -10046,7 +10044,7 @@ The email was being passed as a parameter through 5 layers of function calls jus
 
 ## Changes
 
-- Read `ADK_COMMAND_USER_OVERRIDE` env var in `SourcererSDK.__init__`, set on session headers and
+- Read the acting-user env var in `SourcererSDK.__init__`, set on session headers and
   `send_command_batch` headers - Use `self.email` as default `created_by` in `create_metadata()` -
   Remove `email` param from `queue_resources`, `send_queued_commands`, `send_command_batch`,
   `_stage_commands`, `push_project`, `sync_ids_with_sandbox` - Remove `--email` CLI flag from push
@@ -11153,7 +11151,7 @@ Pass the ADK region directly to `SourcererSDK` instead of decomposing it into `(
 
 ## Motivation
 
-When using `POLY_ADK_KEY_DEV`, the dev environment incorrectly called `retrieve_api_key("us")` (the
+When using the dev region key, the dev environment incorrectly called `retrieve_api_key("us")` (the
   decomposed region) instead of `retrieve_api_key("dev")`, falling back to the generic
   `POLY_ADK_KEY` and ignoring the per-region key.
 
@@ -13797,7 +13795,7 @@ Also edited CONTRIBUTING.md to edit the clone url - changed org to PolyAI.
   `nullcontext` to skip the spinner in `--json` mode - Progress counter includes both multi-resource
   (per batch total) and non-multi-resource types for an accurate total
 
-- CONTRIBUTING.md to edit the clone url - changed org from PolyAI-LDN to PolyAI.
+- CONTRIBUTING.md to edit the clone url - updated the GitHub org.
 
 ## Test strategy
 
@@ -14118,7 +14116,7 @@ One secret must be added before the workflow will do anything:
 
 **Settings → Secrets and variables → Actions → New repository secret**
 
-| Name | Value | |---|---| | \`ANTHROPIC_API_KEY\` | Anthropic API key (personal or shared team key)
+| Name | Value | |---|---| | \`ANTHROPIC_API_KEY\` | Anthropic API key
   |
 
 \`GITHUB_TOKEN\` (used to open the docs PR) is provided automatically by GitHub — no setup needed.

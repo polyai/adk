@@ -8,6 +8,7 @@ review and CI validate exactly what ships:
 - Rewrites ``runtime.`` / ``utils.`` imports to relative
 - Injects ``__all__`` from imports.json
 - Drops imports of internal-only modules, erasing their names to ``Any``
+- Blanks URL default arguments (``url: str = "https://..."`` → ``url: str = ...``)
 - Binds module-level annotation-only declarations (``X: T`` → ``X: T = ...``)
   and adds ``from __future__ import annotations`` so the stubs import cleanly
   at runtime (user files execute ``from _gen import *``)
@@ -57,6 +58,10 @@ FAKE_IMPORT_MODULES = {"pydantic": {"BaseModel": "object"}}
 
 # Matches module-level annotation-only declarations e.g. "SupportedLanguageCodes: Any"
 _MODULE_ANNOTATION_RE = re.compile(r"^([A-Za-z_]\w*: [^=\n]+?)\s*$", re.MULTILINE)
+
+# Default arguments that are URLs: the stubs are public and the runtime's defaults
+# can point at internal hosts.
+_URL_DEFAULT_RE = re.compile(r"""= (["'])https?://.*?\1""")
 
 # Regex patterns for import rewriting
 _FROM_RUNTIME_RE = re.compile(r"^from runtime\.(\S+)", re.MULTILINE)
@@ -254,6 +259,7 @@ def _postprocess(
     # runtime (via _gen), where an unassigned annotation binds nothing and
     # breaks "from _gen.x import X" — give module-level declarations a value.
     source = _MODULE_ANNOTATION_RE.sub(r"\1 = ...", source)
+    source = _URL_DEFAULT_RE.sub("= ...", source)
     # Inject __all__ from imports.json, filtered to names available in the stub.
     # imports.json is the only source of truth, so a runtime-declared __all__ is replaced.
     if all_names:
