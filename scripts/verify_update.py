@@ -7,6 +7,11 @@ way a user would, runs ``poly update --cli-only --to TARGET_VERSION`` with the
 installed ``poly`` executable, and then checks from a new process that ``poly``
 still starts and reports the target version.
 
+On Windows, a running ``poly`` can't replace its own files, so ``poly update``
+refuses and prints the command to run instead. There the script checks the
+refusal left ``poly`` working, then runs that command itself, from outside
+``poly``, and checks it installs the target version.
+
 The target is an older release, so the update is a downgrade performed by this
 checkout's update code against a real PyPI release.
 
@@ -17,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -103,19 +109,21 @@ def main() -> None:
         workdir = root / "work"
         workdir.mkdir()
 
-        update = subprocess.run(
-            [str(poly), "update", "--cli-only", "--to", TARGET_VERSION],
-            cwd=workdir,
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-        print(f"poly update exited {update.returncode}\n{update.stdout}{update.stderr}")
+        def run_poly(*args: str) -> subprocess.CompletedProcess:
+            result = subprocess.run(
+                [str(poly), *args], cwd=workdir, env=env, capture_output=True, text=True
+            )
+            print(f"poly {' '.join(args)} exited {result.returncode}")
+            print(f"{result.stdout}{result.stderr}")
+            return result
 
-        version = subprocess.run(
-            [str(poly), "--version"], cwd=workdir, env=env, capture_output=True, text=True
-        )
-        print(f"poly --version exited {version.returncode}\n{version.stdout}{version.stderr}")
+        if sys.platform == "win32":
+            _verify_windows_refusal(method, run_poly, workdir, env)
+            _report_leftovers(root / "install")
+            return
+
+        update = run_poly("update", "--cli-only", "--to", TARGET_VERSION)
+        version = run_poly("--version")
         _report_leftovers(root / "install")
 
         if update.returncode != 0 or version.returncode != 0:
@@ -123,6 +131,37 @@ def main() -> None:
         if TARGET_VERSION not in version.stdout:
             sys.exit(f"FAILED ({method}): expected {TARGET_VERSION}, got {version.stdout!r}")
         print(f"OK ({method}): poly update installed {TARGET_VERSION} and poly still starts")
+
+
+def _verify_windows_refusal(method, run_poly, workdir: Path, env: dict[str, str]) -> None:
+    """On Windows, poly update refuses and gives a command that, run from outside poly, works.
+
+    The running poly can't replace its own files there, so it must not try.
+    """
+    update = run_poly("update", "--cli-only", "--to", TARGET_VERSION, "--json")
+    try:
+        result = json.loads(update.stdout.strip().splitlines()[-1])
+    except (IndexError, json.JSONDecodeError):
+        sys.exit(f"FAILED ({method}): poly update didn't print a JSON result")
+    if result.get("success") is not False or "new terminal" not in result.get("error", ""):
+        sys.exit(f"FAILED ({method}): poly update didn't refuse: {result!r}")
+
+    before = run_poly("--version")
+    if before.returncode != 0 or TARGET_VERSION in before.stdout:
+        sys.exit(f"FAILED ({method}): the refusal changed the install: {before.stdout!r}")
+
+    lines = result["error"].splitlines()
+    command = lines[lines.index(next(ln for ln in lines if "new terminal" in ln)) + 1].strip()
+    print(f"Running the suggested command: {command}")
+    suggested = subprocess.run(
+        command, cwd=workdir, env=env, capture_output=True, text=True, shell=True
+    )
+    print(f"exited {suggested.returncode}\n{suggested.stdout}{suggested.stderr}")
+
+    after = run_poly("--version")
+    if suggested.returncode != 0 or after.returncode != 0 or TARGET_VERSION not in after.stdout:
+        sys.exit(f"FAILED ({method}): the suggested command didn't install {TARGET_VERSION}")
+    print(f"OK ({method}): poly update refused, and its command installed {TARGET_VERSION}")
 
 
 if __name__ == "__main__":

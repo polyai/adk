@@ -5481,6 +5481,134 @@ class InstallMethodDetectionTest(unittest.TestCase):
         self.assertEqual(self._detect(prefix, uv_on_path=False), "pip")
 
 
+class RefuseIfNotUpgradableTest(unittest.TestCase):
+    """Tests for which installs UpdateCommand.refuse_if_not_upgradable refuses, and what it says."""
+
+    WINDOWS_PYTHON = "C:\\Program Files\\Python312\\python.exe"
+
+    def _start(self, patcher) -> MagicMock:
+        """Start a patch for the duration of the test."""
+        mock = patcher.start()
+        self.addCleanup(patcher.stop)
+        return mock
+
+    def _patch(self, target: str, **kwargs) -> MagicMock:
+        return self._start(patch(target, **kwargs))
+
+    def _patch_update(self, attribute: str, **kwargs) -> MagicMock:
+        return self._start(patch.object(UpdateCommand, attribute, **kwargs))
+
+    def setUp(self):
+        """Simulate a pip install on Windows, with the call extra installed."""
+        self.method = self._patch_update("_detect_install_method", return_value="pip"
+        )
+        self._patch_update("_package_spec", return_value="polyai-adk[call]"
+        )
+        self._patch("sys.platform", new="win32")
+        self._patch("sys.executable", new=self.WINDOWS_PYTHON)
+        self.warning = self._patch("poly.output.console.warning")
+
+    def test_windows_pip_install_is_refused(self):
+        """pip cannot replace the running poly.exe, so the update is refused, not attempted."""
+        self.assertTrue(UpdateCommand.refuse_if_not_upgradable(output_json=False))
+
+    def test_windows_pip_refusal_gives_the_pip_command_to_run(self):
+        """The message names the exact pip command, quoting an interpreter path with spaces."""
+        UpdateCommand.refuse_if_not_upgradable(output_json=False)
+
+        message = self.warning.call_args[0][0]
+        self.assertIn(
+            '"C:\\Program Files\\Python312\\python.exe" -m pip install --upgrade '
+            "polyai-adk\\[call]",
+            message,
+        )
+        self.assertIn("poly update --skills-only", message)
+
+    @patch("poly.cli_commands.update.json_print")
+    def test_windows_pip_refusal_pins_the_target_version(self, mock_json_print):
+        """With --to, the suggested command installs that version, unescaped in JSON."""
+        UpdateCommand.refuse_if_not_upgradable(output_json=True, target_version="0.52.0")
+
+        payload = mock_json_print.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("-m pip install polyai-adk[call]==0.52.0", payload["error"])
+
+    def test_pip_install_off_windows_is_upgradable(self):
+        """pip can replace a running script on macOS and Linux, so nothing is refused."""
+        self._patch("sys.platform", new="darwin")
+
+        self.assertFalse(UpdateCommand.refuse_if_not_upgradable(output_json=False))
+
+    def test_every_windows_install_is_refused_with_its_own_command(self):
+        """Every method's upgrade replaces files the running poly uses, so none runs in place."""
+        commands = {
+            "uv-tool": "uv tool upgrade polyai-adk",
+            "pipx": "pipx upgrade polyai-adk",
+            "uv-pip": "uv pip install --upgrade polyai-adk",
+        }
+        for method, command in commands.items():
+            with self.subTest(method):
+                self.method.return_value = method
+
+                self.assertTrue(UpdateCommand.refuse_if_not_upgradable(output_json=False))
+                self.assertIn(command, self.warning.call_args[0][0])
+
+    def test_windows_install_is_not_refused_when_nothing_is_installed(self):
+        """Checking for updates and refreshing skills replace nothing, so they still run."""
+        self.assertFalse(
+            UpdateCommand.refuse_if_not_upgradable(output_json=False, installing=False)
+        )
+
+    @patch("poly.output.console.info")
+    def test_windows_check_still_reports_an_update(self, mock_info):
+        self._patch_update("check_for_updates", return_value=(True, "9.9.9")
+        )
+
+        UpdateCommand.update(check=True, output_json=False)
+
+        self.warning.assert_not_called()
+        self.assertIn("Update available", mock_info.call_args[0][0])
+
+    @patch("poly.output.console.info")
+    def test_windows_update_refuses_before_announcing_it(self, mock_info):
+        self._patch_update("check_for_updates", return_value=(True, "9.9.9")
+        )
+        run = self._patch("poly.cli_commands.update.subprocess.run")
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.warning.assert_called_once()
+        run.assert_not_called()
+        announced = [c[0][0] for c in mock_info.call_args_list]
+        self.assertFalse(any("Updating Poly CLI" in m for m in announced), announced)
+
+    @patch("poly.output.console.info")
+    def test_windows_update_with_nothing_new_still_refreshes_skills(self, mock_info):
+        self._patch_update("check_for_updates", return_value=(False, "0.0.1")
+        )
+        skills = self._patch_update("update_skills_step", return_value=True
+        )
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.warning.assert_not_called()
+        skills.assert_called_once()
+
+    def test_editable_install_is_still_refused(self):
+        """The existing refusals are unchanged."""
+        self.method.return_value = "editable"
+
+        self.assertTrue(UpdateCommand.refuse_if_not_upgradable(output_json=False))
+        self.assertIn("editable/dev mode", self.warning.call_args[0][0])
+
+    def test_perform_update_never_runs_pip_on_windows(self):
+        """perform_update refuses as well, so calling it directly cannot break the install."""
+        run = self._patch("poly.cli_commands.update.subprocess.run")
+
+        self.assertFalse(UpdateCommand.perform_update(output_json=False))
+        run.assert_not_called()
+
+
 class IsNewerVersionTest(unittest.TestCase):
     """Tests for shared.is_newer_version, which gates the 'update available' message."""
 
