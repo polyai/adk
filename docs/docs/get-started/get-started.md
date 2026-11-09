@@ -49,12 +49,13 @@ One command handles the rest of onboarding:
 poly setup
 ```
 
-It runs four steps, skipping any that are already done — so it is safe to re-run at any time:
+It runs five steps, skipping any that are already done — so it is safe to re-run at any time:
 
 1. **Sign in** — opens a browser window, fetches (or creates) an API key for your user, and saves it to `~/.poly/credentials.json` so future `poly` commands pick it up automatically — no environment variables to manage. The browser step can happen on any device, not just the machine running the CLI.
-2. **Shell completion** — installs tab completion for bash, zsh, or fish.
-3. **AI agent skills** — installs the ADK's skills into coding agents detected on your machine (Claude Code, Cursor, Codex, and others), so they know the `poly` workflow. Requires Node.js 18+ and is skipped with a warning otherwise.
-4. **Project** — offers to create a new Agent Studio project or connect an existing one, covered in Step 3 below.
+2. **Account API key (optional)** — asks whether to also create an account API key for the PolyAI APIs, as [`poly apikey`](../reference/cli/apikey.md) does. The ADK does not need it, so you can say no.
+3. **Shell completion** — installs tab completion for bash, zsh, or fish.
+4. **AI agent skills** — installs the ADK's skills into coding agents detected on your machine (Claude Code, Cursor, Codex, and others), so they know the `poly` workflow. Requires Node.js 18+ and is skipped with a warning otherwise.
+5. **Project** — offers to create a new Agent Studio project or connect an existing one, covered in Step 3 below.
 
 You are asked to pick a region when signing in. Choose based on your account type:
 

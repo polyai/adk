@@ -1,7 +1,8 @@
 """Setup command: one-command onboarding for the ADK.
 
-Runs the full first-run sequence — authentication, shell completion, AI agent
-skills, and project setup — skipping any step that is already done, so it is
+Runs the full first-run sequence — authentication, an optional account API
+key, shell completion, AI agent skills, and project setup — skipping any step
+that is already done, so it is
 safe to re-run at any time. Each run reports anonymous usage events unless
 the user has opted out.
 
@@ -18,14 +19,17 @@ from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParser
 from collections.abc import Callable
 from pathlib import Path
 
+from poly.cli_commands.apikey import ApiKeyCommand
 from poly.cli_commands.auth import _authenticate_and_save_key, _select_region, _signin
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import REGION_CHOICES, get_package_version, region_type
 from poly.cli_commands.skills import install_skills, node_gate_reason
+from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS
 from poly.handlers.posthog import capture_event
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE
-from poly.utils import any_credentials_exist
+from poly.utils import any_credentials_exist, apikey_session
+from poly.utils.env_profile import read_env_var
 
 logger = logging.getLogger(__name__)
 
@@ -106,11 +110,12 @@ class SetupCommand(BaseCommand):
             help="Set up the ADK: auth, shell completion, AI skills, and a project",
             description=(
                 "Set up everything the ADK needs in one command.\n\n"
-                "Runs four steps, each skipped automatically if already done:\n"
-                "  1. Authentication (browser sign-in, saves an API key)\n"
-                "  2. Shell completion for bash/zsh/fish\n"
-                "  3. AI agent skills, installed into detected coding agents\n"
-                "  4. Project setup (create a new project or connect an existing one)\n\n"
+                "Runs five steps, each skipped automatically if already done:\n"
+                "  1. Authentication (browser sign-in, saves an ADK key)\n"
+                "  2. Account API key for the PolyAI APIs (optional, asks first)\n"
+                "  3. Shell completion for bash/zsh/fish\n"
+                "  4. AI agent skills, installed into detected coding agents\n"
+                "  5. Project setup (create a new project or connect an existing one)\n\n"
                 "Examples:\n"
                 "  poly setup\n"
                 "  poly setup --region us\n"
@@ -192,8 +197,9 @@ class SetupCommand(BaseCommand):
 
         print_welcome_message()
         plain(
-            "This will set up authentication, shell completion, AI agent skills,"
-            " and a project. Steps that are already done are skipped."
+            "This will set up authentication, an optional account API key, shell"
+            " completion, AI agent skills, and a project. Steps that are already done"
+            " are skipped."
         )
         plain("")
 
@@ -212,13 +218,16 @@ class SetupCommand(BaseCommand):
             region = run.region = _select_region()
         run.step("auth", cls._authenticate, skip_auth, had_credentials, region)
 
-        # --- 2. Shell completion ---
+        # --- 2. Account API key (optional) ---
+        run.step("apikey", cls._setup_account_key, skip_auth, region)
+
+        # --- 3. Shell completion ---
         run.step("completion", cls._install_completion)
 
-        # --- 3. AI agent skills ---
+        # --- 4. AI agent skills ---
         run.step("skills", cls._install_skills, skip_skills, agents, dev, global_install)
 
-        # --- 4. Project setup ---
+        # --- 5. Project setup ---
         run.step("project", cls._setup_project, base_path, region)
 
         run.completed()
@@ -239,8 +248,53 @@ class SetupCommand(BaseCommand):
         if had_credentials:
             success("Authentication: existing credentials found — skipping.")
             return "skipped"
-        jwt_access_token = _signin(region)
+        # Studio signs in with the same client as `poly apikey`, and the sign-in is
+        # kept for it, so the account key step needs no second browser trip.
+        jwt_access_token = _signin(
+            region, auth_details=APIKEY_AUTH_DETAILS if region == "studio" else None
+        )
+        apikey_session.save(region, jwt_access_token)
         _authenticate_and_save_key(jwt_access_token, region=region)
+        return "done"
+
+    @classmethod
+    def _setup_account_key(cls, skip_auth: bool, region: str | None) -> str:
+        """Offer to create an account API key by running ``poly apikey``.
+
+        The ADK does not need this key; it is for the PolyAI APIs. Never fatal:
+        if ``poly apikey`` stops, setup warns and carries on.
+
+        Returns:
+            The step outcome: ``"done"``, ``"skipped"``, ``"declined"`` or ``"failed"``.
+        """
+        import questionary
+
+        from poly.output.console import info, success, warning
+
+        if skip_auth:
+            info("Account API key: skipped (--skip-auth).")
+            return "skipped"
+        if read_env_var("POLY_API_KEY"):
+            success("Account API key: POLY_API_KEY is already in your profile — skipping.")
+            return "skipped"
+        if not sys.stdin.isatty():
+            info(
+                "Account API key: skipped (not an interactive terminal)."
+                " Run 'poly apikey' to create one for the PolyAI APIs."
+            )
+            return "skipped"
+        wanted = questionary.confirm(
+            "Set up an API key for the PolyAI APIs and Dialog RSN? (Optional for the ADK)",
+            default=True,
+        ).ask()
+        if not wanted:
+            info("Account API key: skipped. Run 'poly apikey' when you want one.")
+            return "declined"
+        try:
+            ApiKeyCommand.apikey(region=region or _select_region())
+        except SystemExit:
+            warning("Account API key: not set up. Run 'poly apikey' to try again.")
+            return "failed"
         return "done"
 
     @classmethod
