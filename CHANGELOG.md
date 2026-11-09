@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.77.4 (2026-11-09)
+
+### Bug Fixes
+
+- Reuse the profile's key in poly apikey instead of reading the key list
+  ([#411](https://github.com/polyai/adk/pull/411),
+  [`4221850`](https://github.com/polyai/adk/commit/4221850dc442c7537b0844a3b9b5f99dc98320d8))
+
+
 ## v0.77.3 (2026-11-09)
 
 ### Bug Fixes
