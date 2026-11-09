@@ -1034,29 +1034,6 @@ class PlatformAPIHandler:
         )
 
     @staticmethod
-    def list_account_api_keys_internal(
-        region: str, jwt_token: str, account_id: str, source: str = "adk"
-    ) -> list[dict]:
-        """List the account-scoped API keys for an account, via JWT auth.
-
-        Args:
-            region: The region name.
-            jwt_token: A valid JWT access token.
-            account_id: The account ID.
-            source: Value for the ``X-Poly-Source`` header.
-
-        Returns:
-            list[dict]: The raw list of API key records.
-        """
-        return PlatformAPIHandler.make_request(
-            region,
-            f"/jupiter/v2/accounts/{account_id}/api-keys",
-            "GET",
-            headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
-            use_jupiter_api=True,
-        )
-
-    @staticmethod
     def create_account_api_key_internal(
         region: str, jwt_token: str, account_id: str, name: str, source: str = "adk"
     ) -> dict:
