@@ -124,7 +124,7 @@ Four layers, catching different problems — load `poly-adk-testing` for the det
 
 | Command | Catches | Runs against |
 |---|---|---|
-| `poly validate` | Invalid resources, missing values, broken references | Local files |
+| `poly validate` | Invalid resources, missing values, broken references, function imports that don't resolve | Local files |
 | `poly chat` | Conversational behavior, judged by reading | Last **pushed** state |
 | `poly test run` | Regressions, repeatably | Last **pushed** state |
 | `poly conversations` | What happened on real calls | Live traffic |

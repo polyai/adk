@@ -295,12 +295,6 @@ def test_code(conv: Conversation, flow: Flow, test_param: int):
         self.assertIn("Function description cannot be empty", str(cm.exception))
         test_function.description = "Test description"
 
-        # Test with a syntax error
-        test_function.code = "print('hel\n"
-        with self.assertRaises(ValueError) as cm:
-            test_function.validate()
-        self.assertIn("Syntax error in function code", str(cm.exception))
-
         # Test with a missing function definition
         test_function.code = "print('Hello World')"
 

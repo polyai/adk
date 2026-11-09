@@ -883,7 +883,7 @@ requires-dist = [
     { name = "ruff", specifier = ">=0.14.0" },
     { name = "sounddevice", marker = "extra == 'call'", specifier = "==0.5.6" },
     { name = "tomli-w", marker = "extra == 'dev'", specifier = ">=1.0.0" },
-    { name = "ty" },
+    { name = "ty", specifier = "==0.0.20" },
     { name = "websockets", marker = "extra == 'call'", specifier = "==17.1" },
 ]
 provides-extras = ["call", "dev"]

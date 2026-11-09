@@ -9,6 +9,7 @@ import dataclasses
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 from copy import deepcopy
@@ -2979,6 +2980,113 @@ class ValidateProjectTest(unittest.TestCase):
         )
         self.assertIn("Start step 'missing_step' not found.", error_texts)
 
+
+    def _validate_edited_copy(
+        self, edits: dict[str, str], parent_pyproject: Optional[str] = None
+    ) -> list[str]:
+        """Validate a copy of the test project with lines added after each file's header.
+
+        Function code is checked with ty, which reads the files on disk, so these edit real files
+        rather than mocking reads. `parent_pyproject` is written to the folder above the project.
+        """
+        root = _copy_test_project(self)
+        if parent_pyproject is not None:
+            with open(os.path.join(os.path.dirname(root), "pyproject.toml"), "w") as f:
+                f.write(parent_pyproject)
+        for rel_path, lines in edits.items():
+            path = os.path.join(root, rel_path)
+            with open(path, encoding="utf-8") as f:
+                header, rest = f.read().split("\n", 1)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(f"{header}\n{lines}\n{rest}")
+        return AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), root).validate_project()
+
+    def test_validate_project_reports_an_import_of_a_missing_helper(self):
+        """A merge that drops a helper another function imports only fails at runtime."""
+        errors = self._validate_edited_copy(
+            {"functions/test_function.py": "from functions.format_date import dropped_helper"}
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn(os.path.join("functions", "test_function.py") + ", line", errors[0])
+        self.assertIn("dropped_helper", errors[0])
+
+    def test_validate_project_ignores_ty_settings_above_the_project(self):
+        """A repository holding many projects can switch rules off for its own ty runs."""
+        errors = self._validate_edited_copy(
+            {"functions/test_function.py": "from functions.format_date import dropped_helper"},
+            parent_pyproject='[tool.ty.rules]\nunresolved-import = "ignore"\n',
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("dropped_helper", errors[0])
+
+    def test_validate_project_reports_an_import_of_a_missing_module(self):
+        errors = self._validate_edited_copy(
+            {"functions/test_function.py": "from functions.deleted_module import something"}
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("functions.deleted_module", errors[0])
+
+    def test_validate_project_reports_a_missing_helper_in_a_flows_functions(self):
+        errors = self._validate_edited_copy(
+            {
+                "flows/test_flow/functions/process_data.py": (
+                    "from flows.test_flow.functions.shared_helper import gone"
+                )
+            }
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("gone", errors[0])
+
+    def test_validate_project_ignores_modules_the_runtime_provides(self):
+        """Packages such as plog exist only on the platform, so they can't resolve locally."""
+        errors = self._validate_edited_copy(
+            {"functions/test_function.py": "import plog\nfrom functions.format_date import format_date"}
+        )
+        self.assertEqual(errors, [])
+
+    def test_validate_project_checks_syntax_against_the_platform_python(self):
+        """Syntax only newer Python accepts is valid when the platform runs that version."""
+        errors = self._validate_edited_copy(
+            {
+                "functions/test_function.py": (
+                    "try:\n    pass\nexcept ValueError, TypeError:\n    pass"
+                )
+            }
+        )
+        self.assertEqual(errors, [])
+
+    def test_validate_project_reports_syntax_errors_in_functions_and_steps(self):
+        """Errors that parse but don't compile. A parse error already fails reading the file."""
+        errors = self._validate_edited_copy(
+            {
+                "functions/test_function.py": "return None",
+                "flows/test_flow/function_steps/process_payment.py": "nonlocal missing",
+            }
+        )
+        text = "\n".join(errors)
+        self.assertIn(os.path.join("functions", "test_function.py") + ", line", text)
+        self.assertIn(os.path.join("function_steps", "process_payment.py") + ", line", text)
+
+    def test_validate_project_leaves_function_step_imports_alone(self):
+        errors = self._validate_edited_copy(
+            {"flows/test_flow/function_steps/process_payment.py": "from functions.gone import x"}
+        )
+        self.assertEqual(errors, [])
+
+    def test_validate_project_compiles_functions_when_ty_fails(self):
+        """A ty crash with no output must not read as a clean project."""
+        failed = subprocess.CompletedProcess(args=[], returncode=2, stdout="", stderr="panic")
+        with patch("poly.utils.ty_check.subprocess.run", return_value=failed):
+            errors = self._validate_edited_copy({"functions/test_function.py": "return None"})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("Syntax error in function code", errors[0])
+
+    def test_validate_project_compiles_functions_when_ty_cant_run(self):
+        """Without ty, syntax is still checked, by the Python running the ADK."""
+        with patch("poly.utils.ty_check.subprocess.run", side_effect=OSError("no ty")):
+            errors = self._validate_edited_copy({"functions/test_function.py": "return None"})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("Syntax error in function code", errors[0])
 
 class PullProjectTest(unittest.TestCase):
     """Tests for the pull_project method"""
