@@ -92,7 +92,6 @@ DATA_AGGS = [
     "distinct_count",
 ]
 DATA_GROUP_BY = [
-    "project_id",
     "channel",
     "deployment_id",
     "variant_id",

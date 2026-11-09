@@ -27,6 +27,8 @@ from rich.text import Text
 from rich.theme import Theme
 from rich.tree import Tree
 
+from poly.constants import DATA_AGGS
+
 # Global verbose flag — set by CLI before commands run
 _verbose = False
 
@@ -1793,7 +1795,7 @@ def print_available_metrics(metrics: list[dict[str, Any]]) -> None:
     """Print the metrics a project can query, built-in metrics included.
 
     Args:
-        metrics: Metric dicts from the Data Gateway catalog: name, type,
+        metrics: Metric dicts from the Data API catalog: name, type,
             description, and ``values`` (expected values for string metrics).
     """
     if not metrics:
@@ -1823,9 +1825,7 @@ def _format_aggregate_cell(column: str, value: Any) -> str:
     """Format one cell of an aggregate result for the terminal."""
     if value is None:
         return "—"
-    if column in ("bucket", "bucket_start", "interval_start", "timestamp") and isinstance(
-        value, str
-    ):
+    if column == "bucket" and isinstance(value, str):
         return _format_iso_timestamp(value)
     if isinstance(value, float):
         return f"{value:,.2f}"
@@ -1835,7 +1835,7 @@ def _format_aggregate_cell(column: str, value: Any) -> str:
 
 
 def print_aggregate(result: dict[str, Any], headline: str | None = None) -> None:
-    """Print a tabular aggregate result from the Data Gateway.
+    """Print a tabular aggregate result from the Data API.
 
     Args:
         result: ``{"columns": [...], "rows": [[...]], "limit", "offset"}``.
@@ -1854,18 +1854,8 @@ def print_aggregate(result: dict[str, Any], headline: str | None = None) -> None
 
     table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
     for column in columns:
-        numeric = column in (
-            "sum",
-            "avg",
-            "min",
-            "max",
-            "p50",
-            "p95",
-            "p99",
-            "conversation_count",
-            "distinct_count",
-        )
-        table.add_column(column, justify="right" if numeric else "left", no_wrap=True)
+        justify = "right" if column in DATA_AGGS else "left"
+        table.add_column(column, justify=justify, no_wrap=True)
 
     for row in rows:
         table.add_row(*[_format_aggregate_cell(c, v) for c, v in zip(columns, row)])

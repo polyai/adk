@@ -86,7 +86,7 @@ The table has one row per bucket and group: a `bucket` column when `--interval` 
 | `--to` | Exclusive window end. A bare date includes the whole of that day. |
 | `--interval` | Time bucket: `hourly`, `daily`, `weekly`, `monthly`. Omit for one total. |
 | `--timezone` | IANA timezone for hourly and daily buckets, e.g. `Europe/London`. |
-| `--by` | Group by `project_id`, `channel`, `deployment_id`, `variant_id`, `client_env`, `experiment_id`, `experiment_version_id` or, for a string metric, `value_string`. Repeatable. |
+| `--by` | Group by `channel`, `deployment_id`, `variant_id`, `client_env`, `experiment_id`, `experiment_version_id` or, for a string metric, `value_string`. Repeatable. |
 | `--filter METRIC OP VALUE` | Only count conversations where the condition holds. `OP` is `eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ex`, `exists`; `in`/`ex` take a comma-separated list. Repeatable. |
 | `--any` | Match conversations that satisfy any `--filter` instead of all. |
 | `--having AGG OP VALUE` | Keep only buckets where the aggregate passes the threshold, e.g. `--having avg gte 4`. Repeatable. |
