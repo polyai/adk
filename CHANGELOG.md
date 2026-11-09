@@ -2392,8 +2392,7 @@ Flag evaluation from the `studio` region now sends cluster `plg-us-1-prod` with 
 
 ## Motivation
 
-Studio (jupiter) and sourcerer both build PostHog groups from `CLUSTERS` in platform_ui's
-  `packages/schemas/src/posthog/index.ts`. There, the PLG deployment is `plg-us-1-prod` / `plg`, and
+Studio (jupiter) and sourcerer both build PostHog groups from the same cluster list. There, the PLG deployment is `plg-us-1-prod` / `plg`, and
   that matches `CLUSTER: plg-us-1-prod` in gitops for jupiter-api and sourcerer. The ADK's
   `region_to_posthog_cluster` passed `studio` through unchanged, so:
 
@@ -2651,7 +2650,7 @@ Linear:
 
 - [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (2124) - [x] No breaking
   changes to the `poly` CLI interface. `--name` is optional, and the platform has accepted the
-  `select` shape since platform_ui#9801 and `name` since #10525. - [x] Commit messages follow
+  `select` and `name` shapes for some time. - [x] Commit messages follow
   conventional commits
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
@@ -3584,7 +3583,7 @@ Why this is a separate command rather than a flag on `poly login`, or part of `p
   small backend seam so the logic is testable on Linux CI. - Never overwrite an existing `studio`
   entry in `~/.poly/credentials.json`; report that it was kept. - On enterprise regions
   (`us-1`/`uk-1`/`euw-1`), `/jupiter/v1/authorise` only auto-creates a workspace for `@poly-ai.com`
-  users (verified in `poly_core`, `src/agent_v3/jupiter_api/interactors/auth_interactor.py`) -
+  users -
   anyone else who isn't already provisioned in Aegis gets a raw `403`. `apikey` now catches that and
   raises a friendly message pointing at `--account-id`/PolyAI provisioning instead of surfacing the
   HTTP error; studio's 403 behaviour (a genuine auth error) is untouched. Also: account resolution
@@ -6214,7 +6213,7 @@ The platform's simplified deployment model introduces branch lineage (branches c
 The vendored protos under `src/poly/handlers/protobuf/` had drifted well behind the platform protos
   they are generated from. Regenerated wholesale rather than leaving a partial sync.
 
-Companion to poly_core#44868, which does the same for its copy of these protos.
+Companion to the same change in the platform's copy of these protos.
 
 ## What arrives
 
@@ -6228,7 +6227,7 @@ Companion to poly_core#44868, which does the same for its copy of these protos.
 
 **Also caught up by the same run**, none of it this project's work: `agent_settings`, `artifact`,
   `channels`, `functions`, `knowledge_base`, `snapshot`, `variant`. `webchat_csat_pb2` is new — it
-  exists in poly_core's copy of these protos but had never been generated here.
+  exists in the platform's copy of these protos but had never been generated here.
 
 ## Provenance
 
@@ -6236,7 +6235,7 @@ Generated output only, no hand edits.
 
 There is **no proto generation script in this repo** — `scripts/` holds only `sync_runtime_stubs.py`
   — so this reproduces the platform's proto generation:
-  protoc 25.5, the same include paths against a poly_core checkout on master (`6d2f8d717a`), then
+  protoc 25.5, the same include paths against a platform checkout, then
   the relative-to-absolute import rewrite pointed at `poly.handlers.protobuf` instead of the
   sourcerer_sdk package.
 
@@ -7067,7 +7066,7 @@ Workflow syntax has not been exercised against a live PR in this repo yet — fi
 
 ## Summary
 
-Adds `poly audio-cache` CLI commands wrapping the Audio Cache public API (poly_core PR #42487) so
+Adds `poly audio-cache` CLI commands wrapping the Audio Cache public API so
   developers can manage an agent's cached TTS audio without hand-rolled HTTP calls.
 
 ## Motivation
@@ -7492,7 +7491,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 - Removes the blanket `# type: ignore` directive from `src/poly/types/secret_vault.py`
 
 The `# type: ignore` comment triggers an `unused-type-ignore-comment` warning with `ty`, which
-  `agent-deployments` uses as a pre-commit hook. This causes commits that touch
+  deployment repos use as a pre-commit hook. This causes commits that touch
   `_gen/secret_vault.py` to fail:
 
 ``` warning[unused-type-ignore-comment]: Unused blanket `type: ignore` directive -->
@@ -8042,7 +8041,7 @@ Adds `soniox` as a supported ASR provider in the experimental config schema.
 
 ## Motivation
 
-The Soniox speech recognition provider (poly_core #43628) needs to be a valid option in the
+The Soniox speech recognition provider needs to be a valid option in the
   experimental config schema so projects using it pass validation. Agent Studio already accepts
   `soniox` in published configs, so the reverse-synced `experimental_config.json` currently fails
   ADK validation in deployment CI until the config
@@ -8210,10 +8209,10 @@ Adds `diff_projections(before_projection, after_projection)` — semantic per-fi
 
 ## Motivation
 
-The deployed adk_service (poly_core) is stateless: callers (Glot) fetch projections from sourcerer
-  with their own session auth and post them in the request body. To give Glot a branch-vs-main
+The deployed service is stateless: callers fetch projections
+  with their own session auth and post them in the request body. To give callers a branch-vs-main
   `branch_diff` tool with the same semantic, pretty-rendered diffs as `poly diff --before main
-  --after <branch>`, adk_service needs a `/diff` endpoint following the `/pull`/`/push` pattern
+  --after <branch>`, the service needs a `/diff` endpoint following the `/pull`/`/push` pattern
   — which needs this projection-based entry point.
 
 ## Changes
@@ -8231,7 +8230,7 @@ The deployed adk_service (poly_core) is stateless: callers (Glot) fetch projecti
   live Agent Studio project - [ ] N/A (docs, config, or trivial change)
 
 New `DiffProjectionsTest` covers modified / added+deleted / identical / empty-projection cases. Also
-  verified end-to-end: installed this branch into a local adk_service and curled the new `/diff`
+  verified end-to-end: installed this branch into a local service and curled the new `/diff`
   endpoint — correct unified diffs for modified + added resources.
 
 ## Checklist
@@ -14722,14 +14721,14 @@ See CONTRIBUTING.md for details. ```
 
 ### Documentation
 
-- Add CONTRIBUTING.md and rename Local Agent Studio to ADK
+- Add CONTRIBUTING.md and rename the project to ADK
   ([#7](https://github.com/polyai/adk/pull/7),
   [`0ed7729`](https://github.com/polyai/adk/commit/0ed7729936c22aded9b3680436fd1269521e7225))
 
 ## Summary
 
 Add a dedicated CONTRIBUTING.md with dev setup and contribution guidelines extracted from the
-  README. Rename all references from "Local Agent Studio" / "local_agent_studio" to "ADK" across the
+  README. Rename all references from the old project name to "ADK" across the
   codebase.
 
 ## Motivation
@@ -14742,7 +14741,7 @@ The README was getting long with dev setup details mixed in, and the old project
 - Created `CONTRIBUTING.md` with dev setup, project structure, code style, commit conventions, and
   tooling sections - Replaced README dev setup and contributing sections with a link to
   `CONTRIBUTING.md` - Replaced broken dynamic Python version badge with a static `Python 3.14` badge
-  - Updated all `local_agent_studio` GitHub URLs to `adk` - Renamed "Local Agent Studio" to "ADK" in
+  - Updated all GitHub URLs to `adk` - Renamed the old project name to "ADK" in
   docstrings, comments, error messages, and docs across 9 files
 
 ## Test strategy
