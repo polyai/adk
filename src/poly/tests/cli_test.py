@@ -5855,7 +5855,10 @@ class PerformUpdateFailureTest(unittest.TestCase):
     """Tests for how UpdateCommand.perform_update reports a failed install."""
 
     def setUp(self):
-        """Simulate a uv tool install with the call extra whose installer fails."""
+        """Simulate a uv tool install with the call extra whose installer fails.
+
+        Off Windows, where poly update refuses before running the installer.
+        """
         for name, return_value in (
             ("_detect_install_method", "uv-tool"),
             ("_package_spec", "polyai-adk[call]"),
@@ -5863,6 +5866,9 @@ class PerformUpdateFailureTest(unittest.TestCase):
             patcher = patch.object(UpdateCommand, name, return_value=return_value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        patcher = patch("sys.platform", new="linux")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         patcher = patch(
             "poly.cli_commands.update.subprocess.run",
             side_effect=subprocess.CalledProcessError(1, "uv"),

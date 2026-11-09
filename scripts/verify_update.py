@@ -140,8 +140,8 @@ def _verify_windows_refusal(method, run_poly, workdir: Path, env: dict[str, str]
     """
     update = run_poly("update", "--cli-only", "--to", TARGET_VERSION, "--json")
     try:
-        result = json.loads(update.stdout.strip().splitlines()[-1])
-    except (IndexError, json.JSONDecodeError):
+        result = json.loads(update.stdout)
+    except json.JSONDecodeError:
         sys.exit(f"FAILED ({method}): poly update didn't print a JSON result")
     if result.get("success") is not False or "new terminal" not in result.get("error", ""):
         sys.exit(f"FAILED ({method}): poly update didn't refuse: {result!r}")
