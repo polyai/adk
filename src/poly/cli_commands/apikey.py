@@ -4,11 +4,11 @@
 the PolyAI APIs and Dialog RSN into your environment, not to set up the ADK itself. It
 signs a user in - via the GitHub-only Auth0 device flow for the default `studio` region, or
 the standard sign-in page for any other region - creates their PolyAI account if needed,
-provisions (or reuses) an account-scoped API key, and writes ``POLY_API_KEY`` into their
-shell profile - or, on Windows, their user environment. It never prompts when run by an
-agent (no terminal, or ``--json``); at a terminal it may ask which account to use. It keeps
-the sign-in so a re-run does not sign in again. To set up the ADK itself,
-use ``poly setup`` or ``poly login`` instead. See ``poly apikey --help`` or
+provisions an account-scoped API key (or reuses the one already in their profile), and
+writes ``POLY_API_KEY`` into their shell profile - or, on Windows, their user environment.
+It never prompts when run by an agent (no terminal, or ``--json``); at a terminal it may ask
+which account to use. It keeps the sign-in so a re-run does not sign in again. To set up the
+ADK itself, use ``poly setup`` or ``poly login`` instead. See ``poly apikey --help`` or
 ``docs/docs/reference/cli/apikey.md`` for the full step-by-step behaviour.
 
 Copyright PolyAI Limited
@@ -18,7 +18,6 @@ import contextlib
 import sys
 import time
 from argparse import ArgumentParser, Namespace, _SubParsersAction
-from datetime import datetime, timezone
 from typing import Callable
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
@@ -28,13 +27,18 @@ from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
 from poly.handlers.interface import AgentStudioInterface
 from poly.utils import apikey_session
-from poly.utils.api_keys import select_reusable_api_key
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
     load_api_key_from_credential_file,
     save_api_key_credential_file,
 )
-from poly.utils.env_profile import EnvVarConflict, ProfileTarget, write_env_var
+from poly.utils.env_profile import (
+    EnvVarConflict,
+    ProfileTarget,
+    detect_profile,
+    read_env_var,
+    write_env_var,
+)
 
 DEFAULT_KEY_NAME = "cli-generated-key"
 ACCOUNT_POLL_ATTEMPTS = 20
@@ -161,23 +165,46 @@ def _resolve_account_id(
     )
 
 
+def _key_works_for_account(
+    api: AgentStudioInterface, region: str, api_key: str, account_id: str
+) -> bool:
+    """Whether `api_key` is accepted on `region` and can reach `account_id`."""
+    try:
+        return account_id in api.get_accounts_with_key(region=region, api_key=api_key)
+    except Exception:
+        return False
+
+
 def _get_or_create_key(
-    api: AgentStudioInterface, region: str, jwt_token: str, account_id: str, key_name: str
+    api: AgentStudioInterface,
+    region: str,
+    jwt_token: str,
+    account_id: str,
+    key_name: str,
+    *,
+    force: bool,
 ) -> tuple[str, bool]:
-    """Reuse an active, unexpired key named `key_name`, or create one.
+    """Reuse the POLY_API_KEY already in the profile if it works, or create a key.
+
+    The platform only shows a key's secret when it is created, so the profile is the one place
+    an existing key can be read back from.
 
     Returns:
         tuple[str, bool]: The key, and whether it was reused rather than created.
 
     Raises:
+        EnvVarConflict: The profile holds a key that doesn't work for this account and `force`
+            is false. Raised before creating anything, so a re-run doesn't leave another
+            unused key behind.
         ValueError: The create call succeeded but returned no key.
     """
-    keys = api.list_account_api_keys_internal(
-        region=region, jwt_token=jwt_token, account_id=account_id, source=APIKEY_SOURCE
-    )
-    existing_key = select_reusable_api_key(keys, key_name, datetime.now(timezone.utc))
+    from poly.output.console import mask_secret
+
+    existing_key = None if force else read_env_var("POLY_API_KEY")
     if existing_key is not None:
-        return existing_key, True
+        if _key_works_for_account(api, region, existing_key, account_id):
+            return existing_key, True
+        raise EnvVarConflict(mask_secret(existing_key), "a new key", detect_profile().path)
 
     response = api.create_account_api_key_internal(
         region=region,
@@ -242,10 +269,8 @@ def _print_summary(
     plain("")
     plain("Done.")
     plain(f"  Account:   {account_id}")
-    plain(
-        f"  API key:   {mask_api_key(api_key)}   "
-        f"({key_name}, {'reused' if key_reused else 'created'})"
-    )
+    origin = "reused from your profile" if key_reused else f"{key_name}, created"
+    plain(f"  API key:   {mask_api_key(api_key)}   ({origin})")
     plain(f"  Saved to:  {credentials_summary}")
     plain(f"  Profile:   {target.path}  ({masked_line})")
     plain("")
@@ -274,7 +299,7 @@ def _print_json(
         {
             "success": True,
             "account_id": account_id,
-            "key_name": key_name,
+            "key_name": None if key_reused else key_name,
             "key_reused": key_reused,
             "api_key_masked": mask_secret(api_key),
             "credentials_file": credentials_summary,
@@ -301,7 +326,8 @@ class ApiKeyCommand(BaseCommand):
             parents=[parents.verbose, parents.debug, parents.json],
             help="Create an account API key and export POLY_API_KEY for the PolyAI APIs.",
             description=(
-                "Sign in, create (or reuse) an account-scoped API key, and export it as"
+                "Sign in, create an account-scoped API key (or reuse the one in your profile),"
+                " and export it as"
                 " POLY_API_KEY for use with the PolyAI APIs and Dialog RSN. Never prompts when"
                 " run by an AI coding assistant (no terminal, or --json); at a terminal it"
                 " asks which account to use if you have more than one. The sign-in is kept,"
@@ -351,7 +377,10 @@ class ApiKeyCommand(BaseCommand):
             "--force",
             "-f",
             action="store_true",
-            help="Overwrite an existing POLY_API_KEY in your profile if it holds a different value.",
+            help=(
+                "Create a new key and overwrite any POLY_API_KEY already in your profile,"
+                " even one that still works."
+            ),
         )
         apikey_parser.add_argument(
             "--no-session-cache",
@@ -506,13 +535,13 @@ class ApiKeyCommand(BaseCommand):
 
             step = "key"
             api_key, key_reused = _get_or_create_key(
-                api, region, jwt_token, resolved_account_id, key_name
+                api, region, jwt_token, resolved_account_id, key_name, force=force
             )
             if key_reused:
                 _say(
                     output_json,
                     success,
-                    f"Reusing existing '{key_name}' key: {mask_api_key(api_key)}",
+                    f"Reusing the key already in your profile: {mask_api_key(api_key)}",
                 )
             else:
                 _say(output_json, success, f"Created API key '{key_name}': {mask_api_key(api_key)}")
