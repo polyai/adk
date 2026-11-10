@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.78.0 (2026-11-10)
+
+### Features
+
+- **metrics**: Poly metrics available, query and score
+  ([#348](https://github.com/polyai/adk/pull/348),
+  [`335af92`](https://github.com/polyai/adk/commit/335af922062b5870fe5a631a070f374f5665a70f))
+
+
 ## v0.77.5 (2026-11-10)
 
 ### Bug Fixes
