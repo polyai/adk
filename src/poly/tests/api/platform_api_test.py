@@ -58,31 +58,6 @@ class JwtAuthedAccountAndKeyCalls(unittest.TestCase):
         self.assertEqual(kwargs["headers"]["X-Poly-Source"], "apikey")
 
     @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
-    def test_list_account_api_keys_internal_hits_expected_url(self, mock_make_request):
-        """list_account_api_keys_internal() GETs the account's api-keys endpoint."""
-        mock_make_request.return_value = [{"key": "sk-1"}]
-
-        result = PlatformAPIHandler.list_account_api_keys_internal("studio", "jwt-token", "acc-1")
-
-        args, kwargs = mock_make_request.call_args
-        self.assertEqual(args[0], "studio")
-        self.assertEqual(args[1], "/jupiter/v2/accounts/acc-1/api-keys")
-        self.assertEqual(args[2], "GET")
-        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer jwt-token")
-        self.assertTrue(kwargs["use_jupiter_api"])
-        self.assertEqual(result, [{"key": "sk-1"}])
-
-    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
-    def test_list_account_api_keys_internal_sends_given_source(self, mock_make_request):
-        """list_account_api_keys_internal() sends the caller-supplied X-Poly-Source."""
-        PlatformAPIHandler.list_account_api_keys_internal(
-            "studio", "jwt-token", "acc-1", source="apikey"
-        )
-
-        kwargs = mock_make_request.call_args.kwargs
-        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "apikey")
-
-    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_create_account_api_key_internal_posts_name(self, mock_make_request):
         """create_account_api_key_internal() POSTs {"name": ...} to the api-keys endpoint."""
         mock_make_request.return_value = {"key": "sk-new", "name": ""}
@@ -187,7 +162,7 @@ class MakeRequest(unittest.TestCase):
     """Tests for PlatformAPIHandler.make_request HTTP behaviour."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_default_headers_include_api_key_and_adk_metadata(self, mock_request, _mock_key):
         """Default headers carry the API key, an adk correlation id, and the source."""
         mock_request.return_value = make_mock_response(200, json_body={"ok": True})
@@ -201,7 +176,7 @@ class MakeRequest(unittest.TestCase):
         self.assertEqual(headers["Content-Type"], "application/json")
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_post_body_is_json_encoded(self, mock_request, _mock_key):
         """POST data is serialised to a JSON string in the request body."""
         mock_request.return_value = make_mock_response(200, json_body={})
@@ -212,7 +187,7 @@ class MakeRequest(unittest.TestCase):
         self.assertEqual(json.loads(sent), {"name": "abc"})
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_204_returns_empty_dict(self, mock_request, _mock_key):
         """A 204 No Content response returns an empty dict without parsing JSON."""
         mock_request.return_value = make_mock_response(204)
@@ -220,7 +195,7 @@ class MakeRequest(unittest.TestCase):
         self.assertEqual(PlatformAPIHandler.make_request("studio", "/x"), {})
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_client_error_raises_http_error(self, mock_request, _mock_key):
         """A 4xx response propagates as requests.HTTPError."""
         mock_request.return_value = make_mock_response(404, json_body={"error": "nope"})
@@ -229,7 +204,7 @@ class MakeRequest(unittest.TestCase):
             PlatformAPIHandler.make_request("studio", "/x")
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_server_error_raises_http_error(self, mock_request, _mock_key):
         """A 5xx response propagates as requests.HTTPError."""
         mock_request.return_value = make_mock_response(500, json_body={"error": "boom"})
@@ -238,7 +213,7 @@ class MakeRequest(unittest.TestCase):
             PlatformAPIHandler.make_request("studio", "/x")
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_undecodable_json_raises_value_error(self, mock_request, _mock_key):
         """A 200 response with an unparseable body raises ValueError."""
         mock_request.return_value = make_mock_response(200, json_body=None, content=b"<html>")
@@ -356,7 +331,7 @@ class UpdateProject(unittest.TestCase):
     """Tests for PlatformAPIHandler.update_project."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_patches_the_project_with_the_given_fields(self, mock_request, _mock_key):
         """The patch is sent as the JSON body of a PATCH to the project's URL."""
         mock_request.return_value = make_mock_response(200, json_body={"id": "proj1"})
@@ -373,7 +348,7 @@ class UpdateProject(unittest.TestCase):
         self.assertEqual(json.loads(sent["data"]), {"config": {"deployment_mode": "simple"}})
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_returns_the_updated_project(self, mock_request, _mock_key):
         """The platform's response body is returned to the caller."""
         updated = {"id": "proj1", "config": {"deployment_mode": "simple"}}
@@ -386,7 +361,7 @@ class UpdateProject(unittest.TestCase):
         self.assertEqual(result, updated)
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_rejected_update_raises_http_error(self, mock_request, _mock_key):
         """A refused update (e.g. no permission) propagates as requests.HTTPError."""
         mock_request.return_value = make_mock_response(403, json_body={"error": "forbidden"})
@@ -401,7 +376,7 @@ class GetConversationAudio(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_conversation_audio."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.get")
+    @patch("requests.get")
     def test_returns_raw_audio_bytes(self, mock_get, _mock_key):
         """The raw response content is returned as bytes."""
         mock_get.return_value = make_mock_response(200, content=b"RIFF-audio-data")
@@ -411,7 +386,7 @@ class GetConversationAudio(unittest.TestCase):
         self.assertEqual(audio, b"RIFF-audio-data")
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.get")
+    @patch("requests.get")
     def test_error_status_raises_http_error(self, mock_get, _mock_key):
         """A failing audio request propagates as requests.HTTPError."""
         mock_get.return_value = make_mock_response(404, content=b"not found")
@@ -424,7 +399,7 @@ class ListAudioCache(unittest.TestCase):
     """Tests for PlatformAPIHandler.list_audio_cache."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_sends_limit_offset_and_sort_params(self, mock_request, _mock_key):
         """limit/offset/sort are forwarded as query params when provided."""
         mock_request.return_value = make_mock_response(
@@ -439,7 +414,7 @@ class ListAudioCache(unittest.TestCase):
         self.assertEqual(params, {"limit": 20, "offset": 5, "sort": "hit_count:desc"})
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_omits_sort_when_not_provided(self, mock_request, _mock_key):
         """sort is left out of the query params entirely when None."""
         mock_request.return_value = make_mock_response(
@@ -456,7 +431,7 @@ class GetAudioCacheFile(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_audio_cache_file."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.get")
+    @patch("requests.get")
     def test_returns_raw_audio_bytes(self, mock_get, _mock_key):
         """The raw response content is returned as bytes."""
         mock_get.return_value = make_mock_response(200, content=b"RIFF-audio-data")
@@ -466,7 +441,7 @@ class GetAudioCacheFile(unittest.TestCase):
         self.assertEqual(audio, b"RIFF-audio-data")
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.get")
+    @patch("requests.get")
     def test_error_status_raises_http_error(self, mock_get, _mock_key):
         """A failing file request propagates as requests.HTTPError."""
         mock_get.return_value = make_mock_response(404, content=b"not found")
@@ -479,7 +454,7 @@ class UpdateAudioCacheFile(unittest.TestCase):
     """Tests for PlatformAPIHandler.update_audio_cache_file."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_sends_raw_bytes_with_wav_content_type(self, mock_request, _mock_key):
         """The raw audio bytes are sent as the body with a WAV content type."""
         mock_request.return_value = make_mock_response(204)
@@ -495,7 +470,7 @@ class UpdateAudioCacheFile(unittest.TestCase):
         self.assertEqual(call.kwargs["headers"]["X-Filename"], "clip.wav")
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_omits_filename_header_when_not_provided(self, mock_request, _mock_key):
         """X-Filename is left out of headers entirely when no filename is given."""
         mock_request.return_value = make_mock_response(204)
@@ -505,7 +480,7 @@ class UpdateAudioCacheFile(unittest.TestCase):
         self.assertNotIn("X-Filename", mock_request.call_args.kwargs["headers"])
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_error_status_raises_http_error(self, mock_request, _mock_key):
         """A failing update propagates as requests.HTTPError."""
         mock_request.return_value = make_mock_response(400, json_body={"error": "too big"})
@@ -518,7 +493,7 @@ class UpdateAudioCacheDetails(unittest.TestCase):
     """Tests for PlatformAPIHandler.update_audio_cache_details."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_sends_multipart_file_and_settings(self, mock_request, _mock_key):
         """The audio bytes and JSON-encoded settings are sent as multipart form data."""
         mock_request.return_value = make_mock_response(204)
@@ -540,7 +515,7 @@ class UpdateAudioCacheDetails(unittest.TestCase):
         self.assertEqual(sent_settings, {"text": "hello", "config": {"stability": 0.5}})
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_error_status_raises_http_error(self, mock_request, _mock_key):
         """A failing update propagates as requests.HTTPError."""
         mock_request.return_value = make_mock_response(400, json_body={"error": "bad settings"})
@@ -555,7 +530,7 @@ class DeleteAudioCacheEntry(unittest.TestCase):
     """Tests for PlatformAPIHandler.delete_audio_cache_entry."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_sends_delete_to_entry_endpoint(self, mock_request, _mock_key):
         """DELETE is sent to the entry-specific endpoint."""
         mock_request.return_value = make_mock_response(200, json_body={"success": True})
@@ -571,7 +546,7 @@ class BulkDeleteAudioCache(unittest.TestCase):
     """Tests for PlatformAPIHandler.bulk_delete_audio_cache."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_sends_ids_in_body(self, mock_request, _mock_key):
         """The list of IDs is JSON-encoded into the request body."""
         mock_request.return_value = make_mock_response(
@@ -589,7 +564,7 @@ class SynthesizeAudioCache(unittest.TestCase):
     """Tests for PlatformAPIHandler.synthesize_audio_cache."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_returns_raw_audio_bytes(self, mock_request, _mock_key):
         """The raw response content is returned as bytes."""
         mock_request.return_value = make_mock_response(200, content=b"RIFF-preview-audio")
@@ -601,7 +576,7 @@ class SynthesizeAudioCache(unittest.TestCase):
         self.assertEqual(audio, b"RIFF-preview-audio")
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_includes_language_when_provided(self, mock_request, _mock_key):
         """language is included in the JSON body only when provided."""
         mock_request.return_value = make_mock_response(200, content=b"audio")
@@ -614,7 +589,7 @@ class SynthesizeAudioCache(unittest.TestCase):
         self.assertEqual(sent["language"], "en-US")
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_error_status_raises_http_error(self, mock_request, _mock_key):
         """A failing synthesis request propagates as requests.HTTPError."""
         mock_request.return_value = make_mock_response(422, json_body={"error": "bad text"})
@@ -627,7 +602,7 @@ class GetCustomMetrics(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_custom_metrics."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_returns_list_directly(self, mock_request, _mock_key):
         """When the API returns a bare list, it is returned as-is."""
         metrics = [{"name": "SCORE", "type": "int"}]
@@ -638,7 +613,7 @@ class GetCustomMetrics(unittest.TestCase):
         self.assertEqual(result, metrics)
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_extracts_from_metrics_key(self, mock_request, _mock_key):
         """When the API wraps the list in a 'metrics' key, it is unwrapped."""
         metrics = [{"name": "SCORE", "type": "int"}]
@@ -653,7 +628,7 @@ class CreateCustomMetric(unittest.TestCase):
     """Tests for PlatformAPIHandler.create_custom_metric."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_posts_data_to_correct_endpoint(self, mock_request, _mock_key):
         """create_custom_metric sends a POST with the metric payload."""
         mock_request.return_value = make_mock_response(200, json_body={"name": "SCORE"})
@@ -670,7 +645,7 @@ class TriggerTestRun(unittest.TestCase):
     """Tests for PlatformAPIHandler.trigger_test_run."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_sends_the_select_shape(self, mock_request, _mock_key):
         """The body uses select, not the legacy testCaseIds that drops other fields."""
         mock_request.return_value = make_mock_response(200, json_body={"id": "run-1"})
@@ -686,7 +661,7 @@ class TriggerTestRun(unittest.TestCase):
         )
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_includes_the_run_name_when_given(self, mock_request, _mock_key):
         """A name is sent alongside the selection."""
         mock_request.return_value = make_mock_response(200, json_body={"id": "run-1"})
@@ -703,7 +678,7 @@ class UpdateCustomMetric(unittest.TestCase):
     """Tests for PlatformAPIHandler.update_custom_metric."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_patches_correct_metric(self, mock_request, _mock_key):
         """update_custom_metric sends a PATCH to the metric-specific URL."""
         mock_request.return_value = make_mock_response(200, json_body={"name": "SCORE"})
@@ -719,7 +694,7 @@ class ExportCustomMetrics(unittest.TestCase):
     """Tests for PlatformAPIHandler.export_custom_metrics."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_requests_yaml_format(self, mock_request, _mock_key):
         """export_custom_metrics hits the export endpoint with a GET."""
         yaml_body = b"SCORE:\n  type: int\n"
@@ -736,7 +711,7 @@ class ImportCustomMetrics(unittest.TestCase):
     """Tests for PlatformAPIHandler.import_custom_metrics."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_sends_multipart_upload(self, mock_request, _mock_key):
         """import_custom_metrics POSTs a multipart file upload."""
         mock_request.return_value = make_mock_response(
@@ -771,7 +746,7 @@ class ListFunctions(unittest.TestCase):
     """Tests for PlatformAPIHandler.list_functions."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_returns_the_raw_function_list(self, mock_request, _mock_key):
         """The endpoint returns a bare array, not a {"functions": [...]} wrapper."""
         payload = [{"id": "fn-1", "name": "my_func"}]
@@ -789,7 +764,7 @@ class ExecuteFunction(unittest.TestCase):
     """Tests for PlatformAPIHandler.execute_function."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_wraps_args_in_body_and_returns_result(self, mock_request, _mock_key):
         """Arguments are wrapped in an "args" object and the result is returned."""
         payload = {"body": {"ok": True}, "logs": ["line"], "runtime": 12}
@@ -808,7 +783,7 @@ class ValidateFunctions(unittest.TestCase):
     """Tests for the functions validate endpoint."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_validate_returns_valid_and_issues(self, mock_request, _mock_key):
         """Validate returns the raw {"valid": ..., "issues": [...]} payload."""
         payload = {"valid": False, "issues": [{"type": "syntax_error", "function_id": "fn-1"}]}
@@ -824,7 +799,7 @@ def _make_request_headers() -> dict:
     """Call make_request with the network mocked and return the headers it sent."""
     with (
         patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
-        patch("poly.handlers.platform_api.requests.request") as mock_request,
+        patch("requests.request") as mock_request,
     ):
         mock_request.return_value = make_mock_response(200, json_body={})
         PlatformAPIHandler.make_request("studio", "/adk/v1/accounts")
@@ -835,7 +810,7 @@ def _get_conversation_audio_headers() -> dict:
     """Call get_conversation_audio with the network mocked and return the headers it sent."""
     with (
         patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
-        patch("poly.handlers.platform_api.requests.get") as mock_get,
+        patch("requests.get") as mock_get,
     ):
         mock_get.return_value = make_mock_response(200, content=b"audio")
         PlatformAPIHandler.get_conversation_audio("studio", "agent-1", "conv-1")
@@ -846,7 +821,7 @@ def _get_audio_cache_file_headers() -> dict:
     """Call get_audio_cache_file with the network mocked and return the headers it sent."""
     with (
         patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
-        patch("poly.handlers.platform_api.requests.get") as mock_get,
+        patch("requests.get") as mock_get,
     ):
         mock_get.return_value = make_mock_response(200, content=b"audio")
         PlatformAPIHandler.get_audio_cache_file("studio", "agent-1", "entry-1")
@@ -857,7 +832,7 @@ def _update_audio_cache_file_headers() -> dict:
     """Call update_audio_cache_file with the network mocked and return the headers it sent."""
     with (
         patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
-        patch("poly.handlers.platform_api.requests.request") as mock_request,
+        patch("requests.request") as mock_request,
     ):
         mock_request.return_value = make_mock_response(204)
         PlatformAPIHandler.update_audio_cache_file("studio", "agent-1", "entry-1", b"audio")
@@ -868,7 +843,7 @@ def _update_audio_cache_details_headers() -> dict:
     """Call update_audio_cache_details with the network mocked and return the headers it sent."""
     with (
         patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
-        patch("poly.handlers.platform_api.requests.request") as mock_request,
+        patch("requests.request") as mock_request,
     ):
         mock_request.return_value = make_mock_response(204)
         PlatformAPIHandler.update_audio_cache_details(
@@ -881,7 +856,7 @@ def _synthesize_audio_cache_headers() -> dict:
     """Call synthesize_audio_cache with the network mocked and return the headers it sent."""
     with (
         patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
-        patch("poly.handlers.platform_api.requests.request") as mock_request,
+        patch("requests.request") as mock_request,
     ):
         mock_request.return_value = make_mock_response(200, content=b"audio")
         PlatformAPIHandler.synthesize_audio_cache("studio", "agent-1", "entry-1", "hi", {})

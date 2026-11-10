@@ -8530,6 +8530,311 @@ class TestProjectFixtureIntegrityTest(unittest.TestCase):
         self.assertEqual(differing, [])
 
 
+class ProjectQueryMetricTest(unittest.TestCase):
+    """Tests for AgentStudioProject.query_metric: validation and request building."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api = patch("poly.project.AgentStudioInterface.query_metric").start()
+        self.mock_api.return_value = {"columns": [], "rows": []}
+        self.addCleanup(patch.stopall)
+
+    def _body(self) -> dict:
+        return self.mock_api.call_args.kwargs["body"]
+
+    def test_scopes_the_request_to_the_project(self):
+        """The project id and region come from the loaded project."""
+        self.project.query_metric("poly_score")
+
+        self.assertEqual(self.mock_api.call_args.args[0], "us-1")
+        self.assertEqual(
+            self._body(),
+            {
+                "project_id": "test_project",
+                "metric": "poly_score",
+                "aggs": ["avg", "conversation_count"],
+                "limit": 20,
+                "offset": 0,
+            },
+        )
+
+    def test_date_bounds_are_normalised(self):
+        """A bare --to date rolls to the next midnight; Z becomes an offset."""
+        self.project.query_metric("poly_score", from_dt="2026-09-01T09:30:00Z", to_dt="2026-09-30")
+
+        self.assertEqual(self._body()["from_datetime"], "2026-09-01T09:30:00+00:00")
+        self.assertEqual(self._body()["to_datetime"], "2026-10-01T00:00:00")
+
+    def test_having_values_become_numbers_and_sort_order_is_lowercased(self):
+        """Thresholds are sent as floats and the sort order normalised."""
+        self.project.query_metric(
+            "CSAT",
+            ["avg"],
+            having=[{"field": "avg", "op": "GTE", "value": "4"}],
+            sort={"field": "avg", "order": "DESC"},
+        )
+
+        self.assertEqual(self._body()["having"], [{"field": "avg", "op": "gte", "value": 4.0}])
+        self.assertEqual(self._body()["sort"], {"field": "avg", "order": "desc"})
+
+    def test_rejects_what_the_data_api_would_reject(self):
+        """Every enum and bound is checked locally with a clear message."""
+        cases = [
+            ({"metric": ""}, "metric name"),
+            ({"metric": "x", "aggs": ["median"]}, "Aggregation"),
+            ({"metric": "x", "interval": "yearly"}, "Interval"),
+            ({"metric": "x", "group_by": ["caller"]}, "Group-by"),
+            ({"metric": "x", "channel": ["FAX"]}, "Channel"),
+            ({"metric": "x", "client_env": ["prod"]}, "Environment"),
+            ({"metric": "x", "limit": 0}, "Limit"),
+            ({"metric": "x", "limit": 101}, "Limit"),
+            ({"metric": "x", "offset": 1001}, "Offset"),
+            ({"metric": "x", "from_dt": "yesterday"}, "YYYY-MM-DD"),
+            ({"metric": "x", "filters": [{"metric": "a", "op": "like", "value": "b"}]}, "like"),
+            ({"metric": "x", "filters": [{"metric": "a", "op": "in", "value": "b"}]}, "list"),
+            ({"metric": "x", "having": [{"field": "median", "op": "gte", "value": 1}]}, "Having"),
+            ({"metric": "x", "having": [{"field": "avg", "op": "in", "value": 1}]}, "Having"),
+            ({"metric": "x", "having": [{"field": "avg", "op": "gte", "value": "high"}]}, "number"),
+            ({"metric": "x", "sort": {"field": "avg", "order": "sideways"}}, "Sort"),
+        ]
+        for kwargs, fragment in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.query_metric(**kwargs)
+                self.assertIn(fragment, str(ctx.exception))
+        self.mock_api.assert_not_called()
+
+
+class ProjectGetPolyScoreTest(unittest.TestCase):
+    """Tests for AgentStudioProject.get_poly_score."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api = patch("poly.project.AgentStudioInterface.query_metric").start()
+        self.addCleanup(patch.stopall)
+
+    def test_summary_is_fetched_separately_from_the_table(self):
+        """The overall figure comes from an unbucketed query over the same window."""
+        self.mock_api.side_effect = [
+            {"columns": ["avg", "conversation_count"], "rows": [[4.456, 40]]},
+            {"columns": ["bucket", "avg", "conversation_count"], "rows": [["b", 4.0, 10]]},
+        ]
+
+        result = self.project.get_poly_score(from_dt="2026-09-01", to_dt="2026-09-30", limit=5)
+
+        overall, table = (c.kwargs["body"] for c in self.mock_api.call_args_list)
+        self.assertNotIn("interval", overall)
+        self.assertEqual(overall["limit"], 1)
+        self.assertEqual(table["interval"], "daily")
+        self.assertEqual(table["limit"], 5)
+        self.assertEqual(overall["from_datetime"], table["from_datetime"])
+        self.assertEqual(
+            result["summary"],
+            {
+                "version": "v2",
+                "scale": "1-5",
+                "average": 4.46,
+                "conversations": 40,
+                "from_datetime": "2026-09-01T00:00:00",
+                "to_datetime": "2026-10-01T00:00:00",
+            },
+        )
+        self.assertEqual(result["rows"], [["b", 4.0, 10]])
+        self.assertEqual({overall["metric"], table["metric"]}, {"poly_score_v2"})
+
+    def test_v1_reads_the_earlier_score(self):
+        """``version="v1"`` queries the 0-10 score and says so in the summary."""
+        self.mock_api.return_value = {"columns": [], "rows": []}
+
+        result = self.project.get_poly_score(version="v1")
+
+        self.assertEqual(
+            {c.kwargs["body"]["metric"] for c in self.mock_api.call_args_list}, {"poly_score"}
+        )
+        self.assertEqual(result["summary"]["version"], "v1")
+        self.assertEqual(result["summary"]["scale"], "0-10")
+
+    def test_unknown_version_is_refused(self):
+        """Only v1 and v2 exist."""
+        with self.assertRaisesRegex(ValueError, "v2, v1"):
+            self.project.get_poly_score(version="v3")
+
+        self.mock_api.assert_not_called()
+
+    def test_bare_dates_are_read_in_the_timezone_by_both_queries(self):
+        """The summary query has no interval, so the offset has to travel with the dates."""
+        self.mock_api.return_value = {"columns": [], "rows": []}
+
+        self.project.get_poly_score(
+            from_dt="2026-11-01", to_dt="2026-11-03", timezone="America/New_York"
+        )
+
+        overall, table = (c.kwargs["body"] for c in self.mock_api.call_args_list)
+        self.assertEqual(overall["from_datetime"], "2026-11-01T00:00:00-04:00")
+        self.assertEqual(overall["to_datetime"], "2026-11-04T00:00:00-05:00")
+        self.assertEqual(
+            (table["from_datetime"], table["to_datetime"]),
+            (overall["from_datetime"], overall["to_datetime"]),
+        )
+
+    def test_defaults_to_the_last_seven_days(self):
+        """With no bounds the window is the last seven days, applied to both queries."""
+        self.mock_api.return_value = {"columns": [], "rows": []}
+
+        result = self.project.get_poly_score()
+
+        overall = self.mock_api.call_args_list[0].kwargs["body"]
+        start = datetime.fromisoformat(overall["from_datetime"])
+        end = datetime.fromisoformat(overall["to_datetime"])
+        self.assertEqual((end - start).days, 7)
+        self.assertEqual(result["summary"]["average"], None)
+        self.assertEqual(result["summary"]["conversations"], 0)
+
+
+class ProjectMetricBucketWindowTest(unittest.TestCase):
+    """Weekly and monthly windows are widened to whole buckets.
+
+    The Data API keeps a weekly or monthly bucket only when the bucket starts
+    inside the window, so a window from Thursday 1 October would lose the week
+    of Monday 28 September while an unbucketed total still counted it.
+    """
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api = patch("poly.project.AgentStudioInterface.query_metric").start()
+        self.mock_api.return_value = {"columns": [], "rows": []}
+        self.addCleanup(patch.stopall)
+
+    def _body(self, call: int = -1) -> dict:
+        return self.mock_api.call_args_list[call].kwargs["body"]
+
+    def test_weekly_start_moves_back_to_monday(self):
+        """A mid-week start is sent as that week's Monday and reported in ``window``."""
+        result = self.project.query_metric("poly_score", from_dt="2026-10-01", interval="weekly")
+
+        self.assertEqual(self._body()["from_datetime"], "2026-09-28T00:00:00")
+        self.assertNotIn("to_datetime", self._body())
+        self.assertEqual(
+            result["window"], {"from_datetime": "2026-09-28T00:00:00", "to_datetime": None}
+        )
+
+    def test_past_end_moves_forward_to_the_next_bucket(self):
+        """An end inside a past bucket is sent as the start of the next bucket."""
+        self.project.query_metric(
+            "poly_score", from_dt="2026-09-28", to_dt="2026-10-06", interval="weekly"
+        )
+        self.assertEqual(self._body()["to_datetime"], "2026-10-12T00:00:00")
+
+        result = self.project.query_metric(
+            "poly_score", from_dt="2026-09-15", to_dt="2026-10-06", interval="monthly"
+        )
+        self.assertEqual(
+            result["window"],
+            {"from_datetime": "2026-09-01T00:00:00", "to_datetime": "2026-11-01T00:00:00"},
+        )
+
+    def test_end_in_the_future_is_left_alone(self):
+        """Nothing lies beyond an end that has not happened, so it is sent as given."""
+        result = self.project.query_metric(
+            "poly_score", from_dt="2026-09-28", to_dt="2999-01-02T10:00:00", interval="weekly"
+        )
+
+        self.assertEqual(self._body()["to_datetime"], "2999-01-02T10:00:00")
+        self.assertNotIn("window", result)
+
+    def test_weekly_and_monthly_bounds_stay_utc_with_a_timezone(self):
+        """Weekly and monthly buckets are UTC, so a timezone must not move their bounds.
+
+        Read in the zone, 19 Oct 00:00 New York is 04:00 UTC, past the Monday
+        boundary, and 5 Oct 00:00 Tokyo is Sunday 4 Oct in UTC: either adds a
+        whole extra week.
+        """
+        for timezone in (None, "America/New_York", "Asia/Tokyo"):
+            with self.subTest(timezone=timezone):
+                result = self.project.query_metric(
+                    "poly_score",
+                    from_dt="2026-10-05",
+                    to_dt="2026-10-18",
+                    interval="weekly",
+                    timezone=timezone,
+                )
+                self.assertEqual(self._body()["from_datetime"], "2026-10-05T00:00:00")
+                self.assertEqual(self._body()["to_datetime"], "2026-10-19T00:00:00")
+                self.assertNotIn("window", result)
+
+        result = self.project.query_metric(
+            "poly_score",
+            from_dt="2026-09-01",
+            to_dt="2026-09-30",
+            interval="monthly",
+            timezone="Asia/Tokyo",
+        )
+        self.assertEqual(self._body()["from_datetime"], "2026-09-01T00:00:00")
+        self.assertEqual(self._body()["to_datetime"], "2026-10-01T00:00:00")
+        self.assertNotIn("window", result)
+
+    def test_weekly_score_with_a_timezone_keeps_both_queries_in_utc(self):
+        """The unbucketed headline query uses the same UTC window as the weekly table."""
+        self.project.get_poly_score(
+            from_dt="2026-10-05", to_dt="2026-10-18", interval="weekly", timezone="Asia/Tokyo"
+        )
+
+        overall, table = (c.kwargs["body"] for c in self.mock_api.call_args_list[-2:])
+        for body in (overall, table):
+            self.assertEqual(body["from_datetime"], "2026-10-05T00:00:00")
+            self.assertEqual(body["to_datetime"], "2026-10-19T00:00:00")
+
+    def test_aligned_and_finer_windows_are_untouched(self):
+        """Windows on bucket boundaries, and hourly, daily or unbucketed ones, stay as given."""
+        for interval, start, end in (
+            ("weekly", "2026-09-28", "2026-10-04"),
+            ("monthly", "2026-09-01", "2026-09-30"),
+            ("daily", "2026-10-01", "2026-10-06"),
+            ("hourly", "2026-10-01T09:30:00", None),
+            (None, "2026-10-01", None),
+        ):
+            with self.subTest(interval=interval):
+                result = self.project.query_metric(
+                    "poly_score", from_dt=start, to_dt=end, interval=interval
+                )
+                self.assertTrue(self._body()["from_datetime"].startswith(start))
+                self.assertNotIn("window", result)
+
+    def test_score_summary_and_table_share_the_widened_window(self):
+        """The unbucketed summary query uses the same widened window as the weekly table."""
+        self.mock_api.side_effect = [
+            {"columns": ["avg", "conversation_count"], "rows": [[2.12, 57]]},
+            {
+                "columns": ["bucket", "avg", "conversation_count"],
+                "rows": [["2026-09-28T00:00:00+00:00", 1.4, 45], ["2026-10-05", 4.83, 12]],
+            },
+        ]
+
+        result = self.project.get_poly_score(from_dt="2026-10-01", interval="weekly")
+
+        overall, table = self._body(0), self._body(1)
+        self.assertNotIn("interval", overall)
+        self.assertEqual(overall["from_datetime"], "2026-09-28T00:00:00")
+        self.assertEqual(table["from_datetime"], "2026-09-28T00:00:00")
+        self.assertEqual(result["summary"]["from_datetime"], "2026-09-28T00:00:00")
+        self.assertEqual(result["summary"]["conversations"], 57)
+        self.assertEqual(
+            result["window"], {"from_datetime": "2026-09-28T00:00:00", "to_datetime": None}
+        )
+
+    def test_default_score_window_keeps_ending_now(self):
+        """With no bounds a weekly score starts on a Monday and still ends now."""
+        self.project.get_poly_score(interval="weekly")
+
+        overall, table = self._body(0), self._body(1)
+        start = datetime.fromisoformat(overall["from_datetime"])
+        self.assertEqual((start.weekday(), start.hour, start.minute), (0, 0, 0))
+        self.assertEqual(overall["from_datetime"], table["from_datetime"])
+        self.assertEqual(overall["to_datetime"], table["to_datetime"])
+        end = datetime.fromisoformat(overall["to_datetime"])
+        self.assertLess(abs((datetime.now(end.tzinfo) - end).total_seconds()), 60)
+
+
 class ProjectCreateCustomMetricTest(unittest.TestCase):
     """Tests for AgentStudioProject.create_custom_metric validation and orchestration."""
 

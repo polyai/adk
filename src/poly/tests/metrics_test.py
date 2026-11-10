@@ -3,10 +3,64 @@
 Copyright PolyAI Limited
 """
 
+import json
+import os
 import unittest
+from argparse import Namespace
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from poly.cli_commands.metrics import VALID_METRIC_TYPES, MetricsCommand, _parse_bool_flag
+from poly.cli_commands.shared import (
+    describe_data_api_error,
+    filter_flags_to_filters,
+    having_flags_to_having,
+    sort_flag_to_sort,
+)
+from poly.output.console import console
+from poly.project import AgentStudioProject
+
+TEST_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_projects", "test_project")
+with open(os.path.join(TEST_DIR, "test_project.json"), encoding="utf-8") as _f:
+    PROJECT_DATA = json.load(_f)
+
+
+def _query_args(**overrides) -> Namespace:
+    """A Namespace with every query/score flag at its parser default."""
+    base = {
+        "agg": None,
+        "from_dt": None,
+        "to_dt": None,
+        "interval": None,
+        "timezone": None,
+        "by": None,
+        "channel": None,
+        "env": None,
+        "deployment": None,
+        "variant": None,
+        "filter": None,
+        "any": False,
+        "having": None,
+        "sort": None,
+        "limit": 20,
+        "offset": 0,
+        "v1": False,
+    }
+    base.update(overrides)
+    return Namespace(**base)
+
+
+def _http_error(status: int, payload=None, text: str = "") -> requests.HTTPError:
+    """An HTTPError whose response has the given status and JSON body."""
+    response = MagicMock()
+    response.status_code = status
+    response.text = text
+    if payload is None:
+        response.json.side_effect = ValueError("no body")
+    else:
+        response.json.return_value = payload
+    return requests.HTTPError(response=response)
 
 
 class ParseBoolFlagTest(unittest.TestCase):
@@ -37,7 +91,7 @@ class ParseBoolFlagTest(unittest.TestCase):
 class MetricsListTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_list."""
 
-    @patch("poly.cli_commands.metrics.print_metrics")
+    @patch("poly.output.console.print_metrics")
     @patch("poly.cli_commands.metrics.load_project")
     def test_list_calls_print_metrics(self, mock_load, mock_print):
         """metrics_list fetches metrics and prints them in table mode."""
@@ -96,7 +150,7 @@ class MetricsExportTest(unittest.TestCase):
 
             mock_ry.dump.assert_called_once_with({"SCORE": {"type": "int"}}, sys.stdout)
 
-    @patch("poly.cli_commands.metrics.success")
+    @patch("poly.output.console.success")
     @patch("poly.cli_commands.metrics.load_project")
     def test_export_to_file(self, mock_load, mock_success):
         """With a file path, YAML is written to file and success message shown."""
@@ -135,7 +189,7 @@ class MetricsExportTest(unittest.TestCase):
 class MetricsAddTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_add."""
 
-    @patch("poly.cli_commands.metrics.success")
+    @patch("poly.output.console.success")
     @patch("poly.cli_commands.metrics.load_project")
     def test_add_with_all_args(self, mock_load, mock_success):
         """Non-interactive add passes all fields to project.create_custom_metric."""
@@ -239,7 +293,7 @@ class MetricsAddTest(unittest.TestCase):
         printed = mock_json.call_args[0][0]
         self.assertIn("--type", printed["error"])
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_add_expected_values_rejected_for_non_string(self, mock_load, mock_error):
         """Expected values are rejected for non-string metric types."""
@@ -305,7 +359,7 @@ class MetricsAddTest(unittest.TestCase):
 
         mock_json.assert_called_once_with({"success": True, "metric": result})
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_add_duplicate_metric_friendly_error(self, mock_load, mock_error):
         """409 from the server shows 'already exists' instead of raw HTTP error."""
@@ -347,7 +401,7 @@ class MetricsAddTest(unittest.TestCase):
 class MetricsEditTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_edit."""
 
-    @patch("poly.cli_commands.metrics.success")
+    @patch("poly.output.console.success")
     @patch("poly.cli_commands.metrics.load_project")
     def test_edit_with_description(self, mock_load, mock_success):
         """Editing description passes it through to project.update_custom_metric."""
@@ -361,7 +415,7 @@ class MetricsEditTest(unittest.TestCase):
 
         project.update_custom_metric.assert_called_once_with("SCORE", {"description": "New desc"})
 
-    @patch("poly.cli_commands.metrics.success")
+    @patch("poly.output.console.success")
     @patch("poly.cli_commands.metrics.load_project")
     def test_edit_deactivate_metric(self, mock_load, mock_success):
         """Setting active=False prints 'Deactivated' message."""
@@ -375,7 +429,7 @@ class MetricsEditTest(unittest.TestCase):
         mock_success.assert_called_once()
         self.assertIn("Deactivated", mock_success.call_args[0][0])
 
-    @patch("poly.cli_commands.metrics.success")
+    @patch("poly.output.console.success")
     @patch("poly.cli_commands.metrics.load_project")
     def test_edit_multiple_flags(self, mock_load, mock_success):
         """Multiple flags are combined into one update call."""
@@ -424,7 +478,7 @@ class MetricsEditTest(unittest.TestCase):
         printed = mock_json.call_args[0][0]
         self.assertFalse(printed["success"])
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_edit_not_found_friendly_error(self, mock_load, mock_error):
         """404 from the server shows 'not found' instead of raw HTTP error."""
@@ -457,7 +511,7 @@ class MetricsEditTest(unittest.TestCase):
         self.assertFalse(printed["success"])
         self.assertIn("not found", printed["error"])
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_edit_expected_values_rejected_for_non_string(self, mock_load, mock_error):
         """Expected values flag is rejected when the metric type is not string."""
@@ -514,7 +568,7 @@ class InteractiveEditTest(unittest.TestCase):
         },
     ]
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     def test_metric_not_found_exits(self, mock_error):
         """Exits with error when the named metric does not exist."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
@@ -606,7 +660,7 @@ class InteractiveEditTest(unittest.TestCase):
 class MetricsImportTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_import."""
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_import_file_not_found(self, mock_load, mock_error):
         """Exits with error when the import file does not exist."""
@@ -643,7 +697,7 @@ class MetricsImportTest(unittest.TestCase):
         printed = mock_json.call_args[0][0]
         self.assertFalse(printed["success"])
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.output.console.error")
     @patch("poly.cli_commands.metrics.load_project")
     def test_import_invalid_yaml(self, mock_load, mock_error):
         """Exits with error when YAML parsing fails."""
@@ -666,7 +720,7 @@ class MetricsImportTest(unittest.TestCase):
             "metadata": {"created": ["SCORE"], "ignored": []},
         }
 
-        with patch("poly.cli_commands.metrics.success"), patch("poly.cli_commands.metrics.plain"):
+        with patch("poly.output.console.success"), patch("poly.output.console.plain"):
             MetricsCommand.metrics_import("/tmp/test", file_path="metrics.yaml", output_json=False)
 
         project.import_metrics_from_file.assert_called_once_with("metrics.yaml", False)
@@ -685,8 +739,8 @@ class MetricsImportTest(unittest.TestCase):
         }
 
         with (
-            patch("poly.cli_commands.metrics.success") as mock_success,
-            patch("poly.cli_commands.metrics.plain") as mock_plain,
+            patch("poly.output.console.success") as mock_success,
+            patch("poly.output.console.plain") as mock_plain,
         ):
             MetricsCommand.metrics_import("/tmp/test", file_path="m.yaml", output_json=False)
 
@@ -717,8 +771,8 @@ class PrintDryRunTest(unittest.TestCase):
         self.assertEqual(result["would_skip"], ["B"])
         self.assertEqual(result["remote_only"], ["D"])
 
-    @patch("poly.cli_commands.metrics.warning")
-    @patch("poly.cli_commands.metrics.plain")
+    @patch("poly.output.console.warning")
+    @patch("poly.output.console.plain")
     def test_dry_run_text_output(self, mock_plain, mock_warning):
         """Text dry-run shows create, skip, and remote-only warnings."""
         preview = {
@@ -734,7 +788,7 @@ class PrintDryRunTest(unittest.TestCase):
         self.assertTrue(any("Would skip" in c for c in calls))
         mock_warning.assert_called_once()
 
-    @patch("poly.cli_commands.metrics.plain")
+    @patch("poly.output.console.plain")
     def test_dry_run_empty_preview(self, mock_plain):
         """With empty lists, only the dim header is printed."""
         preview = {"would_create": [], "would_skip": [], "remote_only": []}
@@ -785,3 +839,463 @@ class ValidMetricTypesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MetricsReadCommandTest(unittest.TestCase):
+    """Base for the read commands: a real fixture project, the mock at the HTTP boundary."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        patch("poly.cli_commands.metrics.load_project", return_value=self.project).start()
+        self.mock_request = patch(
+            "poly.handlers.platform_api.PlatformAPIHandler.make_request"
+        ).start()
+        self.addCleanup(patch.stopall)
+
+    def _render(self, fn, *args, **kwargs) -> str:
+        # Wide enough that no column truncates, whatever the platform calls UTC.
+        with patch.object(console, "_width", 200), console.capture() as capture:
+            fn(*args, **kwargs)
+        return capture.get()
+
+
+class MetricsAvailableTest(MetricsReadCommandTest):
+    """Tests for MetricsCommand.metrics_available."""
+
+    def test_table_mode_lists_the_catalog_for_the_project(self):
+        """The catalog is fetched for the project's region and id, then printed."""
+        self.mock_request.return_value = {
+            "metrics": [{"name": "poly_score", "type": "float", "description": "Overall score"}],
+            "total": 1,
+        }
+
+        output = self._render(MetricsCommand.metrics_available, TEST_DIR, output_json=False)
+
+        self.mock_request.assert_called_once_with(
+            "us-1", "/api/v1/metrics", "GET", params={"project_id": "test_project"}
+        )
+        self.assertIn("poly_score", output)
+        self.assertIn("Overall score", output)
+
+    @patch("poly.cli_commands.metrics.json_print")
+    def test_json_mode_emits_the_raw_response(self, mock_json):
+        """JSON mode passes the Data API response through unchanged."""
+        self.mock_request.return_value = {"metrics": [], "total": 0}
+
+        MetricsCommand.metrics_available(TEST_DIR, output_json=True)
+
+        mock_json.assert_called_once_with({"metrics": [], "total": 0})
+
+    @patch("poly.output.console.error")
+    def test_http_error_is_explained_and_exits(self, mock_error):
+        """A Data API error becomes a plain message and a non-zero exit."""
+        self.mock_request.side_effect = _http_error(401)
+
+        with self.assertRaises(SystemExit) as ctx:
+            MetricsCommand.metrics_available(TEST_DIR, output_json=False)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("poly apikey", mock_error.call_args[0][0])
+
+
+class MetricsQueryTest(MetricsReadCommandTest):
+    """Tests for MetricsCommand.metrics_query."""
+
+    def test_every_flag_reaches_the_request_body(self):
+        """Flags map onto the aggregate body under the Data API's field names."""
+        self.mock_request.return_value = {"columns": ["avg"], "rows": [[4.2]], "limit": 50}
+        args = _query_args(
+            agg=["avg", "p95"],
+            from_dt="2026-09-01",
+            to_dt="2026-09-30",
+            interval="daily",
+            timezone="Europe/London",
+            by=["channel"],
+            channel=["VOICE-SIP"],
+            env=["live"],
+            deployment=["dep1"],
+            variant=["var1"],
+            filter=[["handoff", "eq", "false"], ["channel", "in", "CHAT, SMS"]],
+            any=True,
+            having=[["avg", "gte", "4"]],
+            sort="avg:desc",
+            limit=50,
+            offset=100,
+        )
+
+        self._render(MetricsCommand.metrics_query, TEST_DIR, "duration", args, output_json=False)
+
+        region, endpoint, method = self.mock_request.call_args.args
+        body = self.mock_request.call_args.kwargs["data"]
+        self.assertEqual((region, endpoint, method), ("us-1", "/api/v1/metrics/aggregate", "POST"))
+        self.assertEqual(
+            body,
+            {
+                "project_id": "test_project",
+                "metric": "duration",
+                "aggs": ["avg", "p95"],
+                "from_datetime": "2026-09-01T00:00:00+01:00",
+                "to_datetime": "2026-10-01T00:00:00+01:00",
+                "interval": "daily",
+                "timezone": "Europe/London",
+                "group_by": ["channel"],
+                "channel": ["VOICE-SIP"],
+                "client_env": ["live"],
+                "deployment_id": ["dep1"],
+                "variant_id": ["var1"],
+                "filters": [
+                    {"metric": "handoff", "op": "eq", "value": False},
+                    {"metric": "channel", "op": "in", "value": ["CHAT", "SMS"]},
+                ],
+                "filter_operator": "or",
+                "having": [{"field": "avg", "op": "gte", "value": 4.0}],
+                "sort": {"field": "avg", "order": "desc"},
+                "limit": 50,
+                "offset": 100,
+            },
+        )
+
+    @patch("poly.cli_commands.metrics.json_print")
+    def test_minimal_body_has_defaults_and_no_nulls(self, mock_json):
+        """With no flags the body carries the defaults only; nothing is sent as null."""
+        self.mock_request.return_value = {"columns": [], "rows": []}
+
+        MetricsCommand.metrics_query(TEST_DIR, "poly_score", _query_args(), output_json=True)
+
+        self.assertEqual(
+            self.mock_request.call_args.kwargs["data"],
+            {
+                "project_id": "test_project",
+                "metric": "poly_score",
+                "aggs": ["avg", "conversation_count"],
+                "limit": 20,
+                "offset": 0,
+            },
+        )
+        mock_json.assert_called_once_with({"columns": [], "rows": []})
+
+    @patch("poly.cli_commands.metrics.json_print")
+    def test_invalid_flag_fails_before_any_request(self, mock_json):
+        """The project's validation stops a bad flag before the API is called."""
+        with self.assertRaises(SystemExit):
+            MetricsCommand.metrics_query(
+                TEST_DIR, "x", _query_args(filter=[["a", "like", "b"]]), output_json=True
+            )
+
+        self.mock_request.assert_not_called()
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("like", payload["error"])
+
+    @patch("poly.output.console.error")
+    def test_out_of_range_limit_fails_locally(self, mock_error):
+        """--limit outside 1 to 100 is refused without a request."""
+        with self.assertRaises(SystemExit):
+            MetricsCommand.metrics_query(
+                TEST_DIR, "poly_score", _query_args(limit=500), output_json=False
+            )
+
+        self.mock_request.assert_not_called()
+        self.assertIn("Limit", mock_error.call_args[0][0])
+
+    def test_table_mode_prints_the_rows(self):
+        """Rows render with the bucket column and formatted numbers."""
+        self.mock_request.return_value = {
+            "columns": ["bucket", "channel", "avg", "conversation_count"],
+            "rows": [["2026-09-01T00:00:00+00:00", "VOICE-SIP", 4.2134, 1318]],
+            "limit": 20,
+            "offset": 0,
+        }
+
+        output = self._render(
+            MetricsCommand.metrics_query, TEST_DIR, "duration", _query_args(), output_json=False
+        )
+
+        self.assertIn("VOICE-SIP", output)
+        self.assertIn("4.21", output)
+        self.assertIn("1,318", output)
+
+    def test_bucket_labels_stay_in_the_query_timezone(self):
+        """A New York day bucket reads as that day, not as the UTC instant it starts at."""
+        self.mock_request.return_value = {
+            "columns": ["bucket", "avg"],
+            "rows": [["2026-11-01T04:00:00+00:00", 4.2]],
+            "limit": 20,
+            "offset": 0,
+        }
+
+        output = self._render(
+            MetricsCommand.metrics_query,
+            TEST_DIR,
+            "duration",
+            _query_args(interval="daily", timezone="America/New_York"),
+            output_json=False,
+        )
+
+        self.assertIn("2026-11-01 ", output)
+        self.assertNotIn("04:00", output)
+
+    @patch("poly.cli_commands.metrics.json_print")
+    def test_unknown_timezone_fails_before_any_request(self, mock_json):
+        """A timezone that is not an IANA name is refused locally."""
+        with self.assertRaises(SystemExit):
+            MetricsCommand.metrics_query(
+                TEST_DIR, "duration", _query_args(timezone="Mars/Olympus"), output_json=True
+            )
+
+        self.mock_request.assert_not_called()
+        self.assertIn("Mars/Olympus", mock_json.call_args[0][0]["error"])
+
+
+class MetricsQueryWindowTest(MetricsReadCommandTest):
+    """A widened weekly or monthly window is reported by `poly metrics query`."""
+
+    def test_monthly_query_prints_the_widened_window(self):
+        """--from mid-month and a past --to mid-month become whole months, with a note."""
+        self.mock_request.return_value = {
+            "columns": ["bucket", "avg"],
+            "rows": [["2026-09-01T00:00:00+00:00", 4.2]],
+            "limit": 20,
+            "offset": 0,
+        }
+
+        output = self._render(
+            MetricsCommand.metrics_query,
+            TEST_DIR,
+            "poly_score",
+            _query_args(interval="monthly", from_dt="2026-09-15", to_dt="2026-10-06"),
+            output_json=False,
+        )
+
+        body = self.mock_request.call_args.kwargs["data"]
+        self.assertEqual(body["from_datetime"], "2026-09-01T00:00:00")
+        self.assertEqual(body["to_datetime"], "2026-11-01T00:00:00")
+        self.assertIn(
+            "Monthly buckets are whole months, so the window is from 2026-09-01 to 2026-10-31.",
+            output,
+        )
+
+    def test_daily_query_has_no_note(self):
+        """Daily buckets are not widened, so nothing is added to the output."""
+        self.mock_request.return_value = {"columns": ["avg"], "rows": [[4.2]], "limit": 20}
+
+        output = self._render(
+            MetricsCommand.metrics_query,
+            TEST_DIR,
+            "poly_score",
+            _query_args(interval="daily", from_dt="2026-10-01"),
+            output_json=False,
+        )
+
+        self.assertNotIn("buckets are whole", output)
+
+
+class MetricsScoreTest(MetricsReadCommandTest):
+    """Tests for MetricsCommand.metrics_score."""
+
+    def _responses(self, overall_rows, table_rows):
+        """Answer the overall query first, then the bucketed one."""
+        self.mock_request.side_effect = [
+            {"columns": ["avg", "conversation_count"], "rows": overall_rows, "limit": 1},
+            {
+                "columns": ["bucket", "avg", "conversation_count"],
+                "rows": table_rows,
+                "limit": 20,
+                "offset": 0,
+            },
+        ]
+
+    def test_headline_comes_from_a_separate_unbucketed_query(self):
+        """The overall figure is fetched without interval or group-by, so paging can't skew it."""
+        self._responses([[4.5, 40]], [["2026-09-28T00:00:00", 4.0, 10]])
+
+        output = self._render(
+            MetricsCommand.metrics_score,
+            TEST_DIR,
+            _query_args(interval="daily", by=["channel"], limit=1),
+            output_json=False,
+        )
+
+        overall_body = self.mock_request.call_args_list[0].kwargs["data"]
+        table_body = self.mock_request.call_args_list[1].kwargs["data"]
+        self.assertEqual(overall_body["metric"], "poly_score_v2")
+        self.assertEqual(table_body["metric"], "poly_score_v2")
+        self.assertEqual(overall_body["aggs"], ["avg", "conversation_count"])
+        self.assertEqual(overall_body["limit"], 1)
+        self.assertNotIn("interval", overall_body)
+        self.assertNotIn("group_by", overall_body)
+        self.assertEqual(table_body["interval"], "daily")
+        self.assertEqual(table_body["group_by"], ["channel"])
+        self.assertEqual(table_body["limit"], 1)
+        self.assertIn("from_datetime", overall_body)
+        self.assertEqual(overall_body["from_datetime"], table_body["from_datetime"])
+        self.assertIn("4.5 average over 40 conversations", output)
+
+    def test_headline_shows_the_window_as_given(self):
+        """--to 2026-09-30 reads 'to 2026-09-30' although the request end is the next day."""
+        self._responses([[4.0, 3]], [])
+
+        output = self._render(
+            MetricsCommand.metrics_score,
+            TEST_DIR,
+            _query_args(interval="daily", from_dt="2026-09-01", to_dt="2026-09-30"),
+            output_json=False,
+        )
+
+        self.assertIn("from 2026-09-01 to 2026-09-30", output)
+        self.assertEqual(
+            self.mock_request.call_args_list[0].kwargs["data"]["to_datetime"],
+            "2026-10-01T00:00:00",
+        )
+
+    @patch("poly.cli_commands.metrics.json_print")
+    def test_json_includes_summary(self, mock_json):
+        """JSON output carries the summary next to the table."""
+        self._responses([], [])
+
+        MetricsCommand.metrics_score(TEST_DIR, _query_args(interval="daily"), output_json=True)
+
+        payload = mock_json.call_args[0][0]
+        self.assertIsNone(payload["summary"]["average"])
+        self.assertEqual(payload["summary"]["conversations"], 0)
+        self.assertEqual(payload["summary"]["version"], "v2")
+        self.assertEqual(payload["summary"]["scale"], "1-5")
+        self.assertIn("Poly Score (1-5)", payload["summary"]["text"])
+        self.assertIn("no scored conversations", payload["summary"]["text"])
+        self.assertIn(
+            "Older conversations may have a previous Poly Score: try --v1.",
+            payload["summary"]["text"],
+        )
+        self.assertNotIn("V2", payload["summary"]["text"])
+        self.assertEqual(payload["rows"], [])
+
+    def test_v1_reads_the_earlier_score_and_names_its_scale(self):
+        """--v1 queries poly_score, and the headline says previous Poly Score and 0-10."""
+        self._responses([[7.25, 12]], [])
+
+        output = self._render(
+            MetricsCommand.metrics_score,
+            TEST_DIR,
+            _query_args(interval="daily", from_dt="2026-03-01", to_dt="2026-03-31", v1=True),
+            output_json=False,
+        )
+
+        overall, table = (c.kwargs["data"] for c in self.mock_request.call_args_list)
+        self.assertEqual(overall["metric"], "poly_score")
+        self.assertEqual(table["metric"], "poly_score")
+        self.assertIn(
+            "Previous Poly Score (0-10) from 2026-03-01 to 2026-03-31: 7.25 average over 12", output
+        )
+
+    def test_timezone_gives_the_headline_and_the_table_the_same_window(self):
+        """Bare dates are sent as midnight in --timezone, for the headline query too.
+
+        The Data API reads a bound with no offset in the timezone only when the
+        query is bucketed hourly or daily, and the headline query is not bucketed.
+        """
+        self._responses([[4.0, 3]], [])
+
+        output = self._render(
+            MetricsCommand.metrics_score,
+            TEST_DIR,
+            _query_args(
+                interval="daily",
+                from_dt="2026-11-01",
+                to_dt="2026-11-03",
+                timezone="America/New_York",
+            ),
+            output_json=False,
+        )
+
+        overall, table = (c.kwargs["data"] for c in self.mock_request.call_args_list)
+        # The clocks go back on 1 November, so the two bounds carry different offsets.
+        self.assertEqual(overall["from_datetime"], "2026-11-01T00:00:00-04:00")
+        self.assertEqual(overall["to_datetime"], "2026-11-04T00:00:00-05:00")
+        self.assertEqual(table["from_datetime"], overall["from_datetime"])
+        self.assertEqual(table["to_datetime"], overall["to_datetime"])
+        self.assertNotIn("timezone", overall)
+        self.assertEqual(table["timezone"], "America/New_York")
+        self.assertIn("from 2026-11-01 to 2026-11-03", output)
+
+    def test_weekly_window_is_widened_and_says_so(self):
+        """--from on a Thursday queries from Monday; the headline and a note show it."""
+        self._responses(
+            [[2.12, 57]],
+            [["2026-09-28T00:00:00+00:00", 1.4, 45], ["2026-10-05T00:00:00+00:00", 4.83, 12]],
+        )
+
+        output = self._render(
+            MetricsCommand.metrics_score,
+            TEST_DIR,
+            _query_args(interval="weekly", from_dt="2026-10-01"),
+            output_json=False,
+        )
+
+        overall, table = (c.kwargs["data"] for c in self.mock_request.call_args_list)
+        self.assertEqual(overall["from_datetime"], "2026-09-28T00:00:00")
+        self.assertEqual(table["from_datetime"], "2026-09-28T00:00:00")
+        self.assertIn("Poly Score (1-5) from 2026-09-28 to now: 2.12 average over 57", output)
+        self.assertIn("2026-09-28 ", output.split("whole weeks")[1])
+        self.assertNotIn("00:00", output)
+        self.assertIn("Weekly buckets are whole weeks, so the window is from 2026-09-28.", output)
+
+    def test_explicit_window_is_respected(self):
+        """When --from is given, no default window is applied."""
+        self._responses([], [])
+
+        MetricsCommand.metrics_score(
+            TEST_DIR, _query_args(interval="weekly", from_dt="2026-08-31"), output_json=True
+        )
+
+        body = self.mock_request.call_args_list[1].kwargs["data"]
+        self.assertEqual(body["from_datetime"], "2026-08-31T00:00:00")
+        self.assertNotIn("to_datetime", body)
+        self.assertEqual(body["interval"], "weekly")
+
+
+class FlagMappingTest(unittest.TestCase):
+    """The argv mappers in shared.py shape flags; validation happens on the project."""
+
+    def test_filter_values_are_coerced_and_lists_split(self):
+        """Numbers and booleans become JSON types; in/ex take a comma-separated list."""
+        parsed = filter_flags_to_filters(
+            [["poly_score", "GTE", "80"], ["handoff", "eq", "true"], ["channel", "in", "CHAT, SMS"]]
+        )
+        self.assertEqual(parsed[0], {"metric": "poly_score", "op": "gte", "value": 80})
+        self.assertEqual(parsed[1], {"metric": "handoff", "op": "eq", "value": True})
+        self.assertEqual(parsed[2], {"metric": "channel", "op": "in", "value": ["CHAT", "SMS"]})
+
+    def test_having_and_sort_are_passed_through_for_the_project_to_check(self):
+        """The mappers keep the raw values; the project rejects bad ones."""
+        self.assertEqual(
+            having_flags_to_having([["avg", "gte", "4"]]),
+            [{"field": "avg", "op": "gte", "value": "4"}],
+        )
+        self.assertIsNone(sort_flag_to_sort(None))
+        self.assertEqual(sort_flag_to_sort("avg"), {"field": "avg", "order": "asc"})
+        self.assertEqual(sort_flag_to_sort("channel:DESC"), {"field": "channel", "order": "DESC"})
+
+
+class DescribeDataApiErrorTest(unittest.TestCase):
+    """Tests for describe_data_api_error."""
+
+    def test_statuses_map_to_plain_messages(self):
+        """Each status the Data API returns gets a message in the caller's terms."""
+        self.assertIn("poly apikey", describe_data_api_error(_http_error(401)))
+        self.assertIn("permission", describe_data_api_error(_http_error(403)))
+        self.assertIn("100 requests", describe_data_api_error(_http_error(429)))
+        self.assertEqual(
+            describe_data_api_error(_http_error(400, {"detail": "metric not found"})),
+            "The Data API rejected the request: metric not found.",
+        )
+
+    def test_validation_detail_list_is_joined(self):
+        """A FastAPI-style list of errors is flattened into one line."""
+        payload = {"detail": [{"msg": "field required", "loc": ["body", "metric"]}]}
+        self.assertIn("field required", describe_data_api_error(_http_error(422, payload)))
+
+    def test_unexpected_body_shapes_do_not_raise(self):
+        """A list body, a dict detail or no JSON at all still produce a message."""
+        self.assertIn("rejected", describe_data_api_error(_http_error(400, ["oops"])))
+        self.assertIn("rejected", describe_data_api_error(_http_error(400, {"detail": {"a": 1}})))
+        self.assertIn("rejected", describe_data_api_error(_http_error(400, text="plain text")))

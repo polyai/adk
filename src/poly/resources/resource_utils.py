@@ -624,6 +624,17 @@ def _format_def_line(line: str) -> str:
     return line + "\n"
 
 
+@functools.lru_cache(maxsize=4)
+def parse_python(source: str) -> ast.Module:
+    """Parse Python source, reusing the tree for the same source.
+
+    Reading one function file parses the same source in consecutive steps, so they
+    share one parse. Trees are about 45 times the size of their source, so only the
+    last few are kept. The tree is shared between callers, so it must not be modified.
+    """
+    return ast.parse(source)
+
+
 def restore_function_def_line(file_content: str, file_name: str) -> str:
     """Restore the main function definition to be formatted on one line.
 
@@ -640,7 +651,7 @@ def restore_function_def_line(file_content: str, file_name: str) -> str:
     """
 
     try:
-        tree = ast.parse(file_content)
+        tree = parse_python(file_content)
     except SyntaxError:
         return file_content
 

@@ -11,7 +11,7 @@ import os
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -26,6 +26,8 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 from rich.tree import Tree
+
+from poly.constants import DATA_AGGS
 
 # Global verbose flag — set by CLI before commands run
 _verbose = False
@@ -1787,3 +1789,118 @@ def poll_test_run_live(
         success(f"Test run {result.get('status', 'unknown')}: {passed}/{total_count} passed")
 
     return result
+
+
+def print_available_metrics(metrics: list[dict[str, Any]]) -> None:
+    """Print the metrics a project can query, built-in metrics included.
+
+    Args:
+        metrics: Metric dicts from the Data API catalog: name, type,
+            description, and ``values`` (expected values for string metrics).
+    """
+    if not metrics:
+        plain("No metrics available for this project.")
+        return
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Name", style="bold yellow", no_wrap=True)
+    table.add_column("Type", no_wrap=True)
+    table.add_column("Values", max_width=30)
+    table.add_column("Description", max_width=60)
+
+    for m in sorted(metrics, key=lambda m: str(m.get("name", "")).lower()):
+        values = m.get("values") or []
+        table.add_row(
+            str(m.get("name", "—")),
+            str(m.get("type", "—")),
+            ", ".join(str(v) for v in values) if values else "—",
+            m.get("description") or "",
+        )
+
+    console.print(table)
+    console.print(f"\n{len(metrics)} metrics. Query one with: poly metrics query <name>")
+
+
+def _format_bucket(value: str, interval: str | None, timezone: str | None) -> str:
+    """Label a time bucket in the timezone the query bucketed in.
+
+    Buckets are UTC unless the query gave a timezone, which the Data API
+    applies to hourly and daily buckets only. The label stays in that
+    timezone, not the machine's, so a day's bucket reads as that day wherever
+    it is printed. Daily, weekly and monthly buckets show the date alone.
+    Hourly buckets name the zone too, which tells apart the two 01:00 hours
+    on the day the clocks go back.
+    """
+    try:
+        start = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if start.tzinfo is not None:
+        local = timezone and interval in ("hourly", "daily")
+        start = start.astimezone(ZoneInfo(timezone) if local else UTC)
+    return start.strftime("%Y-%m-%d %H:%M %Z" if interval == "hourly" else "%Y-%m-%d")
+
+
+def _format_aggregate_cell(
+    column: str, value: Any, interval: str | None = None, timezone: str | None = None
+) -> str:
+    """Format one cell of an aggregate result for the terminal."""
+    if value is None:
+        return "—"
+    if column == "bucket" and isinstance(value, str):
+        return _format_bucket(value, interval, timezone)
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return f"{value:,}"
+    return str(value)
+
+
+def print_aggregate(
+    result: dict[str, Any],
+    headline: str | None = None,
+    note: str | None = None,
+    interval: str | None = None,
+    timezone: str | None = None,
+) -> None:
+    """Print a tabular aggregate result from the Data API.
+
+    Args:
+        result: ``{"columns": [...], "rows": [[...]], "limit", "offset"}``.
+        headline: Optional one-line summary printed above the table.
+        note: Optional remark about the query, printed dimmed above the table.
+        interval: The query's time bucket, which decides how buckets are labelled.
+        timezone: The query's timezone, which the bucket labels stay in.
+    """
+    columns = result.get("columns") or []
+    rows = result.get("rows") or []
+
+    if headline:
+        console.print(f"[bold]{headline}[/bold]")
+    if note:
+        console.print(f"[dim]{note}[/dim]")
+    if headline or note:
+        console.print()
+
+    if not rows:
+        plain("No data in this window.")
+        return
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    for column in columns:
+        justify = "right" if column in DATA_AGGS else "left"
+        table.add_column(column, justify=justify, no_wrap=True)
+
+    for row in rows:
+        table.add_row(
+            *[_format_aggregate_cell(c, v, interval, timezone) for c, v in zip(columns, row)]
+        )
+
+    console.print(table)
+    limit = result.get("limit")
+    if limit is not None and len(rows) >= limit:
+        next_offset = result.get("offset", 0) + limit
+        console.print(
+            f"\nShowing {len(rows)} rows (limit {limit}). "
+            f"Use --offset {next_offset} for the next page."
+        )
