@@ -78,7 +78,7 @@ poly push --help
 | [`poly call`](./cli/call.md) | Voice-call the agent using your microphone and speaker |
 | [`poly test`](./cli/test.md) | Run and inspect simulated conversation tests |
 | [`poly conversations`](./cli/conversations.md) | List and inspect real conversations |
-| [`poly metrics`](./cli/metrics.md) | Define and manage the project's custom metrics |
+| [`poly metrics`](./cli/metrics.md) | Define custom metrics and read metric values including Poly Score |
 | [`poly docs`](./cli/docs.md) | Output resource documentation |
 
 ### Deployment and configuration
@@ -147,6 +147,9 @@ poly deployments list --json
 poly deployments promote --from <id> --to pre-release --force --json
 poly deployments rollback --to <id> --force --json
 poly metrics list --json
+poly metrics available --json
+poly metrics query poly_score_v2 --agg avg --from 2026-09-01 --json
+poly metrics score --json
 poly metrics export --json
 poly metrics add --name BOOKING_CONFIRMED --type bool --json
 poly metrics edit BOOKING_CONFIRMED --active false --json
