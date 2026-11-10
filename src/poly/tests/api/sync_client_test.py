@@ -239,6 +239,18 @@ class MergeBranch(unittest.TestCase):
         self.assertEqual(errors[0]["path"], [])
         self.assertIn("sequence mismatch", errors[0]["message"])
 
+    def test_merge_passes_experiment_acknowledgement_to_sdk(self):
+        """The acknowledgement reaches the SDK call unchanged."""
+        handler = self._handler_on_branch()
+        handler._sdk.merge_branch.return_value = {"sequence": "2"}
+
+        success, _, _ = handler.merge_branch(message="msg", acknowledge_active_experiment=True)
+
+        self.assertTrue(success)
+        self.assertTrue(
+            handler._sdk.merge_branch.call_args.kwargs["acknowledge_active_experiment"]
+        )
+
     def test_sync_api_error_is_returned_in_errors(self):
         """sync_branch reports API errors the same way as merge_branch."""
         handler = self._handler_on_branch()

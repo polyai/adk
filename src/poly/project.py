@@ -12,17 +12,31 @@ import shutil
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from functools import cached_property
 from pathlib import PurePath
 from typing import Any, Optional, TypeAlias
+from zoneinfo import ZoneInfo
 
 from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
 from poly.call.session import CallSession
+from poly.constants import (
+    DATA_AGGS,
+    DATA_CHANNELS,
+    DATA_CLIENT_ENVS,
+    DATA_FILTER_OPS,
+    DATA_GROUP_BY,
+    DATA_HAVING_OPS,
+    DATA_INTERVALS,
+    DATA_LIST_OPS,
+    DATA_MAX_LIMIT,
+    DATA_MAX_OFFSET,
+    POLY_SCORE_VERSIONS,
+)
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
@@ -71,6 +85,8 @@ STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
 MAX_TEST_RUN_NAME_LENGTH = 120
 
+AB_TEST_ACTIVE = "AB_TEST_ACTIVE"
+
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
 
@@ -104,9 +120,245 @@ class DeploymentMode(Enum):
     RELEASES_BRANCHES = "releases_branches"
 
 
+def _active_experiment_message(acknowledged: bool) -> str:
+    """Explain an AB_TEST_ACTIVE merge rejection and how to get past it."""
+    if acknowledged:
+        # The platform only honours the acknowledgement for projects with it enabled.
+        return (
+            "An experiment is running, and this project does not allow merging into main "
+            "during an experiment. End the experiment before merging."
+        )
+    return (
+        "An experiment is running. Merging into main changes the live version it compares "
+        "against, which may affect its result. To merge anyway, re-run with "
+        "--acknowledge-experiment (acknowledge_active_experiment=True), or end the experiment."
+    )
+
+
 def _non_empty_types(resources: ResourceMap) -> ResourceMap:
     """Return resources without the types that have none."""
     return {resource_type: typed for resource_type, typed in resources.items() if typed}
+
+
+POLY_SCORE_DEFAULT_DAYS = 7
+
+
+def _zone(timezone: Optional[str]) -> Optional[ZoneInfo]:
+    """The ``ZoneInfo`` for an IANA timezone name, or ``None`` when none is given.
+
+    Raises:
+        ValueError: If the name is not a known timezone.
+    """
+    if timezone is None:
+        return None
+    try:
+        return ZoneInfo(timezone)
+    except (KeyError, ValueError, OSError) as e:
+        raise ValueError(
+            f"Unknown timezone {timezone!r}. Use an IANA name such as Europe/London."
+        ) from e
+
+
+def _window_bound(value: str, zone: Optional[ZoneInfo], *, exclusive_end: bool = False) -> str:
+    """Normalise a ``from``/``to`` bound into an ISO 8601 string for the Data API.
+
+    Accepts a date (``2026-09-01``) or a datetime (``2026-09-01T09:30``, with or
+    without an offset). A bare date for an exclusive end bound rolls to the next
+    midnight so ``to="2026-09-30"`` includes the whole of the 30th.
+
+    A bound with no offset is local time in ``zone`` and is sent with that
+    offset. The Data API applies ``timezone`` to such bounds only on hourly
+    and daily queries, so sending the offset is what makes a window cover the
+    same conversations whatever the interval.
+
+    Raises:
+        ValueError: If the value is not a date or datetime.
+    """
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as e:
+        raise ValueError(f"Invalid date {value!r}. Use YYYY-MM-DD or an ISO 8601 datetime.") from e
+    if exclusive_end and len(text) == 10:
+        parsed = parsed + timedelta(days=1)
+    if parsed.tzinfo is None and zone is not None:
+        parsed = parsed.replace(tzinfo=zone)
+    return parsed.isoformat()
+
+
+def _bucket_window(
+    from_dt: Optional[str],
+    to_dt: Optional[str],
+    interval: Optional[str],
+    timezone: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str], bool]:
+    """Normalise a window and widen it to whole weekly or monthly buckets.
+
+    Bounds with no offset are read in ``timezone`` when one is given, except
+    for weekly and monthly buckets: those are UTC whatever the timezone, so
+    their bounds stay UTC dates too. Reading them in the zone would move a
+    bound across a bucket boundary and widen the window by a whole bucket.
+
+    Weekly and monthly buckets are whole calendar weeks (Monday, UTC) and
+    months, and the Data API keeps a bucket only when the bucket's start is
+    inside the window. A window that cuts through a bucket would lose its
+    first bucket and over-count its last, so the start moves back to the
+    bucket boundary and a past end moves forward to the next one. An end that
+    has not happened yet is left alone: nothing lies beyond it.
+
+    Returns:
+        The ``from`` and ``to`` bounds as ISO 8601 strings (``None`` when not
+        given) and whether either bound moved.
+
+    Raises:
+        ValueError: If a bound is not a date or datetime, or the timezone is unknown.
+    """
+    zone = _zone(timezone)
+    if interval in ("weekly", "monthly"):
+        zone = None
+    start = _window_bound(from_dt, zone) if from_dt else None
+    end = _window_bound(to_dt, zone, exclusive_end=True) if to_dt else None
+    if interval not in ("weekly", "monthly"):
+        return start, end, False
+
+    def floor(moment: datetime) -> datetime:
+        midnight = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        if interval == "weekly":
+            return midnight - timedelta(days=midnight.weekday())
+        return midnight.replace(day=1)
+
+    def as_utc(text: str) -> datetime:
+        moment = datetime.fromisoformat(text)
+        return moment.astimezone(UTC) if moment.tzinfo else moment
+
+    snapped_start, snapped_end = start, end
+    if start:
+        snapped_start = floor(as_utc(start)).isoformat()
+    if end:
+        moment = as_utc(end)
+        now = datetime.now(UTC) if moment.tzinfo else datetime.now(UTC).replace(tzinfo=None)
+        if moment < now and floor(moment) != moment:
+            following = floor(moment) + timedelta(days=7 if interval == "weekly" else 32)
+            snapped_end = floor(following).isoformat()
+    widened = (snapped_start, snapped_end) != (start, end)
+    if not widened:
+        return start, end, False
+    return snapped_start, snapped_end, True
+
+
+def _check_choices(name: str, values: Optional[list[str]], allowed: list[str]) -> None:
+    """Raise ``ValueError`` if any of ``values`` is not in ``allowed``."""
+    for value in values or []:
+        if value not in allowed:
+            raise ValueError(f"{name} must be one of: {', '.join(allowed)}. Got {value!r}.")
+
+
+def _build_metric_query(
+    metric: str,
+    aggs: Optional[list[str]],
+    *,
+    from_dt: Optional[str] = None,
+    to_dt: Optional[str] = None,
+    interval: Optional[str] = None,
+    timezone: Optional[str] = None,
+    group_by: Optional[list[str]] = None,
+    channel: Optional[list[str]] = None,
+    client_env: Optional[list[str]] = None,
+    deployment_id: Optional[list[str]] = None,
+    variant_id: Optional[list[str]] = None,
+    filters: Optional[list[dict]] = None,
+    match_any: bool = False,
+    having: Optional[list[dict]] = None,
+    sort: Optional[dict] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> dict:
+    """Validate the arguments of :meth:`AgentStudioProject.query_metric` and build the body.
+
+    ``from_dt`` and ``to_dt`` are sent as given: the caller passes the window
+    it got from :func:`_bucket_window`.
+
+    Raises:
+        ValueError: On anything the Data API would reject.
+    """
+    if not metric or not str(metric).strip():
+        raise ValueError("A metric name is required. See `poly metrics available`.")
+    aggs = list(aggs) if aggs else ["avg", "conversation_count"]
+    _check_choices("Aggregation", aggs, DATA_AGGS)
+    if interval is not None and interval not in DATA_INTERVALS:
+        raise ValueError(f"Interval must be one of: {', '.join(DATA_INTERVALS)}. Got {interval!r}.")
+    _check_choices("Group-by dimension", group_by, DATA_GROUP_BY)
+    _check_choices("Channel", channel, DATA_CHANNELS)
+    _check_choices("Environment", client_env, DATA_CLIENT_ENVS)
+    if not 1 <= limit <= DATA_MAX_LIMIT:
+        raise ValueError(f"Limit must be between 1 and {DATA_MAX_LIMIT}. Got {limit}.")
+    if not 0 <= offset <= DATA_MAX_OFFSET:
+        raise ValueError(f"Offset must be between 0 and {DATA_MAX_OFFSET}. Got {offset}.")
+
+    checked_filters = []
+    for item in filters or []:
+        op = str(item.get("op", "")).lower()
+        if op not in DATA_FILTER_OPS:
+            raise ValueError(
+                f"Unknown filter operator {item.get('op')!r}. "
+                f"Use one of: {', '.join(DATA_FILTER_OPS)}."
+            )
+        if op in DATA_LIST_OPS and not isinstance(item.get("value"), list):
+            raise ValueError(f"Filter operator {op!r} takes a list of values.")
+        if not item.get("metric"):
+            raise ValueError("Each filter needs a metric name.")
+        checked_filters.append({"metric": item["metric"], "op": op, "value": item.get("value")})
+
+    checked_having = []
+    for item in having or []:
+        field = item.get("field")
+        if field not in DATA_AGGS:
+            raise ValueError(f"Having field must be one of: {', '.join(DATA_AGGS)}. Got {field!r}.")
+        op = str(item.get("op", "")).lower()
+        if op not in DATA_HAVING_OPS:
+            raise ValueError(
+                f"Having operator must be one of: {', '.join(DATA_HAVING_OPS)}. Got {op!r}."
+            )
+        try:
+            number = float(item.get("value"))
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Having value must be a number, got {item.get('value')!r}.") from e
+        checked_having.append({"field": field, "op": op, "value": number})
+
+    checked_sort = None
+    if sort:
+        order = str(sort.get("order") or "asc").lower()
+        if order not in ("asc", "desc"):
+            raise ValueError(f"Sort order must be 'asc' or 'desc'. Got {sort.get('order')!r}.")
+        if not sort.get("field"):
+            raise ValueError("Sort needs a field.")
+        checked_sort = {"field": sort["field"], "order": order}
+
+    body: dict[str, Any] = {
+        "metric": str(metric).strip(),
+        "aggs": aggs,
+        "limit": limit,
+        "offset": offset,
+    }
+    optional = {
+        "from_datetime": from_dt,
+        "to_datetime": to_dt,
+        "interval": interval,
+        "timezone": timezone,
+        "group_by": list(group_by) if group_by else None,
+        "channel": list(channel) if channel else None,
+        "client_env": list(client_env) if client_env else None,
+        "deployment_id": list(deployment_id) if deployment_id else None,
+        "variant_id": list(variant_id) if variant_id else None,
+        "filters": checked_filters or None,
+        "filter_operator": "or" if match_any else None,
+        "having": checked_having or None,
+        "sort": checked_sort,
+    }
+    body.update({k: v for k, v in optional.items() if v is not None})
+    return body
 
 
 @dataclass
@@ -3191,7 +3443,10 @@ class AgentStudioProject:
         return messages
 
     def merge_branch(
-        self, message: Optional[str], conflict_resolutions: list[dict[str, Any]] = None
+        self,
+        message: Optional[str],
+        conflict_resolutions: list[dict[str, Any]] = None,
+        acknowledge_active_experiment: bool = False,
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main in the project.
 
@@ -3202,6 +3457,8 @@ class AgentStudioProject:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value
+            acknowledge_active_experiment (bool): Allow a merge into main while an
+                experiment is running, changing the live version it compares against.
 
         Returns:
             bool: True if the merge was successful, False otherwise
@@ -3233,7 +3490,9 @@ class AgentStudioProject:
                 )
 
         success, conflicts, errors = self.api_handler.merge_branch(
-            message=message, conflict_resolutions=conflict_resolutions
+            message=message,
+            conflict_resolutions=conflict_resolutions,
+            acknowledge_active_experiment=acknowledge_active_experiment,
         )
         if success:
             parent_branch_id = current_branch_meta.get("parentBranchId")
@@ -3248,6 +3507,12 @@ class AgentStudioProject:
             success, _ = self.switch_branch(parent_branch_name, force=True)
             return success, [], []
 
+        errors = [
+            {**err, "message": _active_experiment_message(acknowledge_active_experiment)}
+            if AB_TEST_ACTIVE in str(err.get("message", ""))
+            else err
+            for err in errors
+        ]
         return False, conflicts, errors
 
     def sync_branch(
@@ -4285,6 +4550,203 @@ class AgentStudioProject:
         return AgentStudioInterface.export_custom_metrics(
             self.region, self.account_id, self.project_id
         )
+
+    def get_available_metrics(self) -> dict:
+        """List every metric the project can query, built-in metrics included.
+
+        Returns:
+            dict: ``{"metrics": [...], "total": n}`` from the Data API.
+        """
+        return AgentStudioInterface.get_available_metrics(self.region, project_id=self.project_id)
+
+    def query_metric(
+        self,
+        metric: str,
+        aggs: Optional[list[str]] = None,
+        *,
+        from_dt: Optional[str] = None,
+        to_dt: Optional[str] = None,
+        interval: Optional[str] = None,
+        timezone: Optional[str] = None,
+        group_by: Optional[list[str]] = None,
+        channel: Optional[list[str]] = None,
+        client_env: Optional[list[str]] = None,
+        deployment_id: Optional[list[str]] = None,
+        variant_id: Optional[list[str]] = None,
+        filters: Optional[list[dict]] = None,
+        match_any: bool = False,
+        having: Optional[list[dict]] = None,
+        sort: Optional[dict] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict:
+        """Aggregate one metric over a window for this project.
+
+        Args:
+            metric: Metric name from :meth:`get_available_metrics` (case-insensitive).
+            aggs: Aggregations to compute; defaults to ``avg`` and ``conversation_count``.
+            from_dt: Inclusive start, ``YYYY-MM-DD`` or an ISO 8601 datetime.
+            to_dt: Exclusive end. A bare date includes the whole of that day.
+            interval: Time bucket (``hourly``, ``daily``, ``weekly``, ``monthly``), or
+                ``None`` for one total. Weekly and monthly buckets are whole
+                weeks (from Monday, UTC) and months, so the window is widened
+                to the bucket boundaries.
+            timezone: IANA timezone for hourly and daily buckets. ``from_dt``
+                and ``to_dt`` with no offset are read in it for hourly, daily and
+                unbucketed queries; weekly and monthly bounds stay UTC.
+            group_by: Dimensions to group by.
+            channel: Restrict to these channels.
+            client_env: Restrict to these environments.
+            deployment_id: Restrict to these deployment IDs.
+            variant_id: Restrict to these variant IDs.
+            filters: Conversation filters, each ``{"metric", "op", "value"}``.
+            match_any: Match conversations that satisfy any filter instead of all.
+            having: Bucket thresholds, each ``{"field", "op", "value"}``.
+            sort: Secondary sort, ``{"field", "order"}``.
+            limit: Rows per page, 1 to 100.
+            offset: Rows to skip, up to 1000.
+
+        Returns:
+            dict: Columns, rows and paging from the Data API, plus ``window``
+            (``{"from_datetime", "to_datetime"}``) when the window was widened.
+
+        Raises:
+            ValueError: If any argument is outside what the Data API accepts.
+        """
+        window_from, window_to, widened = _bucket_window(from_dt, to_dt, interval, timezone)
+        result = self._query_metric(
+            metric,
+            aggs,
+            from_dt=window_from,
+            to_dt=window_to,
+            interval=interval,
+            timezone=timezone,
+            group_by=group_by,
+            channel=channel,
+            client_env=client_env,
+            deployment_id=deployment_id,
+            variant_id=variant_id,
+            filters=filters,
+            match_any=match_any,
+            having=having,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+        if widened:
+            result = {**result, "window": {"from_datetime": window_from, "to_datetime": window_to}}
+        return result
+
+    def _query_metric(self, metric: str, aggs: Optional[list[str]], **query: Any) -> dict:
+        """Validate one metric query, scope it to this project and send it."""
+        body = _build_metric_query(metric, aggs, **query)
+        return AgentStudioInterface.query_metric(
+            self.region, body={**body, "project_id": self.project_id}
+        )
+
+    def get_poly_score(
+        self,
+        *,
+        from_dt: Optional[str] = None,
+        to_dt: Optional[str] = None,
+        interval: Optional[str] = "daily",
+        timezone: Optional[str] = None,
+        group_by: Optional[list[str]] = None,
+        channel: Optional[list[str]] = None,
+        client_env: Optional[list[str]] = None,
+        limit: int = 20,
+        offset: int = 0,
+        version: str = "v2",
+    ) -> dict:
+        """Poly Score for this project: an overall summary plus a bucketed table.
+
+        Reads Poly Score (1-5), the score new conversations get (``v2`` in the
+        Data API). Pass ``version="v1"`` for the previous Poly Score (0-10) on
+        older conversations.
+
+        The summary comes from its own unbucketed, ungrouped query, so it covers
+        the whole window whatever ``limit`` and ``offset`` leave in the table.
+        For weekly and monthly buckets both queries use the window widened to
+        whole buckets, as in :meth:`query_metric`.
+        With neither bound given, the window is the last
+        ``POLY_SCORE_DEFAULT_DAYS`` days.
+
+        Args:
+            from_dt: Inclusive start, as for :meth:`query_metric`.
+            to_dt: Exclusive end, as for :meth:`query_metric`.
+            interval: Time bucket for the table; defaults to ``daily``.
+            timezone: IANA timezone for hourly and daily buckets. Bounds with
+                no offset are read in it, for the summary as well as the table,
+                except for weekly and monthly buckets, whose bounds stay UTC.
+            group_by: Dimensions to group the table by.
+            channel: Restrict to these channels.
+            client_env: Restrict to these environments.
+            limit: Table rows per page.
+            offset: Table rows to skip.
+            version: Poly Score version, ``v2`` or ``v1``.
+
+        Returns:
+            dict: The bucketed table (``columns``, ``rows``, ``limit``, ``offset``) plus
+            ``summary``: ``{"version", "scale", "average", "conversations",
+            "from_datetime", "to_datetime"}``, and ``window`` when the window was widened.
+
+        Raises:
+            ValueError: If any argument is outside what the Data API accepts.
+        """
+        if version not in POLY_SCORE_VERSIONS:
+            raise ValueError(
+                f"Poly Score version must be one of: {', '.join(POLY_SCORE_VERSIONS)}. "
+                f"Got {version!r}."
+            )
+        score = POLY_SCORE_VERSIONS[version]
+        default_end = None
+        if from_dt is None and to_dt is None:
+            now = datetime.now(UTC).replace(microsecond=0)
+            from_dt = (now - timedelta(days=POLY_SCORE_DEFAULT_DAYS)).isoformat()
+            default_end = now.isoformat()
+        # Widen here, not only in the table query, so the summary and the
+        # table always cover the same window.
+        from_dt, to_dt, widened = _bucket_window(from_dt, to_dt, interval, timezone)
+        to_dt = to_dt or default_end
+        cohort = {
+            "from_dt": from_dt,
+            "to_dt": to_dt,
+            "channel": channel,
+            "client_env": client_env,
+        }
+        aggs = ["avg", "conversation_count"]
+
+        overall = self._query_metric(score["metric"], aggs, limit=1, **cohort)
+        columns = overall.get("columns") or []
+        rows = overall.get("rows") or []
+        summary: dict[str, Any] = {
+            "version": version,
+            "scale": score["scale"],
+            "average": None,
+            "conversations": 0,
+            "from_datetime": from_dt,
+            "to_datetime": to_dt,
+        }
+        if rows:
+            row = dict(zip(columns, rows[0]))
+            average = row.get("avg")
+            summary["average"] = round(float(average), 2) if average is not None else None
+            summary["conversations"] = int(row.get("conversation_count") or 0)
+
+        table = self._query_metric(
+            score["metric"],
+            aggs,
+            interval=interval,
+            timezone=timezone,
+            group_by=group_by,
+            limit=limit,
+            offset=offset,
+            **cohort,
+        )
+        result = {**table, "summary": summary}
+        if widened:
+            result["window"] = {"from_datetime": from_dt, "to_datetime": to_dt}
+        return result
 
     def create_custom_metric(self, data: dict) -> dict:
         """Validate and create a new custom metric.

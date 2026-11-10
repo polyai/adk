@@ -10,7 +10,7 @@ description: >
 metadata:
   author: PolyAI
   license: Apache-2.0
-  version: 0.77.1
+  version: 0.79.0
   requires:
     bins:
       - poly
@@ -69,6 +69,8 @@ poly branch merge 'Merge message'       # message required when merging into mai
 ```
 
 A clean merge completes immediately and switches your checkout to the parent branch. Merging into `main` deploys to `sandbox` automatically. The web UI's **Merge** button hits the same endpoint — identical result.
+
+If the merge deploys to `live` while an experiment is running, `--force` and `--json` merges are blocked without `--acknowledge-experiment`. Ask the user before adding it: it changes the live version the experiment compares against.
 
 ### Resolving merge conflicts
 
