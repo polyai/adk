@@ -219,7 +219,7 @@ Argument assertion fields:
 |---|---|
 | `parameter_name` | Parameter as defined on the function. |
 | `expected_value` | Expected value, expressed as a string. |
-| `value_type` | One of `string`, `integer`, `number`, `boolean`. |
+| `value_type` | One of `string`, `integer`, `float`, `boolean`. |
 
 ~~~yaml
 function_call_assertions:
@@ -281,7 +281,7 @@ prompt_assertions:
 - `integration_attributes` values must be text, numbers, `true`/`false`, `null`, lists, or nested maps; an unquoted date is rejected with the quoted form to use instead; keys must be text
 - `api_mocks`: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `respond.status` must be a valid HTTP status code (100–599); `respond.body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation
 - each `function_call_assertions[*].name` must match a global function under `functions/` or a flow function under `flows/<flow>/functions/`
-- each argument's `value_type` must be one of `string`, `integer`, `number`, `boolean`
+- each argument's `value_type` must be one of `string`, `integer`, `float`, `boolean`
 - the filename must match the normalized `name`
 
 Validation runs automatically as part of `poly push`.

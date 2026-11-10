@@ -10404,6 +10404,62 @@ class TestCaseTests(unittest.TestCase):
             )
         self.assertIn("Unknown function in assertion: register_phone_numbr", str(cm.exception))
 
+    def _test_case_with_argument(self, **argument) -> TestCase:
+        """A test case asserting one function call argument, read from its YAML shape."""
+        return TestCase.from_yaml_dict(
+            {
+                "name": "Argument assertion",
+                "scenario": "Book a table.",
+                "channel": "voice",
+                "language": "en-GB",
+                "function_call_assertions": [
+                    {
+                        "name": "test_function",
+                        "arguments": [{"parameter_name": "amount", **argument}],
+                    }
+                ],
+            },
+            resource_id="TEST-argument_assertion",
+            name="Argument assertion",
+        )
+
+    def test_validate_accepts_float_value_type(self):
+        """`float` is the decimal value type Agent Studio stores."""
+        self._test_case_with_argument(expected_value="1.5", value_type="float").validate()
+
+    def test_number_value_type_is_read_as_float(self):
+        """`number` in a file is sent to Agent Studio, and written back, as `float`."""
+        test_case = self._test_case_with_argument(expected_value="1.5", value_type="number")
+        test_case.validate()
+
+        call = test_case.assertions.function_calls[0]
+        self.assertEqual(call.arguments[0].value_type, "float")
+        self.assertEqual(call.to_proto().arguments["amount"].value_type, "float")
+        written = test_case.to_yaml_dict()["function_call_assertions"][0]["arguments"][0]
+        self.assertEqual(written["value_type"], "float")
+
+    def test_validate_rejects_unknown_value_type(self):
+        with self.assertRaises(ValueError) as cm:
+            self._test_case_with_argument(expected_value="1.5", value_type="decimal").validate()
+        self.assertIn(
+            "Invalid value type for function call assertion argument: decimal", str(cm.exception)
+        )
+
+    def test_float_assertion_round_trips(self):
+        """A `float` assertion read from YAML is written back unchanged."""
+        test_case = self._test_case_with_argument(expected_value="1.5", value_type="float")
+        yaml_dict = test_case.to_yaml_dict()
+        self.assertEqual(
+            yaml_dict["function_call_assertions"][0]["arguments"],
+            [{"parameter_name": "amount", "expected_value": "1.5", "value_type": "float"}],
+        )
+
+        restored = TestCase.from_yaml_dict(
+            yaml_dict, resource_id="TEST-argument_assertion", name="Argument assertion"
+        )
+        self.assertEqual(restored.to_yaml_dict(), yaml_dict)
+        self.assertEqual(restored.assertions, test_case.assertions)
+
     def test_get_new_updated_deleted_subresources(self):
         test_case = self._sample_test_case()
         new, updated, deleted = test_case.get_new_updated_deleted_subresources()
