@@ -3178,12 +3178,18 @@ class UnchangedFilesTest(unittest.TestCase):
         self.assertNotIn(self.TOPIC, reads)
         self.assertLess(len(reads), len(full_reads))
 
-    def test_a_real_push_records_the_files_it_saved(self):
+    def _push(self, while_sending=None) -> None:
+        """Push with only the network mocked, running `while_sending` as the commands go out."""
         project = AgentStudioProject.from_file_path(self.root)
-        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
         api_handler = MagicMock(branch_id=project.branch_id)
         api_handler.queue_resources.return_value = []
-        api_handler.send_queued_commands.return_value = True
+
+        def send_queued_commands():
+            if while_sending:
+                while_sending()
+            return True
+
+        api_handler.send_queued_commands.side_effect = send_queued_commands
         project._api_handler = api_handler
 
         with (
@@ -3191,10 +3197,48 @@ class UnchangedFilesTest(unittest.TestCase):
             patch.object(AgentStudioProject, "pull_project", return_value=([], {})),
         ):
             success, message, _ = project.push_project(parent_projection_json={})
-
         self.assertTrue(success, message)
+
+    def test_a_real_push_records_the_files_it_saved(self):
+        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
+
+        self._push()
+
         _, reads, _ = self._assert_same_as_full_read()
         self.assertNotIn(self.TOPIC, reads)
+
+    def test_a_file_edited_while_a_push_runs_is_read_afterwards(self):
+        """An editor's autosave or a coding agent can write while the commands are sent."""
+        self._edit(self.TOPIC, "uses global functions.", "edited locally.")
+
+        self._push(lambda: self._edit(self.TOPIC, "edited locally.", "edited during the push."))
+
+        (_, modified, _, _), reads, _ = self._assert_same_as_full_read()
+        self.assertIn(self.TOPIC, reads)
+        self.assertIn(os.path.join(self.root, self.TOPIC), modified)
+
+    def test_renaming_a_referenced_resource_reads_the_files_that_name_it(self):
+        """The rename keeps the handoff's path and ID, but the topic's name for it is gone."""
+        self._record()
+        self._edit(os.path.join("config", "handoffs.yaml"), "name: default", "name: default!")
+
+        errors, reads, _ = self._assert_same_as_full_read("validate_project")
+
+        self.assertIn(self.TOPIC, reads)
+        self.assertTrue(any("topic_1" in error for error in errors), errors)
+
+    def test_a_fingerprint_missing_a_field_is_read(self):
+        """A truncated or hand-edited status file makes the file stale, rather than an error."""
+        for field in ("bytes", "saved", "resolved", "unresolved"):
+            with self.subTest(field):
+                self._record()
+                project = AgentStudioProject.from_file_path(self.root)
+                del project.file_fingerprints["files"][self.TOPIC][field]
+                project.save_config()
+
+                _, reads, _ = self._assert_same_as_full_read()
+
+                self.assertIn(self.TOPIC, reads)
 
 
 class ReferencesTest(unittest.TestCase):

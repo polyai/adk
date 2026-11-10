@@ -1,8 +1,8 @@
 """What resources refer to, and which IDs and names exist now.
 
-A saved resource holds IDs where its file shows names. While every ID it refers to still
-exists, and no name it couldn't resolve has appeared, an unedited file still means exactly its
-saved resource, so the ADK needn't read it.
+A saved resource holds IDs where its file shows names. While every name its file shows still
+stands for the IDs it did, and no name it couldn't resolve has appeared, an unedited file still
+means exactly its saved resource, so the ADK needn't read it.
 
 Copyright PolyAI Limited
 """
@@ -28,15 +28,15 @@ FLOW_MODULE = "flow_module"
 
 @dataclass
 class KnownIds:
-    """The IDs that exist now, and the IDs each name has, per reference kind."""
+    """The IDs that exist now with their names, and the IDs each name has, per reference kind."""
 
-    ids: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
+    ids: dict[str, dict[str, str]] = field(default_factory=lambda: defaultdict(dict))
     names: dict[str, dict[str, set[str]]] = field(
         default_factory=lambda: defaultdict(lambda: defaultdict(set))
     )
 
     def _add(self, kind: str, resource_id: str, name: str) -> None:
-        self.ids[kind].add(resource_id)
+        self.ids[kind][resource_id] = name
         self.names[kind][name].add(resource_id)
 
     @classmethod
@@ -60,6 +60,10 @@ class KnownIds:
     def exists(self, kind: str, value: str) -> bool:
         """Whether `value` is the ID of something of this kind."""
         return value in self.ids.get(kind, ())
+
+    def name_of(self, kind: str, resource_id: str) -> str:
+        """The name the resource with this ID has now."""
+        return self.ids[kind][resource_id]
 
     def name_exists(self, kind: str, value: str) -> bool:
         """Whether something of this kind is now named `value`."""

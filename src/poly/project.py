@@ -371,33 +371,41 @@ class AgentStudioProject:
         bytes_hash = bytes_hash or self._file_bytes_hash(rel_path, type(resource), bytes_hashes)
         if not bytes_hash:
             return None
-        refs, unresolved = set(), set()
+        resolved: dict[tuple[str, str], list[str]] = {}
+        unresolved = set()
         for kind, value in references:
-            ids, resolved = known.resolve(kind, value)
-            if resolved:
-                refs.update((kind, resource_id) for resource_id in ids)
+            if known.exists(kind, value):
+                # The file shows this ID's name, and reading it resolves that name again.
+                value = known.name_of(kind, value)
+            ids, found = known.resolve(kind, value)
+            if found:
+                resolved[(kind, value)] = ids
             else:
                 unresolved.add((kind, value))
         return {
             "bytes": bytes_hash,
             "saved": saved_hash,
-            "refs": sorted(list(ref) for ref in refs),
+            "resolved": sorted([kind, name, ids] for (kind, name), ids in resolved.items()),
             "unresolved": sorted(list(ref) for ref in unresolved),
         }
 
-    def _record_fingerprints(self) -> None:
-        """Record every file's current bytes as meaning its saved resource.
+    def _record_fingerprints(self, bytes_hashes: Optional[dict[str, str]] = None) -> None:
+        """Record every file's bytes as meaning its saved resource.
 
         Call only when that's true by construction: after a forced pull, which wrote these files
         from the saved resources, or at the end of a push, whose saved resources were just read
         from them. Types that don't declare their references aren't recorded, so they're always
         read.
+
+        Args:
+            bytes_hashes: File hashes taken before the files were read, as `_file_bytes_hash`
+                caches them. A file missing from it is hashed now.
         """
         known = KnownIds.from_mappings(
             self._make_resource_mappings(self.resources) + self.slim_resources
         )
         files: dict[str, dict[str, Any]] = {}
-        bytes_hashes: dict[str, str] = {}
+        bytes_hashes = {} if bytes_hashes is None else bytes_hashes
         for resources in self.resources.values():
             for resource in resources.values():
                 if fingerprint := self._fingerprint(
@@ -499,32 +507,45 @@ class AgentStudioProject:
         fingerprint = self.file_fingerprints.get("files", {}).get(rel_path)
         if not isinstance(fingerprint, dict):
             return False
-        if fingerprint["saved"] != self.file_structure_info.get(rel_path, {}).get("hash"):
+        if fingerprint.get("saved") != self.file_structure_info.get(rel_path, {}).get("hash"):
             return False
-        return fingerprint["bytes"] == self._file_bytes_hash(rel_path, resource_type, bytes_hashes)
+        return fingerprint.get("bytes") == self._file_bytes_hash(
+            rel_path, resource_type, bytes_hashes
+        )
 
     def _unchanged_files(
-        self, new_mappings: list[ResourceMapping], kept_mappings: list[ResourceMapping]
+        self,
+        new_mappings: list[ResourceMapping],
+        kept_mappings: list[ResourceMapping],
+        bytes_hashes: Optional[dict[str, str]] = None,
     ) -> set[str]:
         """Kept files that still mean exactly their saved resource, so needn't be read.
 
-        A file qualifies when its bytes and its saved hash are as recorded, every ID its saved
-        resource references still exists, and no name it couldn't resolve now does.
+        A file qualifies when its bytes and its saved hash are as recorded, every name it
+        resolved still stands for the same IDs, and no name it couldn't resolve now does.
+
+        Args:
+            new_mappings: Mappings for files new since the last pull or push.
+            kept_mappings: Mappings for files that have a saved resource.
+            bytes_hashes: File hashes already taken, as `_file_bytes_hash` caches them.
 
         Returns:
             Their paths, relative to the project root.
         """
         known = KnownIds.from_mappings([*new_mappings, *kept_mappings, *self.slim_resources])
         unchanged: set[str] = set()
-        bytes_hashes: dict[str, str] = {}
+        bytes_hashes = {} if bytes_hashes is None else bytes_hashes
         for mapping in kept_mappings:
             rel_path = self._relative_path(mapping.file_path)
             if not self._is_as_recorded(rel_path, mapping.resource_type, bytes_hashes):
                 continue
             fingerprint = self.file_fingerprints["files"][rel_path]
-            if not all(known.exists(kind, value) for kind, value in fingerprint["refs"]):
+            resolved, unresolved = fingerprint.get("resolved"), fingerprint.get("unresolved")
+            if resolved is None or unresolved is None:
                 continue
-            if any(known.name_exists(kind, value) for kind, value in fingerprint["unresolved"]):
+            if not all(known.resolve(kind, name)[0] == ids for kind, name, ids in resolved):
+                continue
+            if any(known.name_exists(kind, name) for kind, name in unresolved):
                 continue
             unchanged.add(rel_path)
         return unchanged
@@ -1647,9 +1668,19 @@ class AgentStudioProject:
         }
 
         # 2. Read all new/kept resources from disk. A file known to be unchanged reads to its
-        # saved resource, so that is used instead.
+        # saved resource, so that is used instead. Every file is hashed before any is read, so
+        # one edited while the push runs isn't recorded as what was pushed.
         new_state: ResourceMap = {}
-        unchanged = self._unchanged_files(new_resource_mappings, kept_resource_mappings)
+        bytes_hashes: dict[str, str] = {}
+        for resource_mapping in local_resource_mappings:
+            self._file_bytes_hash(
+                self._relative_path(resource_mapping.file_path),
+                resource_mapping.resource_type,
+                bytes_hashes,
+            )
+        unchanged = self._unchanged_files(
+            new_resource_mappings, kept_resource_mappings, bytes_hashes
+        )
 
         new_file_paths = {rm.file_path for rm in new_resource_mappings}
         for resource_mapping in local_resource_mappings:
@@ -1766,7 +1797,7 @@ class AgentStudioProject:
         else:
             self.resources = new_state
             self.file_structure_info = self.compute_file_structure_info(self.resources)
-            self._record_fingerprints()
+            self._record_fingerprints(bytes_hashes)
             self.save_config()
 
         return True, "Resources pushed successfully.", commands
