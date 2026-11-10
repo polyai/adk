@@ -61,7 +61,7 @@ class TranscriptsCommand(BaseCommand):
                 "Examples:\n"
                 '  poly transcripts search "cancel my booking"\n'
                 '  poly transcripts search "refund" --from 2026-09-01 --to 2026-09-30 --context 0\n'
-                '  poly transcripts search "refund" --english --json\n'
+                '  poly transcripts search "refund" --json\n'
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -145,6 +145,7 @@ class TranscriptsCommand(BaseCommand):
             output_json: If True, emit machine-readable JSON.
         """
         import requests
+        from rich.markup import escape
 
         from poly.output.console import info, paged_output, print_transcript_matches
 
@@ -167,7 +168,7 @@ class TranscriptsCommand(BaseCommand):
             json_print(result)
             return
         if not result.get("results"):
-            info(f"No transcripts mention {args.query!r}.")
+            info(f"No transcripts mention {escape(repr(args.query))}.")
             return
         with paged_output():
             print_transcript_matches(

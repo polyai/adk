@@ -26,7 +26,7 @@ Examples:
 poly transcripts search "cancel my booking"
 poly transcripts search "refund" --from 2026-09-01 --to 2026-09-30 --context 0
 poly transcripts search "speak to a human" --context 2 --limit 5
-poly transcripts search "refund" --english --json
+poly transcripts search "refund" --json
 ~~~
 
 | Argument | Description |

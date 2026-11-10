@@ -112,6 +112,17 @@ class TranscriptsSearchTest(TranscriptsCommandTest):
         self.assertIn("conv-1", output)
         self.assertIn("cancel my booking", output)
 
+    def test_phrase_with_brackets_is_printed_as_typed(self):
+        """A phrase with square brackets is not read as Rich markup in the no-results line."""
+        self.mock_request.return_value = {"results": [], "total": 0, "limit": 20, "offset": 0}
+
+        for phrase in ("[hold] music", "press [/] to continue"):
+            with self.subTest(phrase=phrase):
+                output = self._render(
+                    TranscriptsCommand.transcripts_search, TEST_DIR, _search_args(query=phrase)
+                )
+                self.assertIn(f"No transcripts mention '{phrase}'.", output)
+
     @patch("poly.cli_commands.shared.json_print")
     def test_short_query_fails_before_request(self, mock_json):
         """The Data API requires 3 to 300 characters; say so before calling it."""

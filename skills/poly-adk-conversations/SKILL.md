@@ -37,7 +37,7 @@ poly conversations get-audio <conversation_id> -o recording.wav
 
 ## Reading metrics and transcripts
 
-These commands read the project's conversation data through the Data API. They need no push and work on live traffic. Every one of them accepts `--json`, `--from DATE` / `--to DATE` (a bare date for `--to` includes the whole day), and pages with `--limit` (max 100) / `--offset` — never loop to fetch everything, the API allows 100 requests a minute per key.
+These commands read the project's conversation data through the Data API. They need no push and work on live traffic. All of them accept `--json`. The search commands and `metrics query` / `score` also take `--from DATE` / `--to DATE` (a bare date for `--to` includes the whole day) and page with `--limit` (max 100) / `--offset` — never loop to fetch everything, the API allows 100 requests a minute per key.
 
 ```bash
 poly metrics available                                   # which metrics you can read: built-in (poly_score_v2, duration, handoff, …) plus custom
