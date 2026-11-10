@@ -385,7 +385,10 @@ class UpdateCommand(BaseCommand):
             return {
                 "uv-tool": ["uv", "tool", "upgrade", PACKAGE_NAME],
                 "pipx": ["pipx", "upgrade", PACKAGE_NAME],
-                "uv-pip": ["uv", "pip", "install", "--upgrade", package_spec],
+                "uv-pip": [
+                    *("uv", "pip", "install", "--python", sys.executable, "--upgrade"),
+                    package_spec,
+                ],
                 "pip": [sys.executable, "-m", "pip", "install", "--upgrade", package_spec],
             }[method]
 
@@ -396,7 +399,7 @@ class UpdateCommand(BaseCommand):
         return {
             "uv-tool": ["uv", "tool", "install", "--force", spec],
             "pipx": ["pipx", "install", "--force", spec],
-            "uv-pip": ["uv", "pip", "install", spec],
+            "uv-pip": ["uv", "pip", "install", "--python", sys.executable, spec],
             "pip": [sys.executable, "-m", "pip", "install", spec],
         }[method]
 
@@ -423,14 +426,23 @@ class UpdateCommand(BaseCommand):
         if method in NOT_UPGRADABLE_REASONS:
             return NOT_UPGRADABLE_REASONS[method]
         if installing and sys.platform == "win32":
-            command = subprocess.list2cmdline(cls._upgrade_command(method, target_version))
+            command = cls._powershell_command(cls._upgrade_command(method, target_version))
             return (
                 "On Windows, poly can't update itself while it's running: the update replaces "
                 "files poly is using, and a failed attempt leaves the CLI unable to start. "
-                f"Run this in a new terminal instead:\n  {command}\n"
+                f"Run this in a new PowerShell window instead:\n  {command}\n"
                 "Then run 'poly update --skills-only' to update the AI agent skills."
             )
         return None
+
+    @staticmethod
+    def _powershell_command(args: list[str]) -> str:
+        """`args` as a command to paste into PowerShell, the default shell in Windows Terminal.
+
+        PowerShell reads a quoted program path as a string, so `&` is needed to run it.
+        """
+        command = subprocess.list2cmdline(args)
+        return f"& {command}" if command.startswith('"') else command
 
     @classmethod
     def refuse_if_not_upgradable(

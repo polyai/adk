@@ -36,6 +36,8 @@ TARGET_VERSION = "0.77.0"
 METHODS = ("pip", "uv-pip", "uv-tool", "pipx")
 BIN_DIR = "Scripts" if sys.platform == "win32" else "bin"
 EXE_SUFFIX = ".exe" if sys.platform == "win32" else ""
+# The line on Windows that the command to run follows.
+REFUSAL = "Run this in a new PowerShell window"
 
 
 def _path_without_uv(path: str) -> str:
@@ -62,9 +64,6 @@ def _install(method: str, wheel: Path, root: Path, env: dict[str, str]) -> Path:
         else:
             _run(["uv", "venv", str(venv)])
             _run(["uv", "pip", "install", "--python", str(python), str(wheel)])
-            # 'uv pip install' targets the active venv, as it would for a user who
-            # activated theirs.
-            env["VIRTUAL_ENV"] = str(venv)
         return venv / BIN_DIR / f"poly{EXE_SUFFIX}"
 
     bin_dir = root / "bin"
@@ -143,7 +142,7 @@ def _verify_windows_refusal(method, run_poly, workdir: Path, env: dict[str, str]
         result = json.loads(update.stdout)
     except json.JSONDecodeError:
         sys.exit(f"FAILED ({method}): poly update didn't print a JSON result")
-    if result.get("success") is not False or "new terminal" not in result.get("error", ""):
+    if result.get("success") is not False or REFUSAL not in result.get("error", ""):
         sys.exit(f"FAILED ({method}): poly update didn't refuse: {result!r}")
 
     before = run_poly("--version")
@@ -151,10 +150,14 @@ def _verify_windows_refusal(method, run_poly, workdir: Path, env: dict[str, str]
         sys.exit(f"FAILED ({method}): the refusal changed the install: {before.stdout!r}")
 
     lines = result["error"].splitlines()
-    command = lines[lines.index(next(ln for ln in lines if "new terminal" in ln)) + 1].strip()
-    print(f"Running the suggested command: {command}")
+    command = lines[lines.index(next(ln for ln in lines if REFUSAL in ln)) + 1].strip()
+    print(f"Running the suggested command in PowerShell: {command}")
     suggested = subprocess.run(
-        command, cwd=workdir, env=env, capture_output=True, text=True, shell=True
+        ["powershell", "-NoProfile", "-Command", command],
+        cwd=workdir,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     print(f"exited {suggested.returncode}\n{suggested.stdout}{suggested.stderr}")
 

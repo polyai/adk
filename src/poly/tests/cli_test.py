@@ -5513,12 +5513,13 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
         self.assertTrue(UpdateCommand.refuse_if_not_upgradable(output_json=False))
 
     def test_windows_pip_refusal_gives_the_pip_command_to_run(self):
-        """The message names the exact pip command, quoting an interpreter path with spaces."""
+        """The message names the exact pip command for PowerShell, which runs a quoted path
+        only after `&`."""
         UpdateCommand.refuse_if_not_upgradable(output_json=False)
 
         message = self.warning.call_args[0][0]
         self.assertIn(
-            '"C:\\Program Files\\Python312\\python.exe" -m pip install --upgrade '
+            '& "C:\\Program Files\\Python312\\python.exe" -m pip install --upgrade '
             "polyai-adk\\[call]",
             message,
         )
@@ -5544,7 +5545,10 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
         commands = {
             "uv-tool": "uv tool upgrade polyai-adk",
             "pipx": "pipx upgrade polyai-adk",
-            "uv-pip": "uv pip install --upgrade polyai-adk",
+            "uv-pip": (
+                'uv pip install --python "C:\\Program Files\\Python312\\python.exe" '
+                "--upgrade polyai-adk"
+            ),
         }
         for method, command in commands.items():
             with self.subTest(method):
@@ -5743,16 +5747,22 @@ class UpgradeCommandTest(unittest.TestCase):
         self.assertEqual(command, ["pipx", "install", "--force", "polyai-adk==0.52.0"])
 
     def test_uv_pip_latest_passes_upgrade_flag(self):
-        """A uv-managed venv upgrades with 'uv pip install --upgrade'."""
+        """A uv-managed venv upgrades with 'uv pip install --upgrade', into poly's own venv
+        whether or not it's active."""
         command = UpdateCommand._upgrade_command("uv-pip", None)
 
-        self.assertEqual(command, ["uv", "pip", "install", "--upgrade", "polyai-adk"])
+        self.assertEqual(
+            command,
+            ["uv", "pip", "install", "--python", sys.executable, "--upgrade", "polyai-adk"],
+        )
 
     def test_uv_pip_pinned_drops_upgrade_flag(self):
         """A pinned spec installs exactly that version, so --upgrade is dropped."""
         command = UpdateCommand._upgrade_command("uv-pip", "0.52.0")
 
-        self.assertEqual(command, ["uv", "pip", "install", "polyai-adk==0.52.0"])
+        self.assertEqual(
+            command, ["uv", "pip", "install", "--python", sys.executable, "polyai-adk==0.52.0"]
+        )
 
     def test_pip_latest_passes_upgrade_flag(self):
         """A plain venv upgrades via the running interpreter's pip."""
@@ -5826,13 +5836,19 @@ class UpgradeCommandWithCallExtraTest(unittest.TestCase):
         """An upgrade in a uv-managed venv also upgrades the voice deps."""
         command = UpdateCommand._upgrade_command("uv-pip", None)
 
-        self.assertEqual(command, ["uv", "pip", "install", "--upgrade", "polyai-adk[call]"])
+        self.assertEqual(
+            command,
+            ["uv", "pip", "install", "--python", sys.executable, "--upgrade", "polyai-adk[call]"],
+        )
 
     def test_uv_pip_pinned_keeps_call_extra(self):
         """A pinned install in a uv-managed venv requests the extra at that version."""
         command = UpdateCommand._upgrade_command("uv-pip", "0.52.0")
 
-        self.assertEqual(command, ["uv", "pip", "install", "polyai-adk[call]==0.52.0"])
+        self.assertEqual(
+            command,
+            ["uv", "pip", "install", "--python", sys.executable, "polyai-adk[call]==0.52.0"],
+        )
 
     def test_pip_latest_keeps_call_extra(self):
         """An upgrade via pip also upgrades the voice deps."""
