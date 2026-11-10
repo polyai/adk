@@ -31,8 +31,8 @@ Each handoff includes the following fields:
 
 | Field | Description |
 |---|---|
-| `name` | Identifier for the handoff. Referenced in rules as `{{ho:handoff_name}}`. |
-| `description` | Explains what the handoff does. |
+| `name` | Identifier for the handoff, up to 100 characters. Referenced in rules as `{{ho:handoff_name}}`. |
+| `description` | Explains what the handoff does, up to 300 characters. |
 | `is_default` | Whether this is the default handoff. |
 | `sip_config` | Transfer method configuration. |
 | `sip_headers` | Optional custom SIP headers as key/value pairs. |
@@ -54,8 +54,13 @@ A handoff uses one of three SIP methods:
 
 ## Validation
 
+- `name` is required and at most 100 characters. `description` is at most 300 characters.
 - `sip_config.method` must be one of `invite`, `refer`, or `bye`.
 - For `invite`, `outbound_encryption` must be `TLS/SRTP` or `UDP/RTP`.
+- `phone_number` (for `invite` and `refer`) and `outbound_endpoint` (for `invite`) are at most 100 characters each.
+- Each `sip_headers` entry has a `key` and a `value` that are both text. Quote a value YAML would otherwise read as a number or boolean (`value: '5'`).
+- A SIP header `key` is at most 100 characters, made of letters, digits and `!#$%&'*+-.^_~`.
+- A SIP header `value` is at most 1,000 characters of printable ASCII: no line breaks, tabs or non-ASCII characters.
 - Across all handoffs in `config/handoffs.yaml`, exactly one must have `is_default: true` — zero or more than one default handoff fails validation.
 - Each handoff `name` must be unique.
 

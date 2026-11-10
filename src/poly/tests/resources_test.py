@@ -4581,6 +4581,120 @@ class EntityTests(unittest.TestCase):
         )
         self.assertIsNone(entity_without_config.validate())
 
+    @staticmethod
+    def _entity(entity_type: EntityType, config: dict, description: str = "A test entity"):
+        return Entity(
+            resource_id="entity-1",
+            name="test_entity",
+            description=description,
+            entity_type=entity_type,
+            config=config,
+        )
+
+    def test_validate_entity_with_description_passes(self):
+        """An entity with a description is valid."""
+        self.assertIsNone(self._entity(EntityType.FREE_TEXT, {}).validate())
+
+    def test_validate_entity_with_empty_or_blank_description_raises_value_error(self):
+        """The platform requires a description, so an empty or blank one fails locally."""
+        for description in ("", "   "):
+            with self.subTest(description=description):
+                entity = self._entity(EntityType.FREE_TEXT, {}, description=description)
+                with self.assertRaises(ValueError) as cm:
+                    entity.validate()
+                self.assertEqual("Description cannot be empty.", str(cm.exception))
+
+    def test_validate_numeric_bounds_at_the_limits_pass(self):
+        """A min of 0 and a max of 1,000,000 are the widest bounds allowed."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": True, "min": 0, "max": 1_000_000})
+        self.assertIsNone(entity.validate())
+
+    def test_validate_numeric_min_below_zero_raises_value_error(self):
+        """min cannot be negative, whether or not the range is on."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": False, "min": -1, "max": 10})
+        with self.assertRaises(ValueError) as cm:
+            entity.validate()
+        self.assertIn("'min' must be at least 0", str(cm.exception))
+
+    def test_validate_numeric_max_above_limit_raises_value_error(self):
+        """max cannot exceed 1,000,000, whether or not the range is on."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": False, "max": 1_000_000.5})
+        with self.assertRaises(ValueError) as cm:
+            entity.validate()
+        self.assertIn("'max' must be at most 1,000,000", str(cm.exception))
+
+    def test_validate_numeric_range_with_max_equal_to_min_passes(self):
+        """With the range on, max may equal min."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": True, "min": 5, "max": 5})
+        self.assertIsNone(entity.validate())
+
+    def test_validate_numeric_range_with_max_below_min_raises_value_error(self):
+        """With the range on, max cannot be less than min."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": True, "min": 5, "max": 4})
+        with self.assertRaises(ValueError) as cm:
+            entity.validate()
+        self.assertIn("'max' (4) cannot be less than 'min' (5)", str(cm.exception))
+
+    def test_validate_numeric_max_below_min_without_range_passes(self):
+        """The order of the bounds is only checked when the range is on."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": False, "min": 5, "max": 4})
+        self.assertIsNone(entity.validate())
+
+    def test_validate_numeric_range_with_min_but_no_max_raises_value_error(self):
+        """A missing max is pushed as 0, so a range with only a positive min says to set max."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": True, "min": 5})
+        with self.assertRaises(ValueError) as cm:
+            entity.validate()
+        self.assertIn("'max' must be set when 'has_range' is true", str(cm.exception))
+
+    def test_validate_numeric_range_with_max_but_no_min_passes(self):
+        """A missing min is pushed as 0, which any allowed max is at or above."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": True, "max": 20})
+        self.assertIsNone(entity.validate())
+
+    def test_validate_alphanumeric_regular_expression_that_compiles_passes(self):
+        """A regular expression that compiles is valid; so is an empty one."""
+        for pattern in (r"^[A-Z]{2}\d{6}$", ""):
+            with self.subTest(pattern=pattern):
+                entity = self._entity(
+                    EntityType.ALPHANUMERIC,
+                    {"enabled": True, "validation_type": "regex", "regular_expression": pattern},
+                )
+                self.assertIsNone(entity.validate())
+
+    def test_validate_alphanumeric_regular_expression_that_fails_to_compile_raises(self):
+        """A regular expression that does not compile fails locally."""
+        entity = self._entity(
+            EntityType.ALPHANUMERIC,
+            {"enabled": True, "validation_type": "regex", "regular_expression": "[a-z"},
+        )
+        with self.assertRaises(ValueError) as cm:
+            entity.validate()
+        self.assertIn("'regular_expression' is not a valid regular expression", str(cm.exception))
+
+    def test_validate_text_list_config_with_strings_passes(self):
+        """Enum options and phone number country codes that are all text are valid."""
+        for entity_type, config in (
+            (EntityType.ENUM, {"options": ["1", "2"]}),
+            (EntityType.PHONE_NUMBER, {"enabled": True, "country_codes": ["US", "44"]}),
+        ):
+            with self.subTest(entity_type=entity_type):
+                self.assertIsNone(self._entity(entity_type, config).validate())
+
+    def test_validate_text_list_config_with_non_string_item_raises_value_error(self):
+        """An unquoted number among enum options or country codes fails in validate."""
+        for entity_type, config, config_field in (
+            (EntityType.ENUM, {"options": ["one", 2]}, "options"),
+            (EntityType.PHONE_NUMBER, {"country_codes": ["US", 44]}, "country_codes"),
+        ):
+            with self.subTest(entity_type=entity_type):
+                with self.assertRaises(ValueError) as cm:
+                    self._entity(entity_type, config).validate()
+                self.assertIn(
+                    f"Config field '{config_field}' must be a list of text values",
+                    str(cm.exception),
+                )
+
 
 TEST_FUNCTION_STEP_CODE = """def process_data(conv: Conversation, flow: Flow):
     \"\"\"Process some data.\"\"\"
@@ -6704,6 +6818,111 @@ class HandoffTests(unittest.TestCase):
             }
         )
 
+    @staticmethod
+    def _handoff(**kwargs) -> Handoff:
+        defaults = {"resource_id": "ho-1", "name": "H", "sip_config": {"method": "bye"}}
+        defaults.update(kwargs)
+        return Handoff(**defaults)
+
+    def test_validate_fields_at_their_length_limits_pass(self):
+        """Name, description, phone number and outbound endpoint at their limits are valid."""
+        self._handoff(
+            name="n" * 100,
+            description="d" * 300,
+            sip_config={
+                "method": "invite",
+                "phone_number": "1" * 100,
+                "outbound_endpoint": "e" * 100,
+                "outbound_encryption": "TLS/SRTP",
+            },
+        ).validate()
+        self._handoff(sip_config={"method": "refer", "phone_number": "1" * 100}).validate()
+
+    def test_validate_field_over_its_length_limit_raises_value_error(self):
+        """Each length-limited field fails one character over its limit, naming the limit."""
+        invite = {"method": "invite", "outbound_encryption": "TLS/SRTP"}
+        cases = [
+            ({"name": "n" * 101}, "name is longer than 100 characters"),
+            ({"description": "d" * 301}, "description is longer than 300 characters"),
+            (
+                {"sip_config": {**invite, "phone_number": "1" * 101}},
+                "sip_config.phone_number is longer than 100 characters",
+            ),
+            (
+                {"sip_config": {"method": "refer", "phone_number": "1" * 101}},
+                "sip_config.phone_number is longer than 100 characters",
+            ),
+            (
+                {"sip_config": {**invite, "outbound_endpoint": "e" * 101}},
+                "sip_config.outbound_endpoint is longer than 100 characters",
+            ),
+        ]
+        for kwargs, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as cm:
+                    self._handoff(**kwargs).validate()
+                self.assertIn(message, str(cm.exception))
+
+    def test_validate_length_is_counted_as_the_platform_counts_it(self):
+        """Surrounding whitespace is not counted; a character outside the BMP counts as two."""
+        self._handoff(description=" " + "d" * 300 + " ").validate()
+        with self.assertRaises(ValueError) as cm:
+            self._handoff(name="\U0001f600" * 51).validate()
+        self.assertIn("name is longer than 100 characters", str(cm.exception))
+
+    def test_validate_sip_headers_within_the_limits_pass(self):
+        """Header names of allowed characters and printable ASCII values are valid."""
+        self._handoff(
+            sip_headers=[
+                {"key": "X-Reason", "value": "escalation"},
+                {"key": "k" * 100, "value": "v" * 1000},
+                {"key": "A!#$%&'*+-.^_~9", "value": ' ~ printable: {"a": 1}'},
+            ]
+        ).validate()
+
+    def test_validate_sip_header_with_empty_key_is_ignored(self):
+        """A header with an empty key is left out of the push, so it is not checked."""
+        handoff = self._handoff(
+            sip_headers=[{"key": "", "value": 5}, {"key": "X-Kept", "value": "v"}]
+        )
+        handoff.validate()
+        self.assertEqual(
+            [h.key for h in handoff.build_create_proto().sip_headers.headers], ["X-Kept"]
+        )
+
+    def test_validate_malformed_sip_header_raises_value_error(self):
+        """A header that is not a text key and a text value fails in validate."""
+        cases = [
+            ([{"key": "X-Count", "value": 5}], "both text"),
+            ([{"key": 5, "value": "v"}], "both text"),
+            ([{"key": "X-No-Value"}], "both text"),
+            (["X-Reason: escalation"], "must be a mapping"),
+            ({"X-Reason": "escalation"}, "sip_headers must be a list"),
+        ]
+        for sip_headers, message in cases:
+            with self.subTest(sip_headers=sip_headers):
+                with self.assertRaises(ValueError) as cm:
+                    self._handoff(sip_headers=sip_headers).validate()
+                self.assertIn(message, str(cm.exception))
+
+    def test_validate_sip_header_outside_the_limits_raises_value_error(self):
+        """A header name or value that is too long or has disallowed characters fails."""
+        cases = [
+            ("k" * 101, "v", "is longer than 100 characters"),
+            ("X Reason", "v", "can only contain letters, digits"),
+            ("X:Reason", "v", "can only contain letters, digits"),
+            ("X-Reason\n", "v", "can only contain letters, digits"),
+            ("X-Reason", "v" * 1001, "value is longer than 1000 characters"),
+            ("X-Reason", "caf\u00e9", "can only contain printable ASCII"),
+            ("X-Reason", "a\tb", "can only contain printable ASCII"),
+            ("X-Reason", "line\n", "can only contain printable ASCII"),
+        ]
+        for key, value, message in cases:
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(ValueError) as cm:
+                    self._handoff(sip_headers=[{"key": key, "value": value}]).validate()
+                self.assertIn(message, str(cm.exception))
+
     def test_make_pretty_from_pretty_discover(self):
         """make_pretty/from_pretty pass through to utils; discover_resources returns [] when no file, paths when file exists."""
         content = "name: Test\nsip_config:\n  method: bye\n"
@@ -6747,11 +6966,13 @@ class HandoffTests(unittest.TestCase):
 QUERY_SCHEMA = {"type": "object", "properties": {"family": {"type": "string"}}}
 BODY_SCHEMA = {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}
 OK_SCHEMA = {"type": "object", "properties": {"resourceType": {"const": "Bundle"}}}
+OPERATION_ID = "123e4567-e89b-12d3-a456-426614174000"
+OTHER_OPERATION_ID = "9b2f6c1e-5d3a-4e8b-a7c4-0f1e2d3c4b5a"
 
 
 def _operation(**kwargs) -> ApiIntegrationOperation:
     """An operation with plain defaults; pass fields to override them."""
-    defaults = {"resource_id": "op-1", "name": "get", "method": "GET", "resource": "/a"}
+    defaults = {"resource_id": OPERATION_ID, "name": "get", "method": "GET", "resource": "/a"}
     defaults.update(kwargs)
     return ApiIntegrationOperation(**defaults)
 
@@ -7157,7 +7378,7 @@ class ApiIntegrationTest(unittest.TestCase):
         _, updated, deleted = ApiIntegration(
             resource_id="int-1", name="API", operations=[yaml_op]
         ).get_new_updated_deleted_subresources(old)
-        self.assertEqual(updated[0].resource_id, "op-1")
+        self.assertEqual(updated[0].resource_id, OPERATION_ID)
         self.assertEqual((updated[0].description, updated[0].headers), ("Fetch", {"Accept": "a"}))
         self.assertEqual((deleted[0].description, deleted[0].headers), ("Old", {"X": "y"}))
         self.assertEqual(deleted[0].integration_id, "int-1")
@@ -8617,7 +8838,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
             "description": "A valid description",
             "operations": [
                 ApiIntegrationOperation(
-                    resource_id="op-1", name="list_users", method="GET", resource="/users"
+                    resource_id=OPERATION_ID, name="list_users", method="GET", resource="/users"
                 ),
             ],
         }
@@ -8724,11 +8945,65 @@ class TestApiIntegrationValidate(unittest.TestCase):
         """Validation rejects an operation whose name is empty."""
         integration = self._make_integration(
             operations=[
-                ApiIntegrationOperation(resource_id="op-1", name="", method="GET", resource="/x"),
+                ApiIntegrationOperation(
+                    resource_id=OPERATION_ID, name="", method="GET", resource="/x"
+                ),
             ]
         )
         with self.assertRaises(ValueError, msg="Operation name cannot be empty."):
             integration.validate()
+
+    def test_two_character_name_is_valid(self):
+        """An integration name of two characters is the shortest allowed."""
+        self._make_integration(name="ab").validate()
+
+    def test_one_character_name_raises_value_error(self):
+        """Validation rejects an integration name shorter than two characters."""
+        with self.assertRaises(ValueError) as ctx:
+            self._make_integration(name="a").validate()
+        self.assertIn("must be at least 2 characters", str(ctx.exception))
+
+    def test_operation_name_as_lowercase_identifier_is_valid(self):
+        """Operation names of lowercase letters, digits and underscores are valid."""
+        for name in ("get_user_2", "_private", "g"):
+            with self.subTest(name=name):
+                self._make_integration(operations=[_operation(name=name)]).validate()
+
+    def test_operation_name_that_is_not_a_lowercase_identifier_raises_value_error(self):
+        """Validation rejects an operation name the platform would not accept."""
+        for name in ("getUser", "get-user", "get user", "2nd_user", "get_user\n"):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError) as ctx:
+                    self._make_integration(operations=[_operation(name=name)]).validate()
+                self.assertIn("must follow Python function naming convention", str(ctx.exception))
+
+    def test_operation_id_that_is_a_uuid_or_absent_is_valid(self):
+        """An operation id written in the YAML passes when it is a UUID; so does no id."""
+        for operation in (
+            {"id": OPERATION_ID, "name": "list_users", "method": "GET", "resource": "/users"},
+            {"id": OPERATION_ID.upper(), "name": "list_users", "method": "GET", "resource": "/u"},
+            {"name": "list_users", "method": "GET", "resource": "/users"},
+        ):
+            with self.subTest(operation=operation):
+                self._make_integration(operations=[operation]).validate()
+
+    def test_operation_id_that_is_not_a_uuid_raises_value_error(self):
+        """Validation rejects an operation id from the YAML that is not a UUID."""
+        for key, operation_id in (
+            ("id", "list-users"),
+            ("resource_id", "op-1"),
+            ("id", OPERATION_ID.replace("-", "")),
+            ("id", 42),
+        ):
+            with self.subTest(operation_id=operation_id):
+                integration = self._make_integration(
+                    operations=[
+                        {key: operation_id, "name": "list_users", "method": "GET", "resource": "/u"}
+                    ]
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    integration.validate()
+                self.assertIn("must be a UUID", str(ctx.exception))
 
     def test_operation_method_is_normalised_to_uppercase(self):
         """Lowercase method in YAML is normalised to uppercase and accepted."""
@@ -8746,7 +9021,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id="op-1", name="get_users", method="", resource="/users"
+                    resource_id=OPERATION_ID, name="get_users", method="", resource="/users"
                 ),
             ]
         )
@@ -8760,7 +9035,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id="op-1", name="get_users", method="INVALID", resource="/users"
+                    resource_id=OPERATION_ID, name="get_users", method="INVALID", resource="/users"
                 ),
             ]
         )
@@ -8776,7 +9051,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id="op-1", name="get_users", method="GET", resource=""
+                    resource_id=OPERATION_ID, name="get_users", method="GET", resource=""
                 ),
             ]
         )
@@ -8790,7 +9065,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id="op-1", name="get_users", method="GET", resource="users"
+                    resource_id=OPERATION_ID, name="get_users", method="GET", resource="users"
                 ),
             ]
         )
@@ -8804,7 +9079,10 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id="op-1", name="get_user", method="GET", resource="/users/{user_id}"
+                    resource_id=OPERATION_ID,
+                    name="get_user",
+                    method="GET",
+                    resource="/users/{user_id}",
                 ),
             ]
         )
@@ -8815,7 +9093,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id="op-1",
+                    resource_id=OPERATION_ID,
                     name="create_patient",
                     method="POST",
                     resource="/Patient/Create?locationId={location_id}",
@@ -8829,10 +9107,13 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id="op-1", name="get_users", method="GET", resource="/users"
+                    resource_id=OPERATION_ID, name="get_users", method="GET", resource="/users"
                 ),
                 ApiIntegrationOperation(
-                    resource_id="op-2", name="get_users", method="GET", resource="/users/list"
+                    resource_id=OTHER_OPERATION_ID,
+                    name="get_users",
+                    method="GET",
+                    resource="/users/list",
                 ),
             ]
         )
@@ -8849,10 +9130,13 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id="op-1", name="get_users", method="GET", resource="/users"
+                    resource_id=OPERATION_ID, name="get_users", method="GET", resource="/users"
                 ),
                 ApiIntegrationOperation(
-                    resource_id="op-2", name="get_users", method="POST", resource="/users"
+                    resource_id=OTHER_OPERATION_ID,
+                    name="get_users",
+                    method="POST",
+                    resource="/users",
                 ),
             ]
         )
@@ -8865,10 +9149,13 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id="op-1", name="list_users", method="GET", resource="/users"
+                    resource_id=OPERATION_ID, name="list_users", method="GET", resource="/users"
                 ),
                 ApiIntegrationOperation(
-                    resource_id="op-2", name="create_user", method="POST", resource="/users"
+                    resource_id=OTHER_OPERATION_ID,
+                    name="create_user",
+                    method="POST",
+                    resource="/users",
                 ),
             ]
         )

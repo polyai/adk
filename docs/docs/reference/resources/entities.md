@@ -28,7 +28,7 @@ Each entity has four main parts:
 | Field | Description |
 |---|---|
 | `name` | Identifier for the entity, typically in snake_case. Used in prompts as `{{entity:entity_name}}`. |
-| `description` | Explains what the entity represents. This is shown to the model to guide extraction. |
+| `description` | Explains what the entity represents. This is shown to the model to guide extraction. Required. |
 | `entity_type` | The type of entity being collected. |
 | `config` | Type-specific settings for that entity. |
 
@@ -147,8 +147,13 @@ entities:
 
 ## Validation
 
+- `description` cannot be empty or blank.
 - Each `config` field is type-checked against the entity's `entity_type` — for example `min`/`max` on a `numeric` entity must be numbers, and `has_decimal`, `has_range` must be booleans. A mismatched type raises an error on push.
 - Each entity `name` must be unique.
+- On a `numeric` entity, `min` is at least 0 and `max` is at most 1,000,000.
+- When `has_range` is `true`, `max` cannot be less than `min`. A bound left out is pushed as 0, so set `max` whenever `min` is above 0.
+- On an `alphanumeric` entity, `regular_expression` must compile as a regular expression. `poly validate` compiles it with Python's `re` module and Agent Studio compiles it as a JavaScript regular expression on push, so keep to syntax both accept.
+- Every item in an `enum` entity's `options` and a `phone_number` entity's `country_codes` must be text. Quote an item YAML would otherwise read as a number or boolean (`'44'`).
 
 ## Best practices
 
