@@ -30,6 +30,20 @@ from poly.cli_commands.skills import (
 )
 
 
+def setUpModule():
+    """Keep every ``poly setup`` run in this module from sending usage events."""
+    global _saved_opt_out
+    _saved_opt_out = os.environ.get("POLY_NO_TELEMETRY")
+    os.environ["POLY_NO_TELEMETRY"] = "1"
+
+
+def tearDownModule():
+    if _saved_opt_out is None:
+        os.environ.pop("POLY_NO_TELEMETRY", None)
+    else:
+        os.environ["POLY_NO_TELEMETRY"] = _saved_opt_out
+
+
 def _parse_setup_args(argv: list[str]):
     """Parse a ``poly setup ...`` command line with the real CLI parser."""
     cli = AgentStudioCLI()
@@ -507,6 +521,189 @@ class SetupProjectStepTest(unittest.TestCase):
         self.mock_create.assert_not_called()
         self.mock_init.assert_not_called()
         self.assertEqual(os.listdir(self.base_path), [])
+
+
+class SetupTelemetryTest(unittest.TestCase):
+    """Tests for the usage events of ``poly setup``: started, one per step, completed.
+
+    Runs the full sequence inside an existing project and under an unrecognised
+    shell, so each step skips unless a test makes it do something.
+    """
+
+    def setUp(self):
+        self.base_path = tempfile.mkdtemp()
+        Path(self.base_path, "project.yaml").write_text("projectId: proj-1\n", encoding="utf-8")
+        self.addCleanup(shutil.rmtree, self.base_path, True)
+        patch.dict(os.environ, {"SHELL": "/bin/unrecognised-shell"}).start()
+
+        self.capture = patch("poly.cli_commands.setup.capture_event", return_value=True).start()
+        self.mock_signin = patch("poly.cli_commands.setup._signin", return_value="jwt").start()
+        patch("poly.cli_commands.setup._authenticate_and_save_key").start()
+        self.mock_credentials = patch(
+            "poly.cli_commands.setup.any_credentials_exist", return_value=True
+        ).start()
+        self.mock_gate = patch("poly.cli_commands.setup.node_gate_reason", return_value=None).start()
+        patch("poly.cli_commands.setup.install_skills", return_value=True).start()
+        self.addCleanup(patch.stopall)
+
+    def _run_setup(self, **kwargs) -> None:
+        kwargs.setdefault("region", "us-1")
+        SetupCommand.setup(base_path=self.base_path, **kwargs)
+
+    def _steps(self) -> dict[str, dict]:
+        """Properties of each captured ``setup_step`` event, by step name."""
+        return {
+            call.args[2]["step"]: call.args[2]
+            for call in self.capture.call_args_list
+            if call.args[1] == "setup_step"
+        }
+
+    def test_run_sends_started_then_each_step_then_completed(self):
+        """One started event, the four steps in order, then completed, all under one run id."""
+        self._run_setup(skip_skills=True)
+
+        calls = self.capture.call_args_list
+        self.assertEqual(
+            [call.args[1] for call in calls],
+            ["setup_started", *["setup_step"] * 4, "setup_completed"],
+        )
+        self.assertEqual(list(self._steps()), ["auth", "completion", "skills", "project"])
+        run_ids = {call.args[3] for call in calls}
+        self.assertEqual(len(run_ids), 1)
+        self.assertTrue(run_ids.pop().startswith("setup:"))
+        self.assertEqual({call.args[0] for call in calls}, {"us-1"})
+        self.assertEqual(calls[-1].args[2], {})
+
+    def test_started_describes_the_caller_and_nothing_personal(self):
+        """The started event carries the OS, version, invoking agent, TTY and credential state."""
+        with patch.dict(os.environ, {"CLAUDECODE": "1"}):
+            self._run_setup(skip_skills=True)
+
+        started = self.capture.call_args_list[0].args[2]
+        self.assertEqual(
+            set(started), {"os", "adk_version", "invoking_agent", "interactive", "had_credentials"}
+        )
+        self.assertEqual(started["invoking_agent"], "claude-code")
+        self.assertIs(started["had_credentials"], True)
+
+    def test_no_invoking_agent_is_reported_as_none(self):
+        """Outside a coding agent the invoking agent reads 'none'."""
+        with patch.dict(os.environ, clear=False) as env:
+            for marker in ("CLAUDECODE", "CURSOR_AGENT", "CODEX_SANDBOX"):
+                env.pop(marker, None)
+            self._run_setup(skip_skills=True)
+
+        self.assertEqual(self.capture.call_args_list[0].args[2]["invoking_agent"], "none")
+
+    def test_nothing_else_is_sent_when_the_first_event_is_not(self):
+        """An opt-out or a failed first send silences the rest of the run."""
+        self.capture.return_value = False
+
+        self._run_setup(skip_skills=True)
+
+        self.assertEqual(self.capture.call_count, 1)
+
+    def test_opt_out_never_builds_a_client(self):
+        """With the opt-out variable set no PostHog client is created at all."""
+        patch.stopall()
+        with (
+            patch.dict(os.environ, {"DO_NOT_TRACK": "1", "SHELL": "/bin/unrecognised-shell"}),
+            patch("poly.cli_commands.setup.any_credentials_exist", return_value=True),
+            patch("poly.handlers.posthog.get_posthog_client") as mock_client,
+        ):
+            self._run_setup(skip_skills=True)
+
+        mock_client.assert_not_called()
+
+    def test_step_outcomes_and_durations_are_reported(self):
+        """Sign-in is done, skills install is done, and the rest skip themselves."""
+        self.mock_credentials.return_value = False
+
+        self._run_setup()
+
+        steps = self._steps()
+        self.assertEqual(
+            {name: step["outcome"] for name, step in steps.items()},
+            {"auth": "done", "completion": "skipped", "skills": "done", "project": "skipped"},
+        )
+        for step in steps.values():
+            self.assertIsInstance(step["duration_ms"], int)
+            self.assertNotIn("reason", step)
+
+    def test_chosen_region_is_used_for_later_events(self):
+        """A region picked at the prompt routes the step events to that region's project."""
+        self.mock_credentials.return_value = False
+        with patch("poly.cli_commands.setup._select_region", return_value="uk-1"):
+            self._run_setup(region=None, skip_skills=True)
+
+        regions = [call.args[0] for call in self.capture.call_args_list]
+        self.assertEqual(regions[0], None)
+        self.assertEqual(set(regions[1:]), {"uk-1"})
+
+    def test_skills_skipped_for_node_carries_the_reason(self):
+        """A Node.js skip is told apart from --skip-skills by its reason."""
+        self.mock_gate.return_value = "Node.js (with npx) was not found on your PATH"
+        self._run_setup()
+        with_reason = self._steps()["skills"]
+
+        self.capture.reset_mock()
+        self._run_setup(skip_skills=True)
+        flagged = self._steps()["skills"]
+
+        self.assertEqual(with_reason["outcome"], "skipped")
+        self.assertEqual(with_reason["reason"], "Node.js (with npx) was not found on your PATH")
+        self.assertEqual(flagged["outcome"], "skipped")
+        self.assertNotIn("reason", flagged)
+
+    def test_failed_skills_install_is_reported_and_setup_continues(self):
+        """A failed install is a failed step, and the project step still runs."""
+        with patch("poly.cli_commands.setup.install_skills", return_value=False):
+            self._run_setup()
+
+        self.assertEqual(self._steps()["skills"]["outcome"], "failed")
+        self.assertIn("project", self._steps())
+
+    def test_step_that_raises_is_reported_and_re_raised(self):
+        """An aborted sign-in is a failed auth step with the error's class; setup stops there."""
+        self.mock_credentials.return_value = False
+        self.mock_signin.side_effect = SystemExit(1)
+
+        with self.assertRaises(SystemExit):
+            self._run_setup()
+
+        steps = self._steps()
+        self.assertEqual(list(steps), ["auth"])
+        self.assertEqual(steps["auth"]["outcome"], "failed")
+        self.assertEqual(steps["auth"]["reason"], "SystemExit")
+        self.assertNotIn("setup_completed", [c.args[1] for c in self.capture.call_args_list])
+
+    def test_project_choice_is_the_project_step_outcome(self):
+        """Creating, connecting or declining a project is reported on the project step."""
+        os.remove(os.path.join(self.base_path, "project.yaml"))
+        for choice, outcome in (("create", "created"), ("init", "connected"), ("skip", "declined")):
+            with (
+                self.subTest(choice=choice),
+                patch("sys.stdin.isatty", return_value=True),
+                patch("questionary.select") as mock_select,
+                patch("poly.cli_commands.setup.ProjectCommand.create_project"),
+                patch("poly.cli_commands.setup.InitCommand.init_project"),
+            ):
+                mock_select.return_value.ask.return_value = choice
+                self.capture.reset_mock()
+                self._run_setup(skip_skills=True)
+                self.assertEqual(self._steps()["project"]["outcome"], outcome)
+
+    def test_completion_failure_is_reported_with_the_error_class(self):
+        """A completion install that cannot write reports failed, and setup carries on."""
+        with (
+            patch.dict(os.environ, {"SHELL": "/bin/zsh"}),
+            patch("poly.cli_commands.setup.Path.expanduser", side_effect=OSError("read-only")),
+        ):
+            self._run_setup(skip_skills=True)
+
+        step = self._steps()["completion"]
+        self.assertEqual((step["outcome"], step["reason"]), ("failed", "OSError"))
+        self.assertIn("project", self._steps())
 
 
 class SetupArgumentParsingTest(unittest.TestCase):
