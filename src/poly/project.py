@@ -84,6 +84,8 @@ STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
 MAX_TEST_RUN_NAME_LENGTH = 120
 
+AB_TEST_ACTIVE = "AB_TEST_ACTIVE"
+
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
 
@@ -115,6 +117,21 @@ class DeploymentMode(Enum):
     SIMPLE = "simple"
     RELEASES = "releases"
     RELEASES_BRANCHES = "releases_branches"
+
+
+def _active_experiment_message(acknowledged: bool) -> str:
+    """Explain an AB_TEST_ACTIVE merge rejection and how to get past it."""
+    if acknowledged:
+        # The platform only honours the acknowledgement for projects with it enabled.
+        return (
+            "An experiment is running, and this project does not allow merging into main "
+            "during an experiment. End the experiment before merging."
+        )
+    return (
+        "An experiment is running. Merging into main changes the live version it compares "
+        "against, which may affect its result. To merge anyway, re-run with "
+        "--acknowledge-experiment (acknowledge_active_experiment=True), or end the experiment."
+    )
 
 
 def _non_empty_types(resources: ResourceMap) -> ResourceMap:
@@ -3397,7 +3414,10 @@ class AgentStudioProject:
         return validation_errors
 
     def merge_branch(
-        self, message: Optional[str], conflict_resolutions: list[dict[str, Any]] = None
+        self,
+        message: Optional[str],
+        conflict_resolutions: list[dict[str, Any]] = None,
+        acknowledge_active_experiment: bool = False,
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main in the project.
 
@@ -3408,6 +3428,8 @@ class AgentStudioProject:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value
+            acknowledge_active_experiment (bool): Allow a merge into main while an
+                experiment is running, changing the live version it compares against.
 
         Returns:
             bool: True if the merge was successful, False otherwise
@@ -3439,7 +3461,9 @@ class AgentStudioProject:
                 )
 
         success, conflicts, errors = self.api_handler.merge_branch(
-            message=message, conflict_resolutions=conflict_resolutions
+            message=message,
+            conflict_resolutions=conflict_resolutions,
+            acknowledge_active_experiment=acknowledge_active_experiment,
         )
         if success:
             parent_branch_id = current_branch_meta.get("parentBranchId")
@@ -3454,6 +3478,12 @@ class AgentStudioProject:
             success, _ = self.switch_branch(parent_branch_name, force=True)
             return success, [], []
 
+        errors = [
+            {**err, "message": _active_experiment_message(acknowledge_active_experiment)}
+            if AB_TEST_ACTIVE in str(err.get("message", ""))
+            else err
+            for err in errors
+        ]
         return False, conflicts, errors
 
     def sync_branch(

@@ -257,6 +257,7 @@ class SourcererSDK:
         self,
         deployment_message: str = "",
         conflict_resolutions: Optional[list[dict[str, Any]]] = None,
+        acknowledge_active_experiment: bool = False,
     ) -> dict[str, Any]:
         """Merge the current branch into the parent branch
 
@@ -270,6 +271,8 @@ class SourcererSDK:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value (only used with custom strategy)
+            acknowledge_active_experiment: Allow a merge into main while an experiment
+                is running. Without it the platform rejects that merge with AB_TEST_ACTIVE.
 
         Returns:
             Dictionary containing:
@@ -327,6 +330,9 @@ class SourcererSDK:
 
             if conflict_resolutions is not None:
                 payload["conflictResolutions"] = conflict_resolutions
+
+            if acknowledge_active_experiment:
+                payload["acknowledgeActiveExperiment"] = True
 
             logger.info(f"Merging branch {self.branch_id} to main")
             logger.debug(f"Merge payload: {payload}")

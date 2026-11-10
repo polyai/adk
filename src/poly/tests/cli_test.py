@@ -1000,6 +1000,8 @@ class BranchMergeTest(unittest.TestCase):
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
         self.proj.using_simplified_deployments = True
+        self.proj.experiments_enabled = True
+        self.proj.get_active_experiment.return_value = {}
         self.proj.merge_branch.return_value = (True, [], [])
         self._set_current_branch("feature-a")
         self.mock_load.return_value = self.proj
@@ -1020,7 +1022,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it")
 
         mock_confirm.assert_called_once()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("now live", mock_success.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1041,7 +1045,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it", force=True)
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("now live", mock_success.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1053,7 +1059,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it")
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("main", mock_info.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1067,7 +1075,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it")
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("Release 1", mock_info.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1077,7 +1087,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it", output_json=True)
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
 
     @patch("questionary.select")
@@ -1097,6 +1109,96 @@ class BranchMergeTest(unittest.TestCase):
 
                 choices = [c["name"] for c in mock_select.call_args.kwargs["choices"]]
                 self.assertIn(f"Use parent — {parent}", choices)
+
+    def _start_experiment(self) -> None:
+        """Make the project report a running experiment."""
+        self.proj.get_active_experiment.return_value = {"id": "exp-1", "name": "Greeting test"}
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.warning")
+    def test_running_experiment_is_named_and_confirming_acknowledges_it(
+        self, mock_warning, mock_confirm
+    ):
+        """With an experiment running, the prompt names it and a yes acknowledges it."""
+        self._start_experiment()
+        mock_confirm.return_value.ask.return_value = True
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        self.assertIn("Greeting test", mock_warning.call_args_list[0][0][0])
+        self.assertIn("experiment", mock_confirm.call_args[0][0])
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=True
+        )
+
+    @patch("questionary.confirm")
+    def test_declining_while_experiment_runs_aborts_without_merging(self, mock_confirm):
+        """Answering no while an experiment runs leaves the branch unmerged."""
+        self._start_experiment()
+        mock_confirm.return_value.ask.return_value = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.proj.merge_branch.assert_not_called()
+
+    @patch("questionary.confirm")
+    def test_acknowledge_flag_skips_the_experiment_lookup(self, mock_confirm):
+        """--acknowledge-experiment keeps the deploy prompt but needs no experiment lookup."""
+        mock_confirm.return_value.ask.return_value = True
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it", acknowledge_experiment=True)
+
+        self.proj.get_active_experiment.assert_not_called()
+        self.assertEqual(mock_confirm.call_args[0][0], "Confirm Deployment?")
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=True
+        )
+
+    @patch("questionary.confirm")
+    @patch("poly.cli_commands.branch.json_print")
+    def test_non_interactive_merges_acknowledge_only_with_the_flag(
+        self, mock_json_print, mock_confirm
+    ):
+        """--force and --json never prompt, so only the flag acknowledges the experiment."""
+        self._start_experiment()
+        modes = [{"force": True}, {"output_json": True}]
+        for mode in modes:
+            for acknowledge in (False, True):
+                with self.subTest(mode=mode, acknowledge=acknowledge):
+                    self.proj.merge_branch.reset_mock()
+
+                    BranchCommand.branch_merge(
+                        TEST_DIR, message="ship it", acknowledge_experiment=acknowledge, **mode
+                    )
+
+                    self.proj.merge_branch.assert_called_once_with(
+                        message="ship it",
+                        conflict_resolutions=None,
+                        acknowledge_active_experiment=acknowledge,
+                    )
+        mock_confirm.assert_not_called()
+
+    @patch("poly.output.console.success")
+    def test_conflict_retry_keeps_the_acknowledgement(self, mock_success):
+        """The merge re-sent after resolving conflicts still acknowledges the experiment."""
+        resolutions = [{"path": _GREETING_CONFLICT["path"], "strategy": "theirs"}]
+        self.proj.merge_branch.side_effect = [(False, [_GREETING_CONFLICT], []), (True, [], [])]
+
+        with patch.object(BranchCommand, "_merge_interactively", return_value=resolutions):
+            BranchCommand.branch_merge(
+                TEST_DIR,
+                message="ship it",
+                interactive=True,
+                force=True,
+                acknowledge_experiment=True,
+            )
+
+        retry = self.proj.merge_branch.call_args_list[1].kwargs
+        self.assertEqual(retry["conflict_resolutions"], resolutions)
+        self.assertTrue(retry["acknowledge_active_experiment"])
+        mock_success.assert_called_once()
 
 
 class BranchSyncTest(unittest.TestCase):

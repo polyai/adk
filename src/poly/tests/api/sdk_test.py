@@ -285,6 +285,35 @@ class MergeBranch(unittest.TestCase):
         with self.assertRaises(SourcererAPIError):
             sdk.merge_branch(deployment_message="msg")
 
+    def test_experiment_acknowledgement_is_sent_only_when_given(self):
+        """The payload carries acknowledgeActiveExperiment only when the caller sets it."""
+        for acknowledge, expected in [(False, None), (True, True)]:
+            with self.subTest(acknowledge=acknowledge):
+                sdk, session = self._sdk_with_sequence(server_sequence=1750)
+
+                sdk.merge_branch(
+                    deployment_message="msg", acknowledge_active_experiment=acknowledge
+                )
+
+                payload = session.post.call_args.kwargs["json"]
+                self.assertEqual(payload.get("acknowledgeActiveExperiment"), expected)
+
+    def test_active_experiment_block_raises_with_its_error_code(self):
+        """A 409 AB_TEST_ACTIVE raises SourcererAPIError naming the code, so callers can spot it."""
+        sdk, session = self._sdk_with_sequence(server_sequence=1750)
+        session.post.return_value = make_mock_response(
+            409,
+            json_body={
+                "error": "End the experiment before promoting a new version to live",
+                "error_code": "AB_TEST_ACTIVE",
+            },
+        )
+
+        with self.assertRaises(SourcererAPIError) as ctx:
+            sdk.merge_branch(deployment_message="msg")
+
+        self.assertIn("AB_TEST_ACTIVE", str(ctx.exception))
+
 
 class GetBranchCallInfo(unittest.TestCase):
     """Tests for SourcererSDK.get_branch_call_info."""

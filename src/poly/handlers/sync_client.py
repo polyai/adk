@@ -314,7 +314,10 @@ class SyncClientHandler:
         return True
 
     def merge_branch(
-        self, message: Optional[str], conflict_resolutions: Optional[list[dict[str, Any]]] = None
+        self,
+        message: Optional[str],
+        conflict_resolutions: Optional[list[dict[str, Any]]] = None,
+        acknowledge_active_experiment: bool = False,
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into its parent branch.
 
@@ -324,6 +327,8 @@ class SyncClientHandler:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value (only used with custom strategy)
+            acknowledge_active_experiment (bool): Allow a merge into main while an
+                experiment is running.
 
         Returns:
             success (bool): True if the merge was successful, False otherwise
@@ -342,6 +347,7 @@ class SyncClientHandler:
             result = self.sdk.merge_branch(
                 deployment_message=message,
                 conflict_resolutions=conflict_resolutions,
+                acknowledge_active_experiment=acknowledge_active_experiment,
             )
         except SourcererAPIError as e:
             logger.error(
