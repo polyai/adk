@@ -70,6 +70,8 @@ poly branch merge 'Merge message'       # message required when merging into mai
 
 A clean merge completes immediately and switches your checkout to the parent branch. Merging into `main` deploys to `sandbox` automatically. The web UI's **Merge** button hits the same endpoint — identical result.
 
+If the merge deploys to `live` while an experiment is running, `--force` and `--json` merges are blocked without `--acknowledge-experiment`. Ask the user before adding it: it changes the live version the experiment compares against.
+
 ### Resolving merge conflicts
 
 On conflict the command exits non-zero and prints a table per conflicting field: **Path** (e.g. `topics > Booking > content`), **Base / Ours / Theirs** values, the **auto-merged value**, and whether it's auto-mergeable. Two resolution routes:

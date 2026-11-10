@@ -6608,7 +6608,7 @@ class MergeBranchTest(unittest.TestCase):
 
         self.assertEqual(result, (True, [], []))
         self.mock_api.merge_branch.assert_called_once_with(
-            message="ship it", conflict_resolutions=None
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
         )
         self.mock_switch_branch.assert_called_once_with("main", force=True)
 
@@ -6672,6 +6672,50 @@ class MergeBranchTest(unittest.TestCase):
         self.assertEqual(returned_conflicts, conflicts)
         self.assertEqual(returned_errors, errors)
         self.mock_switch_branch.assert_not_called()
+
+    def _merge_blocked_by_experiment(self, acknowledge: bool) -> list[dict]:
+        """Merge feature-a into main while the platform reports a running experiment."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+        blocked = {
+            "path": [],
+            "message": "API Error 409: {'error_code': 'AB_TEST_ACTIVE', 'error': 'End it'}",
+        }
+        self.mock_api.merge_branch.return_value = (False, [], [blocked])
+
+        success, _, errors = self.project.merge_branch(
+            "ship it", acknowledge_active_experiment=acknowledge
+        )
+
+        self.assertFalse(success)
+        self.assertIs(
+            self.mock_api.merge_branch.call_args.kwargs["acknowledge_active_experiment"],
+            acknowledge,
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]["path"], [])
+        return errors
+
+    def test_experiment_block_explains_how_to_acknowledge(self):
+        """Without the acknowledgement, the error says how to give it."""
+        errors = self._merge_blocked_by_experiment(acknowledge=False)
+
+        self.assertIn("--acknowledge-experiment", errors[0]["message"])
+        self.assertIn("acknowledge_active_experiment=True", errors[0]["message"])
+
+    def test_experiment_block_after_acknowledging_says_to_end_it(self):
+        """When the project doesn't allow it even acknowledged, the error says to end it."""
+        errors = self._merge_blocked_by_experiment(acknowledge=True)
+
+        self.assertIn("End the experiment", errors[0]["message"])
+        self.assertNotIn("--acknowledge-experiment", errors[0]["message"])
 
     def test_merging_from_main_is_rejected(self):
         """Main has nothing to merge into, so merging from it is refused."""
