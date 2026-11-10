@@ -7,8 +7,6 @@ import os
 import sys
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 
-import requests
-
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import REGION_CHOICES, region_type
@@ -53,6 +51,8 @@ def authorise_or_explain(
         self_serve_hint: How to reach the self-serve studio region from this command,
             e.g. "run `poly apikey --region studio`".
     """
+    import requests
+
     try:
         return api.authorise(region=region, jwt_token=jwt_token)
     except requests.HTTPError as e:

@@ -3,7 +3,6 @@
 Copyright PolyAI Limited
 """
 
-import asyncio
 import os
 import sys
 import uuid
@@ -127,6 +126,8 @@ class CallCommand(BaseCommand):
         aec: bool = True,
     ) -> None:
         """Start an interactive voice call with the agent's draft build."""
+        import asyncio
+
         from rich.markup import escape
 
         from poly.output.console import error, info, success, warning

@@ -38,7 +38,7 @@ class SigninWithDeviceFlow(unittest.TestCase):
     @patch("poly.auth.device_flow.time.sleep")
     @patch("poly.auth.device_flow.Auth0Handler.poll_device_token_for")
     @patch("poly.auth.device_flow.Auth0Handler.request_device_code_for")
-    @patch("poly.auth.device_flow.webbrowser.open")
+    @patch("webbrowser.open")
     def test_success_on_first_poll(
         self, mock_open, mock_request_code, mock_poll, mock_sleep
     ):
@@ -55,7 +55,7 @@ class SigninWithDeviceFlow(unittest.TestCase):
     @patch("poly.auth.device_flow.time.sleep")
     @patch("poly.auth.device_flow.Auth0Handler.poll_device_token_for")
     @patch("poly.auth.device_flow.Auth0Handler.request_device_code_for")
-    @patch("poly.auth.device_flow.webbrowser.open")
+    @patch("webbrowser.open")
     def test_pending_then_success(self, mock_open, mock_request_code, mock_poll, mock_sleep):
         """authorization_pending is retried until the token comes back."""
         mock_request_code.return_value = DEVICE_CODE_RESPONSE
@@ -73,7 +73,7 @@ class SigninWithDeviceFlow(unittest.TestCase):
     @patch("poly.auth.device_flow.time.sleep")
     @patch("poly.auth.device_flow.Auth0Handler.poll_device_token_for")
     @patch("poly.auth.device_flow.Auth0Handler.request_device_code_for")
-    @patch("poly.auth.device_flow.webbrowser.open")
+    @patch("webbrowser.open")
     def test_slow_down_increases_interval_up_to_cap(
         self, mock_open, mock_request_code, mock_poll, mock_sleep
     ):
@@ -95,7 +95,7 @@ class SigninWithDeviceFlow(unittest.TestCase):
     @patch("poly.auth.device_flow.time.sleep")
     @patch("poly.auth.device_flow.Auth0Handler.poll_device_token_for")
     @patch("poly.auth.device_flow.Auth0Handler.request_device_code_for")
-    @patch("poly.auth.device_flow.webbrowser.open")
+    @patch("webbrowser.open")
     def test_expired_token_raises_device_flow_error(
         self, mock_open, mock_request_code, mock_poll, mock_sleep
     ):
@@ -111,7 +111,7 @@ class SigninWithDeviceFlow(unittest.TestCase):
     @patch("poly.auth.device_flow.time.sleep")
     @patch("poly.auth.device_flow.Auth0Handler.poll_device_token_for")
     @patch("poly.auth.device_flow.Auth0Handler.request_device_code_for")
-    @patch("poly.auth.device_flow.webbrowser.open")
+    @patch("webbrowser.open")
     def test_unknown_error_raises_with_description(
         self, mock_open, mock_request_code, mock_poll, mock_sleep
     ):
@@ -125,7 +125,7 @@ class SigninWithDeviceFlow(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Authorization failed: Something went wrong")
 
     @patch("poly.auth.device_flow.Auth0Handler.request_device_code_for")
-    @patch("poly.auth.device_flow.webbrowser.open")
+    @patch("webbrowser.open")
     def test_request_device_code_failure_raises_device_flow_error(
         self, mock_open, mock_request_code
     ):
@@ -141,7 +141,7 @@ class SigninWithDeviceFlow(unittest.TestCase):
     @patch("poly.auth.device_flow.time.sleep")
     @patch("poly.auth.device_flow.Auth0Handler.poll_device_token_for")
     @patch("poly.auth.device_flow.Auth0Handler.request_device_code_for")
-    @patch("poly.auth.device_flow.webbrowser.open")
+    @patch("webbrowser.open")
     def test_open_browser_false_does_not_open_browser(
         self, mock_open, mock_request_code, mock_poll, mock_sleep
     ):
@@ -156,7 +156,7 @@ class SigninWithDeviceFlow(unittest.TestCase):
     @patch("poly.auth.device_flow.time.sleep")
     @patch("poly.auth.device_flow.Auth0Handler.poll_device_token_for")
     @patch("poly.auth.device_flow.Auth0Handler.request_device_code_for")
-    @patch("poly.auth.device_flow.webbrowser.open")
+    @patch("webbrowser.open")
     def test_on_verification_url_callback_used_instead_of_default_message(
         self, mock_open, mock_request_code, mock_poll, mock_sleep
     ):

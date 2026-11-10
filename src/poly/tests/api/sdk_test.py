@@ -166,7 +166,7 @@ class SendCommandBatch(unittest.TestCase):
         return Command(type="entity_create", command_id="cmd-1")
 
     @patch("poly.handlers.sdk.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.sdk.requests.post")
+    @patch("requests.post")
     def test_batch_serialized_with_sequence_and_octet_stream(self, mock_post, _mock_key):
         """The batch is sent as serialized protobuf with the cached sequence."""
         sdk = build_sdk()
@@ -194,7 +194,7 @@ class SendCommandBatch(unittest.TestCase):
         self.assertEqual(parsed.commands[0].command_id, "cmd-1")
 
     @patch("poly.handlers.sdk.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.sdk.requests.post")
+    @patch("requests.post")
     def test_queue_cleared_on_success(self, mock_post, _mock_key):
         """A successful send clears the command queue."""
         sdk = build_sdk()
@@ -219,7 +219,7 @@ class SendCommandBatch(unittest.TestCase):
             sdk.send_command_batch()
 
     @patch("poly.handlers.sdk.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.sdk.requests.post")
+    @patch("requests.post")
     def test_request_failure_raises_sourcerer_error(self, mock_post, _mock_key):
         """A failing batch POST raises SourcererAPIError."""
         sdk = build_sdk()
