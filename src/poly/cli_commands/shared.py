@@ -13,9 +13,7 @@ import logging
 import os
 import sys
 from argparse import ArgumentParser
-from typing import Any, Optional
-
-import requests
+from typing import TYPE_CHECKING, Any, Optional
 
 from poly.constants import (
     DATA_CHANNELS,
@@ -27,6 +25,9 @@ from poly.constants import (
 from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
+
+if TYPE_CHECKING:
+    import requests
 
 logger = logging.getLogger(__name__)
 
@@ -619,7 +620,7 @@ def add_cohort_arguments(parser: ArgumentParser, *, deployments: bool = True) ->
         )
 
 
-def describe_data_api_error(e: requests.HTTPError) -> str:
+def describe_data_api_error(e: "requests.HTTPError") -> str:
     """Explain a Data API HTTP error in the caller's terms."""
     response = e.response
     status = response.status_code if response is not None else None

@@ -16,6 +16,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import argcomplete
 import requests
 from rich.console import Console
 
@@ -1979,6 +1980,13 @@ class ChatCommandTest(unittest.TestCase):
         self.assertIn("error", payload["push"])
 
 
+class _InProcessCompletionFinder(argcomplete.CompletionFinder):
+    """argcomplete's finder without its debug stream on fd 9, which pytest's capture uses."""
+
+    def _init_debug_stream(self):
+        pass
+
+
 class CompletionCommandTest(unittest.TestCase):
     """Tests for the completion command."""
 
@@ -2014,6 +2022,36 @@ class CompletionCommandTest(unittest.TestCase):
         """Parser rejects shell choices outside bash/zsh/fish."""
         with self.assertRaises(SystemExit):
             AgentStudioCLI().main(sys_args=["completion", "powershell"])
+
+    def _complete(self, line: str) -> list[str]:
+        """Return what the shell would offer for `line`, as argcomplete computes it."""
+        completion_env = {
+            "_ARGCOMPLETE": "1",
+            "COMP_LINE": line,
+            "COMP_POINT": str(len(line)),
+            "_ARGCOMPLETE_IFS": "\013",
+        }
+        with patch.dict(os.environ, completion_env):
+            cli = AgentStudioCLI()
+            cli.register_commands()
+            parser = cli._create_parser()
+            output = StringIO()
+            _InProcessCompletionFinder()(
+                parser,
+                output_stream=output,
+                exit_method=lambda code: None,
+                always_complete_options=False,
+            )
+        return [completion.strip() for completion in output.getvalue().split("\013")]
+
+    def test_completes_command_names(self):
+        """The grouped --help sections must not break completion of command names."""
+        self.assertEqual(self._complete("poly sta"), ["status"])
+
+    def test_completes_grouped_subcommand_names(self):
+        """branch and functions group their subcommands in --help too."""
+        self.assertIn("create", self._complete("poly branch "))
+        self.assertIn("execute", self._complete("poly functions "))
 
 
 class ResolveProjectScopeTest(unittest.TestCase):
@@ -5015,6 +5053,28 @@ def _help_body(help_text: str) -> str:
     """Return the help text after the usage block, which may wrap over lines."""
     _usage, _, body = help_text.partition("\n\n")
     return body
+
+
+class StartupImportsTest(unittest.TestCase):
+    """Tests for what building the CLI imports before any command runs."""
+
+    # Heavy modules that only some commands need. Each command imports them where it
+    # uses them, so every other command, --help and shell completion skip the cost.
+    DEFERRED_MODULES = ["requests", "rich", "asyncio", "webbrowser", "dateutil"]
+
+    def test_heavy_modules_are_not_imported_at_startup(self):
+        script = (
+            "import sys\n"
+            "from poly.cli import AgentStudioCLI\n"
+            "cli = AgentStudioCLI()\n"
+            "cli.register_commands()\n"
+            "cli._create_parser()\n"
+            f"print(' '.join(m for m in {self.DEFERRED_MODULES!r} if m in sys.modules))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, check=True
+        )
+        self.assertEqual(result.stdout.strip(), "", msg="imported at startup")
 
 
 class GroupedHelpOutputTest(unittest.TestCase):

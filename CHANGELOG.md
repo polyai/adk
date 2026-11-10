@@ -2,6 +2,23 @@
 
 <!-- version list -->
 
+## v0.77.5 (2026-11-10)
+
+### Bug Fixes
+
+- Tab-complete command and subcommand names ([#402](https://github.com/polyai/adk/pull/402),
+  [`b6a2424`](https://github.com/polyai/adk/commit/b6a24247f9514d8330cbff5129b69d81da9c5125))
+
+### Performance Improvements
+
+- Defer heavy imports until a command uses them ([#401](https://github.com/polyai/adk/pull/401),
+  [`1d8e7f4`](https://github.com/polyai/adk/commit/1d8e7f4e06ce026d1cd98d7912475fe7741976a3))
+
+- Reuse a function file's parse between reading steps
+  ([#404](https://github.com/polyai/adk/pull/404),
+  [`65c7c87`](https://github.com/polyai/adk/commit/65c7c87a01ed5c6ba712fe7e29f79a3180a93e74))
+
+
 ## v0.77.4 (2026-11-09)
 
 ### Bug Fixes
