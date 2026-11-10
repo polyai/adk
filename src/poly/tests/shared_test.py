@@ -161,10 +161,6 @@ def _subparser_for(parser: argparse.ArgumentParser, argv: list[str]) -> argparse
     return current
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class PackageVersionTest(unittest.TestCase):
     """Tests for the version constant that semantic-release stamps on each release."""
 
@@ -176,3 +172,7 @@ class PackageVersionTest(unittest.TestCase):
 
     def test_get_package_version_returns_the_constant(self):
         self.assertEqual(get_package_version(), __version__)
+
+
+if __name__ == "__main__":
+    unittest.main()
