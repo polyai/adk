@@ -96,7 +96,7 @@ This split is important: content is for facts, actions are for behavior.
 
 ### Limits and guidance
 
-- use no more than **20** example queries
+- a topic can have at most **100** example queries
 - cover meaningful variation, not every minor wording change
 
 ## Tags
@@ -164,6 +164,7 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 ## Validation
 
 - The filename must match the cleaned version of `name` — a mismatch raises a validation error on `pull` or `push`.
+- A topic can have at most 100 example queries.
 
 ## Best practices
 

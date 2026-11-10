@@ -73,7 +73,7 @@ Post-process ASR output with regex rules to fix common misrecognitions. Useful f
 A `corrections` list where each entry has:
 - **name** (required): Identifier for the correction group.
 - **description**: What this correction fixes.
-- **regular_expressions**: List of regex rules, each with:
+- **regular_expressions**: List of regex rules. Can be empty. Each rule has:
   - **regular_expression** (required): Regex pattern to match.
   - **replacement** (required): Replacement string (supports capture groups like `\1`).
   - **replacement_type**: `full` (replace entire match, default) or `partial`/`substring` (replace within context).

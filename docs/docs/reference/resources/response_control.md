@@ -99,7 +99,7 @@ Each item in the `phrase_filtering` list can include:
 |---|---|---|
 | `name` | Yes | Identifier for the filter |
 | `description` | No | Explains what the filter does |
-| `regular_expressions` | Yes | Regex patterns to match |
+| `regular_expressions` | No | Regex patterns to match. Can be an empty list. |
 | `say_phrase` | No | Whether to still speak the matched phrase. Default: `false`. |
 | `language_code` | No | Restrict the filter to a specific language |
 | `function` | No | Global function to call when a match occurs |

@@ -148,7 +148,7 @@ A `corrections` list where each entry includes:
 |---|---|---|
 | `name` | Yes | Identifier for the correction group |
 | `description` | No | Explains what the correction fixes |
-| `regular_expressions` | Yes | Regex rules used for correction |
+| `regular_expressions` | No | Regex rules used for correction. Can be an empty list. |
 
 Each regex rule can include:
 
@@ -188,7 +188,7 @@ corrections:
 - Keys inside a section must be ones listed above, so a misspelt key is an error rather than being ignored.
 - Each keyphrase must be non-empty, with a `level` of `default`, `boosted`, or `maximum`.
 - Keyphrases must be unique once trimmed and lowercased — Agent Studio treats `Infusion Sets` and `infusion sets` as the same phrase, and rejects a project that keeps both.
-- Each transcript correction needs a unique `name` and at least one regex rule, and every rule needs a `regular_expression`.
+- Each transcript correction needs a unique `name`, and every rule needs a `regular_expression`.
 - `replacement_type` must be one of `full`, `partial`, or `substring`.
 
 ## Best practices

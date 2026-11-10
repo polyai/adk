@@ -97,7 +97,7 @@ Each flow includes a `flow_config.yaml` file that defines the flow itself.
 | Field | Required | Description |
 |---|---|---|
 | `name` | No | Human-readable flow name |
-| `description` | Yes | What the flow does |
+| `description` | No | What the flow does. Can be empty. |
 | `start_step` | Yes | The step to enter when the flow starts |
 
 ### Example

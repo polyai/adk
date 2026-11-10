@@ -633,8 +633,6 @@ class VariantAttribute(MultiResourceYamlResource):
         if not self.name:
             raise ValueError("Name is required")
         _validate_attribute_name(self.name)
-        if not self.mappings:
-            raise ValueError("Mappings are required")
 
         known_variant_id_to_name = _variant_id_to_name(resource_mappings)
         known_variants_ids = set(known_variant_id_to_name.keys())

@@ -12,7 +12,7 @@ Chat settings configure the agent's behavior on the web chat channel. They are d
 The first message the agent sends when a chat session starts.
 
 ### Fields
-- **welcome_message** (required): Text of the greeting. Supports `{{attr:...}}` and `{{vrbl:...}}` references.
+- **welcome_message**: Text of the greeting. Can be empty. Supports `{{attr:...}}` and `{{vrbl:...}}` references.
 - **language_code** (required): BCP-47 language code (e.g. `en-GB`, `en-US`).
 
 ### Example
