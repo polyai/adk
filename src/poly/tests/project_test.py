@@ -74,6 +74,7 @@ from poly.resources.resource import MultiResourceYamlResource, _parse_multi_reso
 from poly.resources.test_suite import TestCaseApiOperationMock
 from poly.tests.testing_utils import mock_read_from_file
 from poly.utils import merge_strings
+from poly.utils.ty_check import function_code_errors
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_PROJECT_DIR = os.path.join(DIR, "test_projects")
@@ -2980,14 +2981,17 @@ class ValidateProjectTest(unittest.TestCase):
         )
         self.assertIn("Start step 'missing_step' not found.", error_texts)
 
-
     def _validate_edited_copy(
-        self, edits: dict[str, str], parent_pyproject: Optional[str] = None
+        self,
+        edits: dict[str, str],
+        parent_pyproject: Optional[str] = None,
+        from_parent: bool = False,
     ) -> list[str]:
         """Validate a copy of the test project with lines added after each file's header.
 
         Function code is checked with ty, which reads the files on disk, so these edit real files
         rather than mocking reads. `parent_pyproject` is written to the folder above the project.
+        `from_parent` validates from that folder, with the project's root as a relative path.
         """
         root = _copy_test_project(self)
         if parent_pyproject is not None:
@@ -2999,6 +3003,10 @@ class ValidateProjectTest(unittest.TestCase):
                 header, rest = f.read().split("\n", 1)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(f"{header}\n{lines}\n{rest}")
+        if from_parent:
+            self.addCleanup(os.chdir, os.getcwd())
+            os.chdir(os.path.dirname(root))
+            root = os.path.basename(root)
         return AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), root).validate_project()
 
     def test_validate_project_reports_an_import_of_a_missing_helper(self):
@@ -3040,7 +3048,9 @@ class ValidateProjectTest(unittest.TestCase):
     def test_validate_project_ignores_modules_the_runtime_provides(self):
         """Packages such as plog exist only on the platform, so they can't resolve locally."""
         errors = self._validate_edited_copy(
-            {"functions/test_function.py": "import plog\nfrom functions.format_date import format_date"}
+            {
+                "functions/test_function.py": "import plog\nfrom functions.format_date import format_date"
+            }
         )
         self.assertEqual(errors, [])
 
@@ -3087,6 +3097,84 @@ class ValidateProjectTest(unittest.TestCase):
             errors = self._validate_edited_copy({"functions/test_function.py": "return None"})
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("Syntax error in function code", errors[0])
+
+    def test_validate_project_compiles_functions_when_ty_isnt_installed(self):
+        """Running a missing ty module exits 1 with no output, just as a clean ty run would."""
+        with patch("poly.utils.ty_check.find_spec", return_value=None):
+            errors = self._validate_edited_copy({"functions/test_function.py": "return None"})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("Syntax error in function code", errors[0])
+
+    def test_validate_project_checks_imports_with_a_relative_root(self):
+        errors = self._validate_edited_copy(
+            {"functions/test_function.py": "from functions.format_date import dropped_helper"},
+            from_parent=True,
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("dropped_helper", errors[0])
+
+    def test_validate_project_reports_a_missing_name_imported_from_the_functions_package(self):
+        errors = self._validate_edited_copy(
+            {"functions/test_function.py": "from functions import dropped_helper"}
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("dropped_helper", errors[0])
+
+    def test_validate_project_reports_broken_relative_imports(self):
+        errors = self._validate_edited_copy(
+            {
+                "functions/test_function.py": "from . import dropped_helper",
+                "flows/test_flow/functions/process_data.py": "from .deleted_module import x",
+            }
+        )
+        text = "\n".join(errors)
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("dropped_helper", text)
+        self.assertIn(".deleted_module", text)
+
+    def test_validate_project_resolves_relative_imports_within_a_flow(self):
+        """A flow's functions share one folder on the platform, as they do locally."""
+        errors = self._validate_edited_copy(
+            {
+                "flows/test_flow/functions/process_data.py": (
+                    "from .shared_helper import shared_helper"
+                )
+            }
+        )
+        self.assertEqual(errors, [])
+
+    def _function_code_errors(self, files: dict[str, str]) -> list:
+        """ty's errors for a project holding only these files.
+
+        For code the ADK can't load as a project, such as a file that doesn't parse.
+        """
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        for rel_path, code in files.items():
+            path = os.path.join(root, rel_path)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(code)
+        return function_code_errors(root)
+
+    def test_function_code_errors_reports_one_syntax_error_per_line(self):
+        errors = self._function_code_errors({"functions/broken.py": "def f(:\n    pass\n"})
+        self.assertEqual([(e.path, e.line) for e in errors], [("functions/broken.py", 1)])
+
+    def test_function_code_errors_allows_flow_imports_that_pull_writes(self):
+        """A flow folder can start with a digit or be a keyword, so the import isn't Python."""
+        errors = self._function_code_errors(
+            {
+                "flows/2fa_flow/functions/helper.py": "X = 1\n",
+                "flows/2fa_flow/functions/caller.py": (
+                    "from flows.2fa_flow.functions.helper import X\n"
+                ),
+                "flows/class/functions/helper.py": "X = 1\n",
+                "flows/class/functions/caller.py": "import flows.class.functions.helper\n",
+            }
+        )
+        self.assertEqual(errors, [])
+
 
 class PullProjectTest(unittest.TestCase):
     """Tests for the pull_project method"""

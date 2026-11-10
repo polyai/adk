@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from importlib.util import find_spec
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -27,9 +28,13 @@ _FUNCTION_FILE = re.compile(r"^(?:functions|flows/[^/]+/functions)/[^/]+\.py$")
 _FUNCTION_OR_STEP_FILE = re.compile(
     r"^(?:functions|flows/[^/]+/(?:functions|function_steps))/[^/]+\.py$"
 )
-# Imports of the project's own modules. Anything else (_gen, the standard library, packages the
-# runtime provides) isn't installed locally, so ty can't resolve it.
-_PROJECT_MODULE = re.compile(r"`(?:functions|flows)\.[\w.]+")
+# Imports of the project's own modules, by absolute or relative name. Anything else (_gen, the
+# standard library, packages the runtime provides) isn't installed locally, so ty can't resolve it.
+_PROJECT_MODULE = re.compile(r"`(?:(?:functions|flows)(?:\.[\w.]+)?|\.[\w.]*)`")
+# Pull writes imports of a flow's functions as `flows.<folder>.functions`, which isn't valid
+# Python when the folder starts with a digit or is a keyword. Push sends them back in the
+# platform's `functions.<flow id>` form, which is.
+_FLOW_IMPORT = re.compile(r"^\s*(?:from|import)\s+flows\.")
 
 
 @dataclass
@@ -57,6 +62,10 @@ def function_code_errors(root_path: str) -> Optional[list[CodeError]]:
     targets = [d for d in ("functions", "flows") if os.path.isdir(os.path.join(root_path, d))]
     if not targets:
         return []
+    # Without ty, `python -m ty` exits 1 with no output, which would read as no errors.
+    if find_spec("ty") is None:
+        logger.warning("Couldn't run ty to check function code: it isn't installed")
+        return None
     try:
         with tempfile.TemporaryDirectory() as config_dir:
             # An empty config in place of any ty settings found above the project, which can
@@ -66,7 +75,7 @@ def function_code_errors(root_path: str) -> Optional[list[CodeError]]:
             command = [
                 # -I so a ty.py in the project can't shadow the real one.
                 *(sys.executable, "-I", "-m", "ty", "check", *targets),
-                *("--project", root_path),
+                *("--project", "."),
                 *("--config-file", config_file),
                 *("--python-version", RUNTIME_PYTHON_VERSION),
                 *("--output-format", "gitlab"),
@@ -88,17 +97,31 @@ def function_code_errors(root_path: str) -> Optional[list[CodeError]]:
         return None
 
     errors = []
+    syntax_error_lines = set()
     for diagnostic in diagnostics:
         rule = diagnostic.get("check_name")
         path = diagnostic["location"]["path"].replace("\\", "/")
+        line = diagnostic["location"]["positions"]["begin"]["line"]
         message = diagnostic["description"].removeprefix(f"{rule}: ")
         if rule == "unresolved-import":
             reported = _FUNCTION_FILE.match(path) and _PROJECT_MODULE.search(message)
         elif rule == "invalid-syntax":
-            reported = _FUNCTION_OR_STEP_FILE.match(path)
+            # One mistake often gives several messages for the same line.
+            reported = (
+                _FUNCTION_OR_STEP_FILE.match(path)
+                and (path, line) not in syntax_error_lines
+                and not _is_flow_import(root_path, path, line)
+            )
+            syntax_error_lines.add((path, line))
         else:
             reported = False
         if reported:
-            line = diagnostic["location"]["positions"]["begin"]["line"]
             errors.append(CodeError(path=path, line=line, message=message))
     return errors
+
+
+def _is_flow_import(root_path: str, path: str, line: int) -> bool:
+    """Whether a line imports a flow's functions in the form pull writes them."""
+    with open(os.path.join(root_path, path), encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    return line <= len(lines) and bool(_FLOW_IMPORT.match(lines[line - 1]))
