@@ -62,6 +62,7 @@ from poly.resources import (
 )
 from poly.resources.api_integration import HAND_WRITTEN_SCHEMA_SOURCE
 from poly.resources.flows import (
+    FLOW_STEP_NAME_PATTERN,
     ASRBiasing,
     Condition,
     DTMFConfig,
@@ -1717,6 +1718,69 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         # Dummy step is scheduled for post-push deletion
         self.assertIn(FlowStep, post_deleted)
         self.assertIn("flow-new-func-start_entry_func_start_step_temp", post_deleted[FlowStep])
+
+    def _new_flow_dummy_start_step(self, flow_name: str, other_steps: list[FlowStep]) -> FlowStep:
+        """Push a new flow starting on a function step and return its temporary step."""
+        flow_config = FlowConfig(
+            resource_id="flow-new",
+            name=flow_name,
+            description="Flow with function step as start",
+            start_step="entry_func",
+        )
+        function_start_step = FunctionStep(
+            resource_id="flow-new_entry_func",
+            step_id="entry_func",
+            name="entry",
+            flow_id="flow-new",
+            flow_name=flow_name,
+            code="def entry(conv, flow): pass",
+            function_id="FUNC-entry",
+        )
+        new_resources = {
+            FlowConfig: {"flow-new": flow_config},
+            FunctionStep: {function_start_step.resource_id: function_start_step},
+        }
+        if other_steps:
+            new_resources[FlowStep] = {step.resource_id: step for step in other_steps}
+
+        push_changes = self.project._clean_resources_before_push({}, new_resources, {}, {})
+
+        created_flow = push_changes.main.new[FlowConfig]["flow-new"]
+        dummy_step = next(s for s in created_flow.steps if s.step_id == created_flow.start_step)
+        self.assertIn(dummy_step.resource_id, push_changes.post.deleted[FlowStep])
+        return dummy_step
+
+    def test_clean_resources_before_push_dummy_start_step_keeps_plain_flow_name(self):
+        """A flow name that is a valid step name is used as is for the temporary step."""
+        dummy_step = self._new_flow_dummy_start_step("New Flow", other_steps=[])
+
+        self.assertEqual(dummy_step.name, "New Flow-temp")
+
+    def test_clean_resources_before_push_dummy_start_step_name_fits_step_name_rules(self):
+        """Characters a step name cannot hold are replaced in the temporary step's name."""
+        dummy_step = self._new_flow_dummy_start_step("Billing (v2): refunds", other_steps=[])
+
+        self.assertEqual(dummy_step.name, "Billing _v2__ refunds-temp")
+        self.assertRegex(dummy_step.name, FLOW_STEP_NAME_PATTERN)
+
+    def test_clean_resources_before_push_dummy_start_step_name_avoids_existing_steps(self):
+        """The temporary step takes a name no other step in the new flow uses."""
+        existing_steps = [
+            FlowStep(
+                resource_id=f"flow-new_{step_id}",
+                step_id=step_id,
+                name=name,
+                flow_id="flow-new",
+                flow_name="New Flow",
+                step_type=StepType.ADVANCED_STEP,
+                prompt="Help the caller.",
+            )
+            for step_id, name in (("step-a", "New Flow-temp"), ("step-b", "New Flow-temp-2"))
+        ]
+
+        dummy_step = self._new_flow_dummy_start_step("New Flow", other_steps=existing_steps)
+
+        self.assertEqual(dummy_step.name, "New Flow-temp-3")
 
     def test_clean_resources_before_push_orphaned_variable_delete_and_recreate(self):
         """When all functions referencing a variable are deleted, variable is delete+recreated."""

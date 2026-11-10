@@ -67,6 +67,7 @@ logger = logging.getLogger(__name__)
 FUNCTION_REGEX = re.compile(r"{{f[nt]:([\w-]+)}}")
 # Flow step names: alphanumeric, extended Latin (C0–024F, 1E00–1EFF), and _ &,/.-
 FLOW_STEP_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF_ &,/.\-]+$")
+CONDITION_NAME_MAX_LENGTH = 50
 FLOW_REFERENCES = [
     "global_functions",
     "sms",
@@ -228,6 +229,30 @@ class FlowConfig(YamlResource):
 
         if self.description != self.description.strip():
             raise ValueError("Description cannot contain leading or trailing whitespace.")
+
+        self._validate_step_names_unique(resource_mappings)
+
+    def _validate_step_names_unique(self, resource_mappings: list[ResourceMapping] = None) -> None:
+        """Check no two steps in this flow share a name, whatever their step type."""
+        step_files_by_name: dict[str, list[str]] = {}
+        for resource in resource_mappings or []:
+            if (
+                issubclass(resource.resource_type, BaseFlowStep)
+                and resource.flow_id == self.resource_id
+            ):
+                # Shown relative to the flow folder, e.g. steps/x.yaml
+                step_file = "/".join(os.path.normpath(resource.file_path).split(os.sep)[-2:])
+                step_files_by_name.setdefault(resource.resource_name, []).append(step_file)
+
+        clashes = [
+            f"'{name}' ({', '.join(sorted(files))})"
+            for name, files in sorted(step_files_by_name.items())
+            if len(files) > 1
+        ]
+        if clashes:
+            raise ValueError(
+                f"Step names must be unique within a flow. Duplicates: {'; '.join(clashes)}"
+            )
 
     def build_update_proto(
         self,
@@ -797,6 +822,17 @@ class FlowStep(BaseFlowStep, YamlResource):
                 condition.validate(resource_mappings=resource_mappings)
             except Exception as e:
                 raise ValueError(f"Condition '{condition.name}': {e}") from e
+
+        # The platform trims a condition name before comparing it, then matches exactly.
+        condition_names = [condition.name.strip() for condition in self.conditions]
+        duplicate_names = sorted(
+            {name for name in condition_names if condition_names.count(name) > 1}
+        )
+        if duplicate_names:
+            quoted_names = ", ".join(f"'{name}'" for name in duplicate_names)
+            raise ValueError(
+                f"Condition names must be unique within a step. Duplicates: {quoted_names}"
+            )
 
         entity_ids = set(
             resource.resource_id
@@ -1679,13 +1715,22 @@ class Condition(SubResource):
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         """Validate the condition resource."""
-        if not self.name:
+        name = (self.name or "").strip()
+        if not name:
             raise ValueError("Condition name cannot be empty.")
+
+        # The platform counts UTF-16 code units, so a character outside the BMP counts twice.
+        name_length = len(name.encode("utf-16-le")) // 2
+        if name_length > CONDITION_NAME_MAX_LENGTH:
+            raise ValueError(
+                f"Condition name cannot be longer than {CONDITION_NAME_MAX_LENGTH} characters "
+                f"(got {name_length})."
+            )
 
         if self.condition_type not in ConditionType:
             raise ValueError(f"Invalid condition type: {self.condition_type}")
 
-        # Check child step exists in resource mappings
+        # Check child step exists in this condition's flow
         # and also all required entities exist in resource mappings
         required_entity_ids = set(self.required_entities)
         if self.condition_type != ConditionType.EXIT_FLOW:
@@ -1697,7 +1742,8 @@ class Condition(SubResource):
             if (
                 not found_step
                 and issubclass(resource.resource_type, BaseFlowStep)
-                and resource.resource_id.removeprefix(resource.flow_id + "_") == self.child_step
+                and resource.flow_id == self.flow_id
+                and resource.resource_id == f"{self.flow_id}_{self.child_step}"
             ):
                 found_step = True
 
@@ -1708,7 +1754,7 @@ class Condition(SubResource):
                 break
 
         if not found_step:
-            raise ValueError(f"Step '{self.child_step}' not found")
+            raise ValueError(f"Step '{self.child_step}' not found in this flow")
 
         if required_entity_ids:
             raise ValueError(f"Required entities not found: {required_entity_ids}")
