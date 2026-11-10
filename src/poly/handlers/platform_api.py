@@ -1801,7 +1801,7 @@ class PlatformAPIHandler:
     def get_available_metrics(region: str, project_id: ty.Optional[str] = None) -> dict:
         """List the metrics that can be queried for an account or project.
 
-        Built-in metrics such as ``poly_score`` are included alongside custom
+        Built-in metrics such as ``poly_score_v2`` are included alongside custom
         ones, so this is the set a ``query`` may name.
 
         Args:

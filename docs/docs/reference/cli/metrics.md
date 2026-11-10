@@ -40,7 +40,7 @@ poly metrics list --json
 
 ## `poly metrics available`
 
-Show every metric the project can query: built-in metrics such as `poly_score`, `duration` and `handoff`, plus the custom metrics defined in the project. These are the names `poly metrics query` and the `--filter` flags accept (case-insensitive).
+Show every metric the project can query: built-in metrics such as `poly_score_v2`, `duration` and `handoff`, plus the custom metrics defined in the project. These are the names `poly metrics query` and the `--filter` flags accept (case-insensitive).
 
 Examples:
 
@@ -54,7 +54,7 @@ poly metrics available --json
 ~~~json
 {
   "metrics": [
-    { "name": "poly_score", "description": "...", "type": "float", "values": null }
+    { "name": "POLY_SCORE_V2", "description": "...", "type": "float", "values": null }
   ],
   "total": 0
 }
@@ -67,13 +67,15 @@ Aggregate one metric over a time window, optionally bucketed by interval and gro
 Examples:
 
 ~~~bash
-poly metrics query poly_score --agg avg --from 2026-09-01 --to 2026-09-30
+poly metrics query poly_score_v2 --agg avg --from 2026-09-01 --to 2026-09-30
 poly metrics query duration --agg avg --agg p95 --interval daily --by channel
 poly metrics query CSAT --agg avg --filter channel eq VOICE-SIP --having avg gte 4
-poly metrics query poly_score --agg conversation_count --by value_string --json
+poly metrics query handoff_reason --agg conversation_count --by value_string --json
 ~~~
 
 The table has one row per bucket and group: a `bucket` column when `--interval` is set, one column per `--by` dimension, then one column per `--agg`. Rows are sorted by bucket ascending, then by `--sort`.
+
+Buckets are labelled in the timezone they were bucketed in: UTC, or `--timezone` for hourly and daily buckets. The label never depends on the machine's timezone. Daily, weekly and monthly buckets show the date they start on (`2026-10-01`); hourly buckets add the time and zone (`2026-10-01 14:00 UTC`). `--json` keeps the timestamps as the Data API returns them.
 
 | Argument | Description |
 |---|---|
@@ -85,7 +87,7 @@ The table has one row per bucket and group: a `bucket` column when `--interval` 
 | `--from` | Inclusive window start, `YYYY-MM-DD` or an ISO 8601 datetime. Defaults to no lower bound. |
 | `--to` | Exclusive window end. A bare date includes the whole of that day. |
 | `--interval` | Time bucket: `hourly`, `daily`, `weekly`, `monthly`. Omit for one total. Weekly and monthly buckets are whole weeks (from Monday, UTC) and whole months, so the window is widened to match: see below. |
-| `--timezone` | IANA timezone for hourly and daily buckets, e.g. `Europe/London`. |
+| `--timezone` | IANA timezone for hourly and daily buckets, e.g. `Europe/London`. `--from` and `--to` with no offset are read as local time in it, whatever the interval. |
 | `--by` | Group by `channel`, `deployment_id`, `variant_id`, `client_env`, `experiment_id`, `experiment_version_id` or, for a string metric, `value_string`. Repeatable. |
 | `--filter METRIC OP VALUE` | Only count conversations where the condition holds. `OP` is `eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ex`, `exists`; `in`/`ex` take a comma-separated list. Repeatable. |
 | `--any` | Match conversations that satisfy any `--filter` instead of all. |
@@ -115,7 +117,9 @@ When this happens the table is preceded by a line such as `Weekly buckets are wh
 
 ## `poly metrics score`
 
-Poly Score for the project: a one-line headline (average and conversation count over the whole window) above the bucketed table. Shortcut for `poly metrics query poly_score --agg avg --agg conversation_count`, defaulting to the last 7 days bucketed daily. The headline comes from a separate unbucketed request, so it covers the full window whatever `--limit` and `--offset` leave in the table.
+Poly Score for the project: a one-line headline (average and conversation count over the whole window) above the bucketed table. Shortcut for `poly metrics query poly_score_v2 --agg avg --agg conversation_count`, defaulting to the last 7 days bucketed daily. The headline comes from a separate unbucketed request, so it covers the full window whatever `--limit` and `--offset` leave in the table.
+
+There are two versions of Poly Score, on different scales. `score` reads **Poly Score V2** (1 to 5), the score new conversations get. `--v1` reads the earlier **Poly Score V1** (0 to 10), which only older conversations have. The headline names the version and scale, because the same number means something different on each: `Poly Score V2 (1-5) from 2026-11-03 to 2026-11-09: 3.7 average over 1,369 conversations.`
 
 Examples:
 
@@ -123,14 +127,16 @@ Examples:
 poly metrics score
 poly metrics score --interval weekly --from 2026-09-01
 poly metrics score --by channel --env live
+poly metrics score --v1 --from 2026-03-01 --to 2026-03-31
 poly metrics score --json
 ~~~
 
 | Flag | Description |
 |---|---|
+| `--v1` | Read Poly Score V1 (0 to 10) instead of V2 (1 to 5), for older conversations. |
 | `--from`, `--to` | Window bounds as for `query`. Defaults to the last 7 days. |
 | `--interval` | Time bucket. Defaults to `daily`. Weekly and monthly widen the window to whole buckets, as for `query`. |
-| `--timezone` | IANA timezone for hourly and daily buckets. |
+| `--timezone` | IANA timezone for hourly and daily buckets. `--from` and `--to` with no offset are read in it, for the headline as well as the table. |
 | `--by` | Group by a dimension, as for `query`. Repeatable. |
 | `--channel`, `--env` | Restrict to channels or environments, as for `query`. Repeatable. |
 | `--limit`, `--offset` | Rows per page and rows to skip. |
@@ -144,11 +150,13 @@ poly metrics score --json
   "limit": 20,
   "offset": 0,
   "summary": {
+    "version": "v2",
+    "scale": "1-5",
     "average": 4.3,
     "conversations": 2012,
     "from_datetime": "2026-09-28T00:00:00",
     "to_datetime": "2026-10-05T00:00:00",
-    "text": "Poly Score from 2026-09-28 to 2026-10-04: 4.3 average over 2,012 conversations."
+    "text": "Poly Score V2 (1-5) from 2026-09-28 to 2026-10-04: 4.3 average over 2,012 conversations."
   }
 }
 ~~~

@@ -45,6 +45,7 @@ def _query_args(**overrides) -> Namespace:
         "sort": None,
         "limit": 20,
         "offset": 0,
+        "v1": False,
     }
     base.update(overrides)
     return Namespace(**base)
@@ -933,8 +934,8 @@ class MetricsQueryTest(MetricsReadCommandTest):
                 "project_id": "test_project",
                 "metric": "duration",
                 "aggs": ["avg", "p95"],
-                "from_datetime": "2026-09-01T00:00:00",
-                "to_datetime": "2026-10-01T00:00:00",
+                "from_datetime": "2026-09-01T00:00:00+01:00",
+                "to_datetime": "2026-10-01T00:00:00+01:00",
                 "interval": "daily",
                 "timezone": "Europe/London",
                 "group_by": ["channel"],
@@ -1014,6 +1015,37 @@ class MetricsQueryTest(MetricsReadCommandTest):
         self.assertIn("4.21", output)
         self.assertIn("1,318", output)
 
+    def test_bucket_labels_stay_in_the_query_timezone(self):
+        """A New York day bucket reads as that day, not as the UTC instant it starts at."""
+        self.mock_request.return_value = {
+            "columns": ["bucket", "avg"],
+            "rows": [["2026-11-01T04:00:00+00:00", 4.2]],
+            "limit": 20,
+            "offset": 0,
+        }
+
+        output = self._render(
+            MetricsCommand.metrics_query,
+            TEST_DIR,
+            "duration",
+            _query_args(interval="daily", timezone="America/New_York"),
+            output_json=False,
+        )
+
+        self.assertIn("2026-11-01 ", output)
+        self.assertNotIn("04:00", output)
+
+    @patch("poly.cli_commands.metrics.json_print")
+    def test_unknown_timezone_fails_before_any_request(self, mock_json):
+        """A timezone that is not an IANA name is refused locally."""
+        with self.assertRaises(SystemExit):
+            MetricsCommand.metrics_query(
+                TEST_DIR, "duration", _query_args(timezone="Mars/Olympus"), output_json=True
+            )
+
+        self.mock_request.assert_not_called()
+        self.assertIn("Mars/Olympus", mock_json.call_args[0][0]["error"])
+
 
 class MetricsQueryWindowTest(MetricsReadCommandTest):
     """A widened weekly or monthly window is reported by `poly metrics query`."""
@@ -1075,7 +1107,7 @@ class MetricsScoreTest(MetricsReadCommandTest):
 
     def test_headline_comes_from_a_separate_unbucketed_query(self):
         """The overall figure is fetched without interval or group-by, so paging can't skew it."""
-        self._responses([[87.5, 40]], [["2026-09-28T00:00:00", 80.0, 10]])
+        self._responses([[4.5, 40]], [["2026-09-28T00:00:00", 4.0, 10]])
 
         output = self._render(
             MetricsCommand.metrics_score,
@@ -1086,7 +1118,8 @@ class MetricsScoreTest(MetricsReadCommandTest):
 
         overall_body = self.mock_request.call_args_list[0].kwargs["data"]
         table_body = self.mock_request.call_args_list[1].kwargs["data"]
-        self.assertEqual(overall_body["metric"], "poly_score")
+        self.assertEqual(overall_body["metric"], "poly_score_v2")
+        self.assertEqual(table_body["metric"], "poly_score_v2")
         self.assertEqual(overall_body["aggs"], ["avg", "conversation_count"])
         self.assertEqual(overall_body["limit"], 1)
         self.assertNotIn("interval", overall_body)
@@ -1096,7 +1129,7 @@ class MetricsScoreTest(MetricsReadCommandTest):
         self.assertEqual(table_body["limit"], 1)
         self.assertIn("from_datetime", overall_body)
         self.assertEqual(overall_body["from_datetime"], table_body["from_datetime"])
-        self.assertIn("87.5 average over 40 conversations", output)
+        self.assertIn("4.5 average over 40 conversations", output)
 
     def test_headline_shows_the_window_as_given(self):
         """--to 2026-09-30 reads 'to 2026-09-30' although the request end is the next day."""
@@ -1125,8 +1158,60 @@ class MetricsScoreTest(MetricsReadCommandTest):
         payload = mock_json.call_args[0][0]
         self.assertIsNone(payload["summary"]["average"])
         self.assertEqual(payload["summary"]["conversations"], 0)
+        self.assertEqual(payload["summary"]["version"], "v2")
+        self.assertEqual(payload["summary"]["scale"], "1-5")
+        self.assertIn("Poly Score V2 (1-5)", payload["summary"]["text"])
         self.assertIn("no scored conversations", payload["summary"]["text"])
+        self.assertIn("--v1", payload["summary"]["text"])
         self.assertEqual(payload["rows"], [])
+
+    def test_v1_reads_the_earlier_score_and_names_its_scale(self):
+        """--v1 queries poly_score, and the headline says V1 and 0-10."""
+        self._responses([[7.25, 12]], [])
+
+        output = self._render(
+            MetricsCommand.metrics_score,
+            TEST_DIR,
+            _query_args(interval="daily", from_dt="2026-03-01", to_dt="2026-03-31", v1=True),
+            output_json=False,
+        )
+
+        overall, table = (c.kwargs["data"] for c in self.mock_request.call_args_list)
+        self.assertEqual(overall["metric"], "poly_score")
+        self.assertEqual(table["metric"], "poly_score")
+        self.assertIn(
+            "Poly Score V1 (0-10) from 2026-03-01 to 2026-03-31: 7.25 average over 12", output
+        )
+
+    def test_timezone_gives_the_headline_and_the_table_the_same_window(self):
+        """Bare dates are sent as midnight in --timezone, for the headline query too.
+
+        The Data API reads a bound with no offset in the timezone only when the
+        query is bucketed hourly or daily, and the headline query is not bucketed.
+        """
+        self._responses([[4.0, 3]], [])
+
+        output = self._render(
+            MetricsCommand.metrics_score,
+            TEST_DIR,
+            _query_args(
+                interval="daily",
+                from_dt="2026-11-01",
+                to_dt="2026-11-03",
+                timezone="America/New_York",
+            ),
+            output_json=False,
+        )
+
+        overall, table = (c.kwargs["data"] for c in self.mock_request.call_args_list)
+        # The clocks go back on 1 November, so the two bounds carry different offsets.
+        self.assertEqual(overall["from_datetime"], "2026-11-01T00:00:00-04:00")
+        self.assertEqual(overall["to_datetime"], "2026-11-04T00:00:00-05:00")
+        self.assertEqual(table["from_datetime"], overall["from_datetime"])
+        self.assertEqual(table["to_datetime"], overall["to_datetime"])
+        self.assertNotIn("timezone", overall)
+        self.assertEqual(table["timezone"], "America/New_York")
+        self.assertIn("from 2026-11-01 to 2026-11-03", output)
 
     def test_weekly_window_is_widened_and_says_so(self):
         """--from on a Thursday queries from Monday; the headline and a note show it."""
@@ -1145,7 +1230,9 @@ class MetricsScoreTest(MetricsReadCommandTest):
         overall, table = (c.kwargs["data"] for c in self.mock_request.call_args_list)
         self.assertEqual(overall["from_datetime"], "2026-09-28T00:00:00")
         self.assertEqual(table["from_datetime"], "2026-09-28T00:00:00")
-        self.assertIn("Poly Score from 2026-09-28 to now: 2.12 average over 57", output)
+        self.assertIn("Poly Score V2 (1-5) from 2026-09-28 to now: 2.12 average over 57", output)
+        self.assertIn("2026-09-28 ", output.split("whole weeks")[1])
+        self.assertNotIn("00:00", output)
         self.assertIn("Weekly buckets are whole weeks, so the window is from 2026-09-28.", output)
 
     def test_explicit_window_is_respected(self):

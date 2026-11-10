@@ -720,14 +720,17 @@ class PrintAvailableMetricsTest(unittest.TestCase):
 class PrintAggregateTest(unittest.TestCase):
     """Tests for print_aggregate, the `metrics query` / `metrics score` table."""
 
-    def _render(self, result: dict, headline: str | None = None) -> str:
-        # Wide enough that no column truncates, whatever the platform calls UTC.
+    def _render(self, result: dict, headline: str | None = None, **query) -> str:
         with patch.object(console, "_width", 200), console.capture() as capture:
-            print_aggregate(result, headline=headline)
+            print_aggregate(result, headline=headline, **query)
         return capture.get()
 
+    def _bucket_label(self, bucket: str, **query) -> str:
+        output = self._render({"columns": ["bucket"], "rows": [[bucket]]}, **query)
+        return output.splitlines()[-1].strip()
+
     def test_numbers_and_buckets_are_formatted(self):
-        """Floats get two decimals, counts get separators, buckets a readable timestamp."""
+        """Floats get two decimals, counts get separators, buckets a date."""
         output = self._render(
             {
                 "columns": ["bucket", "channel", "avg", "conversation_count"],
@@ -743,8 +746,44 @@ class PrintAggregateTest(unittest.TestCase):
         self.assertIn("4.21", output)
         self.assertIn("1,318", output)
         self.assertNotIn("2026-09-01T00:00:00+00:00", output)
-        self.assertRegex(output, r"\d{2} \w{3} 26 \d{2}:\d{2}")
+        self.assertIn("2026-09-01 ", output)
         self.assertNotIn("Use --offset", output)
+
+    def test_bucket_labels_do_not_depend_on_the_machine_timezone(self):
+        """UTC buckets are labelled in UTC: the date alone, or with the hour when hourly."""
+        bucket = "2026-10-01T00:00:00+00:00"
+
+        self.assertEqual(self._bucket_label(bucket, interval="daily"), "2026-10-01")
+        self.assertEqual(self._bucket_label(bucket, interval="weekly"), "2026-10-01")
+        self.assertEqual(self._bucket_label(bucket, interval="monthly"), "2026-10-01")
+        self.assertEqual(self._bucket_label(bucket, interval="hourly"), "2026-10-01 00:00 UTC")
+
+    def test_bucket_labels_stay_in_the_query_timezone(self):
+        """Hourly and daily buckets are labelled in the timezone they were bucketed in."""
+        zone = "America/New_York"
+        bucket = "2026-11-01T04:00:00+00:00"
+
+        self.assertEqual(self._bucket_label(bucket, interval="daily", timezone=zone), "2026-11-01")
+        self.assertEqual(
+            self._bucket_label(bucket, interval="hourly", timezone=zone), "2026-11-01 00:00 EDT"
+        )
+
+    def test_hourly_labels_tell_apart_the_repeated_hour(self):
+        """When the clocks go back, 01:00 happens twice; the zone name says which is which."""
+        labels = [
+            self._bucket_label(bucket, interval="hourly", timezone="America/New_York")
+            for bucket in ("2026-11-01T05:00:00+00:00", "2026-11-01T06:00:00+00:00")
+        ]
+
+        self.assertEqual(labels, ["2026-11-01 01:00 EDT", "2026-11-01 01:00 EST"])
+
+    def test_weekly_and_monthly_labels_ignore_the_timezone(self):
+        """The Data API buckets weeks and months in UTC whatever timezone is sent."""
+        label = self._bucket_label(
+            "2026-11-02T00:00:00+00:00", interval="weekly", timezone="America/New_York"
+        )
+
+        self.assertEqual(label, "2026-11-02")
 
     def test_full_page_hints_at_the_next_offset(self):
         """When the page is full, the footer says where the next page starts."""

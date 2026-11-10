@@ -8106,8 +8106,8 @@ class ProjectGetPolyScoreTest(unittest.TestCase):
     def test_summary_is_fetched_separately_from_the_table(self):
         """The overall figure comes from an unbucketed query over the same window."""
         self.mock_api.side_effect = [
-            {"columns": ["avg", "conversation_count"], "rows": [[87.456, 40]]},
-            {"columns": ["bucket", "avg", "conversation_count"], "rows": [["b", 80.0, 10]]},
+            {"columns": ["avg", "conversation_count"], "rows": [[4.456, 40]]},
+            {"columns": ["bucket", "avg", "conversation_count"], "rows": [["b", 4.0, 10]]},
         ]
 
         result = self.project.get_poly_score(from_dt="2026-09-01", to_dt="2026-09-30", limit=5)
@@ -8121,13 +8121,51 @@ class ProjectGetPolyScoreTest(unittest.TestCase):
         self.assertEqual(
             result["summary"],
             {
-                "average": 87.46,
+                "version": "v2",
+                "scale": "1-5",
+                "average": 4.46,
                 "conversations": 40,
                 "from_datetime": "2026-09-01T00:00:00",
                 "to_datetime": "2026-10-01T00:00:00",
             },
         )
-        self.assertEqual(result["rows"], [["b", 80.0, 10]])
+        self.assertEqual(result["rows"], [["b", 4.0, 10]])
+        self.assertEqual({overall["metric"], table["metric"]}, {"poly_score_v2"})
+
+    def test_v1_reads_the_earlier_score(self):
+        """``version="v1"`` queries the 0-10 score and says so in the summary."""
+        self.mock_api.return_value = {"columns": [], "rows": []}
+
+        result = self.project.get_poly_score(version="v1")
+
+        self.assertEqual(
+            {c.kwargs["body"]["metric"] for c in self.mock_api.call_args_list}, {"poly_score"}
+        )
+        self.assertEqual(result["summary"]["version"], "v1")
+        self.assertEqual(result["summary"]["scale"], "0-10")
+
+    def test_unknown_version_is_refused(self):
+        """Only v1 and v2 exist."""
+        with self.assertRaisesRegex(ValueError, "v2, v1"):
+            self.project.get_poly_score(version="v3")
+
+        self.mock_api.assert_not_called()
+
+    def test_bare_dates_are_read_in_the_timezone_by_both_queries(self):
+        """The summary query has no interval, so the offset has to travel with the dates."""
+        self.mock_api.return_value = {"columns": [], "rows": []}
+
+        self.project.get_poly_score(
+            from_dt="2026-11-01", to_dt="2026-11-03", timezone="America/New_York"
+        )
+
+        overall, table = (c.kwargs["body"] for c in self.mock_api.call_args_list)
+        self.assertEqual(overall["from_datetime"], "2026-11-01T00:00:00-04:00")
+        self.assertEqual(overall["to_datetime"], "2026-11-04T00:00:00-05:00")
+        self.assertEqual(
+            (table["from_datetime"], table["to_datetime"]),
+            (overall["from_datetime"], overall["to_datetime"]),
+        )
 
     def test_defaults_to_the_last_seven_days(self):
         """With no bounds the window is the last seven days, applied to both queries."""

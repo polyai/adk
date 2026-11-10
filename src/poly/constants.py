@@ -106,3 +106,10 @@ DATA_HAVING_OPS = ["eq", "gt", "gte", "lt", "lte"]
 DATA_MAX_LIMIT = 100
 DATA_MAX_OFFSET = 1000
 DATA_RATE_LIMIT_PER_MINUTE = 100
+
+# Poly Score versions: the metric each one is stored under and the scale it is scored on.
+# New conversations are scored on V2 only.
+POLY_SCORE_VERSIONS = {
+    "v2": {"metric": "poly_score_v2", "scale": "1-5"},
+    "v1": {"metric": "poly_score", "scale": "0-10"},
+}

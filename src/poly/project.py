@@ -17,6 +17,7 @@ from enum import Enum
 from functools import cached_property
 from pathlib import PurePath
 from typing import Any, Optional, TypeAlias
+from zoneinfo import ZoneInfo
 
 from google.protobuf.message import Message
 
@@ -34,6 +35,7 @@ from poly.constants import (
     DATA_LIST_OPS,
     DATA_MAX_LIMIT,
     DATA_MAX_OFFSET,
+    POLY_SCORE_VERSIONS,
 )
 from poly.handlers.interface import (
     AgentStudioInterface,
@@ -120,16 +122,36 @@ def _non_empty_types(resources: ResourceMap) -> ResourceMap:
     return {resource_type: typed for resource_type, typed in resources.items() if typed}
 
 
-POLY_SCORE_METRIC = "poly_score"
 POLY_SCORE_DEFAULT_DAYS = 7
 
 
-def _window_bound(value: str, *, exclusive_end: bool = False) -> str:
+def _zone(timezone: Optional[str]) -> Optional[ZoneInfo]:
+    """The ``ZoneInfo`` for an IANA timezone name, or ``None`` when none is given.
+
+    Raises:
+        ValueError: If the name is not a known timezone.
+    """
+    if timezone is None:
+        return None
+    try:
+        return ZoneInfo(timezone)
+    except (KeyError, ValueError, OSError) as e:
+        raise ValueError(
+            f"Unknown timezone {timezone!r}. Use an IANA name such as Europe/London."
+        ) from e
+
+
+def _window_bound(value: str, zone: Optional[ZoneInfo], *, exclusive_end: bool = False) -> str:
     """Normalise a ``from``/``to`` bound into an ISO 8601 string for the Data API.
 
     Accepts a date (``2026-09-01``) or a datetime (``2026-09-01T09:30``, with or
     without an offset). A bare date for an exclusive end bound rolls to the next
     midnight so ``to="2026-09-30"`` includes the whole of the 30th.
+
+    A bound with no offset is local time in ``zone`` and is sent with that
+    offset. The Data API applies ``timezone`` to such bounds only on hourly
+    and daily queries, so sending the offset is what makes a window cover the
+    same conversations whatever the interval.
 
     Raises:
         ValueError: If the value is not a date or datetime.
@@ -143,13 +165,20 @@ def _window_bound(value: str, *, exclusive_end: bool = False) -> str:
         raise ValueError(f"Invalid date {value!r}. Use YYYY-MM-DD or an ISO 8601 datetime.") from e
     if exclusive_end and len(text) == 10:
         parsed = parsed + timedelta(days=1)
+    if parsed.tzinfo is None and zone is not None:
+        parsed = parsed.replace(tzinfo=zone)
     return parsed.isoformat()
 
 
 def _bucket_window(
-    from_dt: Optional[str], to_dt: Optional[str], interval: Optional[str]
+    from_dt: Optional[str],
+    to_dt: Optional[str],
+    interval: Optional[str],
+    timezone: Optional[str] = None,
 ) -> tuple[Optional[str], Optional[str], bool]:
     """Normalise a window and widen it to whole weekly or monthly buckets.
+
+    Bounds with no offset are read in ``timezone`` when one is given.
 
     Weekly and monthly buckets are whole calendar weeks (Monday, UTC) and
     months, and the Data API keeps a bucket only when the bucket's start is
@@ -163,10 +192,11 @@ def _bucket_window(
         given) and whether either bound moved.
 
     Raises:
-        ValueError: If a bound is not a date or datetime.
+        ValueError: If a bound is not a date or datetime, or the timezone is unknown.
     """
-    start = _window_bound(from_dt) if from_dt else None
-    end = _window_bound(to_dt, exclusive_end=True) if to_dt else None
+    zone = _zone(timezone)
+    start = _window_bound(from_dt, zone) if from_dt else None
+    end = _window_bound(to_dt, zone, exclusive_end=True) if to_dt else None
     if interval not in ("weekly", "monthly"):
         return start, end, False
 
@@ -206,27 +236,26 @@ def _build_metric_query(
     metric: str,
     aggs: Optional[list[str]],
     *,
-    from_dt: Optional[str],
-    to_dt: Optional[str],
-    interval: Optional[str],
-    timezone: Optional[str],
-    group_by: Optional[list[str]],
-    channel: Optional[list[str]],
-    client_env: Optional[list[str]],
-    deployment_id: Optional[list[str]],
-    variant_id: Optional[list[str]],
-    filters: Optional[list[dict]],
-    match_any: bool,
-    having: Optional[list[dict]],
-    sort: Optional[dict],
-    limit: int,
-    offset: int,
-    widen: bool = True,
+    from_dt: Optional[str] = None,
+    to_dt: Optional[str] = None,
+    interval: Optional[str] = None,
+    timezone: Optional[str] = None,
+    group_by: Optional[list[str]] = None,
+    channel: Optional[list[str]] = None,
+    client_env: Optional[list[str]] = None,
+    deployment_id: Optional[list[str]] = None,
+    variant_id: Optional[list[str]] = None,
+    filters: Optional[list[dict]] = None,
+    match_any: bool = False,
+    having: Optional[list[dict]] = None,
+    sort: Optional[dict] = None,
+    limit: int = 20,
+    offset: int = 0,
 ) -> dict:
     """Validate the arguments of :meth:`AgentStudioProject.query_metric` and build the body.
 
-    ``widen=False`` sends the window as given, for a caller that has already
-    widened it with :func:`_bucket_window`.
+    ``from_dt`` and ``to_dt`` are sent as given: the caller passes the window
+    it got from :func:`_bucket_window`.
 
     Raises:
         ValueError: On anything the Data API would reject.
@@ -284,7 +313,6 @@ def _build_metric_query(
             raise ValueError("Sort needs a field.")
         checked_sort = {"field": sort["field"], "order": order}
 
-    window_from, window_to, _ = _bucket_window(from_dt, to_dt, interval if widen else None)
     body: dict[str, Any] = {
         "metric": str(metric).strip(),
         "aggs": aggs,
@@ -292,8 +320,8 @@ def _build_metric_query(
         "offset": offset,
     }
     optional = {
-        "from_datetime": window_from,
-        "to_datetime": window_to,
+        "from_datetime": from_dt,
+        "to_datetime": to_dt,
         "interval": interval,
         "timezone": timezone,
         "group_by": list(group_by) if group_by else None,
@@ -4499,7 +4527,8 @@ class AgentStudioProject:
                 ``None`` for one total. Weekly and monthly buckets are whole
                 weeks (from Monday, UTC) and months, so the window is widened
                 to the bucket boundaries.
-            timezone: IANA timezone for hourly and daily buckets.
+            timezone: IANA timezone for hourly and daily buckets. ``from_dt``
+                and ``to_dt`` with no offset are read in it, whatever the interval.
             group_by: Dimensions to group by.
             channel: Restrict to these channels.
             client_env: Restrict to these environments.
@@ -4519,11 +4548,12 @@ class AgentStudioProject:
         Raises:
             ValueError: If any argument is outside what the Data API accepts.
         """
+        window_from, window_to, widened = _bucket_window(from_dt, to_dt, interval, timezone)
         result = self._query_metric(
             metric,
             aggs,
-            from_dt=from_dt,
-            to_dt=to_dt,
+            from_dt=window_from,
+            to_dt=window_to,
             interval=interval,
             timezone=timezone,
             group_by=group_by,
@@ -4538,31 +4568,12 @@ class AgentStudioProject:
             limit=limit,
             offset=offset,
         )
-        window_from, window_to, widened = _bucket_window(from_dt, to_dt, interval)
         if widened:
             result = {**result, "window": {"from_datetime": window_from, "to_datetime": window_to}}
         return result
 
     def _query_metric(self, metric: str, aggs: Optional[list[str]], **query: Any) -> dict:
         """Validate one metric query, scope it to this project and send it."""
-        query = {
-            "from_dt": None,
-            "to_dt": None,
-            "interval": None,
-            "timezone": None,
-            "group_by": None,
-            "channel": None,
-            "client_env": None,
-            "deployment_id": None,
-            "variant_id": None,
-            "filters": None,
-            "match_any": False,
-            "having": None,
-            "sort": None,
-            "limit": 20,
-            "offset": 0,
-            **query,
-        }
         body = _build_metric_query(metric, aggs, **query)
         return AgentStudioInterface.query_metric(
             self.region, body={**body, "project_id": self.project_id}
@@ -4580,8 +4591,12 @@ class AgentStudioProject:
         client_env: Optional[list[str]] = None,
         limit: int = 20,
         offset: int = 0,
+        version: str = "v2",
     ) -> dict:
         """Poly Score for this project: an overall summary plus a bucketed table.
+
+        Reads Poly Score V2 (1-5), the score new conversations get. Pass
+        ``version="v1"`` for the earlier 0-10 score on older conversations.
 
         The summary comes from its own unbucketed, ungrouped query, so it covers
         the whole window whatever ``limit`` and ``offset`` leave in the table.
@@ -4594,21 +4609,29 @@ class AgentStudioProject:
             from_dt: Inclusive start, as for :meth:`query_metric`.
             to_dt: Exclusive end, as for :meth:`query_metric`.
             interval: Time bucket for the table; defaults to ``daily``.
-            timezone: IANA timezone for hourly and daily buckets.
+            timezone: IANA timezone for hourly and daily buckets. Bounds with
+                no offset are read in it, for the summary as well as the table.
             group_by: Dimensions to group the table by.
             channel: Restrict to these channels.
             client_env: Restrict to these environments.
             limit: Table rows per page.
             offset: Table rows to skip.
+            version: Poly Score version, ``v2`` or ``v1``.
 
         Returns:
             dict: The bucketed table (``columns``, ``rows``, ``limit``, ``offset``) plus
-            ``summary``: ``{"average", "conversations", "from_datetime", "to_datetime"}``,
-            and ``window`` when the window was widened.
+            ``summary``: ``{"version", "scale", "average", "conversations",
+            "from_datetime", "to_datetime"}``, and ``window`` when the window was widened.
 
         Raises:
             ValueError: If any argument is outside what the Data API accepts.
         """
+        if version not in POLY_SCORE_VERSIONS:
+            raise ValueError(
+                f"Poly Score version must be one of: {', '.join(POLY_SCORE_VERSIONS)}. "
+                f"Got {version!r}."
+            )
+        score = POLY_SCORE_VERSIONS[version]
         default_end = None
         if from_dt is None and to_dt is None:
             now = datetime.now(UTC).replace(microsecond=0)
@@ -4616,21 +4639,22 @@ class AgentStudioProject:
             default_end = now.isoformat()
         # Widen here, not only in the table query, so the summary and the
         # table always cover the same window.
-        from_dt, to_dt, widened = _bucket_window(from_dt, to_dt, interval)
+        from_dt, to_dt, widened = _bucket_window(from_dt, to_dt, interval, timezone)
         to_dt = to_dt or default_end
         cohort = {
             "from_dt": from_dt,
             "to_dt": to_dt,
             "channel": channel,
             "client_env": client_env,
-            "widen": False,
         }
         aggs = ["avg", "conversation_count"]
 
-        overall = self._query_metric(POLY_SCORE_METRIC, aggs, limit=1, **cohort)
+        overall = self._query_metric(score["metric"], aggs, limit=1, **cohort)
         columns = overall.get("columns") or []
         rows = overall.get("rows") or []
         summary: dict[str, Any] = {
+            "version": version,
+            "scale": score["scale"],
             "average": None,
             "conversations": 0,
             "from_datetime": from_dt,
@@ -4643,7 +4667,7 @@ class AgentStudioProject:
             summary["conversations"] = int(row.get("conversation_count") or 0)
 
         table = self._query_metric(
-            POLY_SCORE_METRIC,
+            score["metric"],
             aggs,
             interval=interval,
             timezone=timezone,

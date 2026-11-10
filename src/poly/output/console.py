@@ -11,7 +11,7 @@ import os
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -1821,12 +1821,34 @@ def print_available_metrics(metrics: list[dict[str, Any]]) -> None:
     console.print(f"\n{len(metrics)} metrics. Query one with: poly metrics query <name>")
 
 
-def _format_aggregate_cell(column: str, value: Any) -> str:
+def _format_bucket(value: str, interval: str | None, timezone: str | None) -> str:
+    """Label a time bucket in the timezone the query bucketed in.
+
+    Buckets are UTC unless the query gave a timezone, which the Data API
+    applies to hourly and daily buckets only. The label stays in that
+    timezone, not the machine's, so a day's bucket reads as that day wherever
+    it is printed. Daily, weekly and monthly buckets show the date alone.
+    Hourly buckets name the zone too, which tells apart the two 01:00 hours
+    on the day the clocks go back.
+    """
+    try:
+        start = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if start.tzinfo is not None:
+        local = timezone and interval in ("hourly", "daily")
+        start = start.astimezone(ZoneInfo(timezone) if local else UTC)
+    return start.strftime("%Y-%m-%d %H:%M %Z" if interval == "hourly" else "%Y-%m-%d")
+
+
+def _format_aggregate_cell(
+    column: str, value: Any, interval: str | None = None, timezone: str | None = None
+) -> str:
     """Format one cell of an aggregate result for the terminal."""
     if value is None:
         return "—"
     if column == "bucket" and isinstance(value, str):
-        return _format_iso_timestamp(value)
+        return _format_bucket(value, interval, timezone)
     if isinstance(value, float):
         return f"{value:,.2f}"
     if isinstance(value, int) and not isinstance(value, bool):
@@ -1835,7 +1857,11 @@ def _format_aggregate_cell(column: str, value: Any) -> str:
 
 
 def print_aggregate(
-    result: dict[str, Any], headline: str | None = None, note: str | None = None
+    result: dict[str, Any],
+    headline: str | None = None,
+    note: str | None = None,
+    interval: str | None = None,
+    timezone: str | None = None,
 ) -> None:
     """Print a tabular aggregate result from the Data API.
 
@@ -1843,6 +1869,8 @@ def print_aggregate(
         result: ``{"columns": [...], "rows": [[...]], "limit", "offset"}``.
         headline: Optional one-line summary printed above the table.
         note: Optional remark about the query, printed dimmed above the table.
+        interval: The query's time bucket, which decides how buckets are labelled.
+        timezone: The query's timezone, which the bucket labels stay in.
     """
     columns = result.get("columns") or []
     rows = result.get("rows") or []
@@ -1864,7 +1892,9 @@ def print_aggregate(
         table.add_column(column, justify=justify, no_wrap=True)
 
     for row in rows:
-        table.add_row(*[_format_aggregate_cell(c, v) for c, v in zip(columns, row)])
+        table.add_row(
+            *[_format_aggregate_cell(c, v, interval, timezone) for c, v in zip(columns, row)]
+        )
 
     console.print(table)
     limit = result.get("limit")

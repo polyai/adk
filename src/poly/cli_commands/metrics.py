@@ -76,7 +76,7 @@ class MetricsCommand(BaseCommand):
             help="List the custom metrics defined in the project.",
             description=(
                 "List the custom metrics defined in the current project.\n\n"
-                "For every metric you can query, built-in ones such as poly_score\n"
+                "For every metric you can query, built-in ones such as poly_score_v2\n"
                 "included, use `poly metrics available`."
             ),
             formatter_class=RawTextHelpFormatter,
@@ -85,10 +85,10 @@ class MetricsCommand(BaseCommand):
         metrics_subparsers.add_parser(
             "available",
             parents=[parents.path, parents.json],
-            help="Show the metrics you can query, including built-in ones such as poly_score.",
+            help="Show the metrics you can query, including built-in ones such as poly_score_v2.",
             description=(
                 "Show every metric you can query for the current project: built-in\n"
-                "metrics such as poly_score and duration, plus the custom metrics\n"
+                "metrics such as poly_score_v2 and duration, plus the custom metrics\n"
                 "defined in the project. These are the names `poly metrics query`\n"
                 "accepts.\n\n"
                 "Examples:\n"
@@ -108,11 +108,11 @@ class MetricsCommand(BaseCommand):
                 "Metric names come from `poly metrics available`. Backed by the\n"
                 "experimental metrics aggregate endpoint of the Data API.\n\n"
                 "Examples:\n"
-                "  poly metrics query poly_score --agg avg --from 2026-09-01 --to 2026-09-30\n"
+                "  poly metrics query poly_score_v2 --agg avg --from 2026-09-01 --to 2026-09-30\n"
                 "  poly metrics query duration --agg avg --agg p95 --interval daily --by channel\n"
                 "  poly metrics query CSAT --agg avg --filter channel eq VOICE-SIP"
                 " --having avg gte 4\n"
-                "  poly metrics query poly_score --agg conversation_count --by value_string\n"
+                "  poly metrics query handoff_reason --agg conversation_count --by value_string\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -132,14 +132,23 @@ class MetricsCommand(BaseCommand):
             help="Poly Score for the project over a window (default: last 7 days, daily).",
             description=(
                 "Average Poly Score and conversation count for the current project.\n"
-                "Shortcut for `poly metrics query poly_score --agg avg --agg\n"
-                "conversation_count`. Defaults to the last 7 days bucketed daily.\n\n"
+                "Reads Poly Score V2 (1-5), the score new conversations get; --v1\n"
+                "reads the earlier 0-10 score on older conversations. Shortcut for\n"
+                "`poly metrics query poly_score_v2 --agg avg --agg conversation_count`.\n"
+                "Defaults to the last 7 days bucketed daily.\n\n"
                 "Examples:\n"
                 "  poly metrics score\n"
                 "  poly metrics score --interval weekly --from 2026-09-01\n"
                 "  poly metrics score --by channel --env live\n"
+                "  poly metrics score --v1 --from 2026-03-01 --to 2026-03-31\n"
             ),
             formatter_class=RawTextHelpFormatter,
+        )
+        score_parser.add_argument(
+            "--v1",
+            action="store_true",
+            default=False,
+            help="Read Poly Score V1 (0-10) instead of V2 (1-5), for older conversations.",
         )
         cls._add_query_arguments(score_parser, score=True)
 
@@ -346,7 +355,10 @@ class MetricsCommand(BaseCommand):
             type=str,
             default=None,
             metavar="IANA",
-            help="Timezone for hourly and daily buckets, e.g. Europe/London.",
+            help=(
+                "Timezone for hourly and daily buckets, e.g. Europe/London.\n"
+                "--from and --to with no offset are read in it."
+            ),
         )
         parser.add_argument(
             "--by",
@@ -453,7 +465,12 @@ class MetricsCommand(BaseCommand):
         if output_json:
             json_print(result)
         else:
-            print_aggregate(result, note=cls._window_note(result, args.interval))
+            print_aggregate(
+                result,
+                note=cls._window_note(result, args.interval),
+                interval=args.interval,
+                timezone=args.timezone,
+            )
 
     @classmethod
     def metrics_score(cls, base_path: str, args: Namespace, output_json: bool = False) -> None:
@@ -474,6 +491,7 @@ class MetricsCommand(BaseCommand):
                 client_env=args.env,
                 limit=args.limit,
                 offset=args.offset,
+                version="v1" if args.v1 else "v2",
             )
         except ValueError as e:
             cls._fail(str(e), output_json)
@@ -484,7 +502,13 @@ class MetricsCommand(BaseCommand):
         if output_json:
             json_print({**result, "summary": {**result["summary"], "text": headline}})
         else:
-            print_aggregate(result, headline=headline, note=cls._window_note(result, args.interval))
+            print_aggregate(
+                result,
+                headline=headline,
+                note=cls._window_note(result, args.interval),
+                interval=args.interval,
+                timezone=args.timezone,
+            )
 
     @staticmethod
     def _window_dates(from_datetime: str | None, to_datetime: str | None) -> tuple[str, str]:
@@ -502,14 +526,21 @@ class MetricsCommand(BaseCommand):
 
     @classmethod
     def _score_headline(cls, summary: dict[str, Any]) -> str:
-        """One line for the overall Poly Score over the window that was queried."""
+        """One line for the overall Poly Score over the window that was queried.
+
+        Names the version and its scale: the same number means something
+        different on V1 (0-10) and V2 (1-5).
+        """
         start, end = cls._window_dates(summary.get("from_datetime"), summary.get("to_datetime"))
         window = f" from {start or '…'} to {end or 'now'}" if start or end else ""
+        version = summary["version"]
+        name = f"Poly Score {version.upper()} ({summary['scale']})"
         average = summary.get("average")
         if average is None:
-            return f"Poly Score{window}: no scored conversations."
+            hint = " Older conversations may have V1 scores: try --v1." if version == "v2" else ""
+            return f"{name}{window}: no scored conversations.{hint}"
         count = summary["conversations"]
-        return f"Poly Score{window}: {average} average over {count:,} conversations."
+        return f"{name}{window}: {average} average over {count:,} conversations."
 
     @classmethod
     def _window_note(cls, result: dict[str, Any], interval: str | None) -> str | None:
