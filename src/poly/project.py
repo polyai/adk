@@ -178,7 +178,10 @@ def _bucket_window(
 ) -> tuple[Optional[str], Optional[str], bool]:
     """Normalise a window and widen it to whole weekly or monthly buckets.
 
-    Bounds with no offset are read in ``timezone`` when one is given.
+    Bounds with no offset are read in ``timezone`` when one is given, except
+    for weekly and monthly buckets: those are UTC whatever the timezone, so
+    their bounds stay UTC dates too. Reading them in the zone would move a
+    bound across a bucket boundary and widen the window by a whole bucket.
 
     Weekly and monthly buckets are whole calendar weeks (Monday, UTC) and
     months, and the Data API keeps a bucket only when the bucket's start is
@@ -195,6 +198,8 @@ def _bucket_window(
         ValueError: If a bound is not a date or datetime, or the timezone is unknown.
     """
     zone = _zone(timezone)
+    if interval in ("weekly", "monthly"):
+        zone = None
     start = _window_bound(from_dt, zone) if from_dt else None
     end = _window_bound(to_dt, zone, exclusive_end=True) if to_dt else None
     if interval not in ("weekly", "monthly"):
@@ -4528,7 +4533,8 @@ class AgentStudioProject:
                 weeks (from Monday, UTC) and months, so the window is widened
                 to the bucket boundaries.
             timezone: IANA timezone for hourly and daily buckets. ``from_dt``
-                and ``to_dt`` with no offset are read in it, whatever the interval.
+                and ``to_dt`` with no offset are read in it for hourly, daily and
+                unbucketed queries; weekly and monthly bounds stay UTC.
             group_by: Dimensions to group by.
             channel: Restrict to these channels.
             client_env: Restrict to these environments.
@@ -4595,8 +4601,9 @@ class AgentStudioProject:
     ) -> dict:
         """Poly Score for this project: an overall summary plus a bucketed table.
 
-        Reads Poly Score V2 (1-5), the score new conversations get. Pass
-        ``version="v1"`` for the earlier 0-10 score on older conversations.
+        Reads Poly Score (1-5), the score new conversations get (``v2`` in the
+        Data API). Pass ``version="v1"`` for the previous Poly Score (0-10) on
+        older conversations.
 
         The summary comes from its own unbucketed, ungrouped query, so it covers
         the whole window whatever ``limit`` and ``offset`` leave in the table.
@@ -4610,7 +4617,8 @@ class AgentStudioProject:
             to_dt: Exclusive end, as for :meth:`query_metric`.
             interval: Time bucket for the table; defaults to ``daily``.
             timezone: IANA timezone for hourly and daily buckets. Bounds with
-                no offset are read in it, for the summary as well as the table.
+                no offset are read in it, for the summary as well as the table,
+                except for weekly and monthly buckets, whose bounds stay UTC.
             group_by: Dimensions to group the table by.
             channel: Restrict to these channels.
             client_env: Restrict to these environments.

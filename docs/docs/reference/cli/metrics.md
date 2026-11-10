@@ -87,7 +87,7 @@ Buckets are labelled in the timezone they were bucketed in: UTC, or `--timezone`
 | `--from` | Inclusive window start, `YYYY-MM-DD` or an ISO 8601 datetime. Defaults to no lower bound. |
 | `--to` | Exclusive window end. A bare date includes the whole of that day. |
 | `--interval` | Time bucket: `hourly`, `daily`, `weekly`, `monthly`. Omit for one total. Weekly and monthly buckets are whole weeks (from Monday, UTC) and whole months, so the window is widened to match: see below. |
-| `--timezone` | IANA timezone for hourly and daily buckets, e.g. `Europe/London`. `--from` and `--to` with no offset are read as local time in it, whatever the interval. |
+| `--timezone` | IANA timezone for hourly and daily buckets, e.g. `Europe/London`. `--from` and `--to` with no offset are read as local time in it for hourly, daily and unbucketed queries. Weekly and monthly buckets are always UTC, so their bounds stay UTC dates. |
 | `--by` | Group by `channel`, `deployment_id`, `variant_id`, `client_env`, `experiment_id`, `experiment_version_id` or, for a string metric, `value_string`. Repeatable. |
 | `--filter METRIC OP VALUE` | Only count conversations where the condition holds. `OP` is `eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ex`, `exists`; `in`/`ex` take a comma-separated list. Repeatable. |
 | `--any` | Match conversations that satisfy any `--filter` instead of all. |
@@ -119,7 +119,7 @@ When this happens the table is preceded by a line such as `Weekly buckets are wh
 
 Poly Score for the project: a one-line headline (average and conversation count over the whole window) above the bucketed table. Shortcut for `poly metrics query poly_score_v2 --agg avg --agg conversation_count`, defaulting to the last 7 days bucketed daily. The headline comes from a separate unbucketed request, so it covers the full window whatever `--limit` and `--offset` leave in the table.
 
-There are two versions of Poly Score, on different scales. `score` reads **Poly Score V2** (1 to 5), the score new conversations get. `--v1` reads the earlier **Poly Score V1** (0 to 10), which only older conversations have. The headline names the version and scale, because the same number means something different on each: `Poly Score V2 (1-5) from 2026-11-03 to 2026-11-09: 3.7 average over 1,369 conversations.`
+`score` reads **Poly Score** (1 to 5), the score new conversations get (the `poly_score_v2` metric). `--v1` reads the **previous Poly Score** (0 to 10, the `poly_score` metric), which only older conversations have. The headline names the score and its scale, because the same number means something different on each: `Poly Score (1-5) from 2026-11-03 to 2026-11-09: 3.7 average over 1,369 conversations.` With `--v1` it starts `Previous Poly Score (0-10)`.
 
 Examples:
 
@@ -133,10 +133,10 @@ poly metrics score --json
 
 | Flag | Description |
 |---|---|
-| `--v1` | Read Poly Score V1 (0 to 10) instead of V2 (1 to 5), for older conversations. |
+| `--v1` | Read the previous Poly Score (0 to 10) instead of Poly Score (1 to 5), for older conversations. |
 | `--from`, `--to` | Window bounds as for `query`. Defaults to the last 7 days. |
 | `--interval` | Time bucket. Defaults to `daily`. Weekly and monthly widen the window to whole buckets, as for `query`. |
-| `--timezone` | IANA timezone for hourly and daily buckets. `--from` and `--to` with no offset are read in it, for the headline as well as the table. |
+| `--timezone` | IANA timezone for hourly and daily buckets. `--from` and `--to` with no offset are read in it, for the headline as well as the table. Weekly and monthly bounds stay UTC, as for `query`. |
 | `--by` | Group by a dimension, as for `query`. Repeatable. |
 | `--channel`, `--env` | Restrict to channels or environments, as for `query`. Repeatable. |
 | `--limit`, `--offset` | Rows per page and rows to skip. |
@@ -156,7 +156,7 @@ poly metrics score --json
     "conversations": 2012,
     "from_datetime": "2026-09-28T00:00:00",
     "to_datetime": "2026-10-05T00:00:00",
-    "text": "Poly Score V2 (1-5) from 2026-09-28 to 2026-10-04: 4.3 average over 2,012 conversations."
+    "text": "Poly Score (1-5) from 2026-09-28 to 2026-10-04: 4.3 average over 2,012 conversations."
   }
 }
 ~~~

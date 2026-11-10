@@ -132,8 +132,8 @@ class MetricsCommand(BaseCommand):
             help="Poly Score for the project over a window (default: last 7 days, daily).",
             description=(
                 "Average Poly Score and conversation count for the current project.\n"
-                "Reads Poly Score V2 (1-5), the score new conversations get; --v1\n"
-                "reads the earlier 0-10 score on older conversations. Shortcut for\n"
+                "Reads Poly Score (1-5), the score new conversations get; --v1\n"
+                "reads the previous Poly Score (0-10) on older conversations. Shortcut for\n"
                 "`poly metrics query poly_score_v2 --agg avg --agg conversation_count`.\n"
                 "Defaults to the last 7 days bucketed daily.\n\n"
                 "Examples:\n"
@@ -148,7 +148,7 @@ class MetricsCommand(BaseCommand):
             "--v1",
             action="store_true",
             default=False,
-            help="Read Poly Score V1 (0-10) instead of V2 (1-5), for older conversations.",
+            help="Read the previous Poly Score (0-10) instead of Poly Score (1-5), for older conversations.",
         )
         cls._add_query_arguments(score_parser, score=True)
 
@@ -357,7 +357,8 @@ class MetricsCommand(BaseCommand):
             metavar="IANA",
             help=(
                 "Timezone for hourly and daily buckets, e.g. Europe/London.\n"
-                "--from and --to with no offset are read in it."
+                "--from and --to with no offset are read in it, except with\n"
+                "weekly and monthly buckets, which are always UTC."
             ),
         )
         parser.add_argument(
@@ -528,16 +529,21 @@ class MetricsCommand(BaseCommand):
     def _score_headline(cls, summary: dict[str, Any]) -> str:
         """One line for the overall Poly Score over the window that was queried.
 
-        Names the version and its scale: the same number means something
-        different on V1 (0-10) and V2 (1-5).
+        Names the score and its scale: the same number means something
+        different on Poly Score (1-5) and the previous Poly Score (0-10).
         """
         start, end = cls._window_dates(summary.get("from_datetime"), summary.get("to_datetime"))
         window = f" from {start or '…'} to {end or 'now'}" if start or end else ""
         version = summary["version"]
-        name = f"Poly Score {version.upper()} ({summary['scale']})"
+        label = "Poly Score" if version == "v2" else "Previous Poly Score"
+        name = f"{label} ({summary['scale']})"
         average = summary.get("average")
         if average is None:
-            hint = " Older conversations may have V1 scores: try --v1." if version == "v2" else ""
+            hint = (
+                " Older conversations may have a previous Poly Score: try --v1."
+                if version == "v2"
+                else ""
+            )
             return f"{name}{window}: no scored conversations.{hint}"
         count = summary["conversations"]
         return f"{name}{window}: {average} average over {count:,} conversations."

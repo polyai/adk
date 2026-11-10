@@ -8232,6 +8232,48 @@ class ProjectMetricBucketWindowTest(unittest.TestCase):
         self.assertEqual(self._body()["to_datetime"], "2999-01-02T10:00:00")
         self.assertNotIn("window", result)
 
+    def test_weekly_and_monthly_bounds_stay_utc_with_a_timezone(self):
+        """Weekly and monthly buckets are UTC, so a timezone must not move their bounds.
+
+        Read in the zone, 19 Oct 00:00 New York is 04:00 UTC, past the Monday
+        boundary, and 5 Oct 00:00 Tokyo is Sunday 4 Oct in UTC: either adds a
+        whole extra week.
+        """
+        for timezone in (None, "America/New_York", "Asia/Tokyo"):
+            with self.subTest(timezone=timezone):
+                result = self.project.query_metric(
+                    "poly_score",
+                    from_dt="2026-10-05",
+                    to_dt="2026-10-18",
+                    interval="weekly",
+                    timezone=timezone,
+                )
+                self.assertEqual(self._body()["from_datetime"], "2026-10-05T00:00:00")
+                self.assertEqual(self._body()["to_datetime"], "2026-10-19T00:00:00")
+                self.assertNotIn("window", result)
+
+        result = self.project.query_metric(
+            "poly_score",
+            from_dt="2026-09-01",
+            to_dt="2026-09-30",
+            interval="monthly",
+            timezone="Asia/Tokyo",
+        )
+        self.assertEqual(self._body()["from_datetime"], "2026-09-01T00:00:00")
+        self.assertEqual(self._body()["to_datetime"], "2026-10-01T00:00:00")
+        self.assertNotIn("window", result)
+
+    def test_weekly_score_with_a_timezone_keeps_both_queries_in_utc(self):
+        """The unbucketed headline query uses the same UTC window as the weekly table."""
+        self.project.get_poly_score(
+            from_dt="2026-10-05", to_dt="2026-10-18", interval="weekly", timezone="Asia/Tokyo"
+        )
+
+        overall, table = (c.kwargs["body"] for c in self.mock_api.call_args_list[-2:])
+        for body in (overall, table):
+            self.assertEqual(body["from_datetime"], "2026-10-05T00:00:00")
+            self.assertEqual(body["to_datetime"], "2026-10-19T00:00:00")
+
     def test_aligned_and_finer_windows_are_untouched(self):
         """Windows on bucket boundaries, and hourly, daily or unbucketed ones, stay as given."""
         for interval, start, end in (

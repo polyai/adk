@@ -1160,13 +1160,17 @@ class MetricsScoreTest(MetricsReadCommandTest):
         self.assertEqual(payload["summary"]["conversations"], 0)
         self.assertEqual(payload["summary"]["version"], "v2")
         self.assertEqual(payload["summary"]["scale"], "1-5")
-        self.assertIn("Poly Score V2 (1-5)", payload["summary"]["text"])
+        self.assertIn("Poly Score (1-5)", payload["summary"]["text"])
         self.assertIn("no scored conversations", payload["summary"]["text"])
-        self.assertIn("--v1", payload["summary"]["text"])
+        self.assertIn(
+            "Older conversations may have a previous Poly Score: try --v1.",
+            payload["summary"]["text"],
+        )
+        self.assertNotIn("V2", payload["summary"]["text"])
         self.assertEqual(payload["rows"], [])
 
     def test_v1_reads_the_earlier_score_and_names_its_scale(self):
-        """--v1 queries poly_score, and the headline says V1 and 0-10."""
+        """--v1 queries poly_score, and the headline says previous Poly Score and 0-10."""
         self._responses([[7.25, 12]], [])
 
         output = self._render(
@@ -1180,7 +1184,7 @@ class MetricsScoreTest(MetricsReadCommandTest):
         self.assertEqual(overall["metric"], "poly_score")
         self.assertEqual(table["metric"], "poly_score")
         self.assertIn(
-            "Poly Score V1 (0-10) from 2026-03-01 to 2026-03-31: 7.25 average over 12", output
+            "Previous Poly Score (0-10) from 2026-03-01 to 2026-03-31: 7.25 average over 12", output
         )
 
     def test_timezone_gives_the_headline_and_the_table_the_same_window(self):
@@ -1230,7 +1234,7 @@ class MetricsScoreTest(MetricsReadCommandTest):
         overall, table = (c.kwargs["data"] for c in self.mock_request.call_args_list)
         self.assertEqual(overall["from_datetime"], "2026-09-28T00:00:00")
         self.assertEqual(table["from_datetime"], "2026-09-28T00:00:00")
-        self.assertIn("Poly Score V2 (1-5) from 2026-09-28 to now: 2.12 average over 57", output)
+        self.assertIn("Poly Score (1-5) from 2026-09-28 to now: 2.12 average over 57", output)
         self.assertIn("2026-09-28 ", output.split("whole weeks")[1])
         self.assertNotIn("00:00", output)
         self.assertIn("Weekly buckets are whole weeks, so the window is from 2026-09-28.", output)
