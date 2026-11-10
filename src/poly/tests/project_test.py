@@ -5488,6 +5488,15 @@ class BranchNamesTest(unittest.TestCase):
         self.assertEqual(self.project.get_current_branch(), "renamed")
         self.assertEqual(self._saved_status()["branch_names"]["branch-abc"], "renamed")
 
+    def test_delete_branch_drops_its_name(self):
+        self.mock_api.get_branches.return_value["other"] = {"branchId": "branch-other"}
+        self.mock_api.delete_branch.return_value = True
+
+        self.project.delete_branch("other")
+
+        self.assertNotIn("branch-other", self.project.branch_names)
+        self.assertNotIn("branch-other", self._saved_status()["branch_names"])
+
 
 class RenameBranchProject(unittest.TestCase):
     """Tests for AgentStudioProject.rename_branch."""

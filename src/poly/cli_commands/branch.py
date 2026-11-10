@@ -1762,7 +1762,8 @@ class BranchCommand(BaseCommand):
 
         project = load_project(base_path, output_json=output_json)
 
-        current_branch = project.get_current_branch()
+        # From a listing, since the saved name outlives a branch deleted in Agent Studio.
+        current_branch, _ = project.get_branches()
         if not current_branch:
             if output_json:
                 json_print(

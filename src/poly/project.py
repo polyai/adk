@@ -3331,7 +3331,7 @@ class AgentStudioProject:
         Returns:
             bool: True if the branch was deleted successfully, False otherwise
         """
-        branches = self.api_handler.get_branches()
+        _, branches = self.get_branches()
         if branch_name not in branches:
             raise ValueError(f"Branch {branch_name} does not exist.")
 
@@ -3340,6 +3340,9 @@ class AgentStudioProject:
 
         branch_id = branches[branch_name]["branchId"]
         success = self.api_handler.delete_branch(branch_id)
+        if success:
+            self.branch_names.pop(branch_id, None)
+            self._save_branch_names()
         if success and self.branch_id == branch_id:
             self.switch_branch("main", force=True)
         return True
