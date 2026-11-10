@@ -104,6 +104,17 @@ def read_project_config(base_path: str) -> AgentStudioProject | None:
     return read_project_config(parent_path)
 
 
+def fail(message: str, output_json: bool) -> None:
+    """Report an error in the requested format and exit with status 1."""
+    from poly.output.console import error
+
+    if output_json:
+        json_print({"success": False, "error": message})
+    else:
+        error(message)
+    sys.exit(1)
+
+
 def load_project(base_path: str, output_json: bool = False) -> AgentStudioProject:
     """Read project config or exit with a helpful error if not found.
 
@@ -620,8 +631,14 @@ def add_cohort_arguments(parser: ArgumentParser, *, deployments: bool = True) ->
         )
 
 
-def describe_data_api_error(e: "requests.HTTPError") -> str:
-    """Explain a Data API HTTP error in the caller's terms."""
+def describe_data_api_error(e: "requests.HTTPError", *, needs_pii: bool = False) -> str:
+    """Explain a Data API HTTP error in the caller's terms.
+
+    Args:
+        e: The error raised by ``requests``.
+        needs_pii: True for routes that require the PII read permission outright
+            (transcripts), so a 403 names that permission.
+    """
     response = e.response
     status = response.status_code if response is not None else None
     detail = ""
@@ -647,6 +664,8 @@ def describe_data_api_error(e: "requests.HTTPError") -> str:
     if status == 401:
         return "The API key for this region is missing or invalid. Run `poly apikey`."
     if status == 403:
+        if needs_pii:
+            return "Your API key needs PII read permission on this project."
         return "Your API key does not have permission for this project or account."
     if status == 404:
         return detail or "Not found, or the key cannot access this account."
