@@ -1689,12 +1689,27 @@ class AgentStudioProject:
         deleted_resources.update(subresource_changes.deleted)
 
         if not (updated_resources or new_resources or deleted_resources):
+            if not skip_validation:
+                # An entry hidden behind an earlier one with the same name is never read,
+                # so it shows up as no change rather than as a new resource.
+                clash_errors = []
+                for resource_type, resources in new_state.items():
+                    clash_error, _ = self._entry_name_clashes(
+                        resource_type, resources, self.root_path
+                    )
+                    if clash_error:
+                        clash_errors.append(f"Validation error: {clash_error}")
+                if clash_errors:
+                    error_messages = "\n".join(clash_errors)
+                    return False, f"Validation errors detected:\n{error_messages}", []
             return False, "No changes detected", []
 
         # 4. Validate all resources with new state
         if not skip_validation:
             validation_errors = self.validate_resources(
-                resources_dict=new_state, resource_mappings=resource_mappings
+                resources_dict=new_state,
+                resource_mappings=resource_mappings,
+                root_path=self.root_path,
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
@@ -3347,21 +3362,71 @@ class AgentStudioProject:
         return self.validate_resources(
             resources_dict=resources,
             resource_mappings=resource_mappings,
+            root_path=self.root_path,
         )
+
+    @staticmethod
+    def _entry_name_clashes(
+        resource_type: type[Resource],
+        resources: dict[str, Resource],
+        root_path: str,
+    ) -> tuple[Optional[str], set[str]]:
+        """Check the YAML file behind a multi-resource type for entries whose names clash.
+
+        Args:
+            resource_type (type[Resource]): The resource type to check.
+            resources (dict[str, Resource]): The type's resources, used to locate its file.
+            root_path (str): The project root the file is under.
+
+        Returns:
+            tuple[Optional[str], set[str]]: The error message, or None when no names clash,
+                and the clean names that clash.
+        """
+        if not issubclass(resource_type, MultiResourceYamlResource) or not resources:
+            return None, set()
+        relative_path, _ = _parse_multi_resource_path(next(iter(resources.values())).file_path)
+        file_path = os.path.join(root_path, relative_path)
+        try:
+            resource_type.validate_entry_names(file_path, display_path=relative_path)
+        except ValueError as e:
+            return str(e), set(resource_type.find_name_clashes(file_path))
+        return None, set()
 
     @staticmethod
     def validate_resources(
         resources_dict: ResourceMap,
         resource_mappings: list[ResourceMapping],
+        root_path: Optional[str] = None,
     ) -> list[str]:
         """Validate all resources in the project.
+
+        Args:
+            resources_dict (ResourceMap): The resources to validate.
+            resource_mappings (list[ResourceMapping]): All resource mappings, for references.
+            root_path (Optional[str]): The project root. When given, multi-resource YAML
+                files are also checked for entries whose names clash.
 
         Returns:
             list[str]: A list of validation error messages.
         """
         validation_errors = []
         for resource_type, resources in resources_dict.items():
+            clashing_names: set[str] = set()
+            if root_path is not None:
+                clash_error, clashing_names = AgentStudioProject._entry_name_clashes(
+                    resource_type, resources, root_path
+                )
+                if clash_error:
+                    validation_errors.append(f"Validation error: {clash_error}")
+
             for resource_id, resource in resources.items():
+                # Every resource behind a clash is read from the clash's first entry, so
+                # its own checks would report on the wrong entry.
+                if (
+                    clashing_names
+                    and resource_utils.clean_name(resource.name, lowercase=False) in clashing_names
+                ):
+                    continue
                 try:
                     resource.validate(
                         resource_mappings=resource_mappings,
@@ -3388,6 +3453,8 @@ class AgentStudioProject:
                         f"{type(e).__name__}: {e}"
                     )
 
+            if clashing_names:
+                continue
             try:
                 # Ensures cleaner error output for collections of resources (e.g., handoffs.yaml)
                 resource_type.validate_collection(resources)

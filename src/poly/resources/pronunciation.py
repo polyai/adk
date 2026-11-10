@@ -307,6 +307,11 @@ class Pronunciation(MultiResourceYamlResource):
         if not save_to_cache:
             cls.save_to_file(utils.dump_yaml(top_level_yaml_dict), true_file_path)
 
+    @classmethod
+    def find_name_clashes(cls, file_path: str) -> dict[str, list[str]]:
+        """Return no clashes: pronunciation rules are matched by position, not by name."""
+        return {}
+
     @staticmethod
     def discover_resources(base_path: str) -> list[str]:
         yaml_path = os.path.join(base_path, "voice", "response_control", "pronunciations.yaml")

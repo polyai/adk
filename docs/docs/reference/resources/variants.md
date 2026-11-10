@@ -246,6 +246,7 @@ Common uses include:
 
 - Exactly one variant must have `is_default: true` — validation fails if zero or more than one variant is marked default.
 - Every variant must have a value in every attribute's `values` map — a missing variant fails validation.
+- Each variant `name` and each attribute `name` must be unique in its list, and names that differ only in punctuation or spacing (`new york` and `new_york`) count as the same name.
 - Every attribute name must be a valid Python identifier — a letter or underscore followed by letters, digits or underscores — and not a Python reserved word. `customer-name` and `class` both fail.
 - Every value must match its attribute's declared `kind` — a value of the wrong type fails validation, naming the variant it came from.
 - An `enum` attribute must declare a non-empty `config.values` list, with no duplicates.

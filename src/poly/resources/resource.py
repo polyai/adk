@@ -661,6 +661,68 @@ class MultiResourceYamlResource(YamlResource, ABC):
         index = positions.get(resource_clean_name)
         return yaml_list[index] if index is not None else None
 
+    @classmethod
+    def find_name_clashes(cls, file_path: str) -> dict[str, list[str]]:
+        """Return the entries in a multi-resource file whose names clash.
+
+        Entries are matched by clean name, so a resource is only ever read from the first
+        entry of a clash. This reads the file's own entries to find the others.
+
+        Args:
+            file_path (str): Path to the YAML file holding this type's entries.
+
+        Returns:
+            dict[str, list[str]]: Each clean name used by more than one entry, mapped to
+                those entries' names as written, in file order.
+        """
+        if cls._singleton or not os.path.isfile(file_path):
+            return {}
+        yaml_list = cls._get_top_level_data(file_path).get(cls.top_level_name)
+        if not isinstance(yaml_list, list):
+            return {}
+        names_by_key: dict[str, list[str]] = {}
+        for entry in yaml_list:
+            if not isinstance(entry, dict):
+                continue
+            key = cls._entry_key(entry)
+            if key:
+                names_by_key.setdefault(key, []).append(str(entry[cls.resource_key]))
+        return {key: names for key, names in names_by_key.items() if len(names) > 1}
+
+    @classmethod
+    def validate_entry_names(cls, file_path: str, display_path: Optional[str] = None) -> None:
+        """Check that no two entries in a multi-resource file share a name.
+
+        Args:
+            file_path (str): Path to the YAML file holding this type's entries.
+            display_path (Optional[str]): The path to name in the error. Defaults to file_path.
+
+        Raises:
+            ValueError: If two entries have the same name, or names that differ only in
+                punctuation or spacing and so have the same clean name.
+        """
+        clashes = cls.find_name_clashes(file_path)
+        if not clashes:
+            return
+
+        problems: list[str] = []
+        for names in clashes.values():
+            distinct = list(dict.fromkeys(names))
+            for name in distinct:
+                count = names.count(name)
+                if count > 1:
+                    problems.append(f"{name!r} is used by {count} entries.")
+            if len(distinct) > 1:
+                problems.append(
+                    f"{' and '.join(repr(name) for name in distinct)} differ only in punctuation "
+                    f"or spacing, so they are treated as the same {cls.resource_key}. "
+                    "Rename one of them."
+                )
+        raise ValueError(
+            f"Duplicate {cls.resource_key} in {cls.top_level_name} ({display_path or file_path}): "
+            f"{' '.join(problems)} Each {cls.resource_key} must be unique."
+        )
+
     def save(
         self, base_path: str, format: bool = False, save_to_cache: bool = False, **kwargs
     ) -> None:

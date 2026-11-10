@@ -57,6 +57,7 @@ A handoff uses one of three SIP methods:
 - `sip_config.method` must be one of `invite`, `refer`, or `bye`.
 - For `invite`, `outbound_encryption` must be `TLS/SRTP` or `UDP/RTP`.
 - Across all handoffs in `config/handoffs.yaml`, exactly one must have `is_default: true` — zero or more than one default handoff fails validation.
+- Each handoff `name` must be unique, and names that differ only in punctuation or spacing (`front desk` and `front_desk`) count as the same name.
 
 ## Example
 

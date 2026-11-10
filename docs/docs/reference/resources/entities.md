@@ -148,6 +148,7 @@ entities:
 ## Validation
 
 - Each `config` field is type-checked against the entity's `entity_type` — for example `min`/`max` on a `numeric` entity must be numbers, and `has_decimal`, `has_range` must be booleans. A mismatched type raises an error on push.
+- Each entity `name` must be unique, and names that differ only in punctuation or spacing (`party size` and `party_size`) count as the same name.
 
 ## Best practices
 
