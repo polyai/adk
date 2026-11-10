@@ -202,6 +202,13 @@ class FlowConfig(YamlResource):
                     break
         return yaml_dict
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """The step the flow starts at."""
+        return (
+            {("flow_step", f"{self.resource_id}_{self.start_step}")} if self.start_step else set()
+        )
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         """Validate the flow config resource."""
         if not self.start_step:
@@ -736,6 +743,18 @@ class FlowStep(BaseFlowStep, YamlResource):
         )
         utils.check_yaml_field_types(instance)
         return instance
+
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Its flow, template references in its prompt, its entities and its conditions' steps."""
+        refs = utils.template_references(self.prompt or "")
+        refs.add(("FlowConfig", self.flow_id))
+        refs |= {("Entity", entity_id) for entity_id in self.extracted_entities or []}
+        for condition in self.conditions or []:
+            if condition.child_step:
+                refs.add(("flow_step", f"{self.flow_id}_{condition.child_step}"))
+            refs |= {("Entity", entity_id) for entity_id in condition.required_entities or []}
+        return refs
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         """Validate the flow step resource."""
@@ -1807,6 +1826,11 @@ class FunctionStep(Function, BaseFlowStep):
         return self._generate_raw_output(
             add_description=False, add_parameters=False, add_latency_control=True
         )
+
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """The same as a function's: its code, its flow and its delay responses."""
+        return super().refers_to
 
     def validate(self, **kwargs):
         """Validate the resource."""

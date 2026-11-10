@@ -827,6 +827,9 @@ def process(conv: Conversation):
             {"my_var_name"},
         )
 
+        code_not_conv = "self.conv.state.a\nmyconv.state.b\nconv.state.c()\n(conv.state.d)"
+        self.assertEqual(resource_utils.extract_variable_names_from_code(code_not_conv), {"d"})
+
 
 class ValidateReferencesTests(unittest.TestCase):
     """Direct unit tests for validate_references."""

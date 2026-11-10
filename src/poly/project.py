@@ -5,12 +5,14 @@ Copyright PolyAI Limited
 
 import base64
 import copy
+import hashlib
 import json
 import logging
 import os
 import shutil
+import tempfile
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -66,6 +68,7 @@ from poly.resources import (
     TestCase,
     Topic,
 )
+from poly.resources.references import KnownIds
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
     RESOURCE_NAME_TO_CLASS,
@@ -360,6 +363,9 @@ class AgentStudioProject:
     account_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
+    # Fingerprints of files the ADK last wrote from, or read into, their saved resources.
+    # See _record_fingerprints and _unchanged_files.
+    file_fingerprints: dict[str, Any] = field(default_factory=dict)
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
     _deployment_mode: Optional[DeploymentMode] = None
@@ -487,6 +493,9 @@ class AgentStudioProject:
             root_path=root_path,
             last_updated=last_updated,
             file_structure_info=file_structure_info,
+            file_fingerprints=cls._saved_file_fingerprints(
+                status_dict, migrated=migration_flags != loaded_flags
+            ),
             slim_resources=slim_resources,
             branch_id=status_dict.get("branch_id", "main"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
@@ -512,6 +521,7 @@ class AgentStudioProject:
             "last_updated": (self.last_updated.isoformat() if self.last_updated else None),
             "file_structure_info": self.file_structure_info,
             "adk_version": ADK_VERSION,
+            "file_fingerprints": self.file_fingerprints,
             "branch_id": self.branch_id,
             "project_name": self.project_name,
             "account_name": self.account_name,
@@ -541,6 +551,9 @@ class AgentStudioProject:
             root_path=root_path,
             last_updated=datetime.fromisoformat(data.get("last_updated", "1970-01-01T00:00:00")),
             file_structure_info=file_structure_info,
+            file_fingerprints=cls._saved_file_fingerprints(
+                data, migrated=migration_flags != loaded_flags
+            ),
             branch_id=data.get("branch_id", "main"),
             project_name=data.get("project_name"),
             account_name=data.get("account_name"),
@@ -549,6 +562,228 @@ class AgentStudioProject:
             slim_resources=slim_resources,
             rtc_metadata=data.get("rtc_metadata"),
         )
+
+    def _relative_path(self, path: str) -> str:
+        """`path` relative to the project root. Mapping paths are joined onto the root, so
+        slicing off its prefix matches relpath without its cost."""
+        root_prefix = os.path.join(self.root_path, "")
+        if path.startswith(root_prefix):
+            return path[len(root_prefix) :]
+        return os.path.relpath(path, self.root_path)
+
+    def _file_bytes_hash(
+        self, rel_path: str, resource_type: type[Resource], cache: dict[str, str]
+    ) -> str:
+        """SHA-256 of the file holding a resource, read once per file. Empty if it's missing."""
+        path = os.path.join(self.root_path, rel_path)
+        if issubclass(resource_type, MultiResourceYamlResource):
+            path = _parse_multi_resource_path(path)[0]
+        if path not in cache:
+            try:
+                with open(path, "rb") as f:
+                    cache[path] = hashlib.sha256(f.read()).hexdigest()
+            except OSError:
+                cache[path] = ""
+        return cache[path]
+
+    def _fingerprint(
+        self,
+        resource: Resource,
+        rel_path: str,
+        known: KnownIds,
+        bytes_hashes: dict[str, str],
+        bytes_hash: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """The fingerprint recording that a file with these bytes means `resource`.
+
+        `bytes_hash` defaults to the file's current bytes. None when it can't be recorded: the
+        type doesn't declare its references, or the resource has no saved hash or no file.
+        """
+        references = resource.refers_to
+        saved_hash = self.file_structure_info.get(rel_path, {}).get("hash")
+        if references is None or not saved_hash:
+            return None
+        bytes_hash = bytes_hash or self._file_bytes_hash(rel_path, type(resource), bytes_hashes)
+        if not bytes_hash:
+            return None
+        resolved: dict[tuple[str, str], list[str]] = {}
+        unresolved = set()
+        for kind, value in references:
+            if known.exists(kind, value):
+                # The file shows this ID's name, and reading it resolves that name again.
+                value = known.name_of(kind, value)
+            ids, found = known.resolve(kind, value)
+            if found:
+                resolved[(kind, value)] = ids
+            else:
+                unresolved.add((kind, value))
+        return {
+            "bytes": bytes_hash,
+            "saved": saved_hash,
+            "resolved": sorted([kind, name, ids] for (kind, name), ids in resolved.items()),
+            "unresolved": sorted(list(ref) for ref in unresolved),
+        }
+
+    def _record_fingerprints(self, bytes_hashes: Optional[dict[str, str]] = None) -> None:
+        """Record every file's bytes as meaning its saved resource.
+
+        Call only when that's true by construction: after a forced pull, which wrote these files
+        from the saved resources, or at the end of a push, whose saved resources were just read
+        from them. Types that don't declare their references aren't recorded, so they're always
+        read.
+
+        Args:
+            bytes_hashes: File hashes taken before the files were read, as `_file_bytes_hash`
+                caches them. A file missing from it is hashed now.
+        """
+        known = KnownIds.from_mappings(
+            self._make_resource_mappings(self.resources) + self.slim_resources
+        )
+        files: dict[str, dict[str, Any]] = {}
+        bytes_hashes = {} if bytes_hashes is None else bytes_hashes
+        for resources in self.resources.values():
+            for resource in resources.values():
+                if fingerprint := self._fingerprint(
+                    resource, resource.file_path, known, bytes_hashes
+                ):
+                    files[resource.file_path] = fingerprint
+        self.file_fingerprints = {"files": files}
+
+    def _record_pulled_fingerprints(self, format: bool = False) -> None:
+        """Record, for every saved resource, the bytes a pull writes for it.
+
+        A file with exactly those bytes means its saved resource. One with local edits, merged
+        or kept by a merge pull, has other bytes, so it's read as before. A fingerprint is kept
+        while its saved resource and the file's bytes are as recorded. The rest are recomputed by
+        rendering their files through the same write code into a scratch directory, because a
+        pull can rewrite a file whose saved resource didn't change (a push records the bytes it
+        read, which needn't be how the ADK writes them). No local file is parsed.
+        """
+        recorded = self.file_fingerprints.get("files", {})
+        stale_files: set[str] = set()
+        rendered: dict[str, str] = {}
+        bytes_hashes: dict[str, str] = {}
+        for resource in self._all_saved_resources():
+            rel_path = resource.file_path
+            fingerprint = recorded.get(rel_path)
+            saved_hash = self.file_structure_info.get(rel_path, {}).get("hash")
+            if (
+                not isinstance(fingerprint, dict)
+                or fingerprint.get("saved") != saved_hash
+                or fingerprint.get("bytes")
+                != self._file_bytes_hash(rel_path, type(resource), bytes_hashes)
+            ):
+                stale_files.add(self._real_rel_path(rel_path, type(resource)))
+        if stale_files:
+            rendered = self._rendered_bytes_hashes(stale_files, format=format)
+        known = KnownIds.from_mappings(
+            self._make_resource_mappings(self.resources) + self.slim_resources
+        )
+        files: dict[str, dict[str, Any]] = {}
+        for resource in self._all_saved_resources():
+            rel_path = resource.file_path
+            real_path = self._real_rel_path(rel_path, type(resource))
+            if real_path not in stale_files:
+                if rel_path in recorded:
+                    files[rel_path] = recorded[rel_path]
+                continue
+            if rendered.get(real_path) and (
+                fingerprint := self._fingerprint(resource, rel_path, known, {}, rendered[real_path])
+            ):
+                files[rel_path] = fingerprint
+        self.file_fingerprints = {"files": files}
+
+    def _all_saved_resources(self) -> Iterator[Resource]:
+        for resources in self.resources.values():
+            yield from resources.values()
+
+    @staticmethod
+    def _real_rel_path(rel_path: str, resource_type: type[Resource]) -> str:
+        """The file a resource lives in: multi-resource paths name a part of a YAML file."""
+        if issubclass(resource_type, MultiResourceYamlResource):
+            return _parse_multi_resource_path(rel_path)[0]
+        return rel_path
+
+    def _rendered_bytes_hashes(self, real_paths: set[str], format: bool = False) -> dict[str, str]:
+        """SHA-256 of each file as a pull writes it from the saved resources, by relative path."""
+        mappings = self._make_resource_mappings(self.resources) + self.slim_resources
+        MultiResourceYamlResource._file_cache.clear()
+        try:
+            with tempfile.TemporaryDirectory() as scratch:
+                for resource in self._all_saved_resources():
+                    if self._real_rel_path(resource.file_path, type(resource)) not in real_paths:
+                        continue
+                    resource.save(
+                        scratch,
+                        resource_name=resource.name,
+                        resource_mappings=mappings,
+                        format=format,
+                        save_to_cache=isinstance(resource, MultiResourceYamlResource),
+                    )
+                MultiResourceYamlResource.write_cache_to_file()
+                hashes = {}
+                for real_path in real_paths:
+                    try:
+                        with open(os.path.join(scratch, real_path), "rb") as f:
+                            hashes[real_path] = hashlib.sha256(f.read()).hexdigest()
+                    except OSError:
+                        continue
+                return hashes
+        finally:
+            MultiResourceYamlResource._file_cache.clear()
+
+    def _is_as_recorded(
+        self, rel_path: str, resource_type: type[Resource], bytes_hashes: dict[str, str]
+    ) -> bool:
+        """Whether a file's bytes and its saved hash are both as its fingerprint recorded.
+
+        Such a file holds exactly what was recorded, so its saved name is the one inside it.
+        """
+        fingerprint = self.file_fingerprints.get("files", {}).get(rel_path)
+        if not isinstance(fingerprint, dict):
+            return False
+        if fingerprint.get("saved") != self.file_structure_info.get(rel_path, {}).get("hash"):
+            return False
+        return fingerprint.get("bytes") == self._file_bytes_hash(
+            rel_path, resource_type, bytes_hashes
+        )
+
+    def _unchanged_files(
+        self,
+        new_mappings: list[ResourceMapping],
+        kept_mappings: list[ResourceMapping],
+        bytes_hashes: Optional[dict[str, str]] = None,
+    ) -> set[str]:
+        """Kept files that still mean exactly their saved resource, so needn't be read.
+
+        A file qualifies when its bytes and its saved hash are as recorded, every name it
+        resolved still stands for the same IDs, and no name it couldn't resolve now does.
+
+        Args:
+            new_mappings: Mappings for files new since the last pull or push.
+            kept_mappings: Mappings for files that have a saved resource.
+            bytes_hashes: File hashes already taken, as `_file_bytes_hash` caches them.
+
+        Returns:
+            Their paths, relative to the project root.
+        """
+        known = KnownIds.from_mappings([*new_mappings, *kept_mappings, *self.slim_resources])
+        unchanged: set[str] = set()
+        bytes_hashes = {} if bytes_hashes is None else bytes_hashes
+        for mapping in kept_mappings:
+            rel_path = self._relative_path(mapping.file_path)
+            if not self._is_as_recorded(rel_path, mapping.resource_type, bytes_hashes):
+                continue
+            fingerprint = self.file_fingerprints["files"][rel_path]
+            resolved, unresolved = fingerprint.get("resolved"), fingerprint.get("unresolved")
+            if resolved is None or unresolved is None:
+                continue
+            if not all(known.resolve(kind, name)[0] == ids for kind, name, ids in resolved):
+                continue
+            if any(known.name_exists(kind, name) for kind, name in unresolved):
+                continue
+            unchanged.add(rel_path)
+        return unchanged
 
     @staticmethod
     def _saved_file_structure_info(
@@ -576,6 +811,17 @@ class AgentStudioProject:
         if saved_ids != loaded:
             return {}
         return saved
+
+    @staticmethod
+    def _saved_file_fingerprints(status_dict: dict, migrated: bool) -> dict[str, Any]:
+        """Return the fingerprints saved in the status file, if this ADK version wrote them.
+
+        Another version may read the same bytes into a different resource, and a migration on
+        this load may have changed the files, so in either case this returns {}.
+        """
+        if migrated or status_dict.get("adk_version") != ADK_VERSION:
+            return {}
+        return status_dict.get("file_fingerprints") or {}
 
     @staticmethod
     def compute_file_structure_info(
@@ -903,6 +1149,12 @@ class AgentStudioProject:
         # Delete all new resources
         if force:
             self._delete_new_resources()
+        # A forced pull has just written every file from the saved resources, so their bytes
+        # are what a pull writes. A merge pull can leave local edits, so it renders instead.
+        if force:
+            self._record_fingerprints()
+        else:
+            self._record_pulled_fingerprints(format=format)
 
         utils.export_decorators(DECORATORS, self.root_path)
         utils.save_imports(self.root_path)
@@ -1650,11 +1902,28 @@ class AgentStudioProject:
             for rt in set(rm.resource_type for rm in new_resource_mappings)
         }
 
-        # 2. Read all new/kept resources from disk
+        # 2. Read all new/kept resources from disk. A file known to be unchanged reads to its
+        # saved resource, so that is used instead. Every file is hashed before any is read, so
+        # one edited while the push runs isn't recorded as what was pushed.
         new_state: ResourceMap = {}
+        bytes_hashes: dict[str, str] = {}
+        for resource_mapping in local_resource_mappings:
+            self._file_bytes_hash(
+                self._relative_path(resource_mapping.file_path),
+                resource_mapping.resource_type,
+                bytes_hashes,
+            )
+        unchanged = self._unchanged_files(
+            new_resource_mappings, kept_resource_mappings, bytes_hashes
+        )
 
         new_file_paths = {rm.file_path for rm in new_resource_mappings}
         for resource_mapping in local_resource_mappings:
+            if self._relative_path(resource_mapping.file_path) in unchanged:
+                new_state.setdefault(resource_mapping.resource_type, {})[
+                    resource_mapping.resource_id
+                ] = self.resources[resource_mapping.resource_type][resource_mapping.resource_id]
+                continue
             # The parent resource supplies known_* subresource ids (function parameters,
             # step conditions): new resources take the parent's wholesale, kept resources
             # only inherit subresources they do not already have by name.
@@ -1694,6 +1963,8 @@ class AgentStudioProject:
                     new_resources.setdefault(resource_type, {})[resource_id] = resource
                     continue
 
+                if resource.file_path in unchanged:
+                    continue
                 original_resource_hash = self.file_structure_info.get(resource.file_path, {}).get(
                     "hash"
                 )
@@ -1761,6 +2032,7 @@ class AgentStudioProject:
         else:
             self.resources = new_state
             self.file_structure_info = self.compute_file_structure_info(self.resources)
+            self._record_fingerprints(bytes_hashes)
             self.save_config()
 
         return True, "Resources pushed successfully.", commands
@@ -2020,11 +2292,13 @@ class AgentStudioProject:
         local_resources_mappings = new_resources_mappings + kept_resources_mappings
         local_resources_mappings.extend(self.slim_resources)
 
+        unchanged = self._unchanged_files(new_resources_mappings, kept_resources_mappings)
+
         for kept_local_resource_mapping in kept_resources_mappings:
-            original_hash = self.file_structure_info.get(
-                os.path.relpath(kept_local_resource_mapping.file_path, self.root_path),
-                {},
-            ).get("hash")
+            rel_path = self._relative_path(kept_local_resource_mapping.file_path)
+            if rel_path in unchanged:
+                continue
+            original_hash = self.file_structure_info.get(rel_path, {}).get("hash")
 
             try:
                 local_resource = self.read_local_resource(
@@ -2089,14 +2363,16 @@ class AgentStudioProject:
         )
         local_resources_mappings = new_resources_mappings + kept_resources_mappings
         local_resources_mappings.extend(self.slim_resources)
+        unchanged = self._unchanged_files(new_resources_mappings, kept_resources_mappings)
 
         for local_resource_mapping in kept_resources_mappings:
             if not all_files and file_paths and local_resource_mapping.file_path not in file_paths:
                 continue
 
-            original_hash = self.file_structure_info.get(
-                os.path.relpath(local_resource_mapping.file_path, self.root_path), {}
-            ).get("hash")
+            rel_path = self._relative_path(local_resource_mapping.file_path)
+            if rel_path in unchanged:
+                continue
+            original_hash = self.file_structure_info.get(rel_path, {}).get("hash")
 
             try:
                 local_resource = self.read_local_resource(
@@ -2658,10 +2934,32 @@ class AgentStudioProject:
         new_resource_mappings: list[ResourceMapping] = []
         kept_resource_mappings: list[ResourceMapping] = []
 
+        if not self.file_structure_info:
+            self.file_structure_info = self.compute_file_structure_info(self.resources)
+        # A file exactly as recorded holds its saved name, so it needn't be parsed for it. Some
+        # types save a fixed name instead, so the saved name must be the one the path was
+        # cleaned from.
+        bytes_hashes: dict[str, str] = {}
+
+        def recorded_name(
+            file_path: str, resource_type: type[Resource], path_name: str
+        ) -> Optional[str]:
+            rel_path = self._relative_path(file_path)
+            if not self._is_as_recorded(rel_path, resource_type, bytes_hashes):
+                return None
+            name = self.file_structure_info[rel_path].get("resource_name")
+            if name and resource_utils.clean_name(name) == resource_utils.clean_name(path_name):
+                return name
+            return None
+
         # Build a map of flow config paths to flow names
         flow_configs = discovered_resources.get(FlowConfig, {})
         flow_paths_to_names: dict[str, str] = {}
         for flow_config_path in flow_configs:
+            path_name = resource_utils.get_flow_name_from_path(flow_config_path)
+            if name := recorded_name(flow_config_path, FlowConfig, path_name):
+                flow_paths_to_names[resource_utils.clean_name(name)] = name
+                continue
             flow_config: FlowConfig = self.read_local_resource(
                 ResourceMapping(
                     resource_id="temp_id",
@@ -2691,9 +2989,6 @@ class AgentStudioProject:
                     parent_flow.resource_id if parent_flow else self.generate_uuid(FlowConfig)
                 )
 
-        if not self.file_structure_info:
-            self.file_structure_info = self.compute_file_structure_info(self.resources)
-
         known_files = set(
             os.path.join(self.root_path, file_path) for file_path in self.file_structure_info.keys()
         )
@@ -2714,29 +3009,17 @@ class AgentStudioProject:
                     resource_utils.get_flow_name_from_path(file_path),
                 )
 
-                if resource_type == FlowStep:
-                    flow_step: FlowStep = self.read_local_resource(
-                        ResourceMapping(
-                            resource_id="temp_id",
-                            resource_type=FlowStep,
-                            resource_name=resource_name,
-                            file_path=file_path,
-                            flow_name=flow_name,
-                            resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
-                        ),
-                        resource_mappings=[],
-                    )
-                    resource_name = flow_step.name
-
+                # Paths hold cleaned names, so these types take their real name from the file.
+                named_in_file = resource_type in (FlowStep, Topic, ChildTopic) or issubclass(
+                    resource_type, MultiResourceYamlResource
+                )
                 if resource_type == FlowConfig:
                     resource_name = flow_name
-
-                # Resource name in file path is cleaned, so we need to get the original name
-                if (
-                    issubclass(resource_type, MultiResourceYamlResource)
-                    or resource_type == Topic
-                    or resource_type == ChildTopic
+                elif named_in_file and (
+                    saved_name := recorded_name(file_path, resource_type, resource_name)
                 ):
+                    resource_name = saved_name
+                elif named_in_file:
                     resource = self.read_local_resource(
                         ResourceMapping(
                             resource_id="temp_id",
@@ -3367,13 +3650,20 @@ class AgentStudioProject:
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
 
         resource_mappings = local_resource_mappings + self.slim_resources
+        # A file known to be unchanged reads to its saved resource, so validate that instead.
+        unchanged = self._unchanged_files(new_resource_mappings, kept_resource_mappings)
 
         resources: ResourceMap = {}
         for resource_mapping in local_resource_mappings:
-            local_resource = self.read_local_resource(
-                resource=resource_mapping,
-                resource_mappings=resource_mappings,
-            )
+            if self._relative_path(resource_mapping.file_path) in unchanged:
+                local_resource = self.resources[resource_mapping.resource_type][
+                    resource_mapping.resource_id
+                ]
+            else:
+                local_resource = self.read_local_resource(
+                    resource=resource_mapping,
+                    resource_mappings=resource_mappings,
+                )
             resources.setdefault(resource_mapping.resource_type, {})[
                 resource_mapping.resource_id
             ] = local_resource

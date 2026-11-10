@@ -293,8 +293,11 @@ PREFIX_TO_REFERENCE = {prefix: reference for reference, prefix in REFERENCES_PRE
 # Regex matching any {{prefix:value}} reference in a single pass
 _REFERENCE_PATTERN = re.compile(r"\{\{(\w+):([^}]+)\}\}")
 
-# Regex to find variable names defined in function code via conv.state.<name>
-CONV_STATE_DOT_NAME = re.compile(r"(?<![\w.])conv\.state\.([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()")
+# Regex to find variable names defined in function code via conv.state.<name>. The literal
+# comes first so the regex engine can skip to it; the lookbehind after it checks what precedes.
+CONV_STATE_DOT_NAME = re.compile(
+    r"conv\.state\.(?<![\w.]conv\.state\.)([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()"
+)
 
 # Detects the header-ending colon on a def line, ignoring trailing comments
 HEADER_END_COLON_RE = re.compile(r":\s*(#.*)?\s*$")
@@ -341,6 +344,17 @@ def get_references_from_prompt(
             references[reference][match] = True
 
     return references
+
+
+def template_references(text: str) -> set[tuple[str, str]]:
+    """Every {{prefix:value}} reference in `text`, as (kind, value).
+
+    Reading swaps names for IDs for every kind, not only the kinds a field allows, so this
+    covers them all. The kind is a reference name such as "global_functions". The value is an
+    ID, or a name that didn't resolve.
+    """
+    found = get_references_from_prompt(text)
+    return {(kind, value) for kind, values in found.items() for value in values}
 
 
 def validate_references(
