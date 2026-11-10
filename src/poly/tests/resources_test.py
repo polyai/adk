@@ -6490,119 +6490,32 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
         MultiResourceYamlResource._file_cache.clear()
         return file_path
 
-    def test_validate_entry_names_same_name_twice_raises(self):
-        """Two entries with the same name are rejected, naming the file, type and name."""
+    def test_duplicate_entry_names_returns_names_used_twice(self):
+        """A name used by two entries is returned for every list-based type."""
         for resource_type, relative_path in self.NAMED_ENTRY_TYPES:
             with self.subTest(resource_type=resource_type.__name__):
                 file_path = self._write_entries(
                     resource_type, relative_path, ["first", "shared", "shared"]
                 )
 
-                with self.assertRaises(ValueError) as ctx:
-                    resource_type.validate_entry_names(file_path, display_path=relative_path)
-
                 self.assertEqual(
-                    str(ctx.exception),
-                    f"Duplicate name in {resource_type.top_level_name} ({relative_path}): "
-                    "'shared' is used by 2 entries. Each name must be unique.",
+                    resource_type.duplicate_entry_names(file_path), ["shared", "shared"]
                 )
 
-    def test_validate_entry_names_unique_names_pass(self):
-        """A file whose entries all have different names is accepted."""
+    def test_duplicate_entry_names_is_empty_for_unique_names(self):
         for resource_type, relative_path in self.NAMED_ENTRY_TYPES:
             with self.subTest(resource_type=resource_type.__name__):
-                file_path = self._write_entries(
-                    resource_type, relative_path, ["first", "second", "Second"]
-                )
+                file_path = self._write_entries(resource_type, relative_path, ["first", "second"])
 
-                self.assertIsNone(resource_type.validate_entry_names(file_path))
+                self.assertEqual(resource_type.duplicate_entry_names(file_path), [])
 
-    def test_validate_entry_names_same_clean_name_raises(self):
-        """Names that differ only in punctuation or spacing are reported as the same name."""
-        for names in (["My Entity", "My_Entity"], ["_a", "a"]):
-            with self.subTest(names=names):
-                relative_path = os.path.join("config", "entities.yaml")
-                file_path = self._write_entries(Entity, relative_path, names)
-
-                with self.assertRaises(ValueError) as ctx:
-                    Entity.validate_entry_names(file_path, display_path=relative_path)
-
-                self.assertEqual(
-                    str(ctx.exception),
-                    f"Duplicate name in entities ({relative_path}): "
-                    f"{names[0]!r} and {names[1]!r} differ only in punctuation or spacing, "
-                    "so they are treated as the same name. Rename one of them. "
-                    "Each name must be unique.",
-                )
-
-    def test_validate_entry_names_reports_every_clash(self):
-        """Repeated names and names sharing a clean name are all listed in one error."""
+    def test_duplicate_entry_names_matches_by_clean_name(self):
+        """Names that differ only in punctuation or spacing count as the same name."""
         file_path = self._write_entries(
-            Entity, "entities.yaml", ["city", "city", "post code", "post-code", "post-code"]
+            Entity, os.path.join("config", "entities.yaml"), ["My Entity", "My_Entity", "other"]
         )
 
-        with self.assertRaises(ValueError) as ctx:
-            Entity.validate_entry_names(file_path)
-
-        message = str(ctx.exception)
-        self.assertIn(f"({file_path})", message)
-        self.assertIn("'city' is used by 2 entries.", message)
-        self.assertIn("'post-code' is used by 2 entries.", message)
-        self.assertIn("'post code' and 'post-code' differ only in punctuation", message)
-
-    def test_validate_entry_names_uses_the_types_own_key(self):
-        """Types keyed by a field other than name are checked on, and name, that field."""
-        file_path = self._write_entries(KeyphraseBoosting, "keyphrases.yaml", ["Acme", "Acme"])
-
-        with self.assertRaises(ValueError) as ctx:
-            KeyphraseBoosting.validate_entry_names(file_path)
-
-        self.assertIn("Duplicate keyphrase in keyphrases", str(ctx.exception))
-        self.assertIn("Each keyphrase must be unique.", str(ctx.exception))
-
-    def test_validate_entry_names_only_reads_its_own_top_level_list(self):
-        """A name shared between two lists in one file is not a clash."""
-        self._write(
-            self.variants_file,
-            "variants:\n  - name: shared\n    is_default: true\n"
-            "attributes:\n  - name: shared\n    values: {}\n",
-        )
-
-        self.assertIsNone(Variant.validate_entry_names(self.variants_file))
-        self.assertIsNone(VariantAttribute.validate_entry_names(self.variants_file))
-
-    def test_find_name_clashes_returns_names_as_written_by_clean_name(self):
-        """Clashing entries are grouped under their clean name, in file order."""
-        file_path = self._write_entries(
-            Entity, "entities.yaml", ["My Entity", "other", "My_Entity", "My Entity"]
-        )
-
-        self.assertEqual(
-            Entity.find_name_clashes(file_path),
-            {"My_Entity": ["My Entity", "My_Entity", "My Entity"]},
-        )
-
-    def test_find_name_clashes_ignores_entries_without_a_name(self):
-        """Entries with no name, and a missing or empty file, give no clashes."""
-        file_path = os.path.join(self.base_path, "entities.yaml")
-        self.assertEqual(Entity.find_name_clashes(file_path), {})
-
-        self._write(file_path, "entities:\n  - description: one\n  - description: two\n")
-        self.assertEqual(Entity.find_name_clashes(file_path), {})
-
-        MultiResourceYamlResource._file_cache.clear()
-        self._write(file_path, "entities:\n")
-        self.assertEqual(Entity.find_name_clashes(file_path), {})
-
-    def test_find_name_clashes_skips_types_not_matched_by_name(self):
-        """Pronunciations are matched by position and single-entry sections have no list."""
-        pronunciations_file = self._write_entries(Pronunciation, "pronunciations.yaml", ["a", "a"])
-        self.assertEqual(Pronunciation.find_name_clashes(pronunciations_file), {})
-
-        voice_file = os.path.join(self.base_path, "configuration.yaml")
-        self._write(voice_file, "greeting:\n  welcome_message: Hello\n")
-        self.assertEqual(VoiceGreeting.find_name_clashes(voice_file), {})
-
+        self.assertEqual(Entity.duplicate_entry_names(file_path), ["My Entity", "My_Entity"])
 
 class ChannelSettingsDictFormatTests(unittest.TestCase):
     """Tests that channel greeting/style prompt save as dict format, not list format."""

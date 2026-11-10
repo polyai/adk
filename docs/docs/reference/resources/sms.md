@@ -120,7 +120,7 @@ conv.state.booking_ref = "ABC123"
 ## Validation
 
 - Only `{{vrbl:...}}` and `{{tn:...}}` references are valid inside `text` — using any other reference type fails validation.
-- Each template `name` must be unique, and names that differ only in punctuation or spacing (`booking confirmation` and `booking_confirmation`) count as the same name.
+- Each template `name` must be unique.
 
 ## Best practices
 

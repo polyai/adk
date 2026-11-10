@@ -40,7 +40,7 @@ This lets you test against staging in sandbox and promote without changing code.
 
 Each operation is one HTTP endpoint. You define:
 
-- **name**: Operation name, unique within the integration whatever the method; used at runtime as `conv.api.<api_name>.<operation_name>(...)`.
+- **name**: Operation name, unique within the integration; used at runtime as `conv.api.<api_name>.<operation_name>(...)`.
 - **description**: Optional note on what the operation does (up to 1000 characters).
 - **method**: HTTP method (e.g. `GET`, `POST`, `PUT`, `DELETE`).
 - **resource**: Path template (e.g. `/tickets/{id}`). Path variables are exposed as arguments when calling the operation.

@@ -97,7 +97,7 @@ Each item in the `phrase_filtering` list can include:
 
 | Field | Required | Description |
 |---|---|---|
-| `name` | Yes | Identifier for the filter. Must be unique, and names that differ only in punctuation or spacing count as the same name. |
+| `name` | Yes | Identifier for the filter. Must be unique. |
 | `description` | No | Explains what the filter does |
 | `regular_expressions` | Yes | Regex patterns to match |
 | `say_phrase` | No | Whether to still speak the matched phrase. Default: `false`. |

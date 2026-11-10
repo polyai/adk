@@ -47,7 +47,7 @@ translations:
 - `name` is required and cannot be empty.
 - Each translation must have at least one language entry.
 - If `agent_settings/languages.yaml` is present, every configured language (default + additional) must have an entry in each translation, and no entry may exist for a language that isn't configured. Missing or extra languages both cause a validation error.
-- Each translation `name` must be unique, and names that differ only in punctuation or spacing (`opening hours` and `opening_hours`) count as the same name.
+- Each translation `name` must be unique.
 
 ## Referencing translations
 
