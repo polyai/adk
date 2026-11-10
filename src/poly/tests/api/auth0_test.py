@@ -20,7 +20,7 @@ from poly.tests.testing_utils import make_mock_response
 class MakeRequest(unittest.TestCase):
     """Tests for Auth0Handler.make_request logging and error handling."""
 
-    @patch("poly.handlers.auth0_handler.requests.request")
+    @patch("requests.request")
     def test_sensitive_fields_are_redacted_in_logs(self, mock_request):
         """password, client_id, and device_code are replaced with <redacted> in logs."""
         mock_request.return_value = make_mock_response(200, json_body={"ok": True})
@@ -35,7 +35,7 @@ class MakeRequest(unittest.TestCase):
         self.assertEqual(log_output.count("<redacted>"), 3)
         self.assertIn("openid", log_output)  # non-sensitive fields are preserved
 
-    @patch("poly.handlers.auth0_handler.requests.request")
+    @patch("requests.request")
     def test_http_error_propagates(self, mock_request):
         """A failing request propagates as requests.HTTPError."""
         mock_request.return_value = make_mock_response(403, json_body={"error": "denied"})
@@ -47,7 +47,7 @@ class MakeRequest(unittest.TestCase):
 class RequestDeviceCode(unittest.TestCase):
     """Tests for Auth0Handler.request_device_code."""
 
-    @patch("poly.handlers.auth0_handler.requests.request")
+    @patch("requests.request")
     def test_sends_expected_payload_and_returns_body(self, mock_request):
         """The device code request carries the region's client id and returns the parsed body."""
         mock_request.return_value = make_mock_response(
@@ -70,7 +70,7 @@ class RequestDeviceCode(unittest.TestCase):
 class PollDeviceToken(unittest.TestCase):
     """Tests for Auth0Handler.poll_device_token."""
 
-    @patch("poly.handlers.auth0_handler.requests.request")
+    @patch("requests.request")
     def test_sends_device_code_grant_and_returns_token(self, mock_request):
         """The poll request uses the device_code grant and returns the parsed token body."""
         mock_request.return_value = make_mock_response(
@@ -102,7 +102,7 @@ class ApiKeyAuthDetails(unittest.TestCase):
         """The dedicated Auth0 client is not selectable via any --region value."""
         self.assertNotIn(APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS.values())
 
-    @patch("poly.handlers.auth0_handler.requests.request")
+    @patch("requests.request")
     def test_request_device_code_for_sends_given_client_id(self, mock_request):
         """request_device_code_for sends the passed-in AuthDetails' client id, not a region's."""
         mock_request.return_value = make_mock_response(
@@ -119,7 +119,7 @@ class ApiKeyAuthDetails(unittest.TestCase):
         )
         self.assertEqual(result, {"device_code": "dc-1", "user_code": "ABCD"})
 
-    @patch("poly.handlers.auth0_handler.requests.request")
+    @patch("requests.request")
     def test_poll_device_token_for_sends_given_client_id(self, mock_request):
         """poll_device_token_for sends the passed-in AuthDetails' client id, not a region's."""
         mock_request.return_value = make_mock_response(200, json_body={"access_token": "tok-1"})
@@ -134,7 +134,7 @@ class ApiKeyAuthDetails(unittest.TestCase):
         )
         self.assertEqual(result, {"access_token": "tok-1"})
 
-    @patch("poly.handlers.auth0_handler.requests.request")
+    @patch("requests.request")
     def test_region_keyed_request_device_code_still_uses_region_client_id(self, mock_request):
         """Delegating to the `_for` variant must not change the region-keyed client id sent."""
         mock_request.return_value = make_mock_response(
@@ -147,7 +147,7 @@ class ApiKeyAuthDetails(unittest.TestCase):
         self.assertEqual(sent["client_id"], REGION_TO_AUTH_DETAILS["studio"].device_client_id)
         self.assertNotEqual(sent["client_id"], APIKEY_AUTH_DETAILS.device_client_id)
 
-    @patch("poly.handlers.auth0_handler.requests.request")
+    @patch("requests.request")
     def test_region_keyed_poll_device_token_still_uses_region_client_id(self, mock_request):
         """Delegating to the `_for` variant must not change the region-keyed client id sent."""
         mock_request.return_value = make_mock_response(200, json_body={"access_token": "tok-1"})
