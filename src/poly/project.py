@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import shutil
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields
@@ -69,6 +70,8 @@ STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
 MAX_TEST_RUN_NAME_LENGTH = 120
+# How long tab-completion trusts the saved branch names before listing branches again.
+BRANCH_NAMES_MAX_AGE_SECONDS = 600
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
@@ -123,6 +126,9 @@ class AgentStudioProject:
     # Branch ID -> name, from the last branch listing. Lets status show the branch name
     # without an API call.
     branch_names: dict[str, str] = field(default_factory=dict)
+    # When branch_names last came from a listing, in seconds since the epoch, as of the last
+    # time it was saved.
+    branch_names_listed_at: Optional[float] = None
     project_name: Optional[str] = None
     account_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
@@ -254,6 +260,7 @@ class AgentStudioProject:
             slim_resources=slim_resources,
             branch_id=status_dict.get("branch_id", "main"),
             branch_names=status_dict.get("branch_names", {}),
+            branch_names_listed_at=status_dict.get("branch_names_listed_at"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
             account_name=config_dict.get("account_name") or status_dict.get("account_name"),
             _not_loaded_resources=not_loaded_resources,
@@ -278,6 +285,7 @@ class AgentStudioProject:
             "file_structure_info": self.file_structure_info,
             "branch_id": self.branch_id,
             "branch_names": self.branch_names,
+            "branch_names_listed_at": self.branch_names_listed_at,
             "project_name": self.project_name,
             "account_name": self.account_name,
             "migration_flags": [flag.value for flag in self._migration_flags]
@@ -306,6 +314,7 @@ class AgentStudioProject:
             file_structure_info=file_structure_info,
             branch_id=data.get("branch_id", "main"),
             branch_names=data.get("branch_names", {}),
+            branch_names_listed_at=data.get("branch_names_listed_at"),
             project_name=data.get("project_name"),
             account_name=data.get("account_name"),
             _migration_flags=migration_flags,
@@ -471,6 +480,7 @@ class AgentStudioProject:
         with open(status_file_path, "rb") as f:
             status_dict = json.loads(base64.b64decode(f.read()).decode("utf-8"))
         status_dict["branch_names"] = self.branch_names
+        status_dict["branch_names_listed_at"] = self.branch_names_listed_at
         with open(status_file_path, "wb") as f:
             f.write(base64.b64encode(json.dumps(status_dict).encode("utf-8")))
 
@@ -2627,10 +2637,20 @@ class AgentStudioProject:
             None,
         )
         branch_names = {meta["branchId"]: name for name, meta in branches.items()}
-        if branch_names != self.branch_names:
+        # An unchanged listing is saved only once the saved time has gone stale, so listing
+        # branches doesn't rewrite the status file every time.
+        if branch_names != self.branch_names or self._branch_names_are_stale():
             self.branch_names = branch_names
+            self.branch_names_listed_at = time.time()
             self._save_branch_names()
         return current_branch, branches
+
+    def _branch_names_are_stale(self) -> bool:
+        """Whether the saved branch names are older than tab-completion trusts."""
+        return (
+            self.branch_names_listed_at is None
+            or time.time() - self.branch_names_listed_at > BRANCH_NAMES_MAX_AGE_SECONDS
+        )
 
     def create_branch(
         self, branch_name: str = None, source_branch_name: Optional[str] = None
@@ -2769,6 +2789,27 @@ class AgentStudioProject:
         if self.branch_id in self.branch_names:
             return self.branch_names[self.branch_id]
         return self.get_branches()[0]
+
+    def branch_names_starting_with(self, prefix: str, exclude: tuple[str, ...] = ()) -> list[str]:
+        """Branch names starting with `prefix`, for tab-completion.
+
+        Uses the names saved from the last branch listing. Fetches the list instead when none of
+        them match, or when they're older than BRANCH_NAMES_MAX_AGE_SECONDS, so a branch created
+        elsewhere completes. Fetching refreshes the saved names.
+
+        Args:
+            prefix: The text typed so far.
+            exclude: Names never to return.
+        """
+        names = [
+            name
+            for name in self.branch_names.values()
+            if name.startswith(prefix) and name not in exclude
+        ]
+        if names and not self._branch_names_are_stale():
+            return names
+        _, branches = self.get_branches()
+        return [name for name in branches if name.startswith(prefix) and name not in exclude]
 
     @classmethod
     def discover_docs(cls) -> list[str]:
