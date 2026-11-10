@@ -162,6 +162,11 @@ def parse_latency_control(latency_control_data: dict) -> FunctionLatencyControl:
     )
 
 
+def _is_integer(value: object) -> bool:
+    """Whether value is an int, not counting bool."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 @dataclass
 class LatencyControl(SubResource):
     """Wrapper for Latency Control protos"""
@@ -731,6 +736,21 @@ class Function(Resource):
         Raises:
             ValidationError: If the resource is not valid.
         """
+        # A function step takes the name of its flow step rather than a function name.
+        if self.function_type != FunctionType.FUNCTION_STEP:
+            utils.validate_python_name(self.name, "Function name")
+
+        if self.function_type in (FunctionType.START, FunctionType.END):
+            if self.parameters:
+                raise ValueError("Start and end functions do not support @func_parameter.")
+            if self.latency_control and self.latency_control.enabled:
+                raise ValueError("Start and end functions do not support @func_latency_control.")
+
+        for parameter in self.parameters:
+            utils.validate_python_name(parameter.name, "Parameter name")
+            if not isinstance(parameter.description, str) or not parameter.description.strip():
+                raise ValueError(f"Parameter '{parameter.name}' description cannot be empty.")
+
         # Check for syntax errors
         try:
             compile(self.code, self.name, "exec")
@@ -763,8 +783,28 @@ class Function(Resource):
         if self.function_type == FunctionType.TRANSITION and not self.flow_id:
             raise ValueError("Can't find flow_id for transition function.")
 
+        if self.function_type == FunctionType.TRANSITION and resource_mappings:
+            # Start and end functions have no prefix, so "fn" selects global functions only.
+            if any(
+                r.resource_type is Function
+                and r.resource_prefix == "fn"
+                and r.resource_name == self.name
+                for r in resource_mappings
+            ):
+                raise ValueError(
+                    f"Transition function '{self.name}' has the same name as a global function. "
+                    "A transition function name must be unique among global functions and "
+                    "the transition functions in its flow."
+                )
+
         # Validate latency control settings
         if self.latency_control and self.latency_control.enabled:
+            for argument, value in (
+                ("delay_before_responses_start", self.latency_control.initial_delay),
+                ("silence_after_each_response", self.latency_control.interval),
+            ):
+                if not _is_integer(value):
+                    raise ValueError(f"{argument} must be an integer, got {value!r}.")
             if not (0 <= self.latency_control.initial_delay <= 10):
                 raise ValueError(
                     "delay_before_responses_start must be between 0 and 10, "
@@ -781,6 +821,11 @@ class Function(Resource):
             for dr in self.latency_control.delay_responses:
                 if not dr.message:
                     raise ValueError("Delay response message cannot be empty.")
+                if not _is_integer(dr.duration) or dr.duration < 0:
+                    raise ValueError(
+                        "Delay response duration must be an integer of 0 or more, "
+                        f"got {dr.duration!r} for '{dr.message}'."
+                    )
 
                 references = utils.get_references_from_prompt(
                     dr.message, DELAY_CONTROL_REFERENCES, raise_on_invalid=True

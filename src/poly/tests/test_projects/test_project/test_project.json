@@ -225,11 +225,11 @@
         "flow_name": null,
         "function_type": "global"
       },
-      "FUNCTION-shared_helper": {
-        "resource_id": "FUNCTION-shared_helper",
-        "name": "shared_helper",
+      "FUNCTION-global_helper": {
+        "resource_id": "FUNCTION-global_helper",
+        "name": "global_helper",
         "description": "A shared helper function that can be used by multiple flows.",
-        "code": "def shared_helper(conv: Conversation, value: str):\n    \"\"\"A shared helper function that can be used by multiple flows.\"\"\"\n    return f\"Processed: {value}\"\n",
+        "code": "def global_helper(conv: Conversation, value: str):\n    \"\"\"A shared helper function that can be used by multiple flows.\"\"\"\n    return f\"Processed: {value}\"\n",
         "parameters": [
           {
             "name": "value",
@@ -335,8 +335,8 @@
       "FUNCTION-shared_helper_flow1": {
         "resource_id": "FUNCTION-shared_helper_flow1",
         "name": "shared_helper",
-        "description": "A shared helper function with same name as global function.",
-        "code": "def shared_helper(conv: Conversation, flow: Flow, value: str):\n    \"\"\"A shared helper function with same name as global function.\"\"\"\n    return f\"Flow-specific helper: {value}\"\n",
+        "description": "A helper function with the same name as a function in another flow.",
+        "code": "def shared_helper(conv: Conversation, flow: Flow, value: str):\n    \"\"\"A helper function with the same name as a function in another flow.\"\"\"\n    return f\"Flow-specific helper: {value}\"\n",
         "parameters": [
           {
             "name": "value",
@@ -371,8 +371,8 @@
       "FUNCTION-shared_helper_flow2": {
         "resource_id": "FUNCTION-shared_helper_flow2",
         "name": "shared_helper",
-        "description": "Another shared helper with same name as global and other flow.",
-        "code": "def shared_helper(conv: Conversation, flow: Flow, value: str):\n    \"\"\"Another shared helper with same name as global and other flow.\"\"\"\n    return f\"Punctuation flow helper: {value}\"\n",
+        "description": "Another helper with the same name as a function in another flow.",
+        "code": "def shared_helper(conv: Conversation, flow: Flow, value: str):\n    \"\"\"Another helper with the same name as a function in another flow.\"\"\"\n    return f\"Punctuation flow helper: {value}\"\n",
         "parameters": [
           {
             "name": "value",
@@ -439,7 +439,7 @@
       "TOPIC-Topic 2": {
         "resource_id": "TOPIC-Topic 2",
         "name": "Topic 2",
-        "actions": "Validate using {{fn:FUNCTION-validate_email}} and process with {{fn:FUNCTION-shared_helper}}. Check {{attr:email_address}} attribute and use {{ho:handoff-2}} for escalation. Send email verification via {{twilio_sms:SMS_TEMPLATE-456}}.",
+        "actions": "Validate using {{fn:FUNCTION-validate_email}} and process with {{fn:FUNCTION-global_helper}}. Check {{attr:email_address}} attribute and use {{ho:handoff-2}} for escalation. Send email verification via {{twilio_sms:SMS_TEMPLATE-456}}.",
         "content": "This topic handles email validation and processing.",
         "example_queries": [
           "I need to verify my email",
@@ -719,7 +719,7 @@
         "flow_id": "FLOW_CONFIG-test_flow",
         "flow_name": "test_flow",
         "step_type": "advanced_step",
-        "prompt": "Thank you! Using {{fn:FUNCTION-shared_helper}} and {{ft:FUNCTION-shared_helper_flow1}} to complete. If you need human assistance, use {{ho:handoff-2}}. I'll send a confirmation via {{twilio_sms:SMS_TEMPLATE-456}}.",
+        "prompt": "Thank you! Using {{fn:FUNCTION-global_helper}} and {{ft:FUNCTION-shared_helper_flow1}} to complete. If you need human assistance, use {{ho:handoff-2}}. I'll send a confirmation via {{twilio_sms:SMS_TEMPLATE-456}}.",
         "settings": {
           "asr_biasing": {
             "alphanumeric": false,

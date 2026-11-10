@@ -1,6 +1,6 @@
 step_type: advanced_step
 name: final_step
-prompt: Thank you! Using {{fn:shared_helper}} and {{ft:shared_helper}} to complete. If you need human assistance, use {{ho:handoff-2}}. I'll send a confirmation via {{twilio_sms:test_template_2}}.
+prompt: Thank you! Using {{fn:global_helper}} and {{ft:shared_helper}} to complete. If you need human assistance, use {{ho:handoff-2}}. I'll send a confirmation via {{twilio_sms:test_template_2}}.
 asr_biasing:
   is_enabled: false
 dtmf_config:

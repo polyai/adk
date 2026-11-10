@@ -106,7 +106,7 @@ Global and transition functions use decorators to describe themselves to the mod
 | `@func_parameter("name", "...")` | Each parameter, except `conv` and `flow` | Describes a parameter |
 | `@func_latency_control(...)` | Optional | Configures delay messaging while the function runs |
 
-Function steps do not support `@func_description` or `@func_parameter`.
+Function steps do not support `@func_description` or `@func_parameter`. Start and end functions do not support `@func_parameter` or `@func_latency_control`.
 
 ### `@func_latency_control` arguments
 
@@ -116,7 +116,7 @@ Adding this decorator to a function enables latency control for it. It accepts:
 |---|---|---|
 | `delay_before_responses_start` | `int` (0–10) | How long to wait before playing the first delay message |
 | `silence_after_each_response` | `int` (0–10) | Minimum gap to leave between delay messages |
-| `delay_responses` | `list[tuple[str, int]]` | `(message, duration)` pairs to play while the function runs |
+| `delay_responses` | `list[tuple[str, int]]` | `(message, duration)` pairs to play while the function runs. Each duration is an `int` of 0 or more |
 | `randomize` | `bool` | When `True`, shuffle delay response order on each function invocation (timing slots are preserved). Default `False` |
 
 ~~~python
@@ -143,8 +143,13 @@ Adding this decorator to a function enables latency control for it. It accepts:
 
     Default values are also not permitted. The ADK validates the function by constructing the expected signature string — `def name(conv: Conversation, param: type)` — and checking it appears literally in the code. A default value such as `param: str = ""` breaks this check and causes push to fail with `Function definition '...' not found in code`. If a parameter is logically optional, pass an explicit empty string or zero from the LLM call site instead.
 
+- Function names and `@func_parameter` names must start with an ASCII letter or underscore, contain only ASCII letters, digits and underscores, and not be a Python reserved word. Python itself accepts accented and other non-ASCII letters in names; Agent Studio does not.
+- A transition function can't have the same name as a global function. Transition functions in different flows can share a name.
 - Global and transition functions must have a non-empty `@func_description`, and the description text can't have leading or trailing whitespace — both raise a `ValueError` on push.
-- `delay_before_responses_start` and `silence_after_each_response` (`@func_latency_control`) must each be between 0 and 10, and `delay_responses` cannot be empty once latency control is enabled — all three raise a `ValueError` on push otherwise.
+- Every `@func_parameter` description must contain at least one non-whitespace character.
+- `delay_before_responses_start` and `silence_after_each_response` (`@func_latency_control`) must each be an integer between 0 and 10, and `delay_responses` cannot be empty once latency control is enabled — all three raise a `ValueError` on push otherwise.
+- Each delay response needs a non-empty message and an integer duration of 0 or more.
+- `start_function` and `end_function` can't use `@func_parameter` or `@func_latency_control`.
 
 ## Parameter types
 

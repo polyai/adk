@@ -40,12 +40,18 @@ flows/{flow_name}/
 ## Decorators
 
 - **`@func_description('...')`** (required for global and transition functions): Description shown to the LLM to decide when to call the function.
-- **`@func_parameter('param_name', '...')`** (required for each parameter except `conv` and `flow`): Description of the parameter shown to the LLM. All parameters must also have a typed Python annotation (e.g. `booking_ref: str`)
+- **`@func_parameter('param_name', '...')`** (required for each parameter except `conv` and `flow`): Description of the parameter shown to the LLM; it cannot be empty or blank. All parameters must also have a typed Python annotation (e.g. `booking_ref: str`)
 - **`@func_latency_control(...)`** (optional): Configure delay messages while the function runs.
   Supports `delay_before_responses_start`, `silence_after_each_response`, `delay_responses`, and
   `randomize` (shuffle delay response order on each invocation; default `False`).
+  `delay_before_responses_start` and `silence_after_each_response` are integers from 0 to 10.
+  `delay_responses` is a non-empty list of `(message, duration)` pairs, each duration an integer of 0 or more.
 
 Function steps do not support `@func_parameter` or `@func_description`.
+Start and end functions do not support `@func_parameter` or `@func_latency_control`.
+
+Function names and parameter names use ASCII letters, digits and underscores only, start with a letter or underscore, and cannot be a Python reserved word.
+A transition function cannot share its name with a global function.
 
 ### Parameter types
 
@@ -100,12 +106,12 @@ Prefer naming after the **event that should trigger the call** (e.g. `first_name
 
 ### Start function (`start_function.py`)
 - Runs **once at call start**, before the first user input.
-- Signature: `def start_function(conv: Conversation):` - no `flow`, no `@func_parameter`.
+- Signature: `def start_function(conv: Conversation):` - no `flow`, no `@func_parameter`, no `@func_latency_control`.
 - Typical use: initialize state, read SIP headers, set language, write initial metrics, then `conv.goto_flow("...")`.
 
 ### End function (`end_function.py`)
 - Runs **once at call end**, after the conversation completes.
-- Signature: `def end_function(conv: Conversation):`
+- Signature: `def end_function(conv: Conversation):` - no `flow`, no `@func_parameter`, no `@func_latency_control`.
 - Typical use: aggregate `conv.metric_events`, write summary metrics (e.g. `CALL_OUTCOME`), optionally trigger post-call webhooks when `conv.env == "live"`.
 
 ## Utility modules

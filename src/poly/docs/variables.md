@@ -10,6 +10,8 @@ When you write `conv.state.customer_name = "Alice"` in a function, `customer_nam
 
 Variables can be referenced in prompts and templates using `$variable_name` or `{{vrbl:variable_name}}` - these are interchangeable. Prefer `{{vrbl:variable_name}}` as it is validated by the ADK.
 
+A variable name cannot be a Python reserved word (e.g. `class`, `in`). The scan covers comments and strings too, so `conv.state.in` inside a comment is picked up as a variable named `in` and fails validation.
+
 ## Setting state in code
 ```python
 conv.state.customer_name = "Alice"
