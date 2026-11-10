@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.79.0 (2026-11-10)
+
+### Features
+
+- Allow merging into main while an experiment is running
+  ([#419](https://github.com/polyai/adk/pull/419),
+  [`b72c5ff`](https://github.com/polyai/adk/commit/b72c5ff892fadc6de9e19055d5ec1d1694d394db))
+
+
 ## v0.78.0 (2026-11-10)
 
 ### Features
