@@ -16,6 +16,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import argcomplete
 import requests
 from rich.console import Console
 
@@ -1979,6 +1980,13 @@ class ChatCommandTest(unittest.TestCase):
         self.assertIn("error", payload["push"])
 
 
+class _InProcessCompletionFinder(argcomplete.CompletionFinder):
+    """argcomplete's finder without its debug stream on fd 9, which pytest's capture uses."""
+
+    def _init_debug_stream(self):
+        pass
+
+
 class CompletionCommandTest(unittest.TestCase):
     """Tests for the completion command."""
 
@@ -2014,6 +2022,36 @@ class CompletionCommandTest(unittest.TestCase):
         """Parser rejects shell choices outside bash/zsh/fish."""
         with self.assertRaises(SystemExit):
             AgentStudioCLI().main(sys_args=["completion", "powershell"])
+
+    def _complete(self, line: str) -> list[str]:
+        """Return what the shell would offer for `line`, as argcomplete computes it."""
+        completion_env = {
+            "_ARGCOMPLETE": "1",
+            "COMP_LINE": line,
+            "COMP_POINT": str(len(line)),
+            "_ARGCOMPLETE_IFS": "\013",
+        }
+        with patch.dict(os.environ, completion_env):
+            cli = AgentStudioCLI()
+            cli.register_commands()
+            parser = cli._create_parser()
+            output = StringIO()
+            _InProcessCompletionFinder()(
+                parser,
+                output_stream=output,
+                exit_method=lambda code: None,
+                always_complete_options=False,
+            )
+        return [completion.strip() for completion in output.getvalue().split("\013")]
+
+    def test_completes_command_names(self):
+        """The grouped --help sections must not break completion of command names."""
+        self.assertEqual(self._complete("poly sta"), ["status"])
+
+    def test_completes_grouped_subcommand_names(self):
+        """branch and functions group their subcommands in --help too."""
+        self.assertIn("create", self._complete("poly branch "))
+        self.assertIn("execute", self._complete("poly functions "))
 
 
 class ResolveProjectScopeTest(unittest.TestCase):
@@ -3239,6 +3277,39 @@ class InitProjectTest(unittest.TestCase):
 
         mock_create.assert_called_once_with(
             TEST_DIR, region="eu-west-1", account_id="acc_1", output_json=False
+        )
+
+
+class ListProjectsTest(unittest.TestCase):
+    """Tests for the list project command."""
+
+    @patch("poly.cli_commands.project.json_print")
+    @patch("poly.cli_commands.project.AgentStudioInterface")
+    def test_json_rows_carry_the_agent_id_as_project_id(self, mock_iface_cls, mock_json_print):
+        """The API names the id agentId; the row must not come out with a null project_id."""
+        mock_iface_cls.return_value.list_agents.return_value = [
+            {
+                "agentId": "AGENT-1",
+                "agentName": "My First Agent",
+                "updatedAt": "2026-11-03T19:06:16Z",
+                "branchCount": 2,
+            }
+        ]
+
+        ProjectCommand.list_projects(region="us-1", account_id="acc-456", output_json=True)
+
+        mock_json_print.assert_called_once_with(
+            {
+                "success": True,
+                "agents": [
+                    {
+                        "project_id": "AGENT-1",
+                        "agent_name": "My First Agent",
+                        "updated_at": "2026-11-03T19:06:16Z",
+                        "branch_count": 2,
+                    }
+                ],
+            }
         )
 
 

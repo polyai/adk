@@ -114,6 +114,24 @@ def write_env_var(name: str, value: str, *, force: bool = False) -> tuple[Profil
     return _write_env_var_unix(name, value, force=force)
 
 
+def read_env_var(name: str) -> Optional[str]:
+    """The value `write_env_var` would find for `name`, or None if it is not set.
+
+    Args:
+        name: The environment variable name.
+
+    Returns:
+        Optional[str]: The value in the shell profile, or on Windows the user's environment.
+    """
+    if _is_windows():
+        return _get_windows_registry_backend().read(name)
+    target = detect_profile()
+    if not target.path.exists():
+        return None
+    lines = target.path.read_text(encoding="utf-8").splitlines()
+    return _find_existing_value(lines, target.shell, name)[1]
+
+
 def _format_line(shell: str, name: str, value: str) -> str:
     """Render the export line for the given shell dialect."""
     if shell == "fish":
@@ -137,6 +155,21 @@ def _strip_quotes(raw: str) -> str:
     return raw
 
 
+def _find_existing_value(
+    lines: list[str], shell: str, name: str
+) -> tuple[Optional[int], Optional[str]]:
+    """The index and value of the last line setting `name`, the one a shell ends up with."""
+    pattern = _existing_line_pattern(shell, name)
+    existing_index: Optional[int] = None
+    existing_value: Optional[str] = None
+    for i, line in enumerate(lines):
+        match = pattern.match(line)
+        if match:
+            existing_index = i
+            existing_value = _strip_quotes(match.group(1))
+    return existing_index, existing_value
+
+
 def _write_env_var_unix(name: str, value: str, *, force: bool) -> tuple[ProfileTarget, str]:
     """Persist an environment variable into the detected shell profile file."""
     from poly.output.console import mask_secret
@@ -147,14 +180,7 @@ def _write_env_var_unix(name: str, value: str, *, force: bool) -> tuple[ProfileT
     content = target.path.read_text(encoding="utf-8") if target.path.exists() else ""
     lines = content.splitlines()
 
-    pattern = _existing_line_pattern(target.shell, name)
-    existing_index: Optional[int] = None
-    existing_value: Optional[str] = None
-    for i, line in enumerate(lines):
-        match = pattern.match(line)
-        if match:
-            existing_index = i
-            existing_value = _strip_quotes(match.group(1))
+    existing_index, existing_value = _find_existing_value(lines, target.shell, name)
 
     masked_line = _format_line(target.shell, name, mask_secret(value))
 
