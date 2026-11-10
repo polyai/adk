@@ -24,7 +24,7 @@ Commands are listed under section headers so related ones stay together:
 |---|---|
 | Getting started | `init`, `setup`, `login`, `apikey`, `studio`, `project` |
 | Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch`, `test`, `rtc`, `chat`, `call` |
-| Builder API | `deployments`, `metrics`, `conversations`, `audio-cache`, `functions` |
+| Builder API | `deployments`, `metrics`, `conversations`, `transcripts`, `audio-cache`, `functions` |
 | Other | `template`, `docs`, `completion` |
 
 Each command also supports its own help output. For example:
@@ -77,7 +77,8 @@ poly push --help
 | [`poly chat`](./cli/chat.md) | Talk to the agent interactively |
 | [`poly call`](./cli/call.md) | Voice-call the agent using your microphone and speaker |
 | [`poly test`](./cli/test.md) | Run and inspect simulated conversation tests |
-| [`poly conversations`](./cli/conversations.md) | List and inspect real conversations |
+| [`poly conversations`](./cli/conversations.md) | List, search and inspect real conversations |
+| [`poly transcripts`](./cli/transcripts.md) | Search transcripts for a phrase, or read one conversation's transcript |
 | [`poly metrics`](./cli/metrics.md) | Define and manage the project's custom metrics |
 | [`poly docs`](./cli/docs.md) | Output resource documentation |
 
@@ -152,8 +153,11 @@ poly metrics add --name BOOKING_CONFIRMED --type bool --json
 poly metrics edit BOOKING_CONFIRMED --active false --json
 poly metrics import metrics.yaml --dry-run --json
 poly conversations list --json
+poly conversations search --filter poly_score_v2 lt 3 --env live --json
 poly conversations get <conversation_id> --json
 poly conversations get-audio <conversation_id> --json
+poly transcripts search "cancel my booking" --json
+poly transcripts get <conversation_id> --json
 poly audio-cache list --json
 poly audio-cache get-file <entry_id> --json
 poly audio-cache update-file <entry_id> --file replacement.wav --json
