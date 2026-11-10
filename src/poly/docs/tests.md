@@ -181,7 +181,7 @@ Each function call assertion has:
 - **arguments**: List of parameter assertions, each with:
   - **parameter_name**: Function parameter to check.
   - **expected_value**: Expected value for that parameter.
-  - **value_type**: Type of the value — `string`, `integer`, `number`, or `boolean`.
+  - **value_type**: Type of the value — `string`, `integer`, `float`, or `boolean`.
 
 ## Channels
 
@@ -203,7 +203,7 @@ On `push`, each test case is validated:
 - **scenario** is required (cannot be empty).
 - **language** is required and must match a configured project language (default or additional).
 - **variant**, if specified, must match an existing variant in the project.
-- **function_call_assertions**: each function name must match a global function (`functions/`) or a flow function (`flows/<flow>/functions/`) in the project, and each argument's `value_type` must be one of `string`, `integer`, `number`, or `boolean`.
+- **function_call_assertions**: each function name must match a global function (`functions/`) or a flow function (`flows/<flow>/functions/`) in the project, and each argument's `value_type` must be one of `string`, `integer`, `float`, or `boolean`.
 - **integration_attributes**: values must be text, numbers, `true`/`false`, `null`, lists or nested maps. An unquoted date is rejected with the quoted form to use instead, and keys must be text.
 - **api_mocks**: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `status` must be a valid HTTP status code (100–599); `body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation.
 

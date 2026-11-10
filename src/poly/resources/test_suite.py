@@ -57,7 +57,10 @@ INTERNAL_TO_CHANNEL = {
 CHANNEL_TO_INTERNAL = {v: k for k, v in INTERNAL_TO_CHANNEL.items()}
 
 
-ALLOWED_TYPES = ["string", "integer", "number", "boolean"]
+ALLOWED_TYPES = ["string", "integer", "float", "boolean"]
+
+# Value types accepted in YAML under another name than the one Agent Studio stores.
+VALUE_TYPE_ALIASES = {"number": "float"}
 
 SIMULATED_AT_HINT = "an ISO 8601 datetime, e.g. 2026-01-15T09:30:00Z"
 
@@ -119,6 +122,8 @@ class FunctionCallArgumentAssertion:
         # The projection and YAML can hold a bool or number here; the proto field is a string.
         if self.expected_value is not None and not isinstance(self.expected_value, str):
             self.expected_value = json.dumps(self.expected_value)
+        if isinstance(self.value_type, str):
+            self.value_type = VALUE_TYPE_ALIASES.get(self.value_type, self.value_type)
 
     def to_yaml_dict(self) -> dict:
         return {
