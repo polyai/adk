@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.80.0 (2026-11-10)
+
+### Features
+
+- **conversations**: Poly conversations search and poly transcripts search|get
+  ([#349](https://github.com/polyai/adk/pull/349),
+  [`714d798`](https://github.com/polyai/adk/commit/714d7984a0a270649520a5b1d2b380b95264c3eb))
+
+
 ## v0.79.0 (2026-11-10)
 
 ### Features
