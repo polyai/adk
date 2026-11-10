@@ -324,19 +324,21 @@ class AgentStudioProject:
         Every change to the saved resources recomputes the hashes before saving, so they
         stay valid, except when a migration changed the project on this load or a different
         ADK version wrote them (it may format and so hash resources differently). In those
-        cases, or when they don't cover exactly the loaded resources, this returns {} and the
-        hashes are computed when needed.
+        cases, or when they don't key exactly the loaded resources by the paths this OS gives
+        them, this returns {} and the hashes are computed when needed.
         """
         saved = status_dict.get("file_structure_info") or {}
         if migrated or not saved or status_dict.get("adk_version") != ADK_VERSION:
             return {}
         loaded = {
-            (RESOURCE_CLASS_TO_NAME[resource_type], resource_id)
+            resource.file_path: (RESOURCE_CLASS_TO_NAME[resource_type], resource_id)
             for resource_type, resource_dict in resources.items()
-            for resource_id in resource_dict
+            for resource_id, resource in resource_dict.items()
         }
-        saved_ids = [(info.get("type"), info.get("resource_id")) for info in saved.values()]
-        if len(saved_ids) != len(loaded) or set(saved_ids) != loaded:
+        saved_ids = {
+            path: (info.get("type"), info.get("resource_id")) for path, info in saved.items()
+        }
+        if saved_ids != loaded:
             return {}
         return saved
 

@@ -2853,6 +2853,22 @@ class SavedFileHashesTest(unittest.TestCase):
 
         self.assertEqual(project.file_structure_info, {})
 
+    def test_hashes_saved_with_another_path_separator_are_not_reused(self):
+        """A status file committed on Windows and loaded on macOS or Linux, or the other way."""
+        other_separator = "/" if os.sep == "\\" else "\\"
+
+        def swap_separators(status):
+            status["file_structure_info"] = {
+                path.replace(os.sep, other_separator): info
+                for path, info in status["file_structure_info"].items()
+            }
+
+        self._edit_status(swap_separators)
+
+        project = AgentStudioProject.from_file_path(self.root)
+
+        self.assertEqual(project.file_structure_info, {})
+
     def test_from_dict_computes_hashes_it_cannot_reuse(self):
         data = deepcopy(PROJECT_DATA)
         data["adk_version"] = "0.0.1"
