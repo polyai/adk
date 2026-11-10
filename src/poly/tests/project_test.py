@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import unittest
 from copy import deepcopy
 from datetime import datetime
@@ -22,7 +23,12 @@ from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
-from poly.project import STATUS_FILE, AgentStudioProject, DeploymentMode
+from poly.project import (
+    BRANCH_NAMES_MAX_AGE_SECONDS,
+    STATUS_FILE,
+    AgentStudioProject,
+    DeploymentMode,
+)
 from poly.resources import (
     AsrSettings,
     AttributeKind,
@@ -5435,7 +5441,9 @@ class BranchNamesTest(unittest.TestCase):
 
         after = self._saved_status()
         self.assertEqual(after.pop("branch_names"), {"main": "main", "branch-abc": "my-feature"})
-        before.pop("branch_names")
+        for status in (before, after):
+            status.pop("branch_names", None)
+            status.pop("branch_names_listed_at", None)
         self.assertEqual(after, before)
 
     def test_names_survive_reloading_the_project(self):
@@ -5454,9 +5462,34 @@ class BranchNamesTest(unittest.TestCase):
 
     def test_completion_uses_saved_names_without_an_api_call(self):
         self.project.branch_names = {"main": "main", "branch-abc": "my-feature"}
+        self.project.branch_names_listed_at = time.time()
 
         self.assertEqual(self.project.branch_names_starting_with("my"), ["my-feature"])
         self.mock_api.get_branches.assert_not_called()
+
+    def test_completion_fetches_when_the_saved_names_are_old(self):
+        """A branch created elsewhere completes even when a saved name also matches."""
+        self.project.branch_names = {"main": "main", "branch-abc": "my-feature"}
+        self.project.branch_names_listed_at = time.time() - BRANCH_NAMES_MAX_AGE_SECONDS - 1
+        self.mock_api.get_branches.return_value["my-other"] = {"branchId": "branch-other"}
+
+        names = self.project.branch_names_starting_with("my")
+
+        self.assertEqual(sorted(names), ["my-feature", "my-other"])
+        self.assertGreater(self._saved_status()["branch_names_listed_at"], time.time() - 60)
+
+    def test_an_unchanged_listing_saves_only_once_the_saved_time_is_old(self):
+        """Listing branches mustn't rewrite the status file every time."""
+        self.project.get_branches()
+        listed_at = self._saved_status()["branch_names_listed_at"]
+
+        with patch.object(AgentStudioProject, "_save_branch_names") as save:
+            self.project.get_branches()
+        save.assert_not_called()
+
+        self.project.branch_names_listed_at = listed_at - BRANCH_NAMES_MAX_AGE_SECONDS - 1
+        self.project.get_branches()
+        self.assertGreaterEqual(self._saved_status()["branch_names_listed_at"], listed_at)
 
     def test_completion_fetches_when_no_saved_name_matches(self):
         """A branch created elsewhere still completes, and the saved names catch up."""
@@ -5469,7 +5502,9 @@ class BranchNamesTest(unittest.TestCase):
     def test_completion_leaves_out_excluded_names(self):
         self.project.branch_names = {"main": "main", "branch-abc": "my-feature"}
 
-        self.assertEqual(self.project.branch_names_starting_with("", exclude=("main",)), ["my-feature"])
+        self.assertEqual(
+            self.project.branch_names_starting_with("", exclude=("main",)), ["my-feature"]
+        )
         self.assertEqual(self.project.branch_names_starting_with("ma", exclude=("main",)), [])
 
     def test_create_branch_saves_the_new_name(self):
