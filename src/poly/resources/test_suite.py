@@ -5,7 +5,9 @@ Copyright PolyAI Limited
 
 import json
 import logging
+import math
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any, Optional
@@ -61,6 +63,39 @@ ALLOWED_TYPES = ["string", "integer", "float", "boolean"]
 
 # Value types accepted in YAML under another name than the one Agent Studio stores.
 VALUE_TYPE_ALIASES = {"number": "float"}
+
+ALLOWED_ASSERTION_TYPES = ["equals", "any"]
+
+MAX_API_MOCK_RULES_BYTES = 131_072
+
+_INTEGER_PATTERN = re.compile(r"-?[0-9]+")
+_DECIMAL_PATTERN = re.compile(r"[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+_RADIX_PATTERN = re.compile(r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+")
+
+
+def _reads_as_value_type(expected_value: str, value_type: str) -> bool:
+    """Whether an expected value reads as its value type, by Agent Studio's rules.
+
+    An integer is an optional minus sign and digits. A float is anything a
+    JavaScript number conversion reads as finite, which includes hex, binary and
+    octal literals but not `1_000`, `nan` or `inf`. A boolean is `true` or `false`.
+    """
+    text = expected_value.strip()
+    if value_type == "integer":
+        return bool(_INTEGER_PATTERN.fullmatch(text))
+    if value_type == "float":
+        try:
+            if _DECIMAL_PATTERN.fullmatch(text):
+                return math.isfinite(float(text))
+            if _RADIX_PATTERN.fullmatch(text):
+                return math.isfinite(float(int(text, 0)))
+        except OverflowError:
+            return False
+        return False
+    if value_type == "boolean":
+        return text in ("true", "false")
+    return True
+
 
 SIMULATED_AT_HINT = "an ISO 8601 datetime, e.g. 2026-01-15T09:30:00Z"
 
@@ -436,6 +471,27 @@ def _parse_body(body: Any) -> Any:
     return body if parsed is None or isinstance(parsed, str) else parsed
 
 
+def _serialised_rules_size(rules: list["ApiResponseRule"]) -> int:
+    """Size in bytes of an operation's response rules, as Agent Studio measures them.
+
+    Agent Studio limits the UTF-8 size of the rules written as compact JSON, with
+    each body held as the text it is sent as and headers always present.
+    """
+    serialised = []
+    for rule in rules:
+        respond: dict[str, Any] = {"status": rule.respond.status}
+        if rule.respond.body is not None:
+            respond["body"] = _body_text(rule.respond.body)
+        respond["headers"] = {
+            str(key): _header_value(value) for key, value in rule.respond.headers.items()
+        }
+        entry: dict[str, Any] = {"respond": respond}
+        if rule.repeat is not None:
+            entry["repeat"] = rule.repeat
+        serialised.append(entry)
+    return len(json.dumps(serialised, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+
+
 def _same_json(left: Any, right: Any) -> bool:
     """Equality that tells `2` from `2.0`, and `1` from `true`, unlike `==`."""
     if type(left) is not type(right):
@@ -639,12 +695,12 @@ class TestCaseApiMocks:
         trusted here the same way the platform trusts them when cascading renames.
         """
         for integration_name, operations in self.mocks.items():
-            if not integration_name:
+            if utils.is_blank(integration_name):
                 raise ValueError("API mock integration name cannot be empty.")
             if known_integrations and integration_name not in known_integrations:
                 raise ValueError(f"Unknown API integration in mocks: '{integration_name}'.")
             for operation_name, rules in operations.items():
-                if not operation_name:
+                if utils.is_blank(operation_name):
                     raise ValueError(
                         f"API mock for integration '{integration_name}' has an empty "
                         "operation name."
@@ -685,6 +741,13 @@ class TestCaseApiMocks:
                                 f"{label}: repeat=-1 (respond forever) is only valid on the "
                                 "last response rule for an operation."
                             )
+                rules_bytes = _serialised_rules_size(rules)
+                if rules_bytes > MAX_API_MOCK_RULES_BYTES:
+                    raise ValueError(
+                        f"API mock '{integration_name}.{operation_name}': response rules are "
+                        f"{rules_bytes} bytes when serialised, over the limit of "
+                        f"{MAX_API_MOCK_RULES_BYTES} bytes."
+                    )
 
 
 @dataclass
@@ -1076,7 +1139,7 @@ class TestCase(YamlResource):
             raise ValueError(f"Invalid channel: {self.channel}")
 
         # Prompt exists
-        if not self.scenario:
+        if utils.is_blank(self.scenario):
             raise ValueError("Scenario is required")
 
         if not self.language:
@@ -1092,6 +1155,10 @@ class TestCase(YamlResource):
                 f"Language '{self.language}' is not configured. "
                 f"Available languages: {sorted(configured_languages)}"
             )
+
+        duplicate_tags = sorted({tag for tag in self.tags.tags if self.tags.tags.count(tag) > 1})
+        if duplicate_tags:
+            raise ValueError(f"Duplicate tags: {duplicate_tags}")
 
         # Variant is valid if exists
         if self.variant:
@@ -1140,6 +1207,24 @@ class TestCase(YamlResource):
                 if argument.value_type not in ALLOWED_TYPES:
                     raise ValueError(
                         f"Invalid value type for function call assertion argument: {argument.value_type}"
+                    )
+                if argument.assertion_type not in ALLOWED_ASSERTION_TYPES:
+                    raise ValueError(
+                        "Invalid assertion type for function call assertion argument: "
+                        f"{argument.assertion_type}"
+                    )
+                # An unset expected value is allowed; Agent Studio only rejects a blank one.
+                if argument.expected_value is None:
+                    continue
+                if utils.is_blank(argument.expected_value):
+                    raise ValueError(
+                        "Expected value cannot be blank for function call assertion argument: "
+                        f"{argument.parameter_name}"
+                    )
+                if not _reads_as_value_type(argument.expected_value, argument.value_type):
+                    raise ValueError(
+                        f"Expected value '{argument.expected_value}' for function call assertion "
+                        f"argument '{argument.parameter_name}' is not a valid {argument.value_type}"
                     )
 
     def _diff_api_mocks(

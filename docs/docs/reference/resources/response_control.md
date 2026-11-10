@@ -63,7 +63,7 @@ Each item in the `pronunciations` list can include:
 | `regex` | Yes | Regex pattern to match in the output text |
 | `replacement` | Yes | Replacement text for speech synthesis. Can be an empty string to silence the match. |
 | `case_sensitive` | No | Whether matching is case-sensitive. Default: `false`. |
-| `language_code` | No | Restrict the rule to a specific language |
+| `language_code` | No | Restrict the rule to a specific language. Must be a valid BCP-47 language code, for example `en-GB`. |
 | `description` | No | Notes about the rule |
 
 Rules are ordered, so list position matters.
@@ -101,7 +101,7 @@ Each item in the `phrase_filtering` list can include:
 | `description` | No | Explains what the filter does |
 | `regular_expressions` | Yes | Regex patterns to match |
 | `say_phrase` | No | Whether to still speak the matched phrase. Default: `false`. |
-| `language_code` | No | Restrict the filter to a specific language |
+| `language_code` | No | Restrict the filter to a specific language. Must be a valid BCP-47 language code, for example `en-GB`. |
 | `function` | No | Global function to call when a match occurs |
 
 ### Example

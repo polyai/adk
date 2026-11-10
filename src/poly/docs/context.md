@@ -14,3 +14,9 @@ These are read from the `context/` folder. Only `*.md` files are discovered.
     FUNCTION_GUIDELINES.md
     SUCCESS_CRITERIA.md
 ```
+
+## Validation
+
+- The file name can contain only letters, digits, `_`, `-` and `.`. It cannot contain `..` or end with `.`, and is at most 512 characters long.
+- A document's content is at most 262,144 bytes (256 KB) when encoded as UTF-8.
+- A project has at most 50 context documents.

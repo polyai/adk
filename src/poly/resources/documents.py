@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from functools import cached_property
 
@@ -18,6 +19,11 @@ from poly.resources.resource import Resource, register_resource
 logger = logging.getLogger(__name__)
 
 PLATFORM_CONTEXT_FILE = "CONTEXT.MD"
+
+DOCUMENT_PATH_PATTERN = re.compile(r"[a-zA-Z0-9_\-.][a-zA-Z0-9_\-./]*")
+MAX_DOCUMENT_PATH_LENGTH = 512
+MAX_DOCUMENT_CONTENT_BYTES = 262_144
+MAX_DOCUMENTS = 50
 
 
 @register_resource("documents")
@@ -53,6 +59,43 @@ class Document(Resource):
         if self.path.upper() == PLATFORM_CONTEXT_FILE and self.path != PLATFORM_CONTEXT_FILE:
             raise ValueError(
                 f"Document path must be {PLATFORM_CONTEXT_FILE} (case-sensitive) for the platform context file."
+            )
+        self._validate_path()
+
+        content_bytes = len(self.contents.encode("utf-8"))
+        if content_bytes > MAX_DOCUMENT_CONTENT_BYTES:
+            raise ValueError(
+                f"Document content is {content_bytes} bytes, "
+                f"over the limit of {MAX_DOCUMENT_CONTENT_BYTES} bytes"
+            )
+
+    def _validate_path(self) -> None:
+        """Check the file name is a path Agent Studio accepts for a document."""
+        if not self.path:
+            raise ValueError("Document file name is required")
+        if len(self.path) > MAX_DOCUMENT_PATH_LENGTH:
+            raise ValueError(
+                f"Document file name must be at most {MAX_DOCUMENT_PATH_LENGTH} characters"
+            )
+        if not DOCUMENT_PATH_PATTERN.fullmatch(self.path):
+            raise ValueError(
+                f"Document file name '{self.path}' contains invalid characters. Use only "
+                "letters, digits, '_', '-' and '.'"
+            )
+        if ".." in self.path:
+            raise ValueError(f"Document file name '{self.path}' must not contain '..'")
+        if "//" in self.path:
+            raise ValueError(f"Document file name '{self.path}' must not contain '//'")
+        if self.path.endswith(("/", ".")):
+            raise ValueError(f"Document file name '{self.path}' must not end with '/' or '.'")
+
+    @classmethod
+    def validate_collection(cls, resources: dict[str, "Document"]) -> None:
+        """Check the project holds no more documents than Agent Studio allows."""
+        if len(resources) > MAX_DOCUMENTS:
+            raise ValueError(
+                f"A project can have at most {MAX_DOCUMENTS} context documents, "
+                f"found {len(resources)}"
             )
 
     @classmethod

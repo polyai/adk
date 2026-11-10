@@ -218,8 +218,17 @@ Argument assertion fields:
 | Field | Description |
 |---|---|
 | `parameter_name` | Parameter as defined on the function. |
-| `expected_value` | Expected value, expressed as a string. |
+| `expected_value` | Expected value, expressed as a string. When set, it must not be blank and must read as its `value_type`. |
 | `value_type` | One of `string`, `integer`, `float`, `boolean`. |
+
+How `expected_value` is read for each `value_type`:
+
+| `value_type` | Accepted `expected_value` |
+|---|---|
+| `string` | Any non-empty text. |
+| `integer` | Digits with an optional leading `-`, for example `"4"` or `"-4"`. |
+| `float` | A decimal number, for example `"1.5"`, `"4"` or `"1e3"`. |
+| `boolean` | `"true"` or `"false"`, in lowercase. |
 
 ~~~yaml
 function_call_assertions:
@@ -274,14 +283,16 @@ prompt_assertions:
 
 - `channel` must be `voice` or `webchat`
 - `scenario` is required and non-empty
+- `tags` must be unique
 - `language` is required and must be one of the project's configured languages (`default_language` or `additional_languages`)
 - `variant`, if set, must reference a variant declared in `config/variant_attributes.yaml`
 - `simulated_at`, if set, must be a valid ISO 8601 datetime
 - `caller_number`, if set, must be text — an unquoted number is rejected rather than converted
 - `integration_attributes` values must be text, numbers, `true`/`false`, `null`, lists, or nested maps; an unquoted date is rejected with the quoted form to use instead; keys must be text
-- `api_mocks`: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `respond.status` must be a valid HTTP status code (100–599); `respond.body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation
+- `api_mocks`: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `respond.status` must be a valid HTTP status code (100–599); `respond.body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation; one operation's response rules must be at most 131,072 bytes (128 KB) when serialised as JSON
 - each `function_call_assertions[*].name` must match a global function under `functions/` or a flow function under `flows/<flow>/functions/`
 - each argument's `value_type` must be one of `string`, `integer`, `float`, `boolean`
+- each argument's `expected_value`, when set, must not be blank and must read as its `value_type`
 - the filename must match the normalized `name`
 
 Validation runs automatically as part of `poly push`.

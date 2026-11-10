@@ -805,6 +805,13 @@ def convert_keys_to_snake_case(dict_obj: dict) -> dict:
     return {to_snake_case(k): v for k, v in dict_obj.items()}
 
 
+def is_blank(value: object) -> bool:
+    """Check if a value is empty, counting a whitespace-only string as empty."""
+    if isinstance(value, str):
+        return not value.strip()
+    return not value
+
+
 def is_valid_language_code(code: str) -> bool:
     """Check if the given code is a valid BCP 47 language code."""
     import langcodes

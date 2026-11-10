@@ -89,7 +89,7 @@ mcp_servers:
 - `header` and `query_param` need `secret_name`, and `secret_name` needs one of them.
 - `oauth` needs `client_id`, `client_secret_name` and `token_url`, and `token_url` must be an `http(s)://` URL.
 - `timeout`, if set, is between 1 and 30.
-- `enabled_functions` entries must be non-empty and unique.
+- `enabled_functions` entries must be text, non-empty and unique.
 
 ## Best practices
 

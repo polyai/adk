@@ -97,6 +97,7 @@ This split is important: content is for facts, actions are for behavior.
 ### Limits and guidance
 
 - use no more than **20** example queries
+- an example query cannot be empty or contain the `|` character
 - cover meaningful variation, not every minor wording change
 
 ## Tags
@@ -164,6 +165,11 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 ## Validation
 
 - The filename must match the cleaned version of `name` — a mismatch raises a validation error on `pull` or `push`.
+- `name` cannot start with `Guardrail - `, in any letter case. Agent Studio reserves that prefix for guardrails.
+- A topic has at most 20 `example_queries`.
+- Each example query must be non-empty and cannot contain the `|` character.
+
+Child topics follow the same rules.
 
 ## Best practices
 

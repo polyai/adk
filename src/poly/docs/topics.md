@@ -51,9 +51,11 @@ actions: |-
 - The `name` field in the YAML is the canonical topic name and can contain spaces, punctuation, and mixed case (e.g. `"Opening Hours & Locations"`).
 - The filename is cleaned to lowercase snake_case (e.g. `opening_hours_locations.yaml`).
 - The filename must match the cleaned version of `name` — a mismatch raises a validation error on `pull` or `push`.
+- `name` cannot start with `Guardrail - `, in any letter case. Agent Studio reserves that prefix for guardrails.
 
 ## Example queries
 - Maximum **20 queries**.
+- A query cannot be empty or contain the `|` character.
 - Cover different ways a user might ask about the same thing.
 - Don't try to cover every minor variation - the model generalizes.
 
