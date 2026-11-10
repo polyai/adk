@@ -6485,6 +6485,9 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
         file_path = os.path.join(self.base_path, relative_path)
         entries = [{resource_type.resource_key: name} for name in names]
         self._write(file_path, yaml.safe_dump({resource_type.top_level_name: entries}))
+        # Files are cached by modification time, which can be too coarse to tell two
+        # writes in one test apart.
+        MultiResourceYamlResource._file_cache.clear()
         return file_path
 
     def test_validate_entry_names_same_name_twice_raises(self):
