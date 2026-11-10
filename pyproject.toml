@@ -191,6 +191,8 @@ dependencies = [
     "langcodes==3.5.1",
     "posthog==7.64.1",
     "packaging>=24.0",
+    # IANA timezone database for `zoneinfo`. Windows has no system copy.
+    "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
 [project.license]
