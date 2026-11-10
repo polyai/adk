@@ -143,13 +143,11 @@ Adding this decorator to a function enables latency control for it. It accepts:
 
     Default values are also not permitted. The ADK validates the function by constructing the expected signature string — `def name(conv: Conversation, param: type)` — and checking it appears literally in the code. A default value such as `param: str = ""` breaks this check and causes push to fail with `Function definition '...' not found in code`. If a parameter is logically optional, pass an explicit empty string or zero from the LLM call site instead.
 
-- Function names and `@func_parameter` names must start with an ASCII letter or underscore, contain only ASCII letters, digits and underscores, and not be a Python reserved word. Python itself accepts accented and other non-ASCII letters in names; Agent Studio does not.
-- A transition function can't have the same name as a global function. Transition functions in different flows can share a name.
+- Function and `@func_parameter` names use only letters, digits and underscores, don't start with a digit, and aren't Python reserved words.
+- A transition function can't share a name with a global function.
 - Global and transition functions must have a non-empty `@func_description`, and the description text can't have leading or trailing whitespace — both raise a `ValueError` on push.
-- Every `@func_parameter` description must contain at least one non-whitespace character.
+- Every `@func_parameter` needs a description.
 - `delay_before_responses_start` and `silence_after_each_response` (`@func_latency_control`) must each be an integer between 0 and 10, and `delay_responses` cannot be empty once latency control is enabled — all three raise a `ValueError` on push otherwise.
-- Each delay response needs a non-empty message and an integer duration of 0 or more.
-- `start_function` and `end_function` can't use `@func_parameter` or `@func_latency_control`.
 
 ## Parameter types
 

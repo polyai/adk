@@ -127,10 +127,6 @@ If you need to expose a structured value in prompts, convert it to a string in P
 
     In prompts and templates, use `$variable` or `{{vrbl:variable}}`, not `conv.state.variable`.
 
-## Validation
-
-- A variable name can't be a Python reserved word, such as `class` or `in`. The scan for `conv.state.<name>` covers comments and strings as well as code, so a comment like `# set conv.state.in the next step` produces a variable named `in`. Reword the comment or string to fix it.
-
 ## Best practices
 
 - variables are discovered automatically, so no manual registration is needed

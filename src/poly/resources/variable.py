@@ -144,18 +144,8 @@ class Variable(Resource):
         return Variable_Delete(id=self.resource_id)
 
     def validate(self, **kwargs) -> None:
-        """Validate the resource.
-
-        Raises:
-            ValueError: If the name is not one the platform accepts for a variable.
-        """
-        try:
-            utils.validate_python_name(self.name, "Variable name")
-        except ValueError as e:
-            raise ValueError(
-                f"{e}. Variables are read from `conv.state.{self.name}` in function code, "
-                "including comments and strings; rename it there."
-            ) from e
+        """Check the name is one the platform accepts for a variable."""
+        utils.validate_python_name(self.name, "Variable name")
 
     @staticmethod
     def discover_resources(base_path: str) -> list[str]:

@@ -7683,14 +7683,11 @@ class VariableTest(unittest.TestCase):
         var = Variable(resource_id="VAR-123", name="customer_name")
         self.assertIsNone(var.validate())
 
-    def test_validate_reserved_word_name_raises_and_points_at_function_code(self):
-        """A reserved word after `conv.state.` in a comment or string is still discovered."""
+    def test_validate_reserved_word_name_raises(self):
         var = Variable(resource_id="VAR-123", name="in")
         with self.assertRaises(ValueError) as cm:
             var.validate()
-        message = str(cm.exception)
-        self.assertIn("Variable name 'in' is a reserved word in Python", message)
-        self.assertIn("`conv.state.in` in function code", message)
+        self.assertIn("Variable name 'in' is a reserved word in Python", str(cm.exception))
 
     def test_discover_resources_from_functions(self):
         """Variables are discovered from conv.state.<name> in function code."""
