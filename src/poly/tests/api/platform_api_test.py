@@ -12,6 +12,7 @@ import requests
 
 from poly.handlers.platform_api import (
     ACCOUNTS_URL,
+    PlatformAPIError,
     PlatformAPIHandler,
 )
 from poly.tests.testing_utils import make_mock_response
@@ -196,20 +197,33 @@ class MakeRequest(unittest.TestCase):
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("requests.request")
-    def test_client_error_raises_http_error(self, mock_request, _mock_key):
-        """A 4xx response propagates as requests.HTTPError."""
+    def test_client_error_raises_platform_api_error(self, mock_request, _mock_key):
+        """A 4xx response raises PlatformAPIError."""
         mock_request.return_value = make_mock_response(404, json_body={"error": "nope"})
 
-        with self.assertRaises(requests.HTTPError):
+        with self.assertRaises(PlatformAPIError) as raised:
             PlatformAPIHandler.make_request("studio", "/x")
+
+        self.assertEqual(raised.exception.response.status_code, 404)
+        self.assertIsInstance(raised.exception.__cause__, requests.HTTPError)
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("requests.request", side_effect=requests.ConnectionError("no network"))
+    def test_unreachable_platform_raises_platform_api_error(self, _mock_request, _mock_key):
+        """A request that gets no response raises PlatformAPIError with no response."""
+        with self.assertRaises(PlatformAPIError) as raised:
+            PlatformAPIHandler.make_request("studio", "/x")
+
+        self.assertIsNone(raised.exception.response)
+        self.assertIn("no network", str(raised.exception))
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("requests.request")
-    def test_server_error_raises_http_error(self, mock_request, _mock_key):
-        """A 5xx response propagates as requests.HTTPError."""
+    def test_server_error_raises_platform_api_error(self, mock_request, _mock_key):
+        """A 5xx response raises PlatformAPIError."""
         mock_request.return_value = make_mock_response(500, json_body={"error": "boom"})
 
-        with self.assertRaises(requests.HTTPError):
+        with self.assertRaises(PlatformAPIError):
             PlatformAPIHandler.make_request("studio", "/x")
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
@@ -362,11 +376,11 @@ class UpdateProject(unittest.TestCase):
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("requests.request")
-    def test_rejected_update_raises_http_error(self, mock_request, _mock_key):
-        """A refused update (e.g. no permission) propagates as requests.HTTPError."""
+    def test_rejected_update_raises_platform_api_error(self, mock_request, _mock_key):
+        """A refused update (e.g. no permission) raises PlatformAPIError."""
         mock_request.return_value = make_mock_response(403, json_body={"error": "forbidden"})
 
-        with self.assertRaises(requests.HTTPError):
+        with self.assertRaises(PlatformAPIError):
             PlatformAPIHandler.update_project(
                 "studio", "acc1", "proj1", {"config": {"deployment_mode": "simple"}}
             )
@@ -387,11 +401,11 @@ class GetConversationAudio(unittest.TestCase):
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("requests.get")
-    def test_error_status_raises_http_error(self, mock_get, _mock_key):
-        """A failing audio request propagates as requests.HTTPError."""
+    def test_error_status_raises_platform_api_error(self, mock_get, _mock_key):
+        """A failing audio request raises PlatformAPIError."""
         mock_get.return_value = make_mock_response(404, content=b"not found")
 
-        with self.assertRaises(requests.HTTPError):
+        with self.assertRaises(PlatformAPIError):
             PlatformAPIHandler.get_conversation_audio("studio", "agent-1", "conv-1")
 
 
@@ -442,11 +456,11 @@ class GetAudioCacheFile(unittest.TestCase):
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("requests.get")
-    def test_error_status_raises_http_error(self, mock_get, _mock_key):
-        """A failing file request propagates as requests.HTTPError."""
+    def test_error_status_raises_platform_api_error(self, mock_get, _mock_key):
+        """A failing file request raises PlatformAPIError."""
         mock_get.return_value = make_mock_response(404, content=b"not found")
 
-        with self.assertRaises(requests.HTTPError):
+        with self.assertRaises(PlatformAPIError):
             PlatformAPIHandler.get_audio_cache_file("studio", "agent-1", "entry-1")
 
 
@@ -481,11 +495,11 @@ class UpdateAudioCacheFile(unittest.TestCase):
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("requests.request")
-    def test_error_status_raises_http_error(self, mock_request, _mock_key):
-        """A failing update propagates as requests.HTTPError."""
+    def test_error_status_raises_platform_api_error(self, mock_request, _mock_key):
+        """A failing update raises PlatformAPIError."""
         mock_request.return_value = make_mock_response(400, json_body={"error": "too big"})
 
-        with self.assertRaises(requests.HTTPError):
+        with self.assertRaises(PlatformAPIError):
             PlatformAPIHandler.update_audio_cache_file("studio", "agent-1", "entry-1", b"data")
 
 
@@ -516,11 +530,11 @@ class UpdateAudioCacheDetails(unittest.TestCase):
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("requests.request")
-    def test_error_status_raises_http_error(self, mock_request, _mock_key):
-        """A failing update propagates as requests.HTTPError."""
+    def test_error_status_raises_platform_api_error(self, mock_request, _mock_key):
+        """A failing update raises PlatformAPIError."""
         mock_request.return_value = make_mock_response(400, json_body={"error": "bad settings"})
 
-        with self.assertRaises(requests.HTTPError):
+        with self.assertRaises(PlatformAPIError):
             PlatformAPIHandler.update_audio_cache_details(
                 "studio", "agent-1", "entry-1", b"data", {"text": "hi", "config": {}}
             )
@@ -590,11 +604,11 @@ class SynthesizeAudioCache(unittest.TestCase):
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("requests.request")
-    def test_error_status_raises_http_error(self, mock_request, _mock_key):
-        """A failing synthesis request propagates as requests.HTTPError."""
+    def test_error_status_raises_platform_api_error(self, mock_request, _mock_key):
+        """A failing synthesis request raises PlatformAPIError."""
         mock_request.return_value = make_mock_response(422, json_body={"error": "bad text"})
 
-        with self.assertRaises(requests.HTTPError):
+        with self.assertRaises(PlatformAPIError):
             PlatformAPIHandler.synthesize_audio_cache("studio", "agent-1", "entry-1", "hi", {})
 
 

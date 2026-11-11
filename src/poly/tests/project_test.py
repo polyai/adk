@@ -18,7 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
 from poly.call.session import DEFAULT_CALL_MODE
-from poly.handlers.interface import AgentStudioInterface, PlatformAPIError
+from poly.handlers.interface import AgentStudioInterface
+from poly.handlers.platform_api import PlatformAPIError
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
 from poly.project import STATUS_FILE, AgentStudioProject, DeploymentMode

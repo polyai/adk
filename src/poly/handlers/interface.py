@@ -8,7 +8,7 @@ from typing import Any, NoReturn, Optional
 
 from google.protobuf.message import Message
 
-from poly.handlers.platform_api import PlatformAPIHandler
+from poly.handlers.platform_api import PlatformAPIError, PlatformAPIHandler
 from poly.handlers.posthog import PosthogHandler
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
@@ -39,10 +39,6 @@ REGIONS = [
     "staging",
     "dev",
 ]
-
-
-class PlatformAPIError(Exception):
-    """An Agent Studio API call failed. Its cause is the error the request raised."""
 
 
 class AgentStudioInterface:
@@ -1504,18 +1500,15 @@ class AgentStudioInterface:
             dict: The created metric record.
 
         Raises:
-            ValueError: If the metric already exists, or the API call fails.
+            ValueError: If the metric already exists.
+            PlatformAPIError: If the API call fails for any other reason.
         """
-        import requests
-
         try:
             return PlatformAPIHandler.create_custom_metric(region, account_id, project_id, data)
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             if e.response is not None and e.response.status_code == 409:
                 raise ValueError(f"Metric '{data.get('name')}' already exists.") from e
-            raise ValueError(
-                f"Failed to create metric: {e.response.text if e.response else e}"
-            ) from e
+            raise
 
     @staticmethod
     def set_custom_metric_api_flag(
@@ -1565,20 +1558,17 @@ class AgentStudioInterface:
             dict: The updated metric record.
 
         Raises:
-            ValueError: If the metric does not exist, or the API call fails.
+            ValueError: If the metric does not exist.
+            PlatformAPIError: If the API call fails for any other reason.
         """
-        import requests
-
         try:
             return PlatformAPIHandler.update_custom_metric(
                 region, account_id, project_id, metric_name, data
             )
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             if e.response is not None and e.response.status_code == 404:
                 raise ValueError(f"Metric '{metric_name}' not found.") from e
-            raise ValueError(
-                f"Failed to update metric: {e.response.text if e.response else e}"
-            ) from e
+            raise
 
     @staticmethod
     def export_custom_metrics(

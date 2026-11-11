@@ -12,6 +12,7 @@ from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS
 from poly.handlers.interface import AgentStudioInterface
+from poly.handlers.platform_api import PlatformAPIError
 from poly.utils import (
     CREDENTIALS_FILE_PATH,
     save_api_key_credential_file,
@@ -51,11 +52,9 @@ def authorise_or_explain(
         self_serve_hint: How to reach the self-serve studio region from this command,
             e.g. "run `poly apikey --region studio`".
     """
-    import requests
-
     try:
         return api.authorise(region=region, jwt_token=jwt_token)
-    except requests.HTTPError as e:
+    except PlatformAPIError as e:
         if region != "studio" and e.response is not None and e.response.status_code == 403:
             raise ValueError(
                 f"No account is provisioned for you on {region}. Enterprise accounts are"

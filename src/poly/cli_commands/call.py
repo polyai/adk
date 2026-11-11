@@ -130,7 +130,7 @@ class CallCommand(BaseCommand):
 
         from rich.markup import escape
 
-        from poly.handlers.interface import PlatformAPIError
+        from poly.handlers.platform_api import PlatformAPIError
         from poly.output.console import error, info, success, warning
 
         # Import the voice stack lazily so other commands don't load the WebRTC/audio stack.

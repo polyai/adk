@@ -26,7 +26,7 @@ from poly.cli_commands.shared import (
     read_project_config,
     resolve_branch_id,
 )
-from poly.handlers.interface import PlatformAPIError
+from poly.handlers.platform_api import PlatformAPIError
 from poly.output.json_output import json_print
 from poly.project import DeploymentMode
 from poly.resources.resource_utils import contains_merge_conflict

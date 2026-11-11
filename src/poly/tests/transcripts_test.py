@@ -9,9 +9,8 @@ import unittest
 from argparse import Namespace
 from unittest.mock import MagicMock, patch
 
-import requests
-
 from poly.cli_commands.transcripts import TranscriptsCommand
+from poly.handlers.platform_api import PlatformAPIError
 from poly.output.console import console
 from poly.project import AgentStudioProject
 
@@ -35,12 +34,12 @@ def _search_args(**overrides) -> Namespace:
     return Namespace(**base)
 
 
-def _http_error(status: int) -> requests.HTTPError:
+def _api_error(status: int) -> PlatformAPIError:
     response = MagicMock()
     response.status_code = status
     response.json.return_value = {}
     response.text = ""
-    return requests.HTTPError(response=response)
+    return PlatformAPIError(f"{status} error", response=response)
 
 
 class TranscriptsCommandTest(unittest.TestCase):
@@ -137,7 +136,7 @@ class TranscriptsSearchTest(TranscriptsCommandTest):
     @patch("poly.cli_commands.shared.json_print")
     def test_403_names_pii_permission(self, mock_json):
         """Transcript routes need PII read outright, so a 403 names that permission."""
-        self.mock_request.side_effect = _http_error(403)
+        self.mock_request.side_effect = _api_error(403)
 
         with self.assertRaises(SystemExit):
             TranscriptsCommand.transcripts_search(TEST_DIR, _search_args(), output_json=True)
@@ -161,7 +160,7 @@ class TranscriptsSearchTest(TranscriptsCommandTest):
     @patch("poly.cli_commands.shared.json_print")
     def test_429_explains_rate_limit(self, mock_json):
         """A 429 explains the per-key limit rather than dumping the response."""
-        self.mock_request.side_effect = _http_error(429)
+        self.mock_request.side_effect = _api_error(429)
 
         with self.assertRaises(SystemExit):
             TranscriptsCommand.transcripts_search(TEST_DIR, _search_args(), output_json=True)

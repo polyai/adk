@@ -44,8 +44,8 @@ from poly.constants import (
 )
 from poly.handlers.interface import (
     AgentStudioInterface,
-    PlatformAPIError,
 )
+from poly.handlers.platform_api import PlatformAPIError
 from poly.handlers.sdk import SourcererAPIError
 from poly.migration_utils import (
     MigrationFlag,
@@ -3059,7 +3059,7 @@ class AgentStudioProject:
             dict: API response with conversation_id and initial greeting.
 
         Raises:
-            requests.HTTPError: If any API call fails.
+            PlatformAPIError: If any API call fails.
             ValueError: If the branch chat info response is incomplete.
         """
         if environment == "draft":
@@ -3116,7 +3116,7 @@ class AgentStudioProject:
         Raises:
             NotImplementedError: If a non-draft environment is requested.
             ValueError: If the branch call info response is incomplete.
-            requests.HTTPError: If the API call fails.
+            PlatformAPIError: If the API call fails.
         """
         if environment != "draft":
             raise NotImplementedError(
@@ -3168,7 +3168,7 @@ class AgentStudioProject:
             dict: API response with the agent's reply.
 
         Raises:
-            requests.HTTPError: If the API call fails.
+            PlatformAPIError: If the API call fails.
         """
         if environment == "draft":
             return AgentStudioInterface.send_draft_chat_message(
@@ -3206,7 +3206,7 @@ class AgentStudioProject:
             dict: API response.
 
         Raises:
-            requests.HTTPError: If the API call fails.
+            PlatformAPIError: If the API call fails.
         """
         return AgentStudioInterface.end_chat(
             region=self.region,
@@ -4371,7 +4371,6 @@ class AgentStudioProject:
         Returns:
             dict with success status.
         """
-        import requests
 
         last_response = None
         if schema is not None and not data_only:
@@ -4382,7 +4381,7 @@ class AgentStudioProject:
                     client_env=env,
                     schema=schema,
                 )
-            except requests.HTTPError as e:
+            except PlatformAPIError as e:
                 return {"success": False, "error": str(e), "step": "schema"}
 
         if variables is not None and not schema_only:
@@ -4393,7 +4392,7 @@ class AgentStudioProject:
                     client_env=env,
                     variables=variables,
                 )
-            except requests.HTTPError as e:
+            except PlatformAPIError as e:
                 if last_response and last_response.get("lastUpdated"):
                     self.set_rtc_last_updated(env, last_response["lastUpdated"])
                 return {

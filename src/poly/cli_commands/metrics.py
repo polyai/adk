@@ -23,6 +23,7 @@ from poly.cli_commands.shared import (
     sort_flag_to_sort,
 )
 from poly.constants import DATA_AGGS, DATA_GROUP_BY, DATA_INTERVALS, DATA_MAX_LIMIT, DATA_MAX_OFFSET
+from poly.handlers.platform_api import PlatformAPIError
 from poly.output.json_output import json_print
 from poly.project import POLY_SCORE_DEFAULT_DAYS
 
@@ -413,14 +414,13 @@ class MetricsCommand(BaseCommand):
     @classmethod
     def metrics_available(cls, base_path: str, output_json: bool = False) -> None:
         """Show the metrics the project can query, built-in metrics included."""
-        import requests
 
         from poly.output.console import paged_output, print_available_metrics
 
         project = load_project(base_path, output_json=output_json)
         try:
             result = project.get_available_metrics()
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             fail(describe_data_api_error(e), output_json)
 
         if output_json:
@@ -434,7 +434,6 @@ class MetricsCommand(BaseCommand):
         cls, base_path: str, metric: str, args: Namespace, output_json: bool = False
     ) -> None:
         """Aggregate one metric over a window and print the table."""
-        import requests
 
         from poly.output.console import print_aggregate
 
@@ -461,7 +460,7 @@ class MetricsCommand(BaseCommand):
             )
         except ValueError as e:
             fail(str(e), output_json)
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             fail(describe_data_api_error(e), output_json)
 
         if output_json:
@@ -477,7 +476,6 @@ class MetricsCommand(BaseCommand):
     @classmethod
     def metrics_score(cls, base_path: str, args: Namespace, output_json: bool = False) -> None:
         """Poly Score over a window: a headline plus the bucketed table."""
-        import requests
 
         from poly.output.console import print_aggregate
 
@@ -497,7 +495,7 @@ class MetricsCommand(BaseCommand):
             )
         except ValueError as e:
             fail(str(e), output_json)
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             fail(describe_data_api_error(e), output_json)
 
         headline = cls._score_headline(result["summary"])
@@ -667,7 +665,7 @@ class MetricsCommand(BaseCommand):
 
         try:
             result = project.create_custom_metric(data)
-        except ValueError as e:
+        except (ValueError, PlatformAPIError) as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
             else:
@@ -714,7 +712,7 @@ class MetricsCommand(BaseCommand):
 
         try:
             result = project.update_custom_metric(name, data)
-        except ValueError as e:
+        except (ValueError, PlatformAPIError) as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
             else:
@@ -835,7 +833,7 @@ class MetricsCommand(BaseCommand):
 
         try:
             result = project.import_metrics_from_file(file_path, dry_run)
-        except (FileNotFoundError, ValueError) as e:
+        except (FileNotFoundError, ValueError, PlatformAPIError) as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
             else:
