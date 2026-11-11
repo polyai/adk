@@ -33,7 +33,6 @@ from poly.resources import (
     Variant,
     VariantAttribute,
 )
-from poly.resources.flows import FLOW_STEP_NAME_PATTERN
 from poly.resources.test_suite import (
     TestCaseApiOperationMock,
     TestCaseIntegrationAttributes,
@@ -127,20 +126,6 @@ def fix_orphaned_variables(
         updated_resources.setdefault(Variable, {})[var_id] = variable
 
 
-def _temporary_step_name(flow_name: str, taken_names: set[str]) -> str:
-    """Build a name for a temporary step that is valid and unused in its flow.
-
-    A flow name can hold characters a step name cannot, so those are replaced.
-    """
-    base = "".join(char if FLOW_STEP_NAME_PATTERN.fullmatch(char) else "_" for char in flow_name)
-    name = f"{base}-temp"
-    suffix = 2
-    while name in taken_names:
-        name = f"{base}-temp-{suffix}"
-        suffix += 1
-    return name
-
-
 def group_new_flow_resources(
     new_resources: ResourceMap,
     updated_resources: ResourceMap,
@@ -186,15 +171,10 @@ def group_new_flow_resources(
         if function_start_step:
             # Create a dummy default step
             dummy_step_id = f"{function_start_step.step_id}_start_step_temp"
-            taken_names = {step.name for step in steps} | {
-                step.name
-                for step in new_resources.get(FunctionStep, {}).values()
-                if step.flow_id == flow_config.resource_id
-            }
             dummy = FlowStep(
                 resource_id=f"{flow_config.resource_id}_{dummy_step_id}",
                 step_id=dummy_step_id,
-                name=_temporary_step_name(flow_config.name, taken_names),
+                name=f"{function_start_step.name}-temp",
                 flow_id=flow_config.resource_id,
                 flow_name=flow_config.name,
                 step_type=StepType.DEFAULT_STEP,

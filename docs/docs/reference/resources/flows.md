@@ -385,9 +385,8 @@ Logic reused across flows is usually better placed in global functions.
 
 ## Validation
 
-- A step `name` must be unique within its flow across default, advanced and function steps. A function step's name is its Python filename without `.py`.
-- A condition `name` must be 1 to 50 characters once leading and trailing whitespace is removed.
-- Condition names must be unique within their step.
+- A step `name` must be unique within its flow, across step types.
+- A condition `name` must be 1 to 50 characters and unique within its step.
 - A condition's `child_step` must be a step in the same flow.
 - `inter_digit_timeout` and `max_digits` (DTMF configuration) cannot be negative.
 - `vad_start` and `vad_end` (VAD) must be finite and non-negative — `poly validate` rejects a negative or infinite value.

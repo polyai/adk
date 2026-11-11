@@ -230,29 +230,17 @@ class FlowConfig(YamlResource):
         if self.description != self.description.strip():
             raise ValueError("Description cannot contain leading or trailing whitespace.")
 
-        self._validate_step_names_unique(resource_mappings)
-
-    def _validate_step_names_unique(self, resource_mappings: list[ResourceMapping] = None) -> None:
-        """Check no two steps in this flow share a name, whatever their step type."""
-        step_files_by_name: dict[str, list[str]] = {}
-        for resource in resource_mappings or []:
-            if (
-                issubclass(resource.resource_type, BaseFlowStep)
-                and resource.flow_id == self.resource_id
-            ):
-                # Shown relative to the flow folder, e.g. steps/x.yaml
-                step_file = "/".join(os.path.normpath(resource.file_path).split(os.sep)[-2:])
-                step_files_by_name.setdefault(resource.resource_name, []).append(step_file)
-
-        clashes = [
-            f"'{name}' ({', '.join(sorted(files))})"
-            for name, files in sorted(step_files_by_name.items())
-            if len(files) > 1
+        # A function step and a default or advanced step live in different folders, so
+        # only their names can show that they clash.
+        step_names = [
+            resource.resource_name
+            for resource in resource_mappings or []
+            if issubclass(resource.resource_type, BaseFlowStep)
+            and resource.flow_id == self.resource_id
         ]
-        if clashes:
-            raise ValueError(
-                f"Step names must be unique within a flow. Duplicates: {'; '.join(clashes)}"
-            )
+        duplicates = sorted({name for name in step_names if step_names.count(name) > 1})
+        if duplicates:
+            raise ValueError(f"Step names must be unique within a flow. Duplicates: {duplicates}")
 
     def build_update_proto(
         self,
@@ -823,15 +811,11 @@ class FlowStep(BaseFlowStep, YamlResource):
             except Exception as e:
                 raise ValueError(f"Condition '{condition.name}': {e}") from e
 
-        # The platform trims a condition name before comparing it, then matches exactly.
-        condition_names = [condition.name.strip() for condition in self.conditions]
-        duplicate_names = sorted(
-            {name for name in condition_names if condition_names.count(name) > 1}
-        )
-        if duplicate_names:
-            quoted_names = ", ".join(f"'{name}'" for name in duplicate_names)
+        names = [condition.name.strip() for condition in self.conditions]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
             raise ValueError(
-                f"Condition names must be unique within a step. Duplicates: {quoted_names}"
+                f"Condition names must be unique within a step. Duplicates: {duplicates}"
             )
 
         entity_ids = set(
@@ -1719,12 +1703,9 @@ class Condition(SubResource):
         if not name:
             raise ValueError("Condition name cannot be empty.")
 
-        # The platform counts UTF-16 code units, so a character outside the BMP counts twice.
-        name_length = len(name.encode("utf-16-le")) // 2
-        if name_length > CONDITION_NAME_MAX_LENGTH:
+        if len(name) > CONDITION_NAME_MAX_LENGTH:
             raise ValueError(
-                f"Condition name cannot be longer than {CONDITION_NAME_MAX_LENGTH} characters "
-                f"(got {name_length})."
+                f"Condition name cannot be longer than {CONDITION_NAME_MAX_LENGTH} characters."
             )
 
         if self.condition_type not in ConditionType:

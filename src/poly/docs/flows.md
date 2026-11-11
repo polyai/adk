@@ -41,7 +41,7 @@ start_step: Collect Details
 ## Flow Steps
 A step represents the agent's current position in the flow. There are 3 types of steps: default steps (no code), advanced steps, and function steps.
 
-A step name is unique within its flow across all three types: a function step cannot share a name with a default or advanced step.
+A step name must be unique within its flow, across step types.
 
 ### Default Steps (`steps/*.yaml`)
 These steps use only LLM logic to process data and transition to other steps. They can define conditions for how to do this.
