@@ -151,7 +151,7 @@ Use the same attribute names as defined in `variant_attributes.yaml`.
 ## Best practices
 - Keep variant names stable; quote them when they contain special characters.
 - Set exactly **one** `is_default` variant.
-- Provide a value (or a blank one) for every variant in each attribute's `values` map. Validation will fail if a variant is missing. In a project with no variants, `values` is empty.
+- Provide a value (or a blank one) for every variant in each attribute's `values` map. Validation will fail if a variant is missing.
 - Name attributes as Python identifiers — `customer_name`, not `customer-name`. The platform rejects anything else.
 - Declare a `kind` when the value is not text. A `boolean` attribute is checked at push time and reaches the agent as a real boolean, where a `"True"` string is neither.
 - Changing an attribute's `kind` does not convert its existing values — update them in the same change, or the push is rejected.

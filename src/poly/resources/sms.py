@@ -142,7 +142,7 @@ class SMSTemplate(MultiResourceYamlResource):
         return cls(
             resource_id=resource_id,
             name=yaml_data.get("name") or name,
-            text=yaml_data.get("text") or "",
+            text=yaml_data.get("text", ""),
             env_phone_numbers=yaml_data.get("env_phone_numbers", {}),
         )
 
@@ -202,6 +202,8 @@ class SMSTemplate(MultiResourceYamlResource):
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if not self.name:
             raise ValueError("Name is required")
+        if not self.text:
+            raise ValueError("Text is required")
         if not self.env_phone_numbers:
             raise ValueError("Env phone numbers are required")
 

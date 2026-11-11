@@ -53,7 +53,7 @@ actions: |-
 - The filename must match the cleaned version of `name` — a mismatch raises a validation error on `pull` or `push`.
 
 ## Example queries
-- Maximum **100 queries**.
+- Maximum **20 queries**.
 - Cover different ways a user might ask about the same thing.
 - Don't try to cover every minor variation - the model generalizes.
 

@@ -805,28 +805,11 @@ def convert_keys_to_snake_case(dict_obj: dict) -> dict:
     return {to_snake_case(k): v for k, v in dict_obj.items()}
 
 
-_ALPHANUM = "[0-9a-z]"
-# language[-script][-region][-variant...][-extension...][-x-private...]
-_LANGUAGE_TAG = re.compile(
-    r"(?:[a-z]{2,3}|[a-z]{5,8})"
-    r"(?:-[a-z]{4})?"
-    r"(?:-(?:[a-z]{2}|[0-9]{3}))?"
-    rf"(?:-(?:{_ALPHANUM}{{5,8}}|[0-9]{_ALPHANUM}{{3}}))*"
-    rf"(?:-[0-9a-wyz](?:-{_ALPHANUM}{{2,8}})+)*"
-    rf"(?:-x(?:-{_ALPHANUM}{{1,8}})+)?"
-)
-
-
 def is_valid_language_code(code: str) -> bool:
-    """Check if the given code is a well-formed BCP 47 language tag.
+    """Check if the given code is a valid BCP 47 language code."""
+    import langcodes
 
-    Matches the platform, which checks the structure of the tag and does not look
-    subtags up in a registry: `xx-YY` passes, `en_GB` and grandfathered tags such as
-    `i-klingon` do not.
-    """
-    if not isinstance(code, str) or not code.isascii():
-        return False
-    return bool(_LANGUAGE_TAG.fullmatch(code.lower()))
+    return langcodes.tag_is_valid(code)
 
 
 def _unwrap_optional(hint: type) -> type:

@@ -23,9 +23,8 @@ additional_languages:
 
 ## Validation
 
-- Default language code is required and must be a well-formed BCP 47 language tag.
-- Additional language codes must be well-formed BCP 47 language tags.
-- A tag is checked for its structure, not against a list of known languages: subtags are separated by hyphens (`en-GB`, not `en_GB`), in the order language, script, region, variants (`zh-Hant-TW`, `es-419`). `xx-YY` passes; `en-` and `i-klingon` do not.
+- Default language code is required and must be a valid BCP 47 language tag.
+- Additional language codes must be valid BCP 47 language tags.
 - A language code cannot appear as both the default and an additional language.
 - Duplicate additional language codes are not allowed.
 

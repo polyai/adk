@@ -111,7 +111,7 @@ class PhraseFilter(MultiResourceYamlResource):
             resource_id=resource_id,
             name=yaml_dict.get("name") or name,
             description=(yaml_dict.get("description") or "").strip(),
-            regular_expressions=yaml_dict.get("regular_expressions") or [],
+            regular_expressions=yaml_dict.get("regular_expressions", []),
             say_phrase=yaml_dict.get("say_phrase", False),
             language_code=yaml_dict.get("language_code", ""),
             function=yaml_dict.get("function"),
@@ -204,6 +204,8 @@ class PhraseFilter(MultiResourceYamlResource):
     def validate(self, **kwargs) -> None:
         if not self.name:
             raise ValueError("Name is required")
+        if not self.regular_expressions:
+            raise ValueError("At least one regular expression is required")
 
         resource_mappings = kwargs.get("resource_mappings") or {}
         if self.function:

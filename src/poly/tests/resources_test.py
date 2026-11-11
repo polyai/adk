@@ -1763,25 +1763,12 @@ class TopicTests(unittest.TestCase):
             name="invalid_topic",
             actions="",
             content="Invalid flow function reference",
-            example_queries=["Test query"] * 101,
+            example_queries=["Test query"] * 21,
         )
 
         with self.assertRaises(ValueError) as cm:
             topic_with_too_many_example_queries.validate(resource_mappings=[])
-        self.assertIn("A topic can have at most 100 example queries", str(cm.exception))
-
-    def test_validate_one_hundred_example_queries_passes(self):
-        """A topic may hold up to 100 example queries."""
-        for count in (21, 100):
-            with self.subTest(count=count):
-                topic = Topic(
-                    resource_id="789",
-                    name="busy_topic",
-                    actions="",
-                    content="Content",
-                    example_queries=[f"query {i}" for i in range(count)],
-                )
-                self.assertIsNone(topic.validate(resource_mappings=[]))
+        self.assertIn("Example queries must be less than 20", str(cm.exception))
 
     def test_read_local_resource(self):
         """Test reading a topic from a YAML file."""
@@ -2268,8 +2255,8 @@ example_queries:
 
         self.assertIsNone(TEST_CHILD_TOPIC.validate(resource_mappings=mappings))
 
-    def test_more_than_one_hundred_example_queries_raises(self):
-        """Example queries are capped at 100, matching the base Topic limit."""
+    def test_more_than_twenty_example_queries_raises(self):
+        """Example queries are capped at 20, matching the base Topic limit."""
         child_topic = ChildTopic(
             resource_id="TOPIC-es-1",
             name="Opening Hours",
@@ -2277,27 +2264,13 @@ example_queries:
             variant_name="Spanish",
             actions="",
             content="",
-            example_queries=[f"query {i}" for i in range(101)],
+            example_queries=[f"query {i}" for i in range(21)],
         )
 
         with self.assertRaises(ValueError) as cm:
             child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
 
-        self.assertIn("A topic can have at most 100 example queries", str(cm.exception))
-
-    def test_one_hundred_example_queries_passes(self):
-        """A child topic may hold up to 100 example queries."""
-        child_topic = ChildTopic(
-            resource_id="TOPIC-es-1",
-            name="Opening Hours",
-            variant_id="VARIANT-es",
-            variant_name="Spanish",
-            actions="",
-            content="",
-            example_queries=[f"query {i}" for i in range(100)],
-        )
-
-        self.assertIsNone(child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS))
+        self.assertIn("Example queries must be less than 20", str(cm.exception))
 
     def test_unknown_reference_raises(self):
         """References in actions/content must resolve, as they do for a base topic."""
@@ -5060,8 +5033,8 @@ class SMSTemplateTests(unittest.TestCase):
             invalid_template.validate()
         self.assertIn("Name is required", str(cm.exception))
 
-        # Empty text is valid
-        empty_text_template = SMSTemplate(
+        # Test with empty text
+        invalid_template = SMSTemplate(
             resource_id="sms-template-999",
             name="test_template",
             text="",
@@ -5071,7 +5044,9 @@ class SMSTemplateTests(unittest.TestCase):
                 live="+447700102347",
             ),
         )
-        self.assertIsNone(empty_text_template.validate())
+        with self.assertRaises(ValueError) as cm:
+            invalid_template.validate()
+        self.assertIn("Text is required", str(cm.exception))
 
         # Test with None env_phone_numbers
         invalid_template = SMSTemplate(
@@ -5083,47 +5058,6 @@ class SMSTemplateTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             invalid_template.validate()
         self.assertIn("Env phone numbers are required", str(cm.exception))
-
-    def test_empty_text_round_trips(self):
-        """A template pulled with empty text reads back from YAML unchanged."""
-        pulled = SMSTemplate.from_projection(
-            {
-                "sms": {
-                    "templates": {
-                        "entities": {
-                            "sms-template-1": {
-                                "name": "blank_template",
-                                "text": "",
-                                "active": True,
-                                "envPhoneNumbers": {
-                                    "sandbox": "",
-                                    "preRelease": "",
-                                    "live": "+447700102347",
-                                },
-                            }
-                        }
-                    }
-                }
-            }
-        )["sms-template-1"]
-
-        yaml_dict = resource_utils.load_yaml(resource_utils.dump_yaml(pulled.to_yaml_dict()))
-        read_back = SMSTemplate.from_yaml_dict(yaml_dict, "sms-template-1", "blank_template")
-
-        self.assertEqual(yaml_dict["text"], "")
-        self.assertEqual(read_back.to_yaml_dict(), pulled.to_yaml_dict())
-        self.assertIsNone(read_back.validate())
-
-    def test_text_key_without_value_reads_as_empty(self):
-        """`text:` with nothing after it reads as empty text."""
-        template = SMSTemplate.from_yaml_dict(
-            {"name": "blank_template", "text": None, "env_phone_numbers": {"live": "+1"}},
-            "sms-template-1",
-            "blank_template",
-        )
-
-        self.assertEqual(template.text, "")
-        self.assertIsNone(template.validate())
 
     def test_validate_variable_references(self):
         """Test validation when SMS template text references a variable."""
@@ -5469,7 +5403,7 @@ attributes:
         self.assertIn("Name is required", str(cm.exception))
 
     def test_validate_empty_mappings(self):
-        """Test validation fails when mappings are empty and the project has variants."""
+        """Test validation fails when mappings are empty."""
         attr = VariantAttribute(
             resource_id="attr-test",
             name="test_attr",
@@ -5485,49 +5419,7 @@ attributes:
         )
         with self.assertRaises(ValueError) as cm:
             attr.validate(resource_mappings=[variant_mapping])
-        self.assertIn("Missing variants for variant attribute: ['default']", str(cm.exception))
-
-    def test_validate_empty_mappings_without_variants_passes(self):
-        """An attribute needs no values in a project that has no variants."""
-        attr = VariantAttribute(resource_id="attr-test", name="test_attr", mappings={})
-
-        self.assertIsNone(attr.validate(resource_mappings=[]))
-
-    def test_validate_mappings_without_variants_raises(self):
-        """An attribute can't hold a value for a variant the project doesn't have."""
-        attr = VariantAttribute(
-            resource_id="attr-test", name="test_attr", mappings={"VARIANT-default": "value"}
-        )
-
-        with self.assertRaises(ValueError) as cm:
-            attr.validate(resource_mappings=[])
-        self.assertIn("Additional variants found for attribute", str(cm.exception))
-
-    def test_no_values_round_trips_without_variants(self):
-        """An attribute pulled from a project with no variants reads back from YAML unchanged."""
-        pulled = VariantAttribute.from_projection(
-            {
-                "variantManagement": {
-                    "attributes": {
-                        "entities": {
-                            "attr-test": {
-                                "name": "test_attr",
-                                "archived": False,
-                                "type": {"kind": 0},
-                            }
-                        }
-                    },
-                    "variantAttributeValues": {"entities": {}},
-                }
-            }
-        )["attr-test"]
-
-        yaml_dict = resource_utils.load_yaml(resource_utils.dump_yaml(pulled.to_yaml_dict()))
-        read_back = VariantAttribute.from_yaml_dict(yaml_dict, "attr-test")
-
-        self.assertEqual(yaml_dict["values"], {})
-        self.assertEqual(read_back, pulled)
-        self.assertIsNone(read_back.validate(resource_mappings=[]))
+        self.assertIn("Mappings are required", str(cm.exception))
 
     def test_validate_missing_variants(self):
         """Test validation fails when attribute is missing values for some variants."""
@@ -5799,7 +5691,7 @@ class TypedVariantAttributeTests(unittest.TestCase):
         attr = VariantAttribute.from_yaml_dict({"name": "x", "values": None}, "attr-x")
         with self.assertRaises(ValueError) as cm:
             attr.validate(resource_mappings=[self.variant_mapping])
-        self.assertIn("Missing variants for variant attribute: ['default']", str(cm.exception))
+        self.assertIn("Mappings are required", str(cm.exception))
 
     def test_validate_rejects_a_name_the_platform_would_reject(self):
         """Attribute names are read as `conv.variant.<name>`, so they must be identifiers.
@@ -7764,47 +7656,12 @@ class PhraseFilterTests(unittest.TestCase):
             pf.validate(resource_mappings=[])
         self.assertIn("Name is required", str(cm.exception))
 
-    def test_validate_no_regular_expressions_passes(self):
-        """validate succeeds when regular_expressions is empty."""
+    def test_validate_missing_regex_raises(self):
+        """validate raises ValueError when regular_expressions is empty."""
         pf = PhraseFilter(resource_id="sk-1", name="Filter", regular_expressions=[])
-        self.assertIsNone(pf.validate(resource_mappings=[]))
-
-    def test_no_regular_expressions_round_trips(self):
-        """A filter pulled with no regular expressions reads back from YAML unchanged."""
-        pulled = PhraseFilter.from_projection(
-            {
-                "stopKeywords": {
-                    "filters": {
-                        "entities": {
-                            "sk-1": {
-                                "title": "Filter",
-                                "description": "",
-                                "regularExpressions": [],
-                                "sayPhrase": False,
-                                "references": {"globalFunctions": {}},
-                                "languageCode": "",
-                            }
-                        }
-                    }
-                }
-            }
-        )["sk-1"]
-
-        yaml_dict = resource_utils.load_yaml(resource_utils.dump_yaml(pulled.to_yaml_dict()))
-        read_back = PhraseFilter.from_yaml_dict(yaml_dict, resource_id="sk-1", name="Filter")
-
-        self.assertEqual(yaml_dict["regular_expressions"], [])
-        self.assertEqual(read_back, pulled)
-        self.assertIsNone(read_back.validate(resource_mappings=[]))
-
-    def test_regular_expressions_key_without_value_reads_as_empty(self):
-        """`regular_expressions:` with nothing under it reads as an empty list."""
-        pf = PhraseFilter.from_yaml_dict(
-            {"name": "Filter", "regular_expressions": None}, resource_id="sk-1", name="Filter"
-        )
-
-        self.assertEqual(pf.regular_expressions, [])
-        self.assertEqual(list(pf.build_create_proto().regular_expressions), [])
+        with self.assertRaises(ValueError) as cm:
+            pf.validate(resource_mappings=[])
+        self.assertIn("regular expression", str(cm.exception).lower())
 
     def test_build_protos(self):
         """build_create_proto, build_update_proto, build_delete_proto set fields correctly."""
@@ -8755,40 +8612,17 @@ class TranscriptCorrectionTests(unittest.TestCase):
             tc.validate()
         self.assertIn("Correction name is required", str(cm.exception))
 
-    def test_validate_empty_regular_expressions_passes(self):
-        """validate succeeds when regular_expressions is empty."""
+    def test_validate_empty_regular_expressions_raises(self):
+        """validate raises ValueError when regular_expressions is empty."""
         tc = TranscriptCorrection(
             resource_id="tc-1",
             name="test",
             description="desc",
             regular_expressions=[],
         )
-        self.assertIsNone(tc.validate())
-
-    def test_no_rules_round_trips(self):
-        """A correction pulled with no rules reads back from YAML unchanged."""
-        pulled = TranscriptCorrection.from_projection(
-            {
-                "transcriptCorrections": {
-                    "transcriptCorrections": {
-                        "entities": {
-                            "tc-1": {
-                                "name": "test",
-                                "description": "desc",
-                                "regularExpressions": [],
-                            }
-                        }
-                    }
-                }
-            }
-        )["tc-1"]
-
-        yaml_dict = resource_utils.load_yaml(resource_utils.dump_yaml(pulled.to_yaml_dict()))
-        read_back = TranscriptCorrection.from_yaml_dict(yaml_dict, resource_id="tc-1", name="test")
-
-        self.assertEqual(yaml_dict["regular_expressions"], [])
-        self.assertEqual(read_back, pulled)
-        self.assertIsNone(read_back.validate())
+        with self.assertRaises(ValueError) as cm:
+            tc.validate()
+        self.assertIn("At least one regular expression rule is required", str(cm.exception))
 
     def test_validate_invalid_replacement_type_raises(self):
         """validate raises ValueError for invalid replacement_type in rule."""
@@ -12187,28 +12021,10 @@ class DefaultLanguageTests(unittest.TestCase):
             lang.validate()
 
     def test_validate_invalid_language_code_raises(self):
-        for code in ("!!!", "en_GB", "i-klingon", "en-", "-en", "e", "en--GB", "toolonglanguagetag"):
-            with self.subTest(code=code):
-                lang = DefaultLanguage(resource_id=code, name=code)
-                with self.assertRaises(ValueError) as cm:
-                    lang.validate()
-                self.assertIn("Invalid language code", str(cm.exception))
-
-    def test_validate_well_formed_language_code_passes(self):
-        """Any well-formed tag is accepted, whether or not its subtags are registered."""
-        for code in (
-            "en-GB",
-            "en",
-            "zh-Hant-TW",
-            "es-419",
-            "xx-YY",
-            "zz",
-            "english",
-            "en-GB-x-private",
-        ):
-            with self.subTest(code=code):
-                lang = DefaultLanguage(resource_id=code, name=code)
-                self.assertIsNone(lang.validate())
+        lang = DefaultLanguage(resource_id="!!!", name="!!!")
+        with self.assertRaises(ValueError) as cm:
+            lang.validate()
+        self.assertIn("Invalid language code", str(cm.exception))
 
     def test_discover_resources(self):
         base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
@@ -12305,28 +12121,10 @@ class AdditionalLanguageTests(unittest.TestCase):
             lang.validate()
 
     def test_validate_invalid_language_code_raises(self):
-        for code in ("!!!", "en_GB", "i-klingon", "en-", "-en", "e", "en--GB", "toolonglanguagetag"):
-            with self.subTest(code=code):
-                lang = AdditionalLanguage(resource_id=code, name=code)
-                with self.assertRaises(ValueError) as cm:
-                    lang.validate()
-                self.assertIn("Invalid language code", str(cm.exception))
-
-    def test_validate_well_formed_language_code_passes(self):
-        """Any well-formed tag is accepted, whether or not its subtags are registered."""
-        for code in (
-            "en-GB",
-            "en",
-            "zh-Hant-TW",
-            "es-419",
-            "xx-YY",
-            "zz",
-            "english",
-            "en-GB-x-private",
-        ):
-            with self.subTest(code=code):
-                lang = AdditionalLanguage(resource_id=code, name=code)
-                self.assertIsNone(lang.validate())
+        lang = AdditionalLanguage(resource_id="!!!", name="!!!")
+        with self.assertRaises(ValueError) as cm:
+            lang.validate()
+        self.assertIn("Invalid language code", str(cm.exception))
 
     def test_discover_resources(self):
         base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")

@@ -43,7 +43,7 @@ Intercept or block phrases in the agent's output before they are spoken. Can opt
 A `phrase_filtering` list where each entry has:
 - **name** (required): Identifier for this filter.
 - **description**: What this filter does.
-- **regular_expressions**: List of regex patterns to match. Can be empty.
+- **regular_expressions** (required): List of regex patterns to match.
 - **say_phrase** (bool): If `true`, still speak the matched phrase. If `false`, suppress it. Default: `false`.
 - **language_code** (string, optional): Restrict to a specific language.
 - **function** (string, optional): Name of a global function to call when a match occurs.

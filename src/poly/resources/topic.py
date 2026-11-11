@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 FUNCTION_REGEX = re.compile(r"{{fn:([\w-]+)}}")
 FLOW_FUNCTION_REGEX = re.compile(r"{{ft:([\w-]+)}}")
 
+
 TOPIC_REFERENCES = ["global_functions", "sms", "handoff", "attributes", "variables", "translations"]
-MAX_EXAMPLE_QUERIES = 100
 
 
 @dataclass
@@ -202,8 +202,9 @@ class Topic(YamlResource):
         if not valid:
             raise ValueError(f"Invalid references: {invalid_references}")
 
-        if len(self.example_queries) > MAX_EXAMPLE_QUERIES:
-            raise ValueError(f"A topic can have at most {MAX_EXAMPLE_QUERIES} example queries")
+        # limit example queries to 20
+        if len(self.example_queries) > 20:
+            raise ValueError("Example queries must be less than 20")
 
         self._validate_tags()
 

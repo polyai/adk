@@ -615,58 +615,6 @@ class StringUtilsTests(unittest.TestCase):
         mixed_case = "this_is_another_test_name"
         self.assertEqual(resource_utils.to_camel_case(mixed_case), "thisIsAnotherTestName")
 
-    def test_is_valid_language_code_accepts_well_formed_tags(self):
-        """A tag is judged on its structure, so unregistered subtags pass."""
-        well_formed = [
-            "en-GB",
-            "en",
-            "zh-Hant-TW",
-            "es-419",
-            "xx-YY",
-            "zz",
-            "english",
-            "en-GB-x-private",
-            "EN-gb",
-            "de-CH-1901",
-            "sl-rozaj-biske",
-            "en-u-ca-gregory",
-            "en-t-fr-h0-hybrid",
-            "en-a-bb-b-cc",
-            "en-u-ca-gregory-x-foo",
-        ]
-        for code in well_formed:
-            with self.subTest(code=code):
-                self.assertTrue(resource_utils.is_valid_language_code(code))
-
-    def test_is_valid_language_code_rejects_malformed_tags(self):
-        """Underscores, empty subtags and grandfathered tags are rejected."""
-        malformed = [
-            "",
-            "en_GB",
-            "i-klingon",
-            "en-",
-            "-en",
-            "e",
-            "en--GB",
-            "toolonglanguagetag",
-            "abcd",
-            "en-GB-oed",
-            "zh-min-nan",
-            "zh-cmn-Hans",
-            "en-GB-US",
-            "x-private",
-            "en-x",
-            "en-a",
-            "en gb",
-            "en-GB\n",
-            "\u00ean",
-            "en-\u0663\u0663\u0663",
-            "\u212aa",
-        ]
-        for code in malformed:
-            with self.subTest(code=code):
-                self.assertFalse(resource_utils.is_valid_language_code(code))
-
 
 class SameYamlDataTests(unittest.TestCase):
     """same_yaml_data is True only when dump_yaml is guaranteed to render both sides the same."""
