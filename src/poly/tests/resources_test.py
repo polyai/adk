@@ -18,6 +18,7 @@ from google.protobuf.json_format import MessageToDict
 from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
+from poly.handlers.protobuf.flows_pb2 import FlowStartMode
 from poly.handlers.protobuf.knowledge_base_pb2 import KnowledgeBase_DeleteTopic
 from poly.handlers.protobuf.variant_pb2 import Variant_UpdateVariant
 from poly.resources.agent_settings import (
@@ -3212,6 +3213,161 @@ start_step: step-1
         )
         restored_yaml = yaml.safe_load(restored_content)
         self.assertEqual(restored_yaml["start_step"], "step-1")
+
+    @staticmethod
+    def _flow_config(start_mode=None, description="A test flow description", name="Test Flow"):
+        return FlowConfig(
+            resource_id="flow-123",
+            name=name,
+            description=description,
+            start_step="step-1",
+            start_mode=start_mode,
+        )
+
+    def test_start_mode_from_yaml_dict(self):
+        """start_mode is read as written, and stays None when the key is missing."""
+        base = {"name": "Test Flow", "description": "A flow", "start_step": "step-1"}
+        for yaml_value, expected in [(None, None), ("agent", "agent"), ("tool", "tool")]:
+            with self.subTest(start_mode=yaml_value):
+                yaml_dict = dict(base) if yaml_value is None else {**base, "start_mode": yaml_value}
+                config = FlowConfig.from_yaml_dict(yaml_dict, resource_id="flow-123", name="x")
+                self.assertEqual(config.start_mode, expected)
+
+    def test_start_mode_written_only_when_agent(self):
+        """Only agent is written to YAML, so tool and a missing key hash the same."""
+        self.assertEqual(self._flow_config("agent").to_yaml_dict()["start_mode"], "agent")
+        self.assertIn("start_mode: agent\n", self._flow_config("agent").raw)
+        self.assertNotIn("start_mode", self._flow_config("tool").to_yaml_dict())
+        self.assertNotIn("start_mode", self._flow_config(None).to_yaml_dict())
+        self.assertEqual(
+            self._flow_config("tool").compute_hash(), self._flow_config(None).compute_hash()
+        )
+        self.assertNotEqual(
+            self._flow_config("agent").compute_hash(), self._flow_config(None).compute_hash()
+        )
+
+    def test_start_mode_equality_treats_tool_as_missing(self):
+        """An explicit tool equals a missing key; agent differs from both."""
+        self.assertEqual(self._flow_config("tool"), self._flow_config(None))
+        self.assertNotEqual(self._flow_config("agent"), self._flow_config(None))
+        self.assertNotEqual(self._flow_config("agent"), self._flow_config("tool"))
+
+    def test_start_mode_round_trips_through_file(self):
+        """A flow with start_mode agent reads back from its own YAML unchanged."""
+        config = self._flow_config("agent")
+        with mock_read_from_file(config.raw):
+            result = FlowConfig.read_local_resource(
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_id="flow-123",
+                resource_name="Test Flow",
+            )
+        self.assertEqual(result.start_mode, "agent")
+        self.assertEqual(result.compute_hash(), config.compute_hash())
+
+    def test_create_proto_start_mode(self):
+        """Create sets AGENT for agent flows and leaves the field unset otherwise."""
+        proto = self._flow_config("agent").build_create_proto()
+        self.assertEqual(proto.start_mode, FlowStartMode.FLOW_START_MODE_AGENT)
+        for start_mode in (None, "tool"):
+            with self.subTest(start_mode=start_mode):
+                proto = self._flow_config(start_mode).build_create_proto()
+                self.assertFalse(proto.HasField("start_mode"))
+
+    def test_update_proto_start_mode(self):
+        """Update sends AGENT, TOOL only when switching back from agent, else nothing."""
+        cases = [
+            # (local start_mode, start_mode at last pull, expected proto value or None)
+            ("agent", None, FlowStartMode.FLOW_START_MODE_AGENT),
+            ("agent", "agent", FlowStartMode.FLOW_START_MODE_AGENT),
+            (None, "agent", FlowStartMode.FLOW_START_MODE_TOOL),
+            ("tool", "agent", FlowStartMode.FLOW_START_MODE_TOOL),
+            (None, None, None),
+            ("tool", None, None),
+            (None, "tool", None),
+            ("tool", "tool", None),
+        ]
+        for start_mode, known_start_mode, expected in cases:
+            with self.subTest(start_mode=start_mode, known_start_mode=known_start_mode):
+                config = self._flow_config(start_mode)
+                config.known_start_mode = known_start_mode
+                proto = config.build_update_proto()
+                if expected is None:
+                    self.assertFalse(proto.HasField("start_mode"))
+                else:
+                    self.assertEqual(proto.start_mode, expected)
+
+    def test_validate_start_mode(self):
+        """start_mode must be agent or tool; agent needs a description that says when."""
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="flow-123_step-1",
+                resource_name="Start Step",
+                resource_type=FlowStep,
+                file_path="flows/test_flow/steps/start_step.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+                flow_id="flow-123",
+            )
+        ]
+        description = "The caller wants to book a table for dinner."
+        for start_mode in (None, "tool", "agent"):
+            with self.subTest(valid=start_mode):
+                config = self._flow_config(start_mode, description=description)
+                self.assertIsNone(config.validate(resource_mappings=resource_mappings))
+
+        # tool flows keep the old, looser description rule
+        self.assertIsNone(
+            self._flow_config("tool", description="Test Flow").validate(
+                resource_mappings=resource_mappings
+            )
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            self._flow_config("Agent", description=description).validate(
+                resource_mappings=resource_mappings
+            )
+        self.assertEqual(
+            str(cm.exception), "Start mode 'Agent' invalid, must be one of ['agent', 'tool']."
+        )
+
+        invalid = [
+            ("Description for flow Test Flow", "default placeholder"),
+            ("description for flow test_flow.", "default placeholder"),
+            ("Test Flow", "repeat the flow name"),
+            ("  test-flow. ".strip(), "repeat the flow name"),
+            ("TEST_FLOW flow.", "repeat the flow name"),
+            ("Books a table.", "at least 5 words"),
+        ]
+        for bad_description, message in invalid:
+            with self.subTest(description=bad_description):
+                config = self._flow_config("agent", description=bad_description)
+                with self.assertRaises(ValueError) as cm:
+                    config.validate(resource_mappings=resource_mappings)
+                self.assertIn(message, str(cm.exception))
+
+        # A five-word name repeated as the description is still caught as a repeat
+        long_name = "Book A Table For Dinner"
+        config = FlowConfig(
+            resource_id="flow-123",
+            name=long_name,
+            description="book_a_table_for_dinner flow",
+            start_step="step-1",
+            start_mode="agent",
+        )
+        mappings = [
+            ResourceMapping(
+                resource_id="flow-123_step-1",
+                resource_name="Start Step",
+                resource_type=FlowStep,
+                file_path="flows/book_a_table_for_dinner/steps/start_step.yaml",
+                resource_prefix=None,
+                flow_name=long_name,
+                flow_id="flow-123",
+            )
+        ]
+        with self.assertRaises(ValueError) as cm:
+            config.validate(resource_mappings=mappings)
+        self.assertIn("repeat the flow name", str(cm.exception))
 
 
 TEST_FLOW_STEP = FlowStep(
@@ -13829,6 +13985,25 @@ class FlowConfigFromProjection(unittest.TestCase):
     def test_empty_projection_yields_no_flow_configs(self):
         """An empty projection should return an empty dict."""
         self.assertEqual(FlowConfig.from_projection({}), {})
+
+    def test_parses_start_mode(self):
+        """startMode is read next to startStepId; a missing key stays None."""
+        flows = {}
+        for flow_id, start_mode in [("FLOW-A", "agent"), ("FLOW-T", "tool"), ("FLOW-N", None)]:
+            flows[flow_id] = {
+                "name": flow_id,
+                "description": "Handles bookings",
+                "startStepId": "STEP-A",
+                "steps": {"entities": {}},
+            }
+            if start_mode is not None:
+                flows[flow_id]["startMode"] = start_mode
+        configs = FlowConfig.from_projection({"flows": {"flows": {"entities": flows}}})
+        self.assertEqual(configs["FLOW-A"].start_mode, "agent")
+        self.assertEqual(configs["FLOW-T"].start_mode, "tool")
+        self.assertIsNone(configs["FLOW-N"].start_mode)
+        self.assertEqual(configs["FLOW-A"].to_yaml_dict()["start_mode"], "agent")
+        self.assertNotIn("start_mode", configs["FLOW-T"].to_yaml_dict())
 
 
 class FlowStepFromProjection(unittest.TestCase):

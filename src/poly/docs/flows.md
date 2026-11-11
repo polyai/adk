@@ -4,6 +4,7 @@
 Flows choreograph multi-step processes. The LLM only sees the current step's prompt and tools. Prefer one task per step; do branching and conditionals in Python via transitions.
 
 ## Entering a flow
+- **By the agent**: with `start_mode: agent` in `flow_config.yaml`, the agent may start the flow itself, at its Start Step, when the conversation matches the flow's description. Without it (or with `start_mode: tool`), only code starts the flow.
 - **From code**: `conv.goto_flow('Flow Name')` (enters at configured Start Step).
 - **Via return**: `return {"transition": {"goto_flow": "Flow Name", "goto_step": "Step Name"}}`.
 - **Within a flow**: `flow.goto_step("Step Name")` in flow functions only.
@@ -30,12 +31,16 @@ Fields:
 - **name**: Human-readable flow name
 - **description** (required): What this flow does
 - **start_step** (required): Name of the step to enter when the flow is triggered. Must match a real step name.
+- **start_mode** (optional): Who may start the flow. `agent`: the agent may start it itself, from its description. `tool`: only function code starts it, with `conv.goto_flow` (the default when the key is missing). Only `start_mode: agent` is written on pull.
+
+When `start_mode` is `agent`, the description is what the agent reads to decide when to start the flow. Write what the user wants, not how the flow works: "The caller wants to book, change or cancel a table reservation", not "Collects name, party size and date". It must have at least 5 words, and must not be the default `Description for flow <name>` or just repeat the flow name.
 
 Example:
 ```yaml
 name: Example Flow
-description: Handles the booking process
+description: The caller wants to book a table for a specific date and time
 start_step: Collect Details
+start_mode: agent
 ```
 
 ## Flow Steps

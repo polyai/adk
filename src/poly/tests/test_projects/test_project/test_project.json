@@ -532,7 +532,8 @@
         "resource_id": "FLOW_CONFIG-test_flow_with_punctuation",
         "name": "test_flow_with_punctuation!",
         "description": "Test flow with punctuation in name and default step as start",
-        "start_step": "welcome_step"
+        "start_step": "welcome_step",
+        "start_mode": "agent"
       }
     },
     "flow_steps": {

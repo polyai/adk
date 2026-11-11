@@ -189,6 +189,7 @@ def group_new_flow_resources(
                 name=flow_config.name,
                 description=flow_config.description,
                 start_step=function_start_step.step_id,
+                start_mode=flow_config.start_mode,
             )
             updated_resources.setdefault(FlowConfig, {})[flow_config.resource_id] = (
                 reset_flow_config
@@ -361,6 +362,7 @@ def replace_flow_steps_with_dummy_workaround(
                         name=flow_config.name,
                         description=flow_config.description,
                         start_step=dummy.step_id,
+                        start_mode=flow_config.start_mode,
                     )
                     pre_push_new_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
                     pre_push_updated_resources.setdefault(FlowConfig, {})[
@@ -408,6 +410,7 @@ def replace_flow_steps_with_dummy_workaround(
                     name=flow_config.name,
                     description=flow_config.description,
                     start_step=dummy.step_id,
+                    start_mode=flow_config.start_mode,
                 )
                 pre_push_new_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
                 pre_push_updated_resources.setdefault(FlowConfig, {})[flow_config.resource_id] = (

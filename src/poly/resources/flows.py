@@ -9,7 +9,7 @@ import os
 import re
 import uuid
 from abc import ABC
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from functools import cached_property
 from typing import Optional
@@ -38,6 +38,7 @@ from poly.handlers.protobuf.flows_pb2 import (
     FlowASRConfig,
     FlowBargeInConfig,
     FlowLLMConfig,
+    FlowStartMode,
     FlowStepSettings,
     FlowVADConfig,
     FunctionStepCondition,
@@ -63,6 +64,12 @@ from poly.resources.resource import (
 
 logger = logging.getLogger(__name__)
 
+# Who may start a flow: the agent from the flow's description, or only function code via
+# conv.goto_flow. A flow with no start mode behaves as "tool".
+START_MODE_AGENT = "agent"
+START_MODE_TOOL = "tool"
+START_MODES = (START_MODE_AGENT, START_MODE_TOOL)
+MIN_AGENT_START_DESCRIPTION_WORDS = 5
 
 FUNCTION_REGEX = re.compile(r"{{f[nt]:([\w-]+)}}")
 # Flow step names: alphanumeric, extended Latin (C0–024F, 1E00–1EFF), and _ &,/.-
@@ -90,6 +97,12 @@ class FlowConfig(YamlResource):
 
     description: str = field(default="")
     start_step: str = field(default="")
+    # Compared through _yaml_start_mode in __eq__, so an explicit "tool" equals a missing key.
+    start_mode: Optional[str] = field(default=None, compare=False)
+
+    # Start mode at the last pull or push, so an update can tell a switch back to "tool"
+    # apart from an unrelated edit.
+    known_start_mode: Optional[str] = field(default=None, repr=False, init=False, compare=False)
 
     # For creating:
     functions: list[Function] = field(default_factory=list, repr=False, init=False)
@@ -100,13 +113,31 @@ class FlowConfig(YamlResource):
         """File path for the resource."""
         return os.path.join("flows", utils.clean_name(self.name), "flow_config.yaml")
 
+    def __eq__(self, other: object) -> bool:
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self._yaml_start_mode() == other._yaml_start_mode() and all(
+            getattr(self, f.name) == getattr(other, f.name) for f in fields(self) if f.compare
+        )
+
+    def _yaml_start_mode(self) -> Optional[str]:
+        """Start mode as written to YAML: "tool" is the default, so it is left out."""
+        return None if self.start_mode == START_MODE_TOOL else self.start_mode
+
     def to_yaml_dict(self) -> dict:
-        """Return a dictionary suitable for YAML serialization."""
-        return {
+        """Return a dictionary suitable for YAML serialization.
+
+        `start_mode: tool` is left out like a missing key, so both hash the same and existing
+        flows don't look modified.
+        """
+        yaml_dict = {
             "name": self.name,
             "description": self.description,
             "start_step": self.start_step,
         }
+        if (start_mode := self._yaml_start_mode()) is not None:
+            yaml_dict["start_mode"] = start_mode
+        return yaml_dict
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "FlowConfig"]:
@@ -123,18 +154,29 @@ class FlowConfig(YamlResource):
                 name=flow_data["name"],
                 description=flow_data.get("description", ""),
                 start_step=flow_data.get("startStepId", ""),
+                start_mode=flow_data.get("startMode"),
             )
         return configs
 
     @classmethod
-    def from_yaml_dict(cls, yaml_data: dict, resource_id: str, name: str, **kwargs) -> "FlowConfig":
+    def from_yaml_dict(
+        cls,
+        yaml_data: dict,
+        resource_id: str,
+        name: str,
+        known_start_mode: Optional[str] = None,
+        **kwargs,
+    ) -> "FlowConfig":
         """Create an instance from YAML data and identity fields."""
-        return cls(
+        flow_config = cls(
             resource_id=resource_id,
             name=yaml_data.get("name", ""),
             description=(yaml_data.get("description") or "").strip(),
             start_step=yaml_data.get("start_step", ""),
+            start_mode=yaml_data.get("start_mode"),
         )
+        flow_config.known_start_mode = known_start_mode
+        return flow_config
 
     @classmethod
     def read_local_resource(
@@ -229,15 +271,61 @@ class FlowConfig(YamlResource):
         if self.description != self.description.strip():
             raise ValueError("Description cannot contain leading or trailing whitespace.")
 
+        if self.start_mode is not None and self.start_mode not in START_MODES:
+            raise ValueError(
+                f"Start mode '{self.start_mode}' invalid, must be one of {list(START_MODES)}."
+            )
+
+        if self.start_mode == START_MODE_AGENT:
+            self._validate_agent_start_description()
+
+    def _validate_agent_start_description(self) -> None:
+        """Check the description says enough for the agent to know when to start the flow."""
+
+        def normalise(text: str) -> str:
+            text = text.strip().lower().replace("_", " ").replace("-", " ")
+            return " ".join(text.removesuffix(".").split())
+
+        description = normalise(self.description)
+        flow_name = normalise(self.name)
+        if description == normalise(f"Description for flow {self.name}"):
+            raise ValueError(
+                "Description cannot be the default placeholder when start_mode is 'agent'. "
+                "Describe what the user wants when this flow should start."
+            )
+
+        if description in (flow_name, f"{flow_name} flow"):
+            raise ValueError(
+                "Description cannot just repeat the flow name when start_mode is 'agent'. "
+                "Describe what the user wants when this flow should start."
+            )
+
+        if len(self.description.split()) < MIN_AGENT_START_DESCRIPTION_WORDS:
+            raise ValueError(
+                f"Description must have at least {MIN_AGENT_START_DESCRIPTION_WORDS} words "
+                "when start_mode is 'agent'. Describe what the user wants when this flow "
+                "should start."
+            )
+
     def build_update_proto(
         self,
     ) -> Flow_UpdateFlow:
-        """Create a proto for updating the resource."""
+        """Create a proto for updating the resource.
+
+        Sends AGENT when the flow is agent-started, and TOOL only when switching back from
+        agent. Otherwise the start mode is left unset, so the platform keeps its value.
+        """
+        start_mode = {}
+        if self.start_mode == START_MODE_AGENT:
+            start_mode["start_mode"] = FlowStartMode.FLOW_START_MODE_AGENT
+        elif self.known_start_mode == START_MODE_AGENT:
+            start_mode["start_mode"] = FlowStartMode.FLOW_START_MODE_TOOL
         return Flow_UpdateFlow(
             flow_id=self.resource_id,
             name=self.name,
             description=self.description,
             start_step_id=self.start_step,
+            **start_mode,
         )
 
     def build_delete_proto(self):
@@ -255,6 +343,10 @@ class FlowConfig(YamlResource):
 
         steps = [step.build_create_proto() for step in all_steps]
 
+        start_mode = {}
+        if self.start_mode == START_MODE_AGENT:
+            start_mode["start_mode"] = FlowStartMode.FLOW_START_MODE_AGENT
+
         return Flow_CreateFlow(
             id=self.resource_id,
             name=self.name,
@@ -263,6 +355,7 @@ class FlowConfig(YamlResource):
             transition_functions=transition_functions,
             no_code_steps=[step for step in steps if isinstance(step, CreateNoCodeStep)],
             steps=[step.step for step in steps if isinstance(step, Flow_CreateStep)],
+            **start_mode,
         )
 
     @property

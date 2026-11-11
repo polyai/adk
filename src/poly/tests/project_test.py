@@ -20,6 +20,7 @@ import poly.resources.resource_utils as resource_utils
 from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
+from poly.handlers.protobuf.flows_pb2 import FlowStartMode
 from poly.handlers.sdk import SourcererAPIError
 from poly.project import STATUS_FILE, AgentStudioProject, DeploymentMode
 from poly.resources import (
@@ -216,6 +217,24 @@ class SerializationRoundTripTest(unittest.TestCase):
         restored = FlowConfig(**serialized)
         self.assertEqual(restored.name, "Test Flow")
         self.assertEqual(restored.start_step, "step-1")
+
+    def test_flow_config_round_trip_keeps_start_mode(self):
+        """start_mode survives the status-file round trip; known_start_mode is not stored."""
+        config = FlowConfig(
+            resource_id="flow-123",
+            name="Test Flow",
+            description="A test flow",
+            start_step="step-1",
+            start_mode="agent",
+        )
+        config.known_start_mode = "tool"
+        serialized = resource_utils.resource_to_dict(config)
+        self.assertEqual(serialized["start_mode"], "agent")
+        self.assertNotIn("known_start_mode", serialized)
+
+        restored = FlowConfig(**serialized)
+        self.assertEqual(restored.start_mode, "agent")
+        self.assertIsNone(restored.known_start_mode)
 
     def test_document_round_trip(self):
         """Document serializes and deserializes via status dict correctly."""
@@ -2302,6 +2321,80 @@ class PushProjectTest(unittest.TestCase):
         self.assertEqual(upsert.last_discovered_at, "2026-08-01T12:00:00Z")
         self.assertEqual(upsert.last_discovered_tool_count, 12)
 
+    FLOW_CONFIG_ID = "FLOW_CONFIG-test_flow"
+    FLOW_CONFIG_PATH = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
+    FLOW_CONFIG_YAML = (
+        "name: test_flow\ndescription: Test flow with advanced step as start\n"
+        "start_step: start_step\n"
+    )
+
+    def _push_flow_start_mode(self, platform_start_mode, local_yaml):
+        """Push with the flow's platform start mode set in the status file and local_yaml on disk.
+
+        Returns the push result and the updated FlowConfigs passed to the API.
+        """
+        project_data = deepcopy(PROJECT_DATA)
+        flow_data = project_data["resources"]["flow_config"][self.FLOW_CONFIG_ID]
+        if platform_start_mode is not None:
+            flow_data["start_mode"] = platform_start_mode
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        with mock_read_from_file({self.FLOW_CONFIG_PATH: local_yaml}):
+            success, message, _ = project.push_project(force=True)
+
+        updated = {}
+        if self.mock_api_handler.queue_resources.called:
+            call_args = self.mock_api_handler.queue_resources.call_args
+            updated = call_args.kwargs["updated_resources"].get(FlowConfig, {})
+        return success, message, updated
+
+    def test_push_project_flow_start_mode_pull_then_push_sends_nothing(self):
+        """A pulled flow pushes nothing, whatever its start mode and however tool is written."""
+        cases = [
+            # (platform start mode, local flow_config.yaml)
+            (None, self.FLOW_CONFIG_YAML),
+            ("tool", self.FLOW_CONFIG_YAML),
+            ("agent", self.FLOW_CONFIG_YAML + "start_mode: agent\n"),
+            (None, self.FLOW_CONFIG_YAML + "start_mode: tool\n"),
+            ("tool", self.FLOW_CONFIG_YAML + "start_mode: tool\n"),
+        ]
+        for platform_start_mode, local_yaml in cases:
+            with self.subTest(platform=platform_start_mode, local=local_yaml):
+                self.mock_api_handler.queue_resources.reset_mock()
+                success, message, _ = self._push_flow_start_mode(platform_start_mode, local_yaml)
+                self.assertFalse(success)
+                self.assertEqual(message, "No changes detected")
+                self.mock_api_handler.queue_resources.assert_not_called()
+
+    def test_push_project_flow_start_mode_switch_to_agent(self):
+        """Adding start_mode: agent is pushed as AGENT."""
+        for platform_start_mode in (None, "tool"):
+            with self.subTest(platform=platform_start_mode):
+                success, message, updated = self._push_flow_start_mode(
+                    platform_start_mode, self.FLOW_CONFIG_YAML + "start_mode: agent\n"
+                )
+                self.assertTrue(success, message)
+                proto = updated[self.FLOW_CONFIG_ID].build_update_proto()
+                self.assertEqual(proto.start_mode, FlowStartMode.FLOW_START_MODE_AGENT)
+
+    def test_push_project_flow_start_mode_switch_back_to_tool(self):
+        """Removing start_mode: agent, or writing tool, is pushed as TOOL."""
+        for local_yaml in (self.FLOW_CONFIG_YAML, self.FLOW_CONFIG_YAML + "start_mode: tool\n"):
+            with self.subTest(local=local_yaml):
+                success, message, updated = self._push_flow_start_mode("agent", local_yaml)
+                self.assertTrue(success, message)
+                proto = updated[self.FLOW_CONFIG_ID].build_update_proto()
+                self.assertTrue(proto.HasField("start_mode"))
+                self.assertEqual(proto.start_mode, FlowStartMode.FLOW_START_MODE_TOOL)
+
+    def test_push_project_flow_unrelated_edit_leaves_start_mode_unset(self):
+        """Editing a tool flow's description doesn't send a start mode."""
+        local_yaml = self.FLOW_CONFIG_YAML.replace("as start", "as the start")
+        success, message, updated = self._push_flow_start_mode(None, local_yaml)
+        self.assertTrue(success, message)
+        proto = updated[self.FLOW_CONFIG_ID].build_update_proto()
+        self.assertFalse(proto.HasField("start_mode"))
+
     def test_push_project_renamed_test_case_is_an_update(self):
         """A test case renamed locally keeps its id: one update, no delete and create."""
         project_data = deepcopy(PROJECT_DATA)
@@ -2978,6 +3071,32 @@ class ValidateProjectTest(unittest.TestCase):
             "Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts
         )
         self.assertIn("Start step 'missing_step' not found.", error_texts)
+
+    def test_validate_project_flow_start_mode(self):
+        """An agent-started flow needs a description that says when to start it."""
+        flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
+        base = "name: test_flow\nstart_step: start_step\n"
+        cases = [
+            ("description: The caller wants to change a booking.\nstart_mode: agent\n", None),
+            ("description: Test flow\nstart_mode: tool\n", None),
+            ("description: Test flow\nstart_mode: agent\n", "repeat the flow name"),
+            ("description: Changes a booking.\nstart_mode: agent\n", "at least 5 words"),
+            (
+                "description: Description for flow test_flow\nstart_mode: agent\n",
+                "default placeholder",
+            ),
+            ("description: Test flow description here\nstart_mode: auto\n", "Start mode 'auto'"),
+        ]
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        for flow_yaml, expected_error in cases:
+            with self.subTest(flow_yaml=flow_yaml):
+                with mock_read_from_file({flow_config_path: base + flow_yaml}):
+                    errors = project.validate_project()
+                if expected_error is None:
+                    self.assertEqual(errors, [])
+                else:
+                    self.assertEqual(len(errors), 1, errors)
+                    self.assertIn(expected_error, errors[0])
 
 
 class PullProjectTest(unittest.TestCase):
