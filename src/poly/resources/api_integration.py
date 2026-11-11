@@ -54,10 +54,6 @@ AVAILABLE_AUTH_TYPES = {
 # Integration and operation names become `conv.api.<integration>.<operation>`.
 NAME_PATTERN = re.compile(r"^[a-z_][a-z0-9_]*$")
 INTEGRATION_NAME_MIN = 2
-# The form the platform accepts for an operation id.
-OPERATION_ID_PATTERN = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
-)
 
 # Matches an empty string (no URL configured) or a valid http(s) base URL
 URL_PATTERN = re.compile(r"^(https?://[^\s]+)?$")
@@ -364,13 +360,6 @@ class ApiIntegrationOperation(SubResource):
                 f"Operation name '{self.name}' must follow Python function naming convention "
                 "(lowercase letters, numbers, and underscores only, starting with letter or "
                 "underscore)."
-            )
-        if self.resource_id and not (
-            isinstance(self.resource_id, str) and OPERATION_ID_PATTERN.fullmatch(self.resource_id)
-        ):
-            raise ValueError(
-                f"Operation '{self.name}': id '{self.resource_id}' must be a UUID, such as "
-                "123e4567-e89b-12d3-a456-426614174000. Remove the id to have one generated."
             )
         if not self.method:
             raise ValueError(f"Operation '{self.name}': method cannot be empty.")
@@ -696,7 +685,10 @@ class ApiIntegration(MultiResourceYamlResource):
         ops_data = yaml_dict.get("operations") or []
         if isinstance(ops_data, dict):
             ops_data = list(ops_data.values())
-        operations = [ApiIntegrationOperation.from_dict(o) for o in ops_data]
+        # Operation ids are not written to the file, so one found there is not read.
+        operations = [
+            replace(ApiIntegrationOperation.from_dict(o), resource_id="") for o in ops_data
+        ]
         return cls(
             resource_id=resource_id,
             name=yaml_dict.get("name") or name,

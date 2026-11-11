@@ -6957,13 +6957,11 @@ class HandoffTests(unittest.TestCase):
 QUERY_SCHEMA = {"type": "object", "properties": {"family": {"type": "string"}}}
 BODY_SCHEMA = {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}
 OK_SCHEMA = {"type": "object", "properties": {"resourceType": {"const": "Bundle"}}}
-OPERATION_ID = "123e4567-e89b-12d3-a456-426614174000"
-OTHER_OPERATION_ID = "9b2f6c1e-5d3a-4e8b-a7c4-0f1e2d3c4b5a"
 
 
 def _operation(**kwargs) -> ApiIntegrationOperation:
     """An operation with plain defaults; pass fields to override them."""
-    defaults = {"resource_id": OPERATION_ID, "name": "get", "method": "GET", "resource": "/a"}
+    defaults = {"resource_id": "op-1", "name": "get", "method": "GET", "resource": "/a"}
     defaults.update(kwargs)
     return ApiIntegrationOperation(**defaults)
 
@@ -7369,7 +7367,7 @@ class ApiIntegrationTest(unittest.TestCase):
         _, updated, deleted = ApiIntegration(
             resource_id="int-1", name="API", operations=[yaml_op]
         ).get_new_updated_deleted_subresources(old)
-        self.assertEqual(updated[0].resource_id, OPERATION_ID)
+        self.assertEqual(updated[0].resource_id, "op-1")
         self.assertEqual((updated[0].description, updated[0].headers), ("Fetch", {"Accept": "a"}))
         self.assertEqual((deleted[0].description, deleted[0].headers), ("Old", {"X": "y"}))
         self.assertEqual(deleted[0].integration_id, "int-1")
@@ -8829,7 +8827,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
             "description": "A valid description",
             "operations": [
                 ApiIntegrationOperation(
-                    resource_id=OPERATION_ID, name="list_users", method="GET", resource="/users"
+                    resource_id="op-1", name="list_users", method="GET", resource="/users"
                 ),
             ],
         }
@@ -8936,13 +8934,26 @@ class TestApiIntegrationValidate(unittest.TestCase):
         """Validation rejects an operation whose name is empty."""
         integration = self._make_integration(
             operations=[
-                ApiIntegrationOperation(
-                    resource_id=OPERATION_ID, name="", method="GET", resource="/x"
-                ),
+                ApiIntegrationOperation(resource_id="op-1", name="", method="GET", resource="/x"),
             ]
         )
         with self.assertRaises(ValueError, msg="Operation name cannot be empty."):
             integration.validate()
+
+    def test_operation_id_in_yaml_is_not_read(self):
+        """Operation ids are not written to the file, so one written there is ignored."""
+        integration = ApiIntegration.from_yaml_dict(
+            {
+                "description": "CRM",
+                "operations": [
+                    {"id": "op-1", "name": "list_users", "method": "GET", "resource": "/users"}
+                ],
+            },
+            resource_id="API-INTEGRATION-12345678",
+            name="crm",
+        )
+
+        self.assertEqual(integration.operations[0].resource_id, "")
 
     def test_two_character_name_is_valid(self):
         """An integration name of two characters is the shortest allowed."""
@@ -8968,34 +8979,6 @@ class TestApiIntegrationValidate(unittest.TestCase):
                     self._make_integration(operations=[_operation(name=name)]).validate()
                 self.assertIn("must follow Python function naming convention", str(ctx.exception))
 
-    def test_operation_id_that_is_a_uuid_or_absent_is_valid(self):
-        """An operation id written in the YAML passes when it is a UUID; so does no id."""
-        for operation in (
-            {"id": OPERATION_ID, "name": "list_users", "method": "GET", "resource": "/users"},
-            {"id": OPERATION_ID.upper(), "name": "list_users", "method": "GET", "resource": "/u"},
-            {"name": "list_users", "method": "GET", "resource": "/users"},
-        ):
-            with self.subTest(operation=operation):
-                self._make_integration(operations=[operation]).validate()
-
-    def test_operation_id_that_is_not_a_uuid_raises_value_error(self):
-        """Validation rejects an operation id from the YAML that is not a UUID."""
-        for key, operation_id in (
-            ("id", "list-users"),
-            ("resource_id", "op-1"),
-            ("id", OPERATION_ID.replace("-", "")),
-            ("id", 42),
-        ):
-            with self.subTest(operation_id=operation_id):
-                integration = self._make_integration(
-                    operations=[
-                        {key: operation_id, "name": "list_users", "method": "GET", "resource": "/u"}
-                    ]
-                )
-                with self.assertRaises(ValueError) as ctx:
-                    integration.validate()
-                self.assertIn("must be a UUID", str(ctx.exception))
-
     def test_operation_method_is_normalised_to_uppercase(self):
         """Lowercase method in YAML is normalised to uppercase and accepted."""
         integration = self._make_integration(
@@ -9012,7 +8995,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id=OPERATION_ID, name="get_users", method="", resource="/users"
+                    resource_id="op-1", name="get_users", method="", resource="/users"
                 ),
             ]
         )
@@ -9026,7 +9009,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id=OPERATION_ID, name="get_users", method="INVALID", resource="/users"
+                    resource_id="op-1", name="get_users", method="INVALID", resource="/users"
                 ),
             ]
         )
@@ -9042,7 +9025,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id=OPERATION_ID, name="get_users", method="GET", resource=""
+                    resource_id="op-1", name="get_users", method="GET", resource=""
                 ),
             ]
         )
@@ -9056,7 +9039,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id=OPERATION_ID, name="get_users", method="GET", resource="users"
+                    resource_id="op-1", name="get_users", method="GET", resource="users"
                 ),
             ]
         )
@@ -9070,10 +9053,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id=OPERATION_ID,
-                    name="get_user",
-                    method="GET",
-                    resource="/users/{user_id}",
+                    resource_id="op-1", name="get_user", method="GET", resource="/users/{user_id}"
                 ),
             ]
         )
@@ -9084,7 +9064,7 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id=OPERATION_ID,
+                    resource_id="op-1",
                     name="create_patient",
                     method="POST",
                     resource="/Patient/Create?locationId={location_id}",
@@ -9098,13 +9078,10 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id=OPERATION_ID, name="get_users", method="GET", resource="/users"
+                    resource_id="op-1", name="get_users", method="GET", resource="/users"
                 ),
                 ApiIntegrationOperation(
-                    resource_id=OTHER_OPERATION_ID,
-                    name="get_users",
-                    method="GET",
-                    resource="/users/list",
+                    resource_id="op-2", name="get_users", method="GET", resource="/users/list"
                 ),
             ]
         )
@@ -9121,13 +9098,10 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id=OPERATION_ID, name="get_users", method="GET", resource="/users"
+                    resource_id="op-1", name="get_users", method="GET", resource="/users"
                 ),
                 ApiIntegrationOperation(
-                    resource_id=OTHER_OPERATION_ID,
-                    name="get_users",
-                    method="POST",
-                    resource="/users",
+                    resource_id="op-2", name="get_users", method="POST", resource="/users"
                 ),
             ]
         )
@@ -9140,13 +9114,10 @@ class TestApiIntegrationValidate(unittest.TestCase):
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
-                    resource_id=OPERATION_ID, name="list_users", method="GET", resource="/users"
+                    resource_id="op-1", name="list_users", method="GET", resource="/users"
                 ),
                 ApiIntegrationOperation(
-                    resource_id=OTHER_OPERATION_ID,
-                    name="create_user",
-                    method="POST",
-                    resource="/users",
+                    resource_id="op-2", name="create_user", method="POST", resource="/users"
                 ),
             ]
         )
