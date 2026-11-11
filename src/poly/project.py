@@ -1007,6 +1007,14 @@ class AgentStudioProject:
                     )
                 seen_paths.add(file_path)
 
+    def _duplicate_path_errors(self, resources: ResourceMap) -> list[str]:
+        """Return a validation error if two of the resources share a file path."""
+        try:
+            self._check_no_duplicate_resource_paths(resources)
+        except ValueError as e:
+            return [f"Validation error: {e}"]
+        return []
+
     @staticmethod
     def _snapshot_multi_resource_file_cache() -> dict[str, dict]:
         """Return {file path: top-level YAML data} for every file in the multi-resource cache.
@@ -1693,10 +1701,8 @@ class AgentStudioProject:
 
         # 4. Validate all resources with new state
         if not skip_validation:
-            validation_errors = self.validate_resources(
-                resources_dict=new_state,
-                resource_mappings=resource_mappings,
-                root_path=self.root_path,
+            validation_errors = self._duplicate_path_errors(new_state) + self.validate_resources(
+                resources_dict=new_state, resource_mappings=resource_mappings
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
@@ -3346,46 +3352,23 @@ class AgentStudioProject:
                 resource_mapping.resource_id
             ] = local_resource
 
-        return self.validate_resources(
+        return self._duplicate_path_errors(resources) + self.validate_resources(
             resources_dict=resources,
             resource_mappings=resource_mappings,
-            root_path=self.root_path,
         )
 
     @staticmethod
     def validate_resources(
         resources_dict: ResourceMap,
         resource_mappings: list[ResourceMapping],
-        root_path: Optional[str] = None,
     ) -> list[str]:
         """Validate all resources in the project.
-
-        Args:
-            resources_dict (ResourceMap): The resources to validate.
-            resource_mappings (list[ResourceMapping]): All resource mappings, for references.
-            root_path (Optional[str]): The project root. When given, multi-resource YAML
-                files are also checked for entries that share a name.
 
         Returns:
             list[str]: A list of validation error messages.
         """
         validation_errors = []
         for resource_type, resources in resources_dict.items():
-            if root_path and resources and issubclass(resource_type, MultiResourceYamlResource):
-                relative_path, _ = _parse_multi_resource_path(
-                    next(iter(resources.values())).file_path
-                )
-                duplicates = resource_type.duplicate_entry_names(
-                    os.path.join(root_path, relative_path)
-                )
-                if duplicates:
-                    names = ", ".join(repr(name) for name in dict.fromkeys(duplicates))
-                    validation_errors.append(
-                        f"Validation error: Duplicate {resource_type.resource_key} in "
-                        f"{relative_path}: {names}. Names that differ only in punctuation "
-                        "or spacing count as the same."
-                    )
-
             for resource_id, resource in resources.items():
                 try:
                     resource.validate(

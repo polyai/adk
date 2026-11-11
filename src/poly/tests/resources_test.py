@@ -6469,53 +6469,6 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
         )
         self.assertEqual([a["name"] for a in on_disk["attributes"]], ["colour", "size"])
 
-    # Each type whose entries are named by the user, and its file relative to the project root.
-    NAMED_ENTRY_TYPES = (
-        (Entity, os.path.join("config", "entities.yaml")),
-        (Handoff, os.path.join("config", "handoffs.yaml")),
-        (SMSTemplate, os.path.join("config", "sms_templates.yaml")),
-        (Translation, os.path.join("config", "translations.yaml")),
-        (PhraseFilter, os.path.join("voice", "response_control", "phrase_filtering.yaml")),
-        (VariantAttribute, os.path.join("config", "variant_attributes.yaml")),
-        (ApiIntegration, os.path.join("config", "api_integrations.yaml")),
-    )
-
-    def _write_entries(self, resource_type, relative_path: str, names: list[str]) -> str:
-        """Write a file holding one entry per name for the type, and return its path."""
-        file_path = os.path.join(self.base_path, relative_path)
-        entries = [{resource_type.resource_key: name} for name in names]
-        self._write(file_path, yaml.safe_dump({resource_type.top_level_name: entries}))
-        # Files are cached by modification time, which can be too coarse to tell two
-        # writes in one test apart.
-        MultiResourceYamlResource._file_cache.clear()
-        return file_path
-
-    def test_duplicate_entry_names_returns_names_used_twice(self):
-        """A name used by two entries is returned for every list-based type."""
-        for resource_type, relative_path in self.NAMED_ENTRY_TYPES:
-            with self.subTest(resource_type=resource_type.__name__):
-                file_path = self._write_entries(
-                    resource_type, relative_path, ["first", "shared", "shared"]
-                )
-
-                self.assertEqual(
-                    resource_type.duplicate_entry_names(file_path), ["shared", "shared"]
-                )
-
-    def test_duplicate_entry_names_is_empty_for_unique_names(self):
-        for resource_type, relative_path in self.NAMED_ENTRY_TYPES:
-            with self.subTest(resource_type=resource_type.__name__):
-                file_path = self._write_entries(resource_type, relative_path, ["first", "second"])
-
-                self.assertEqual(resource_type.duplicate_entry_names(file_path), [])
-
-    def test_duplicate_entry_names_matches_by_clean_name(self):
-        """Names that differ only in punctuation or spacing count as the same name."""
-        file_path = self._write_entries(
-            Entity, os.path.join("config", "entities.yaml"), ["My Entity", "My_Entity", "other"]
-        )
-
-        self.assertEqual(Entity.duplicate_entry_names(file_path), ["My Entity", "My_Entity"])
 
 class ChannelSettingsDictFormatTests(unittest.TestCase):
     """Tests that channel greeting/style prompt save as dict format, not list format."""

@@ -661,25 +661,6 @@ class MultiResourceYamlResource(YamlResource, ABC):
         index = positions.get(resource_clean_name)
         return yaml_list[index] if index is not None else None
 
-    @classmethod
-    def duplicate_entry_names(cls, file_path: str) -> list[str]:
-        """Return the names that more than one entry in a multi-resource file uses.
-
-        Entries are matched by clean name, so names that differ only in punctuation or
-        spacing count as the same, and only the first entry for a name is ever read.
-        """
-        if cls._singleton or not os.path.isfile(file_path):
-            return []
-        yaml_list = cls._get_top_level_data(file_path).get(cls.top_level_name)
-        if not isinstance(yaml_list, list):
-            return []
-        names_by_key: dict[str, list[str]] = {}
-        for entry in yaml_list:
-            key = cls._entry_key(entry) if isinstance(entry, dict) else ""
-            if key:
-                names_by_key.setdefault(key, []).append(str(entry[cls.resource_key]))
-        return [name for names in names_by_key.values() if len(names) > 1 for name in names]
-
     def save(
         self, base_path: str, format: bool = False, save_to_cache: bool = False, **kwargs
     ) -> None:

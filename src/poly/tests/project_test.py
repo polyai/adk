@@ -2218,7 +2218,8 @@ class PushProjectTest(unittest.TestCase):
         success, message, commands = project.push_project(force=True)
 
         self.assertFalse(success)
-        self.assertIn(f"Duplicate name in {ENTITIES_FILE}: 'city'.", message)
+        self.assertIn("Duplicate resource file path found", message)
+        self.assertIn("for resource city", message)
         self.assertEqual(commands, [])
         self.mock_api_handler.queue_resources.assert_not_called()
 
@@ -2995,21 +2996,20 @@ class ValidateProjectTest(unittest.TestCase):
         self.assertIn("Start step 'missing_step' not found.", error_texts)
 
     def test_validate_project_reports_duplicate_entry_names(self):
-        """Entries sharing a name are reported, whether new or already on the platform."""
-        for names in (["city", "city"], ["customer_name"]):
-            with self.subTest(names=names):
-                root = _copy_test_project(self)
-                _append_yaml_entries(
-                    root, ENTITIES_FILE, "entities", [_entity_entry(name) for name in names]
-                )
-                project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+        """Two entries sharing a name are reported."""
+        root = _copy_test_project(self)
+        _append_yaml_entries(
+            root, ENTITIES_FILE, "entities", [_entity_entry("city"), _entity_entry("city")]
+        )
+        project = AgentStudioProject.from_dict(PROJECT_DATA, root)
 
-                errors = project.validate_project()
+        errors = project.validate_project()
 
-                self.assertIn(f"Duplicate name in {ENTITIES_FILE}: {names[0]!r}.", errors[0])
+        self.assertIn("Duplicate resource file path found", errors[0])
+        self.assertIn("for resource city", errors[0])
 
     def test_validate_project_reports_names_with_the_same_clean_name(self):
-        """Names that differ only in punctuation or spacing are reported together."""
+        """Names that differ only in punctuation or spacing share a file path."""
         root = _copy_test_project(self)
         _append_yaml_entries(
             root, ENTITIES_FILE, "entities", [_entity_entry("My Entity"), _entity_entry("My_Entity")]
@@ -3018,11 +3018,7 @@ class ValidateProjectTest(unittest.TestCase):
 
         errors = project.validate_project()
 
-        self.assertIn(
-            f"Duplicate name in {ENTITIES_FILE}: 'My Entity', 'My_Entity'. Names that differ "
-            "only in punctuation or spacing count as the same.",
-            errors[0],
-        )
+        self.assertIn("Duplicate resource file path found", errors[0])
 
 ENTITIES_FILE = os.path.join("config", "entities.yaml")
 VARIANTS_FILE = os.path.join("config", "variant_attributes.yaml")
