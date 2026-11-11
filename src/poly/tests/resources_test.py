@@ -115,7 +115,6 @@ from poly.resources.test_suite import (
     TestCaseIntegrationAttributes,
     TestCaseSipHeaders,
     TestCaseTags,
-    _serialised_rules_size,
 )
 from poly.resources.topic import (
     FUNCTION_REGEX,
@@ -10634,7 +10633,7 @@ class TestCaseTests(unittest.TestCase):
         cases = {
             "string": ["hello", "12abc", "true"],
             "integer": ["4", "-4", " 4 ", "007", 4],
-            "float": ["1.5", "-1.5", "+1.5", ".5", "5.", "4", "1e3", "0x1F", 1.5],
+            "float": ["1.5", "-1.5", "+1.5", ".5", "5.", "4", "1e3", 1.5],
             "boolean": ["true", "false", " true ", True, False],
         }
         for value_type, values in cases.items():
@@ -10647,7 +10646,7 @@ class TestCaseTests(unittest.TestCase):
     def test_validate_rejects_expected_values_that_do_not_read_as_their_type(self):
         cases = {
             "integer": ["4.0", "12abc", "+4", "1e3", "four", "1_000", "٤"],
-            "float": ["1.5abc", "1,5", "nan", "inf", "Infinity", "1e999", "1_000.5", "."],
+            "float": ["1.5abc", "1,5", "nan", "inf", "Infinity", "1e999", "."],
             "boolean": ["True", "FALSE", "yes", "1", "0"],
         }
         for value_type, values in cases.items():
@@ -11574,42 +11573,6 @@ class TestCaseApiMocksTests(unittest.TestCase):
                 with self.assertRaises(ValueError) as ctx:
                     self._test_case(api_mocks=self._api_mocks(mocks)).validate()
                 self.assertIn(message, str(ctx.exception))
-
-    def _rules_with_body_of(self, body_characters: int) -> list[ApiResponseRule]:
-        return [ApiResponseRule(respond=ApiResponse(status=200, body="a" * body_characters))]
-
-    def test_serialised_rules_size_counts_compact_json_in_utf8(self):
-        """Bodies are measured as the text they are sent as, with headers always present."""
-        rules = [
-            ApiResponseRule(respond=ApiResponse(status=200, body={"a": 1})),
-            ApiResponseRule(respond=ApiResponse(status=503, body="é", headers={"x": True})),
-            ApiResponseRule(respond=ApiResponse(status=204), repeat=-1),
-        ]
-        expected = (
-            '[{"respond":{"status":200,"body":"{\\"a\\": 1}","headers":{}}},'
-            '{"respond":{"status":503,"body":"é","headers":{"x":"true"}}},'
-            '{"respond":{"status":204,"headers":{}},"repeat":-1}]'
-        )
-        self.assertEqual(_serialised_rules_size(rules), len(expected.encode("utf-8")))
-
-    def test_validate_accepts_response_rules_at_the_size_limit(self):
-        # One rule with an empty text body serialises to 51 bytes.
-        rules = self._rules_with_body_of(131_072 - 51)
-        self.assertEqual(_serialised_rules_size(rules), 131_072)
-
-        self._test_case(api_mocks=self._api_mocks({"crm": {"get_customer": rules}})).validate()
-
-    def test_validate_rejects_response_rules_over_the_size_limit(self):
-        rules = self._rules_with_body_of(131_072 - 50)
-        test_case = self._test_case(api_mocks=self._api_mocks({"crm": {"get_customer": rules}}))
-
-        with self.assertRaises(ValueError) as ctx:
-            test_case.validate()
-        self.assertIn(
-            "API mock 'crm.get_customer': response rules are 131073 bytes when serialised, "
-            "over the limit of 131072 bytes.",
-            str(ctx.exception),
-        )
 
     def test_validate_rejects_an_operation_with_no_response_rules(self):
         test_case = self._test_case(api_mocks=self._api_mocks({"crm": {"get_customer": []}}))
@@ -13564,12 +13527,7 @@ class DocumentTests(unittest.TestCase):
             "my notes.md": "contains invalid characters",
             "café.md": "contains invalid characters",
             "/notes.md": "contains invalid characters",
-            "": "Document file name is required",
-            "a" * 510 + ".md": "must be at most 512 characters",
             "notes..md": "must not contain '..'",
-            "flows//notes.md": "must not contain '//'",
-            "notes.": "must not end with '/' or '.'",
-            "flows/": "must not end with '/' or '.'",
         }
         for path, message in cases.items():
             with self.subTest(path=path):

@@ -36,9 +36,9 @@ The body is plain Markdown, passed through unchanged in both directions. Two con
 
 ## Validation
 
-- The file name can contain only letters, digits, `_`, `-` and `.`. It cannot contain `..` or end with `.`, and is at most 512 characters long.
+- The file name can contain only letters, digits, `_`, `-` and `.`, and cannot contain `..`.
 - A file whose name matches `context.md` in any letter case must be named exactly `CONTEXT.MD`.
-- A document's content is at most 262,144 bytes (256 KB) when encoded as UTF-8.
+- A document is at most 256 KB.
 - A project has at most 50 context documents.
 
 ## Syncing

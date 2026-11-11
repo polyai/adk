@@ -66,32 +66,19 @@ VALUE_TYPE_ALIASES = {"number": "float"}
 
 ALLOWED_ASSERTION_TYPES = ["equals", "any"]
 
-MAX_API_MOCK_RULES_BYTES = 131_072
-
 _INTEGER_PATTERN = re.compile(r"-?[0-9]+")
-_DECIMAL_PATTERN = re.compile(r"[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
-_RADIX_PATTERN = re.compile(r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+")
 
 
 def _reads_as_value_type(expected_value: str, value_type: str) -> bool:
-    """Whether an expected value reads as its value type, by Agent Studio's rules.
-
-    An integer is an optional minus sign and digits. A float is anything a
-    JavaScript number conversion reads as finite, which includes hex, binary and
-    octal literals but not `1_000`, `nan` or `inf`. A boolean is `true` or `false`.
-    """
+    """Whether an expected value reads as its value type."""
     text = expected_value.strip()
     if value_type == "integer":
         return bool(_INTEGER_PATTERN.fullmatch(text))
     if value_type == "float":
         try:
-            if _DECIMAL_PATTERN.fullmatch(text):
-                return math.isfinite(float(text))
-            if _RADIX_PATTERN.fullmatch(text):
-                return math.isfinite(float(int(text, 0)))
-        except OverflowError:
+            return math.isfinite(float(text))
+        except ValueError:
             return False
-        return False
     if value_type == "boolean":
         return text in ("true", "false")
     return True
@@ -471,27 +458,6 @@ def _parse_body(body: Any) -> Any:
     return body if parsed is None or isinstance(parsed, str) else parsed
 
 
-def _serialised_rules_size(rules: list["ApiResponseRule"]) -> int:
-    """Size in bytes of an operation's response rules, as Agent Studio measures them.
-
-    Agent Studio limits the UTF-8 size of the rules written as compact JSON, with
-    each body held as the text it is sent as and headers always present.
-    """
-    serialised = []
-    for rule in rules:
-        respond: dict[str, Any] = {"status": rule.respond.status}
-        if rule.respond.body is not None:
-            respond["body"] = _body_text(rule.respond.body)
-        respond["headers"] = {
-            str(key): _header_value(value) for key, value in rule.respond.headers.items()
-        }
-        entry: dict[str, Any] = {"respond": respond}
-        if rule.repeat is not None:
-            entry["repeat"] = rule.repeat
-        serialised.append(entry)
-    return len(json.dumps(serialised, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-
-
 def _same_json(left: Any, right: Any) -> bool:
     """Equality that tells `2` from `2.0`, and `1` from `true`, unlike `==`."""
     if type(left) is not type(right):
@@ -741,13 +707,6 @@ class TestCaseApiMocks:
                                 f"{label}: repeat=-1 (respond forever) is only valid on the "
                                 "last response rule for an operation."
                             )
-                rules_bytes = _serialised_rules_size(rules)
-                if rules_bytes > MAX_API_MOCK_RULES_BYTES:
-                    raise ValueError(
-                        f"API mock '{integration_name}.{operation_name}': response rules are "
-                        f"{rules_bytes} bytes when serialised, over the limit of "
-                        f"{MAX_API_MOCK_RULES_BYTES} bytes."
-                    )
 
 
 @dataclass
