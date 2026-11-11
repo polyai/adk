@@ -1745,6 +1745,7 @@ class AgentStudioProject:
         if not dry_run:
             try:
                 self.api_handler.send_queued_commands()
+            # The interface raises API failures as ValueError.
             except ValueError as e:
                 self.branch_id = self.api_handler.branch_id
                 return False, f"{e}\nNothing was pushed.", commands
