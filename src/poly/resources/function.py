@@ -11,7 +11,7 @@ import typing as ty
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property, lru_cache
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from google.protobuf.message import Message
 
@@ -160,6 +160,17 @@ def parse_latency_control(latency_control_data: dict) -> FunctionLatencyControl:
         delay_responses=delay_responses,
         randomize=latency_control_data.get("randomize", False),
     )
+
+
+def _literal(node: ast.expr, default: Any) -> Any:
+    """Return the value of a literal node, or default if the node is not a literal.
+
+    A signed number such as `-1` is a unary operation, not a constant.
+    """
+    try:
+        return ast.literal_eval(node)
+    except ValueError:
+        return default
 
 
 @dataclass
@@ -994,17 +1005,17 @@ class Function(Resource):
         randomize = False
 
         for kw in decorator.keywords:
-            if kw.arg == "delay_before_responses_start" and isinstance(kw.value, ast.Constant):
-                initial_delay = kw.value.value
-            elif kw.arg == "silence_after_each_response" and isinstance(kw.value, ast.Constant):
-                interval = kw.value.value
+            if kw.arg == "delay_before_responses_start":
+                initial_delay = _literal(kw.value, initial_delay)
+            elif kw.arg == "silence_after_each_response":
+                interval = _literal(kw.value, interval)
             elif kw.arg == "randomize" and isinstance(kw.value, ast.Constant):
                 randomize = bool(kw.value.value)
             elif kw.arg == "delay_responses" and isinstance(kw.value, ast.List):
                 for i, elt in enumerate(kw.value.elts):
                     if isinstance(elt, ast.Tuple) and len(elt.elts) == 2:
                         msg = elt.elts[0].value if isinstance(elt.elts[0], ast.Constant) else ""
-                        dur = elt.elts[1].value if isinstance(elt.elts[1], ast.Constant) else 0
+                        dur = _literal(elt.elts[1], 0)
                         # Preserve existing ID when the message text matches.
                         existing_id = None
                         if known_latency_control and known_latency_control.delay_responses:

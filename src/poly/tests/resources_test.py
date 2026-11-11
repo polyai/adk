@@ -1293,6 +1293,19 @@ def test_code(conv: Conversation, test_param: int):
             func.validate()
         self.assertIn("Start and end functions do not support @func_parameter", str(cm.exception))
 
+    def test_extract_decorators_reads_negative_latency_values(self):
+        """A negative number is read as written, so validation can reject it."""
+        code = (
+            "@func_latency_control(delay_before_responses_start=-1, "
+            "silence_after_each_response=1, delay_responses=[('One moment', -1)])\n"
+            "def lookup(conv: Conversation):\n    pass\n"
+        )
+
+        _, _, _, latency_control = Function._extract_decorators(code, "lookup", [], None)
+
+        self.assertEqual(latency_control.initial_delay, -1)
+        self.assertEqual(latency_control.delay_responses[0].duration, -1)
+
     def test_extract_decorators_untyped_parameter_raises_value_error(self):
         """A parameter without a type annotation raises ValueError."""
         code = """@func_description('Book a table')
