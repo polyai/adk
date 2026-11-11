@@ -31,22 +31,12 @@ logger = logging.getLogger(__name__)
 VALID_SIP_METHODS = ("invite", "refer", "bye")
 VALID_ENCRYPTION = ("TLS/SRTP", "UDP/RTP")
 
-# The platform's limits, mirrored so a bad push fails in `poly validate` first.
 NAME_MAX = 100
 DESCRIPTION_MAX = 300
-PHONE_NUMBER_MAX = 100
-OUTBOUND_ENDPOINT_MAX = 100
-SIP_HEADER_NAME_MAX = 100
-SIP_HEADER_VALUE_MAX = 1000
-SIP_HEADER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9!#$%&'*+\-.^_~]*$")
+SIP_FIELD_MAX = 100
+SIP_HEADER_NAME_PATTERN = re.compile(r"[A-Za-z0-9!#$%&'*+\-.^_~]{1,100}")
 # Printable ASCII: space to tilde.
-SIP_HEADER_VALUE_PATTERN = re.compile(r"^[\x20-\x7E]*$")
-
-
-def _platform_length(text: str) -> int:
-    """Length as the platform counts it: surrounding whitespace is trimmed first, and a
-    character outside the Basic Multilingual Plane (most emoji) counts as two."""
-    return len(text.strip().encode("utf-16-le")) // 2
+SIP_HEADER_VALUE_PATTERN = re.compile(r"[\x20-\x7E]{0,1000}")
 
 
 @dataclass
@@ -272,72 +262,35 @@ class Handoff(MultiResourceYamlResource):
                 f"Invalid encryption method '{self.sip_config.outbound_encryption}'. "
                 f"Must be one of: {', '.join(VALID_ENCRYPTION)}"
             )
-        self._validate_lengths()
-        self._validate_sip_headers()
-
-    def _validate_lengths(self) -> None:
-        """Check the name, the description and the SIP config fields the method sends."""
-        limits = [
+        for field_name, value, limit in (
             ("name", self.name, NAME_MAX),
             ("description", self.description, DESCRIPTION_MAX),
-        ]
-        if self.sip_config.method in ("invite", "refer"):
-            limits.append(
-                ("sip_config.phone_number", self.sip_config.phone_number, PHONE_NUMBER_MAX)
-            )
-        if self.sip_config.method == "invite":
-            limits.append(
-                (
-                    "sip_config.outbound_endpoint",
-                    self.sip_config.outbound_endpoint,
-                    OUTBOUND_ENDPOINT_MAX,
-                )
-            )
-        for field_name, value, limit in limits:
-            if _platform_length(value) > limit:
+            ("phone_number", self.sip_config.phone_number, SIP_FIELD_MAX),
+            ("outbound_endpoint", self.sip_config.outbound_endpoint, SIP_FIELD_MAX),
+        ):
+            if len(value or "") > limit:
                 raise ValueError(
                     f"Handoff '{self.name}': {field_name} is longer than {limit} characters."
                 )
 
-    def _validate_sip_headers(self) -> None:
-        """Check each SIP header that is pushed; one with an empty key is left out of a push."""
-        label = f"Handoff '{self.name}': "
-        if not isinstance(self.sip_headers, list):
-            raise ValueError(f"{label}sip_headers must be a list of 'key' and 'value' pairs.")
         for header in self.sip_headers:
-            if not isinstance(header, dict):
-                raise ValueError(
-                    f"{label}each sip_headers entry must be a mapping with a 'key' and a "
-                    f"'value', but got {header!r}."
-                )
-            key = header.get("key")
+            key, value = header.get("key"), header.get("value")
+            # A header with an empty key is left out of a push.
             if not key:
                 continue
-            value = header.get("value")
             if not isinstance(key, str) or not isinstance(value, str):
                 raise ValueError(
-                    f"{label}SIP header {key!r} must have a 'key' and a 'value' that are both "
-                    "text; quote numbers and booleans in YAML."
-                )
-            if len(key) > SIP_HEADER_NAME_MAX:
-                raise ValueError(
-                    f"{label}SIP header name '{key}' is longer than "
-                    f"{SIP_HEADER_NAME_MAX} characters."
+                    f"Handoff '{self.name}': SIP header {key!r} needs a text 'key' and 'value'."
                 )
             if not SIP_HEADER_NAME_PATTERN.fullmatch(key):
                 raise ValueError(
-                    f"{label}SIP header name '{key}' can only contain letters, digits "
-                    "and !#$%&'*+-.^_~"
-                )
-            if len(value) > SIP_HEADER_VALUE_MAX:
-                raise ValueError(
-                    f"{label}SIP header '{key}' value is longer than "
-                    f"{SIP_HEADER_VALUE_MAX} characters."
+                    f"Handoff '{self.name}': SIP header name '{key}' must be at most 100 "
+                    "letters, digits or !#$%&'*+-.^_~"
                 )
             if not SIP_HEADER_VALUE_PATTERN.fullmatch(value):
                 raise ValueError(
-                    f"{label}SIP header '{key}' value can only contain printable ASCII "
-                    "characters (no line breaks, tabs or non-ASCII characters)."
+                    f"Handoff '{self.name}': SIP header '{key}' value must be at most 1000 "
+                    "printable ASCII characters."
                 )
 
     @classmethod

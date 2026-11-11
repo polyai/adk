@@ -13,7 +13,7 @@ Each handoff has:
 - **description** (string): What this handoff does, up to 300 characters.
 - **is_default** (bool): Whether this is the default handoff.
 - **sip_config** (object): Transfer method configuration (see below).
-- **sip_headers** (list, optional): Custom SIP headers as `key`/`value` pairs, both text (quote numbers and booleans). A `key` is up to 100 characters of letters, digits and `!#$%&'*+-.^_~`. A `value` is up to 1,000 characters of printable ASCII.
+- **sip_headers** (list, optional): Custom SIP headers as `key`/`value` pairs, both text. A `key` is at most 100 letters, digits or `!#$%&'*+-.^_~`; a `value` is at most 1,000 printable ASCII characters.
 
 ## SIP config types
 

@@ -13,7 +13,7 @@ They can also be referenced in executed python code.
 
 Each entity has:
 - **name**: Identifier (snake_case), unique within the file. Used in prompts as `{{entity:entity_name}}`.
-- **description**: What the entity represents (shown to the LLM to guide extraction). Required; cannot be blank.
+- **description**: What the entity represents (shown to the LLM to guide extraction). Required.
 - **entity_type**: One of the types below.
 - **config**: Type-specific settings.
 
@@ -33,9 +33,9 @@ Each entity has:
 
 ## Validation
 
-- **numeric**: `min` is at least 0 and `max` is at most 1,000,000. When `has_range` is `true`, `max` cannot be less than `min`; a bound left out is pushed as 0, so set `max` whenever `min` is above 0.
-- **alphanumeric**: `regular_expression` must compile. `poly validate` compiles it with Python's `re` module and Agent Studio compiles it as a JavaScript regular expression on push, so keep to syntax both accept.
-- **enum** `options` and **phone_number** `country_codes`: every item must be text. Quote an item YAML would otherwise read as a number or boolean (`'44'`).
+- **numeric**: `min` is at least 0 and `max` is at most 1,000,000. When `has_range` is `true`, `max` cannot be less than `min`.
+- **alphanumeric**: `regular_expression` must be a valid regular expression.
+- **enum** `options` and **phone_number** `country_codes`: items must be text.
 
 ## Usage
 
