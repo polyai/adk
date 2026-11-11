@@ -2221,7 +2221,7 @@ class PushProjectTest(unittest.TestCase):
 
         success, message, commands = project.push_project(force=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
@@ -2241,7 +2241,7 @@ class PushProjectTest(unittest.TestCase):
 
         success, message, _ = project.push_project(force=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
@@ -2429,7 +2429,7 @@ class PushProjectTest(unittest.TestCase):
 
         success, message, _ = project.push_project(force=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
 
     def test_push_project_ambiguous_rename_stays_delete_and_create(self):
@@ -5057,7 +5057,7 @@ class TopicTagsSyncTest(unittest.TestCase):
         success, message, _ = project.push_project(force=True)
 
         self.assertEqual(project.resources[Topic]["TOPIC-Topic 2"].tags, ["email", "validation"])
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
 
     def test_force_push_clears_tags_when_file_has_no_tags_key(self):
@@ -5076,7 +5076,7 @@ class TopicTagsSyncTest(unittest.TestCase):
 
         success, message, _ = project.push_project()
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.assertIn("enabled: true\ntags:\n- billing\nactions:", self._read_topic_file())
 
@@ -9027,7 +9027,7 @@ class ApiIntegrationSyncTest(unittest.TestCase):
 
         success, message, commands = self.project.push_project(dry_run=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.assertEqual(commands, [])
 
@@ -9197,7 +9197,7 @@ class ApiIntegrationSyncTest(unittest.TestCase):
 
         self.assertEqual(self.project.project_status(), ([], [], [], []))
         success, message, _ = self.project.push_project(dry_run=True)
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
 
     def test_body_schema_on_get_fails_push_validation(self):

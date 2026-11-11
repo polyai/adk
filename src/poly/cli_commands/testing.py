@@ -214,9 +214,6 @@ class TestingCommand(BaseCommand):
                 dry_run=False,
                 format=False,
             )
-            if output == "No changes detected":
-                push_success = True
-
             if push_success:
                 if not output_json:
                     success("Project pushed successfully.")
