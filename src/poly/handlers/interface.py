@@ -41,6 +41,10 @@ REGIONS = [
 ]
 
 
+class PlatformAPIError(Exception):
+    """An Agent Studio API call failed. Its cause is the error the request raised."""
+
+
 class AgentStudioInterface:
     """Interface for the Agent Studio API"""
 
@@ -79,21 +83,21 @@ class AgentStudioInterface:
             e: The HTTPError or SourcererAPIError to translate
 
         Raises:
-            SourcererAPIError: Always raised with a user-facing message
+            PlatformAPIError: Always raised with a user-facing message
         """
         error_code = self._extract_error_code(e)
 
         if error_code == "FORBIDDEN":
-            raise SourcererAPIError(
+            raise PlatformAPIError(
                 f"Forbidden: you do not have permission to access "
                 f"project '{self.project_id}' in account '{self.account_id}'."
             ) from e
         elif error_code == "DEPLOYMENT_NOT_FOUND":
-            raise SourcererAPIError(
+            raise PlatformAPIError(
                 f"Project '{self.project_id}' not found in account '{self.account_id}'."
             ) from e
         else:
-            raise SourcererAPIError(f"API error: {e}") from e
+            raise PlatformAPIError(f"API error: {e}") from e
 
     @property
     def branch_id(self) -> Optional[str]:
@@ -558,7 +562,7 @@ class AgentStudioInterface:
             bool: True once the commands are sent, or when there was nothing to send
 
         Raises:
-            SourcererAPIError: If the batch could not be sent or the platform rejected it
+            PlatformAPIError: If the batch could not be sent or the platform rejected it
         """
         import requests
 

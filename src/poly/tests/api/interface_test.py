@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from poly.handlers.interface import AgentStudioInterface
+from poly.handlers.interface import AgentStudioInterface, PlatformAPIError
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
 from poly.resources import Entity, Topic, Variable
@@ -63,7 +63,7 @@ class HandleApiError(unittest.TestCase):
         """A FORBIDDEN error code maps to a permission-denied message."""
         error = _http_error_with_code("FORBIDDEN")
 
-        with self.assertRaises(SourcererAPIError) as ctx:
+        with self.assertRaises(PlatformAPIError) as ctx:
             self.interface._handle_api_error(error)
 
         self.assertIn("Forbidden", str(ctx.exception))
@@ -73,7 +73,7 @@ class HandleApiError(unittest.TestCase):
         """A DEPLOYMENT_NOT_FOUND error code maps to a project-not-found message."""
         error = _http_error_with_code("DEPLOYMENT_NOT_FOUND")
 
-        with self.assertRaises(SourcererAPIError) as ctx:
+        with self.assertRaises(PlatformAPIError) as ctx:
             self.interface._handle_api_error(error)
 
         self.assertIn("not found", str(ctx.exception))
@@ -83,38 +83,38 @@ class HandleApiError(unittest.TestCase):
         """An unrecognised error code falls back to a generic API error message."""
         error = _http_error_with_code("SOMETHING_ELSE")
 
-        with self.assertRaises(SourcererAPIError) as ctx:
+        with self.assertRaises(PlatformAPIError) as ctx:
             self.interface._handle_api_error(error)
 
         self.assertIn("API error", str(ctx.exception))
 
 
 class WrapperErrorTranslation(unittest.TestCase):
-    """Tests that interface wrappers raise API errors as SourcererAPIError."""
+    """Tests that interface wrappers raise API errors as PlatformAPIError."""
 
     def setUp(self):
         self.interface = AgentStudioInterface()
         self.interface.sync_client = MagicMock()
 
     def test_pull_resources_translates_http_error(self):
-        """pull_resources raises a requests.HTTPError as a SourcererAPIError."""
+        """pull_resources raises a requests.HTTPError as a PlatformAPIError."""
         self.interface.sync_client.pull_projection.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.pull_resources()
 
     def test_pull_resources_translates_sourcerer_error(self):
-        """pull_resources raises a SourcererAPIError with a user-facing message."""
+        """pull_resources raises a SourcererAPIError as a PlatformAPIError."""
         self.interface.sync_client.pull_projection.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.pull_resources()
 
     def test_queue_command_translates_sourcerer_error(self):
-        """queue_command raises a SourcererAPIError with a user-facing message."""
+        """queue_command raises a SourcererAPIError as a PlatformAPIError."""
         self.interface.sync_client.queue_command.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.queue_command(MagicMock())
 
 
@@ -227,17 +227,17 @@ class GetBranchHistoryInterface(unittest.TestCase):
         self.interface.sync_client.get_branch_history.assert_called_once_with("branch-1")
 
     def test_translates_http_error(self):
-        """An HTTPError from the sync client is raised as a SourcererAPIError."""
+        """An HTTPError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.get_branch_history.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.get_branch_history("branch-1")
 
     def test_translates_sourcerer_api_error(self):
-        """A SourcererAPIError from the sync client is raised with a user-facing message."""
+        """A SourcererAPIError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.get_branch_history.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.get_branch_history("branch-1")
 
 
@@ -258,17 +258,17 @@ class RenameBranchInterface(unittest.TestCase):
         self.interface.sync_client.rename_branch.assert_called_once_with("new-name")
 
     def test_translates_http_error(self):
-        """An HTTPError from the sync client is raised as a SourcererAPIError."""
+        """An HTTPError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.rename_branch.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.rename_branch("new-name")
 
     def test_translates_sourcerer_api_error(self):
-        """A SourcererAPIError from the sync client is raised with a user-facing message."""
+        """A SourcererAPIError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.rename_branch.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.rename_branch("new-name")
 
 
@@ -290,17 +290,17 @@ class ListArchivedBranchesInterface(unittest.TestCase):
         self.interface.sync_client.list_archived_branches.assert_called_once()
 
     def test_translates_http_error(self):
-        """An HTTPError from the sync client is raised as a SourcererAPIError."""
+        """An HTTPError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.list_archived_branches.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.list_archived_branches()
 
     def test_translates_sourcerer_api_error(self):
-        """A SourcererAPIError is raised with a user-facing message."""
+        """A SourcererAPIError is raised as a PlatformAPIError."""
         self.interface.sync_client.list_archived_branches.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.list_archived_branches()
 
 
@@ -329,17 +329,17 @@ class RestoreBranchInterface(unittest.TestCase):
         self.assertFalse(result)
 
     def test_translates_http_error(self):
-        """An HTTPError from the sync client is raised as a SourcererAPIError."""
+        """An HTTPError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.restore_branch.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.restore_branch("branch-1")
 
     def test_translates_sourcerer_api_error(self):
-        """A SourcererAPIError is raised with a user-facing message."""
+        """A SourcererAPIError is raised as a PlatformAPIError."""
         self.interface.sync_client.restore_branch.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.restore_branch("branch-1")
 
 
@@ -483,17 +483,17 @@ class GetBranchCallInfoInterface(unittest.TestCase):
         self.interface.sync_client.get_branch_call_info.assert_called_once_with("branch-1")
 
     def test_translates_http_error(self):
-        """An HTTPError from the sync client is raised as a SourcererAPIError."""
+        """An HTTPError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.get_branch_call_info.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.get_branch_call_info("branch-1")
 
     def test_translates_sourcerer_api_error(self):
-        """A SourcererAPIError from the sync client is raised with a user-facing message."""
+        """A SourcererAPIError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.get_branch_call_info.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(SourcererAPIError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.get_branch_call_info("branch-1")
 
 

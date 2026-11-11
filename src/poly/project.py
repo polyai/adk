@@ -44,6 +44,7 @@ from poly.constants import (
 )
 from poly.handlers.interface import (
     AgentStudioInterface,
+    PlatformAPIError,
 )
 from poly.handlers.sdk import SourcererAPIError
 from poly.migration_utils import (
@@ -662,7 +663,7 @@ class AgentStudioProject:
             project.resources, slim_resources, projection = project.api_handler.pull_resources(
                 projection_json=projection_json
             )
-        except (ValueError, SourcererAPIError):
+        except (ValueError, PlatformAPIError):
             if os.path.exists(project_path):
                 shutil.rmtree(project_path)
             if os.path.exists(account_path) and not os.listdir(account_path):
@@ -1745,7 +1746,7 @@ class AgentStudioProject:
         if not dry_run:
             try:
                 self.api_handler.send_queued_commands()
-            except SourcererAPIError as e:
+            except PlatformAPIError as e:
                 self.branch_id = self.api_handler.branch_id
                 return False, f"{e}\nNothing was pushed.", commands
             self.branch_id = self.api_handler.branch_id

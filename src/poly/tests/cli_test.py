@@ -64,7 +64,7 @@ from poly.cli_commands.update import (
     display_update_message,
 )
 from poly.cli_commands.utils import CompletionCommand
-from poly.handlers.sdk import SourcererAPIError
+from poly.handlers.interface import PlatformAPIError
 from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
 
@@ -586,7 +586,7 @@ class BranchDeleteTest(unittest.TestCase):
     def test_direct_delete_when_project_raises_shows_error(self, mock_error, mock_confirm):
         """If project.delete_branch raises, the error is shown to the user and the command exits 1."""
         mock_confirm.return_value.ask.return_value = True
-        self.proj.delete_branch.side_effect = SourcererAPIError("API failure")
+        self.proj.delete_branch.side_effect = PlatformAPIError("API failure")
 
         with self.assertRaises(SystemExit):
             BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
@@ -597,7 +597,7 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("poly.cli_commands.branch.json_print")
     def test_direct_delete_when_project_raises_json_mode(self, mock_json):
         """If project.delete_branch raises in JSON mode, error is printed as JSON and exits 1."""
-        self.proj.delete_branch.side_effect = SourcererAPIError("API failure")
+        self.proj.delete_branch.side_effect = PlatformAPIError("API failure")
 
         with self.assertRaises(SystemExit):
             BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a", output_json=True)

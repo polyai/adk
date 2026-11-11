@@ -130,7 +130,7 @@ class CallCommand(BaseCommand):
 
         from rich.markup import escape
 
-        from poly.handlers.sdk import SourcererAPIError
+        from poly.handlers.interface import PlatformAPIError
         from poly.output.console import error, info, success, warning
 
         # Import the voice stack lazily so other commands don't load the WebRTC/audio stack.
@@ -175,7 +175,7 @@ class CallCommand(BaseCommand):
 
         try:
             session = project.create_call_session("draft", variant=variant)
-        except (ValueError, NotImplementedError, SourcererAPIError) as exc:
+        except (ValueError, NotImplementedError, PlatformAPIError) as exc:
             error(str(exc))
             sys.exit(1)
 

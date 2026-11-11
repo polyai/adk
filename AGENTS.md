@@ -81,7 +81,7 @@ Generated, never edit by hand: `src/poly/handlers/protobuf/` and `src/poly/types
 - **Guard side effects.** Deletes touch only files the ADK owns. Anything that reaches `live`
   says so in its prompt and help text.
 - **Code style:** 100-char lines, type hints and docstrings on public functions, absolute
-  `poly.` imports, `ValueError` for validation and `SourcererAPIError` (`handlers/sdk.py`) for
+  `poly.` imports, `ValueError` for validation and `PlatformAPIError` (`handlers/interface.py`) for
   API failures. User output goes through `output/console.py` or `json_print` in the CLI layer,
   diagnostics through `logging.getLogger(__name__)`, and never a bare `print`.
 - **Comments explain why, briefly.** No narration of the change, and no stray files (scratch
