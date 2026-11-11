@@ -162,11 +162,6 @@ def parse_latency_control(latency_control_data: dict) -> FunctionLatencyControl:
     )
 
 
-def _is_integer(value: object) -> bool:
-    """Whether value is an int, not counting bool."""
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
 @dataclass
 class LatencyControl(SubResource):
     """Wrapper for Latency Control protos"""
@@ -803,7 +798,7 @@ class Function(Resource):
                 ("delay_before_responses_start", self.latency_control.initial_delay),
                 ("silence_after_each_response", self.latency_control.interval),
             ):
-                if not _is_integer(value):
+                if type(value) is not int:
                     raise ValueError(f"{argument} must be an integer, got {value!r}.")
             if not (0 <= self.latency_control.initial_delay <= 10):
                 raise ValueError(
@@ -821,7 +816,7 @@ class Function(Resource):
             for dr in self.latency_control.delay_responses:
                 if not dr.message:
                     raise ValueError("Delay response message cannot be empty.")
-                if not _is_integer(dr.duration) or dr.duration < 0:
+                if type(dr.duration) is not int or dr.duration < 0:
                     raise ValueError(
                         "Delay response duration must be an integer of 0 or more, "
                         f"got {dr.duration!r} for '{dr.message}'."
