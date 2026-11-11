@@ -2233,6 +2233,20 @@ class PushProjectTest(unittest.TestCase):
         topic_names = [r.name for r in new_resources[Topic].values()]
         self.assertIn("Topic 1", topic_names)
 
+    def test_push_project_rejected_by_the_platform_returns_its_reason(self):
+        """A rejected push returns the platform's reason, not a list of resources."""
+        self.mock_api_handler.send_queued_commands.side_effect = ValueError(
+            "API error: Topic name is not unique"
+        )
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["topics"].pop("TOPIC-Topic 1")
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertEqual(message, "API error: Topic name is not unique")
+
     def test_push_project_new_resource_flow(self):
         project_data = deepcopy(PROJECT_DATA)
         # Remove a flow so it appears as new

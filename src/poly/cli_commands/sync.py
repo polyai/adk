@@ -391,6 +391,8 @@ class PushCommand(BaseCommand):
         rtc_env: str = "sandbox",
     ) -> None:
         """Push the project configuration to the Agent Studio."""
+        from rich.markup import escape
+
         from poly.output.console import error, info, plain, success, warning
 
         project = load_project(base_path, output_json=output_json)
@@ -468,7 +470,8 @@ class PushCommand(BaseCommand):
             success(f"Pushed {project.account_id}/{project.project_id} to Agent Studio.")
         else:
             error(f"Failed to push {project.account_id}/{project.project_id} to Agent Studio.")
-            plain(output)
+            # The platform's reason can start with "[command 1: ...]", which is not markup.
+            plain(escape(output))
 
         if include_rtc and push_ok and not dry_run:
             from poly.cli_commands.rtc import RTCCommand
