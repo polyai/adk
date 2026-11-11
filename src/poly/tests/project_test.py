@@ -2245,7 +2245,7 @@ class PushProjectTest(unittest.TestCase):
         success, message, _ = project.push_project(force=True)
 
         self.assertFalse(success)
-        self.assertEqual(message, "API error: Topic name is not unique")
+        self.assertEqual(message, "API error: Topic name is not unique\nNothing was pushed.")
 
     def test_push_project_new_resource_flow(self):
         project_data = deepcopy(PROJECT_DATA)

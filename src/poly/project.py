@@ -1747,7 +1747,7 @@ class AgentStudioProject:
                 self.api_handler.send_queued_commands()
             except ValueError as e:
                 self.branch_id = self.api_handler.branch_id
-                return False, str(e), commands
+                return False, f"{e}\nNothing was pushed.", commands
             self.branch_id = self.api_handler.branch_id
         else:
             self.api_handler.clear_command_queue()
