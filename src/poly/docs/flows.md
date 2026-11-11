@@ -33,7 +33,7 @@ Fields:
 - **start_step** (required): Name of the step to enter when the flow is triggered. Must match a real step name.
 - **start_mode** (optional): Who may start the flow. `agent`: the agent may start it itself, from its description. `tool`: only function code starts it, with `conv.goto_flow` (the default when the key is missing). Only `start_mode: agent` is written on pull.
 
-When `start_mode` is `agent`, the description is what the agent reads to decide when to start the flow. Write what the user wants, not how the flow works: "The caller wants to book, change or cancel a table reservation", not "Collects name, party size and date". It must have at least 5 words, and must not be the default `Description for flow <name>` or just repeat the flow name.
+When `start_mode` is `agent`, the description is what the agent reads to decide when to start the flow. Write what the user wants, not how the flow works: "The caller wants to book, change or cancel a table reservation", not "Collects name, party size and date". It must have at least 5 words (or at least 15 characters in a language written without spaces), must not start with the default `Description for flow `, and must not just repeat the flow name. This is checked when the flow is created or its `start_mode`, description or name changes; an unchanged flow only gets a warning.
 
 Example:
 ```yaml

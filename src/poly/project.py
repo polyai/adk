@@ -2600,7 +2600,7 @@ class AgentStudioProject:
         if resource_class == FlowConfig and original_resource:
             if not isinstance(original_resource, FlowConfig):
                 raise TypeError(f"Original resource is not a FlowConfig: {original_resource}")
-            additional_kwargs["known_start_mode"] = original_resource.start_mode
+            additional_kwargs["known_flow_config"] = original_resource
 
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):

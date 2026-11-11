@@ -70,6 +70,38 @@ START_MODE_AGENT = "agent"
 START_MODE_TOOL = "tool"
 START_MODES = (START_MODE_AGENT, START_MODE_TOOL)
 MIN_AGENT_START_DESCRIPTION_WORDS = 5
+# For descriptions written without spaces (e.g. Japanese or Chinese), where words can't be counted.
+MIN_AGENT_START_DESCRIPTION_CHARS = 15
+AGENT_START_PLACEHOLDER_PREFIX = "description for flow "
+
+# Ordinal mapping for the proto FlowStartMode enum. Unspecified behaves as "tool", so it maps to
+# None like a missing key.
+START_MODE_FROM_PROTO_INT = {
+    0: None,
+    1: START_MODE_AGENT,
+    2: START_MODE_TOOL,
+}
+
+
+def parse_projection_start_mode(value: "int | str | None") -> Optional[str]:
+    """Parse a flow start mode from a projection.
+
+    Accepts the lowercase strings, the proto enum's ordinal or its name. Unspecified and
+    unrecognised values become None, so an unexpected value is never written to YAML.
+    """
+    if isinstance(value, int) and not isinstance(value, bool):
+        start_mode = START_MODE_FROM_PROTO_INT.get(value)
+    elif isinstance(value, str):
+        start_mode = value.strip().lower().removeprefix("flow_start_mode_")
+    else:
+        start_mode = None
+
+    if start_mode not in START_MODES:
+        if value is not None and start_mode != "unspecified":
+            logger.debug(f"Unknown flow start mode {value!r}, treated as unset.")
+        return None
+    return start_mode
+
 
 FUNCTION_REGEX = re.compile(r"{{f[nt]:([\w-]+)}}")
 # Flow step names: alphanumeric, extended Latin (C0–024F, 1E00–1EFF), and _ &,/.-
@@ -100,9 +132,12 @@ class FlowConfig(YamlResource):
     # Compared through _yaml_start_mode in __eq__, so an explicit "tool" equals a missing key.
     start_mode: Optional[str] = field(default=None, compare=False)
 
-    # Start mode at the last pull or push, so an update can tell a switch back to "tool"
-    # apart from an unrelated edit.
-    known_start_mode: Optional[str] = field(default=None, repr=False, init=False, compare=False)
+    # The flow as at the last pull or push (None for a new flow). An update uses it to tell a
+    # switch back to "tool" apart from an unrelated edit, and validation to tell whether the
+    # agent start rules apply to this push.
+    known_flow_config: Optional["FlowConfig"] = field(
+        default=None, repr=False, init=False, compare=False
+    )
 
     # For creating:
     functions: list[Function] = field(default_factory=list, repr=False, init=False)
@@ -154,7 +189,7 @@ class FlowConfig(YamlResource):
                 name=flow_data["name"],
                 description=flow_data.get("description", ""),
                 start_step=flow_data.get("startStepId", ""),
-                start_mode=flow_data.get("startMode"),
+                start_mode=parse_projection_start_mode(flow_data.get("startMode")),
             )
         return configs
 
@@ -164,7 +199,7 @@ class FlowConfig(YamlResource):
         yaml_data: dict,
         resource_id: str,
         name: str,
-        known_start_mode: Optional[str] = None,
+        known_flow_config: Optional["FlowConfig"] = None,
         **kwargs,
     ) -> "FlowConfig":
         """Create an instance from YAML data and identity fields."""
@@ -175,7 +210,7 @@ class FlowConfig(YamlResource):
             start_step=yaml_data.get("start_step", ""),
             start_mode=yaml_data.get("start_mode"),
         )
-        flow_config.known_start_mode = known_start_mode
+        flow_config.known_flow_config = known_flow_config
         return flow_config
 
     @classmethod
@@ -277,7 +312,24 @@ class FlowConfig(YamlResource):
             )
 
         if self.start_mode == START_MODE_AGENT:
-            self._validate_agent_start_description()
+            try:
+                self._validate_agent_start_description()
+            except ValueError as e:
+                # A flow already agent-started on the platform shouldn't block unrelated pushes.
+                if self._agent_start_changed():
+                    raise
+                logger.warning(f"Flow '{self.name}' ({self.file_path}): {e}")
+
+    def _agent_start_changed(self) -> bool:
+        """Whether this push creates the flow or changes its start mode, description or name."""
+        known = self.known_flow_config
+        if known is None:
+            return True
+        return (
+            self._yaml_start_mode() != known._yaml_start_mode()
+            or self.description.strip() != known.description.strip()
+            or self.name != known.name
+        )
 
     def _validate_agent_start_description(self) -> None:
         """Check the description says enough for the agent to know when to start the flow."""
@@ -288,7 +340,7 @@ class FlowConfig(YamlResource):
 
         description = normalise(self.description)
         flow_name = normalise(self.name)
-        if description == normalise(f"Description for flow {self.name}"):
+        if self.description.strip().lower().startswith(AGENT_START_PLACEHOLDER_PREFIX):
             raise ValueError(
                 "Description cannot be the default placeholder when start_mode is 'agent'. "
                 "Describe what the user wants when this flow should start."
@@ -300,9 +352,14 @@ class FlowConfig(YamlResource):
                 "Describe what the user wants when this flow should start."
             )
 
-        if len(self.description.split()) < MIN_AGENT_START_DESCRIPTION_WORDS:
+        words = self.description.split()
+        long_enough = len(words) >= MIN_AGENT_START_DESCRIPTION_WORDS or (
+            len(words) == 1 and len(words[0]) >= MIN_AGENT_START_DESCRIPTION_CHARS
+        )
+        if not long_enough:
             raise ValueError(
-                f"Description must have at least {MIN_AGENT_START_DESCRIPTION_WORDS} words "
+                f"Description must have at least {MIN_AGENT_START_DESCRIPTION_WORDS} words, "
+                f"or {MIN_AGENT_START_DESCRIPTION_CHARS} characters if written without spaces, "
                 "when start_mode is 'agent'. Describe what the user wants when this flow "
                 "should start."
             )
@@ -315,10 +372,11 @@ class FlowConfig(YamlResource):
         Sends AGENT when the flow is agent-started, and TOOL only when switching back from
         agent. Otherwise the start mode is left unset, so the platform keeps its value.
         """
+        known_start_mode = self.known_flow_config.start_mode if self.known_flow_config else None
         start_mode = {}
         if self.start_mode == START_MODE_AGENT:
             start_mode["start_mode"] = FlowStartMode.FLOW_START_MODE_AGENT
-        elif self.known_start_mode == START_MODE_AGENT:
+        elif known_start_mode == START_MODE_AGENT:
             start_mode["start_mode"] = FlowStartMode.FLOW_START_MODE_TOOL
         return Flow_UpdateFlow(
             flow_id=self.resource_id,
@@ -343,6 +401,7 @@ class FlowConfig(YamlResource):
 
         steps = [step.build_create_proto() for step in all_steps]
 
+        # The platform treats an unset start mode as tool, so a create only needs to say agent.
         start_mode = {}
         if self.start_mode == START_MODE_AGENT:
             start_mode["start_mode"] = FlowStartMode.FLOW_START_MODE_AGENT

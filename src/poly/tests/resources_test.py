@@ -3289,7 +3289,8 @@ start_step: step-1
         for start_mode, known_start_mode, expected in cases:
             with self.subTest(start_mode=start_mode, known_start_mode=known_start_mode):
                 config = self._flow_config(start_mode)
-                config.known_start_mode = known_start_mode
+                if known_start_mode is not None:
+                    config.known_flow_config = self._flow_config(known_start_mode)
                 proto = config.build_update_proto()
                 if expected is None:
                     self.assertFalse(proto.HasField("start_mode"))
@@ -3315,6 +3316,12 @@ start_step: step-1
                 config = self._flow_config(start_mode, description=description)
                 self.assertIsNone(config.validate(resource_mappings=resource_mappings))
 
+        # Written without spaces, 15 characters is enough
+        japanese = "お客様がテーブルの予約を変更したい場合"
+        self.assertGreaterEqual(len(japanese), 15)
+        config = self._flow_config("agent", description=japanese)
+        self.assertIsNone(config.validate(resource_mappings=resource_mappings))
+
         # tool flows keep the old, looser description rule
         self.assertIsNone(
             self._flow_config("tool", description="Test Flow").validate(
@@ -3336,7 +3343,11 @@ start_step: step-1
             ("Test Flow", "repeat the flow name"),
             ("  test-flow. ".strip(), "repeat the flow name"),
             ("TEST_FLOW flow.", "repeat the flow name"),
+            ("Description for flow Old Booking Name", "default placeholder"),
+            ("  DESCRIPTION FOR FLOW renamed_flow".strip(), "default placeholder"),
             ("Books a table.", "at least 5 words"),
+            ("Reservations", "at least 5 words"),
+            ("テーブルを予約したい", "15 characters if written without spaces"),
         ]
         for bad_description, message in invalid:
             with self.subTest(description=bad_description):
@@ -3368,6 +3379,47 @@ start_step: step-1
         with self.assertRaises(ValueError) as cm:
             config.validate(resource_mappings=mappings)
         self.assertIn("repeat the flow name", str(cm.exception))
+
+    def test_validate_agent_description_only_blocks_changed_flows(self):
+        """A weak description on an unchanged agent flow warns; once changed, it errors."""
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="flow-123_step-1",
+                resource_name="Start Step",
+                resource_type=FlowStep,
+                file_path="flows/test_flow/steps/start_step.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+                flow_id="flow-123",
+            )
+        ]
+        weak = "Books a table."
+        good = "The caller wants to book a table for dinner."
+
+        unchanged = self._flow_config("agent", description=weak)
+        unchanged.known_flow_config = self._flow_config("agent", description=weak)
+        with self.assertLogs("poly.resources.flows", level="WARNING") as logs:
+            self.assertIsNone(unchanged.validate(resource_mappings=resource_mappings))
+        self.assertIn("at least 5 words", logs.output[0])
+
+        changed_cases = {
+            "new flow": None,
+            "switched to agent": self._flow_config(None, description=weak),
+            "description edited": self._flow_config("agent", description=good),
+            "renamed": self._flow_config("agent", description=weak, name="Old Flow"),
+        }
+        for case, known in changed_cases.items():
+            with self.subTest(case=case):
+                config = self._flow_config("agent", description=weak)
+                config.known_flow_config = known
+                with self.assertRaises(ValueError):
+                    config.validate(resource_mappings=resource_mappings)
+
+        # An invalid start mode is always an error, changed or not
+        invalid = self._flow_config("auto", description=good)
+        invalid.known_flow_config = self._flow_config("auto", description=good)
+        with self.assertRaises(ValueError):
+            invalid.validate(resource_mappings=resource_mappings)
 
 
 TEST_FLOW_STEP = FlowStep(
@@ -6479,9 +6531,7 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
             self._read_disk(self.variants_file)["variants"],
             [{"name": "Site-A"}, {"name": "other"}],
         )
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("Site_A")), {"name": "Site-A"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("Site_A")), {"name": "Site-A"})
 
     def test_delete_then_append_keeps_every_lookup_pointing_at_its_entry(self):
         """Deleting shifts later entries down; a following append lands at the end."""
@@ -6563,17 +6613,13 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
     def test_external_edit_is_seen_after_the_file_changes_on_disk(self):
         """A rewritten file is reloaded, and lookups follow its new entries."""
         self._write(self.variants_file, "variants:\n  - name: alpha\n  - name: beta\n")
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("alpha")), {"name": "alpha"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("alpha")), {"name": "alpha"})
 
         self._write(self.variants_file, "variants:\n  - name: gamma\n  - name: beta\n")
         mtime = os.path.getmtime(self.variants_file) + 10
         os.utime(self.variants_file, (mtime, mtime))
 
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("gamma")), {"name": "gamma"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("gamma")), {"name": "gamma"})
         with self.assertRaises(FileNotFoundError):
             Variant._read_yaml_dict(self._variant_path("alpha"))
 
@@ -6605,12 +6651,8 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
         Variant(resource_id="v3", name="third").save(self.base_path)
         VariantAttribute.delete_resource(self._attribute_path("shared"))
 
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("second")), {"name": "second"}
-        )
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("third")), {"name": "third"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("second")), {"name": "second"})
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("third")), {"name": "third"})
         self.assertEqual(
             VariantAttribute._read_yaml_dict(self._attribute_path("colour"))["name"], "colour"
         )
@@ -6620,9 +6662,7 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             VariantAttribute._read_yaml_dict(self._attribute_path("shared"))
         on_disk = self._read_disk(self.variants_file)
-        self.assertEqual(
-            [v["name"] for v in on_disk["variants"]], ["shared", "second", "third"]
-        )
+        self.assertEqual([v["name"] for v in on_disk["variants"]], ["shared", "second", "third"])
         self.assertEqual([a["name"] for a in on_disk["attributes"]], ["colour", "size"])
 
 
@@ -7266,11 +7306,15 @@ class ApiIntegrationTest(unittest.TestCase):
     def test_subresources_detect_header_only_and_description_only_changes(self):
         """A change to just the headers or just the description is an update; no change is nothing."""
         old = ApiIntegration(
-            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(headers={"Accept": "text/plain"})],
         )
 
         same = ApiIntegration(
-            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(headers={"Accept": "text/plain"})],
         )
         self.assertEqual(same.get_new_updated_deleted_subresources(old), ([], [], []))
 
@@ -7475,7 +7519,9 @@ class ApiIntegrationTest(unittest.TestCase):
             request_body_schema=BODY_SCHEMA,
             response_schemas={"200": OK_SCHEMA},
         ).build_create_proto()
-        self.assertEqual(create.request_query_schema, json.dumps(QUERY_SCHEMA, separators=(",", ":")))
+        self.assertEqual(
+            create.request_query_schema, json.dumps(QUERY_SCHEMA, separators=(",", ":"))
+        )
         self.assertEqual(json.loads(create.request_body_schema), BODY_SCHEMA)
         self.assertEqual(json.loads(create.response_schemas["200"]), OK_SCHEMA)
         self.assertEqual(create.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
@@ -7536,7 +7582,9 @@ class ApiIntegrationTest(unittest.TestCase):
         _, updated, _ = edited.get_new_updated_deleted_subresources(old)
         self.assertEqual([op.request_body_schema for op in updated], [{"type": "object"}])
 
-        relabelled = _integration_with(_operation(request_body_schema=body, schema_source="openapi"))
+        relabelled = _integration_with(
+            _operation(request_body_schema=body, schema_source="openapi")
+        )
         _, updated, _ = relabelled.get_new_updated_deleted_subresources(old)
         self.assertEqual([op.schema_source for op in updated], ["openapi"])
 
@@ -8055,7 +8103,9 @@ class AsrSettingsTests(unittest.TestCase):
     }
 
     def _from_yaml(self, yaml_dict: dict) -> AsrSettings:
-        return AsrSettings.from_yaml_dict(yaml_dict, resource_id="asr_settings", name="asr_settings")
+        return AsrSettings.from_yaml_dict(
+            yaml_dict, resource_id="asr_settings", name="asr_settings"
+        )
 
     def _changes(self, new: dict, old: Optional[dict]):
         old_resource = self._from_yaml(old) if old is not None else None
@@ -13200,7 +13250,9 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         """Type hints are worked out once per class, while values are checked on every call."""
         resource_utils._field_type_hints.cache_clear()
         good = Topic(resource_id="T-1", name="a", actions="x", content="y", example_queries=[])
-        bad = Topic(resource_id="T-2", name="b", actions={"k": "v"}, content="y", example_queries=[])
+        bad = Topic(
+            resource_id="T-2", name="b", actions={"k": "v"}, content="y", example_queries=[]
+        )
 
         with unittest.mock.patch(
             "typing.get_type_hints", wraps=typing.get_type_hints
@@ -14004,6 +14056,47 @@ class FlowConfigFromProjection(unittest.TestCase):
         self.assertIsNone(configs["FLOW-N"].start_mode)
         self.assertEqual(configs["FLOW-A"].to_yaml_dict()["start_mode"], "agent")
         self.assertNotIn("start_mode", configs["FLOW-T"].to_yaml_dict())
+
+    def test_parses_start_mode_formats(self):
+        """Strings in any case, proto ordinals and enum names all parse; the rest is unset."""
+        cases = [
+            ("agent", "agent"),
+            ("tool", "tool"),
+            ("AGENT", "agent"),
+            ("Tool", "tool"),
+            (1, "agent"),
+            (2, "tool"),
+            (0, None),
+            ("FLOW_START_MODE_AGENT", "agent"),
+            ("FLOW_START_MODE_TOOL", "tool"),
+            ("FLOW_START_MODE_UNSPECIFIED", None),
+            (3, None),
+            (True, None),
+            ("automatic", None),
+            ("", None),
+            ({"mode": "agent"}, None),
+        ]
+        def pull(**start_mode) -> FlowConfig:
+            flow = {
+                "name": "Booking",
+                "description": "Handles bookings",
+                "startStepId": "STEP-A",
+                "steps": {"entities": {}},
+                **start_mode,
+            }
+            return FlowConfig.from_projection({"flows": {"flows": {"entities": {"F-1": flow}}}})[
+                "F-1"
+            ]
+
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                config = pull(startMode=raw)
+                self.assertEqual(config.start_mode, expected)
+                if expected != "agent":
+                    # Same file and same hash as a flow with no start mode
+                    self.assertNotIn("start_mode", config.to_yaml_dict())
+                    self.assertEqual(config, pull())
+                    self.assertEqual(config.compute_hash(), pull().compute_hash())
 
 
 class FlowStepFromProjection(unittest.TestCase):

@@ -396,7 +396,7 @@ Logic reused across flows is usually better placed in global functions.
 ## Validation
 
 - `start_mode`, when present, must be `agent` or `tool`.
-- When `start_mode` is `agent`, the flow's description must have at least 5 words, must not be the default `Description for flow <name>`, and must not just repeat the flow name (for example `Booking Flow` or `booking_flow flow.` for a flow named `Booking Flow`).
+- When `start_mode` is `agent`, the flow's description must have at least 5 words (or, for a language written without spaces, at least 15 characters), must not start with the default `Description for flow `, and must not just repeat the flow name (for example `Booking Flow` or `booking_flow flow.` for a flow named `Booking Flow`). This is checked when the flow is created or its `start_mode`, description or name changes; an unchanged flow that breaks it only gets a warning, so it doesn't block other changes.
 - `inter_digit_timeout` and `max_digits` (DTMF configuration) cannot be negative.
 - `vad_start` and `vad_end` (VAD) must be finite and non-negative — `poly validate` rejects a negative or infinite value.
 
