@@ -18,6 +18,7 @@ from typing import Optional
 
 from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
+from poly.handlers.sdk import SourcererAPIError
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 
@@ -326,7 +327,7 @@ class ChatCommand(BaseCommand):
                         output_lang,
                         sip_headers=sip_headers,
                     )
-                except (requests.HTTPError, ValueError) as e:
+                except (requests.HTTPError, ValueError, SourcererAPIError) as e:
                     if output_json:
                         json_output["success"] = False
                         json_output["error"] = str(e)

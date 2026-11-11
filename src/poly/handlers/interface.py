@@ -70,30 +70,30 @@ class AgentStudioInterface:
         return None
 
     def _handle_api_error(self, e: Exception) -> NoReturn:
-        """Translate an API HTTP error into a user-facing ValueError.
+        """Raise an API error again with a user-facing message.
 
-        Extracts the error_code from the response body and raises a ValueError
-        with a descriptive message. Always raises.
+        Extracts the error_code from the response body and names the project for the codes
+        that mean it can't be reached. Always raises.
 
         Args:
             e: The HTTPError or SourcererAPIError to translate
 
         Raises:
-            ValueError: Always raised with a user-facing message
+            SourcererAPIError: Always raised with a user-facing message
         """
         error_code = self._extract_error_code(e)
 
         if error_code == "FORBIDDEN":
-            raise ValueError(
+            raise SourcererAPIError(
                 f"Forbidden: you do not have permission to access "
                 f"project '{self.project_id}' in account '{self.account_id}'."
             ) from e
         elif error_code == "DEPLOYMENT_NOT_FOUND":
-            raise ValueError(
+            raise SourcererAPIError(
                 f"Project '{self.project_id}' not found in account '{self.account_id}'."
             ) from e
         else:
-            raise ValueError(f"API error: {e}") from e
+            raise SourcererAPIError(f"API error: {e}") from e
 
     @property
     def branch_id(self) -> Optional[str]:
@@ -558,7 +558,7 @@ class AgentStudioInterface:
             bool: True once the commands are sent, or when there was nothing to send
 
         Raises:
-            ValueError: If the batch could not be sent or the platform rejected it
+            SourcererAPIError: If the batch could not be sent or the platform rejected it
         """
         import requests
 

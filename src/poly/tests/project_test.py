@@ -2235,7 +2235,7 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_rejected_by_the_platform_returns_its_reason(self):
         """A rejected push returns the platform's reason, not a list of resources."""
-        self.mock_api_handler.send_queued_commands.side_effect = ValueError(
+        self.mock_api_handler.send_queued_commands.side_effect = SourcererAPIError(
             "API error: Topic name is not unique"
         )
         project_data = deepcopy(PROJECT_DATA)

@@ -662,7 +662,7 @@ class AgentStudioProject:
             project.resources, slim_resources, projection = project.api_handler.pull_resources(
                 projection_json=projection_json
             )
-        except ValueError:
+        except (ValueError, SourcererAPIError):
             if os.path.exists(project_path):
                 shutil.rmtree(project_path)
             if os.path.exists(account_path) and not os.listdir(account_path):
@@ -1745,8 +1745,7 @@ class AgentStudioProject:
         if not dry_run:
             try:
                 self.api_handler.send_queued_commands()
-            # The interface raises API failures as ValueError.
-            except ValueError as e:
+            except SourcererAPIError as e:
                 self.branch_id = self.api_handler.branch_id
                 return False, f"{e}\nNothing was pushed.", commands
             self.branch_id = self.api_handler.branch_id
