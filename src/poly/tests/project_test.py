@@ -2218,7 +2218,7 @@ class PushProjectTest(unittest.TestCase):
         success, message, commands = project.push_project(force=True)
 
         self.assertFalse(success)
-        self.assertIn("Duplicate Entity name 'city'.", message)
+        self.assertIn("Duplicate name 'city'.", message)
         self.assertEqual(commands, [])
         self.mock_api_handler.queue_resources.assert_not_called()
 
@@ -3006,7 +3006,7 @@ class ValidateProjectTest(unittest.TestCase):
 
                 errors = project.validate_project()
 
-                self.assertIn(f"Duplicate Entity name {names[0]!r}.", errors[0])
+                self.assertIn(f"Duplicate name {names[0]!r}.", errors[0])
 
     def test_validate_project_reports_names_with_the_same_clean_name(self):
         """Names that differ only in punctuation or spacing count as the same name."""
@@ -3018,7 +3018,7 @@ class ValidateProjectTest(unittest.TestCase):
 
         errors = project.validate_project()
 
-        self.assertIn("Duplicate Entity name", errors[0])
+        self.assertIn("Duplicate name 'My Entity'.", errors[0])
 
 ENTITIES_FILE = os.path.join("config", "entities.yaml")
 VARIANTS_FILE = os.path.join("config", "variant_attributes.yaml")
