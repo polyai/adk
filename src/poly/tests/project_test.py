@@ -67,6 +67,7 @@ from poly.resources.flows import (
     Condition,
     DTMFConfig,
     FlowSettings,
+    KnownFlowStart,
     StepType,
 )
 from poly.resources.function import FunctionParameters, FunctionType
@@ -219,7 +220,7 @@ class SerializationRoundTripTest(unittest.TestCase):
         self.assertEqual(restored.start_step, "step-1")
 
     def test_flow_config_round_trip_keeps_start_mode(self):
-        """start_mode survives the status-file round trip; known_flow_config is not stored."""
+        """start_mode survives the status-file round trip; known_start is not stored."""
         config = FlowConfig(
             resource_id="flow-123",
             name="Test Flow",
@@ -227,14 +228,14 @@ class SerializationRoundTripTest(unittest.TestCase):
             start_step="step-1",
             start_mode="agent",
         )
-        config.known_flow_config = deepcopy(config)
+        config.known_start = KnownFlowStart.of(config)
         serialized = resource_utils.resource_to_dict(config)
         self.assertEqual(serialized["start_mode"], "agent")
-        self.assertNotIn("known_flow_config", serialized)
+        self.assertNotIn("known_start", serialized)
 
         restored = FlowConfig(**serialized)
         self.assertEqual(restored.start_mode, "agent")
-        self.assertIsNone(restored.known_flow_config)
+        self.assertIsNone(restored.known_start)
 
     def test_document_round_trip(self):
         """Document serializes and deserializes via status dict correctly."""
@@ -9020,6 +9021,33 @@ class FlowStartModeSyncTest(unittest.TestCase):
         self.assertEqual(update.flow_id, "FLOW-1")
         self.assertTrue(update.HasField("start_mode"))
         self.assertEqual(update.start_mode, FlowStartMode.FLOW_START_MODE_TOOL)
+
+    def test_known_start_stays_one_level_deep_across_pushes(self):
+        """Repeated pull/push cycles keep only a snapshot of plain values, never a chain."""
+        self._pull("agent")
+        for cycle in range(4):
+            description = f"The caller wants to book a table, attempt {cycle}"
+            with open(self.path, encoding="utf-8") as file:
+                contents = resource_utils.load_yaml(file.read())
+            contents["description"] = description
+            with open(self.path, "w", encoding="utf-8") as file:
+                file.write(resource_utils.dump_yaml(contents))
+            projection = _flow_projection("agent")
+            if cycle:
+                projection["flows"]["flows"]["entities"]["FLOW-1"]["description"] = (
+                    f"The caller wants to book a table, attempt {cycle - 1}"
+                )
+
+            with patch.object(AgentStudioInterface, "send_queued_commands", return_value=True):
+                success, message, _ = self.project.push_project(
+                    force=False, projection_json=projection, parent_projection_json={}
+                )
+            self.assertTrue(success, message)
+
+            [flow] = self.project.resources[FlowConfig].values()
+            self.assertIsInstance(flow.known_start, KnownFlowStart)
+            for value in dataclasses.asdict(flow.known_start).values():
+                self.assertIsInstance(value, (str, type(None)))
 
 
 _STATUS_QUERY = {"type": "object", "properties": {"include_history": {"type": "boolean"}}}

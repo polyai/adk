@@ -65,6 +65,7 @@ from poly.resources.flows import (
     FlowSettings,
     FlowStep,
     FunctionStep,
+    KnownFlowStart,
     LLMConfig,
     ReasoningEffort,
     StepType,
@@ -3290,7 +3291,7 @@ start_step: step-1
             with self.subTest(start_mode=start_mode, known_start_mode=known_start_mode):
                 config = self._flow_config(start_mode)
                 if known_start_mode is not None:
-                    config.known_flow_config = self._flow_config(known_start_mode)
+                    config.known_start = KnownFlowStart.of(self._flow_config(known_start_mode))
                 proto = config.build_update_proto()
                 if expected is None:
                     self.assertFalse(proto.HasField("start_mode"))
@@ -3397,7 +3398,7 @@ start_step: step-1
         good = "The caller wants to book a table for dinner."
 
         unchanged = self._flow_config("agent", description=weak)
-        unchanged.known_flow_config = self._flow_config("agent", description=weak)
+        unchanged.known_start = KnownFlowStart.of(self._flow_config("agent", description=weak))
         with self.assertLogs("poly.resources.flows", level="WARNING") as logs:
             self.assertIsNone(unchanged.validate(resource_mappings=resource_mappings))
         self.assertIn("at least 5 words", logs.output[0])
@@ -3411,13 +3412,13 @@ start_step: step-1
         for case, known in changed_cases.items():
             with self.subTest(case=case):
                 config = self._flow_config("agent", description=weak)
-                config.known_flow_config = known
+                config.known_start = KnownFlowStart.of(known) if known else None
                 with self.assertRaises(ValueError):
                     config.validate(resource_mappings=resource_mappings)
 
         # An invalid start mode is always an error, changed or not
         invalid = self._flow_config("auto", description=good)
-        invalid.known_flow_config = self._flow_config("auto", description=good)
+        invalid.known_start = KnownFlowStart.of(self._flow_config("auto", description=good))
         with self.assertRaises(ValueError):
             invalid.validate(resource_mappings=resource_mappings)
 

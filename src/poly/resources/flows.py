@@ -103,6 +103,24 @@ def parse_projection_start_mode(value: "int | str | None") -> Optional[str]:
     return start_mode
 
 
+@dataclass(frozen=True)
+class KnownFlowStart:
+    """What a flow's start mode, description and name were at the last pull or push."""
+
+    start_mode: Optional[str]
+    description: str
+    name: str
+
+    @classmethod
+    def of(cls, flow_config: "FlowConfig") -> "KnownFlowStart":
+        """Snapshot the values a later push compares against."""
+        return cls(
+            start_mode=flow_config._yaml_start_mode(),
+            description=flow_config.description.strip(),
+            name=flow_config.name,
+        )
+
+
 FUNCTION_REGEX = re.compile(r"{{f[nt]:([\w-]+)}}")
 # Flow step names: alphanumeric, extended Latin (C0–024F, 1E00–1EFF), and _ &,/.-
 FLOW_STEP_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF_ &,/.\-]+$")
@@ -135,7 +153,7 @@ class FlowConfig(YamlResource):
     # The flow as at the last pull or push (None for a new flow). An update uses it to tell a
     # switch back to "tool" apart from an unrelated edit, and validation to tell whether the
     # agent start rules apply to this push.
-    known_flow_config: Optional["FlowConfig"] = field(
+    known_start: Optional[KnownFlowStart] = field(
         default=None, repr=False, init=False, compare=False
     )
 
@@ -210,7 +228,8 @@ class FlowConfig(YamlResource):
             start_step=yaml_data.get("start_step", ""),
             start_mode=yaml_data.get("start_mode"),
         )
-        flow_config.known_flow_config = known_flow_config
+        if known_flow_config is not None:
+            flow_config.known_start = KnownFlowStart.of(known_flow_config)
         return flow_config
 
     @classmethod
@@ -322,14 +341,7 @@ class FlowConfig(YamlResource):
 
     def _agent_start_changed(self) -> bool:
         """Whether this push creates the flow or changes its start mode, description or name."""
-        known = self.known_flow_config
-        if known is None:
-            return True
-        return (
-            self._yaml_start_mode() != known._yaml_start_mode()
-            or self.description.strip() != known.description.strip()
-            or self.name != known.name
-        )
+        return self.known_start is None or KnownFlowStart.of(self) != self.known_start
 
     def _validate_agent_start_description(self) -> None:
         """Check the description says enough for the agent to know when to start the flow."""
@@ -372,7 +384,7 @@ class FlowConfig(YamlResource):
         Sends AGENT when the flow is agent-started, and TOOL only when switching back from
         agent. Otherwise the start mode is left unset, so the platform keeps its value.
         """
-        known_start_mode = self.known_flow_config.start_mode if self.known_flow_config else None
+        known_start_mode = self.known_start.start_mode if self.known_start else None
         start_mode = {}
         if self.start_mode == START_MODE_AGENT:
             start_mode["start_mode"] = FlowStartMode.FLOW_START_MODE_AGENT
