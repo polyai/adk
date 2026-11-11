@@ -16,6 +16,7 @@ from typing import Any, Optional
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import (
     branch_id_map,
+    fail,
     fetch_branch_id_map,
     load_project,
     resolve_branch_id,
@@ -507,15 +508,15 @@ class DeploymentsCommand(BaseCommand):
             output_json: If True, print result as JSON instead of rich text.
             details: If True, print full metadata for each deployment.
         """
-        from poly.output.console import error, paged_output, print_deployments
+        from poly.output.console import paged_output, plain, print_deployments
 
         project = load_project(base_path, output_json=output_json)
         if environment is None:
             environment = "live" if project.using_simplified_deployments else "sandbox"
         versions, active_deployment_hashes = project.get_deployments(client_env=environment)
 
-        if not versions:
-            error("No versions found.")
+        if not versions and not output_json:
+            plain("[muted]No versions found.[/muted]")
             return
 
         if version_hash:
@@ -529,8 +530,7 @@ class DeploymentsCommand(BaseCommand):
                 None,
             )
             if version_idx is None:
-                error(f"Version hash '{version_hash}' not found.")
-                return
+                fail(f"Version hash '{version_hash}' not found.", output_json)
             offset = version_idx
 
         end = offset + limit if limit is not None else None
@@ -569,7 +569,7 @@ class DeploymentsCommand(BaseCommand):
                 the environment holding the project's deployments.
             output_json: If True, emit machine-readable JSON.
         """
-        from poly.output.console import error, print_deployment_show
+        from poly.output.console import print_deployment_show
 
         project = load_project(base_path, output_json=output_json)
         if environment is None:
@@ -577,8 +577,7 @@ class DeploymentsCommand(BaseCommand):
         env_versions, active_deployment_hashes = project.get_deployments(client_env=environment)
 
         if not env_versions:
-            error("No versions found.")
-            return
+            fail("No versions found.", output_json)
 
         version_hash = version_hash[:9]
         version_idx = next(
@@ -590,8 +589,7 @@ class DeploymentsCommand(BaseCommand):
             None,
         )
         if version_idx is None:
-            error(f"Version hash '{version_hash}' not found.")
-            return
+            fail(f"Version hash '{version_hash}' not found.", output_json)
 
         deployment = env_versions[version_idx]
         target_full_hash = deployment.get("version_hash", "")

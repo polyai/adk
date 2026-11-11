@@ -4,11 +4,12 @@ Copyright PolyAI Limited
 """
 
 import os
+import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Optional
 
 from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
-from poly.cli_commands.shared import compute_diff, format_gist_choice
+from poly.cli_commands.shared import compute_diff, fail, format_gist_choice
 from poly.handlers.github_api_handler import GitHubAPIHandler
 from poly.output.json_output import json_print
 
@@ -140,8 +141,7 @@ class ReviewCommand(BaseCommand):
 
         project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
         if version_hash and (before or after):
-            error("Cannot specify both hash and before/after versions.")
-            return
+            fail("Cannot specify both hash and before/after versions.", output_json)
 
         if version_hash:
             after = version_hash
@@ -160,10 +160,8 @@ class ReviewCommand(BaseCommand):
         )
 
         if not diffs:
-            if output_json and diffs is not None:
-                json_print({"success": False, "message": "No changes to review."})
-            elif output_json:
-                json_print({"success": False, "message": "Failed to compute diffs."})
+            if output_json:
+                json_print({"success": True, "message": "No changes to review."})
             else:
                 plain("[muted]No changes detected.[/muted]")
             return
@@ -190,11 +188,13 @@ class ReviewCommand(BaseCommand):
                 json_print({"success": False, "message": f"GitHub API error: {e}"})
             else:
                 error(f"GitHub API error: {e}")
+            sys.exit(1)
         except OSError as e:
             if output_json:
                 json_print({"success": False, "message": str(e)})
             else:
                 error(str(e))
+            sys.exit(1)
 
     @classmethod
     def list_gists(cls, output_json: bool = False) -> None:
@@ -213,13 +213,13 @@ class ReviewCommand(BaseCommand):
                 json_print({"success": False, "message": f"GitHub API error: {e}"})
             else:
                 error(f"GitHub API error: {e}")
-            return
+            sys.exit(1)
         except OSError as e:
             if output_json:
                 json_print({"success": False, "message": str(e)})
             else:
                 error(str(e))
-            return
+            sys.exit(1)
 
         if output_json:
             json_print(gists)
@@ -251,13 +251,13 @@ class ReviewCommand(BaseCommand):
                 json_print({"success": False, "message": f"GitHub API error: {e}"})
             else:
                 error(f"GitHub API error: {e}")
-            return
+            sys.exit(1)
         except OSError as e:
             if output_json:
                 json_print({"success": False, "message": str(e)})
             else:
                 error(str(e))
-            return
+            sys.exit(1)
 
         if gist_id:
             matched = next(
@@ -271,7 +271,7 @@ class ReviewCommand(BaseCommand):
                     )
                 else:
                     error(f"No review gist found matching '{gist_id}'.")
-                return
+                sys.exit(1)
             try:
                 GitHubAPIHandler.delete_gist(matched["id"])
             except requests.HTTPError as e:
@@ -279,13 +279,13 @@ class ReviewCommand(BaseCommand):
                     json_print({"success": False, "message": f"GitHub API error: {e}"})
                 else:
                     error(f"GitHub API error: {e}")
-                return
+                sys.exit(1)
             except OSError as e:
                 if output_json:
                     json_print({"success": False, "message": str(e)})
                 else:
                     error(str(e))
-                return
+                sys.exit(1)
             if output_json:
                 json_print({"success": True})
             else:
@@ -306,7 +306,7 @@ class ReviewCommand(BaseCommand):
                     "error": "Please provide a gist ID to delete when using JSON output.",
                 }
             )
-            return
+            sys.exit(1)
 
         selected = questionary.checkbox("Select gists to delete", choices=choices).ask()
         if not selected:
@@ -328,8 +328,10 @@ class ReviewCommand(BaseCommand):
                 json_print({"success": False, "message": f"GitHub API error: {e}"})
             else:
                 error(f"GitHub API error: {e}")
+            sys.exit(1)
         except OSError as e:
             if output_json:
                 json_print({"success": False, "message": str(e)})
             else:
                 error(str(e))
+            sys.exit(1)

@@ -259,9 +259,6 @@ class ChatCommand(BaseCommand):
                 dry_run=False,
                 format=False,
             )
-            if output == "No changes detected":
-                push_success = True  # Not an error if there are no changes to push
-
             if push_success:
                 if not output_json:
                     success("Project pushed successfully.")
@@ -333,7 +330,7 @@ class ChatCommand(BaseCommand):
                         json_print(json_output)
                     else:
                         error(f"Failed to create chat session: {e}")
-                    return
+                    sys.exit(1)
 
                 conversation_id = response.get("conversation_id")
                 if not conversation_id:
@@ -344,7 +341,7 @@ class ChatCommand(BaseCommand):
                         json_print(json_output)
                     else:
                         error(f"Unexpected response when creating chat: {response}")
-                    return
+                    sys.exit(1)
 
                 url = project.get_conversation_url(conversation_id)
                 greeting = response.get("response", "")

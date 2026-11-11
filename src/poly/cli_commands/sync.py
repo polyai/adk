@@ -15,6 +15,7 @@ from typing import Any, Optional
 from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import (
     compute_diff,
+    fail,
     load_project,
     parse_from_projection_json,
     print_project_file_changes,
@@ -258,6 +259,7 @@ class PullCommand(BaseCommand):
             )
         if files_with_conflicts:
             print_file_list("Merge conflicts detected", files_with_conflicts, "filename.conflict")
+            sys.exit(1)
 
         success(f"Pulled {project.account_id}/{project.project_id}")
 
@@ -464,11 +466,14 @@ class PushCommand(BaseCommand):
 
         if new_branch_name:
             warning(f"Created and switched to new branch '{new_branch_name}'.")
-        if push_ok:
-            success(f"Pushed {project.account_id}/{project.project_id} to Agent Studio.")
-        else:
+        if not push_ok:
             error(f"Failed to push {project.account_id}/{project.project_id} to Agent Studio.")
             plain(output)
+            sys.exit(1)
+        if commands:
+            success(f"Pushed {project.account_id}/{project.project_id} to Agent Studio.")
+        else:
+            plain("[muted]No changes detected.[/muted]")
 
         if include_rtc and push_ok and not dry_run:
             from poly.cli_commands.rtc import RTCCommand
@@ -658,11 +663,10 @@ class DiffCommand(BaseCommand):
         Pass a version hash to compare that version against its predecessor.
         Use --before / --after to compare any two named versions or branches.
         """
-        from poly.output.console import console, error, plain, print_diff
+        from poly.output.console import console, plain, print_diff
 
         if version_hash and (before or after):
-            error("Cannot specify both hash and before/after versions.")
-            return
+            fail("Cannot specify both hash and before/after versions.", output_json)
 
         if version_hash:
             after = version_hash
@@ -670,10 +674,8 @@ class DiffCommand(BaseCommand):
         diffs = compute_diff(base_path, files, before, after, output_json=output_json)
 
         if not diffs:
-            if output_json and diffs is not None:
-                json_print({"success": False, "message": "No changes detected"})
-            elif output_json:
-                json_print({"success": False, "message": "Failed to compute diffs."})
+            if output_json:
+                json_print({"success": True, "message": "No changes detected"})
             else:
                 plain("[muted]No changes detected.[/muted]")
             return

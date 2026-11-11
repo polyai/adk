@@ -201,7 +201,6 @@ def compute_diff(
     If both are specified, compares the two remote versions.
     If only after is specified, compares against the previous version.
     """
-    from poly.output.console import error
 
     project = load_project(base_path, output_json=output_json)
     files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
@@ -216,18 +215,15 @@ def compute_diff(
         if after in deployment_hashes:
             after = deployment_hashes[after]
         if not versions:
-            error("No versions found.")
-            return
+            fail("No versions found.", output_json)
         version_idx = next(
             (i for i, v in enumerate(versions) if (v.get("version_hash") or "")[:9] == after[:9]),
             None,
         )
         if version_idx is None:
-            error(f"Version hash '{after}' not found.")
-            return None
+            fail(f"Version hash '{after}' not found.", output_json)
         if version_idx == len(versions) - 1:
-            error("No previous version found.")
-            return None
+            fail("No previous version found.", output_json)
         previous_version_idx = version_idx + 1
         before = (versions[previous_version_idx].get("version_hash") or "")[:9]
 

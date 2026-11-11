@@ -520,6 +520,8 @@ class AudioCacheCommand(BaseCommand):
 
         if output_json:
             json_print(result)
+            if result.get("failed"):
+                sys.exit(1)
             return
 
         deleted = result.get("deleted", [])
@@ -528,6 +530,7 @@ class AudioCacheCommand(BaseCommand):
             success(f"Deleted {len(deleted)} entries: {', '.join(deleted)}")
         if failed:
             error(f"Failed to delete {len(failed)} entries: {', '.join(failed)}")
+            sys.exit(1)
 
     @classmethod
     def audio_cache_synthesize(
