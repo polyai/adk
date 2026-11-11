@@ -1007,14 +1007,6 @@ class AgentStudioProject:
                     )
                 seen_paths.add(file_path)
 
-    def _duplicate_path_errors(self, resources: ResourceMap) -> list[str]:
-        """Return a validation error if two of the resources share a file path."""
-        try:
-            self._check_no_duplicate_resource_paths(resources)
-        except ValueError as e:
-            return [f"Validation error: {e}"]
-        return []
-
     @staticmethod
     def _snapshot_multi_resource_file_cache() -> dict[str, dict]:
         """Return {file path: top-level YAML data} for every file in the multi-resource cache.
@@ -1701,7 +1693,7 @@ class AgentStudioProject:
 
         # 4. Validate all resources with new state
         if not skip_validation:
-            validation_errors = self._duplicate_path_errors(new_state) + self.validate_resources(
+            validation_errors = self.validate_resources(
                 resources_dict=new_state, resource_mappings=resource_mappings
             )
             if validation_errors:
@@ -3352,7 +3344,7 @@ class AgentStudioProject:
                 resource_mapping.resource_id
             ] = local_resource
 
-        return self._duplicate_path_errors(resources) + self.validate_resources(
+        return self.validate_resources(
             resources_dict=resources,
             resource_mappings=resource_mappings,
         )
@@ -3368,6 +3360,16 @@ class AgentStudioProject:
             list[str]: A list of validation error messages.
         """
         validation_errors = []
+        seen_paths: set[str] = set()
+        for mapping in resource_mappings:
+            if mapping.file_path in seen_paths:
+                validation_errors.append(
+                    f"Validation error: Duplicate {mapping.resource_type.__name__} name "
+                    f"'{mapping.resource_name}'. Names must be unique, ignoring punctuation "
+                    "and spacing."
+                )
+            seen_paths.add(mapping.file_path)
+
         for resource_type, resources in resources_dict.items():
             for resource_id, resource in resources.items():
                 try:
