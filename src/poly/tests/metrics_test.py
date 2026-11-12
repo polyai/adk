@@ -974,7 +974,7 @@ class MetricsQueryTest(MetricsReadCommandTest):
         )
         mock_json.assert_called_once_with({"columns": [], "rows": []})
 
-    @patch("poly.cli_commands.metrics.json_print")
+    @patch("poly.cli_commands.shared.json_print")
     def test_invalid_flag_fails_before_any_request(self, mock_json):
         """The project's validation stops a bad flag before the API is called."""
         with self.assertRaises(SystemExit):
@@ -1035,7 +1035,7 @@ class MetricsQueryTest(MetricsReadCommandTest):
         self.assertIn("2026-11-01 ", output)
         self.assertNotIn("04:00", output)
 
-    @patch("poly.cli_commands.metrics.json_print")
+    @patch("poly.cli_commands.shared.json_print")
     def test_unknown_timezone_fails_before_any_request(self, mock_json):
         """A timezone that is not an IANA name is refused locally."""
         with self.assertRaises(SystemExit):

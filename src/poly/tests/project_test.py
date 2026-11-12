@@ -2209,6 +2209,21 @@ class PushProjectTest(unittest.TestCase):
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
+    def test_push_project_duplicate_entry_names_are_rejected(self):
+        """Two entries sharing a name fail validation and queue nothing."""
+        root = _copy_test_project(self)
+        _append_yaml_entries(
+            root, ENTITIES_FILE, "entities", [_entity_entry("city"), _entity_entry("city")]
+        )
+        project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+        success, message, commands = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertIn("Duplicate name 'city'.", message)
+        self.assertEqual(commands, [])
+        self.mock_api_handler.queue_resources.assert_not_called()
+
     def test_push_project_merge_conflict(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_pull.return_value = (["functions/test_function.py"], {})
@@ -3174,6 +3189,56 @@ class ValidateProjectTest(unittest.TestCase):
             }
         )
         self.assertEqual(errors, [])
+
+    def test_validate_project_reports_duplicate_entry_names(self):
+        """Entries sharing a name are reported, whether new or already on the platform."""
+        for names in (["city", "city"], ["customer_name"]):
+            with self.subTest(names=names):
+                root = _copy_test_project(self)
+                _append_yaml_entries(
+                    root, ENTITIES_FILE, "entities", [_entity_entry(name) for name in names]
+                )
+                project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+                errors = project.validate_project()
+
+                self.assertIn(f"Duplicate name {names[0]!r}.", errors[0])
+
+    def test_validate_project_reports_names_with_the_same_clean_name(self):
+        """Names that differ only in punctuation or spacing count as the same name."""
+        root = _copy_test_project(self)
+        _append_yaml_entries(
+            root,
+            ENTITIES_FILE,
+            "entities",
+            [_entity_entry("My Entity"), _entity_entry("My_Entity")],
+        )
+        project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+        errors = project.validate_project()
+
+        self.assertIn("Duplicate name 'My Entity'.", errors[0])
+
+
+ENTITIES_FILE = os.path.join("config", "entities.yaml")
+VARIANTS_FILE = os.path.join("config", "variant_attributes.yaml")
+
+
+def _entity_entry(name: str) -> dict:
+    """Return a valid entities.yaml entry with the given name."""
+    return {"name": name, "description": "A city", "entity_type": "free_text", "config": {}}
+
+
+def _append_yaml_entries(
+    root: str, relative_path: str, top_level_name: str, entries: list[dict]
+) -> None:
+    """Append entries to a top-level list of a multi-resource YAML file under root."""
+    file_path = os.path.join(root, relative_path)
+    with open(file_path, encoding="utf-8") as f:
+        data = resource_utils.load_yaml(f.read())
+    data[top_level_name] = [*data[top_level_name], *entries]
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(resource_utils.dump_yaml(data))
 
 
 class PullProjectTest(unittest.TestCase):
@@ -8419,6 +8484,110 @@ class ProjectGetPolyScoreTest(unittest.TestCase):
         self.assertEqual((end - start).days, 7)
         self.assertEqual(result["summary"]["average"], None)
         self.assertEqual(result["summary"]["conversations"], 0)
+
+
+class ProjectSearchConversationsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.search_conversations validation and request building."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api = patch("poly.project.AgentStudioInterface.search_conversations").start()
+        self.mock_api.return_value = {"conversations": [], "total": 0}
+        self.addCleanup(patch.stopall)
+
+    def test_scopes_to_the_project_and_normalises_the_window(self):
+        """The project id is always sent and a bare --to date includes the whole day."""
+        self.project.search_conversations(
+            from_dt="2026-09-01",
+            to_dt="2026-09-30",
+            filters=[{"metric": "call_summary", "op": "CONTAINS", "value": "refund"}],
+            sort={"field": "duration", "order": "DESC"},
+        )
+
+        self.assertEqual(self.mock_api.call_args.args[0], "us-1")
+        self.assertEqual(
+            self.mock_api.call_args.kwargs["body"],
+            {
+                "project_id": "test_project",
+                "limit": 20,
+                "offset": 0,
+                "from": "2026-09-01T00:00:00",
+                "to": "2026-10-01T00:00:00",
+                "filters": [{"metric": "call_summary", "op": "contains", "value": "refund"}],
+                "sort": {"field": "duration", "order": "desc"},
+            },
+        )
+
+    def test_rejects_what_the_data_api_would_reject(self):
+        """Operators, sort fields, cohorts and paging are checked locally."""
+        cases = [
+            ({"filters": [{"metric": "a", "op": "like", "value": "b"}]}, "like"),
+            ({"filters": [{"metric": "a", "op": "in", "value": "b"}]}, "list"),
+            ({"sort": {"field": "poly_score", "order": "asc"}}, "started_at"),
+            ({"sort": {"field": "duration", "order": "sideways"}}, "Sort order"),
+            ({"channel": ["FAX"]}, "Channel"),
+            ({"client_env": ["prod"]}, "Environment"),
+            ({"limit": 101}, "Limit"),
+            ({"offset": -1}, "Offset"),
+            ({"from_dt": "last week"}, "YYYY-MM-DD"),
+        ]
+        for kwargs, fragment in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.search_conversations(**kwargs)
+                self.assertIn(fragment, str(ctx.exception))
+        self.mock_api.assert_not_called()
+
+
+class ProjectSearchTranscriptsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.search_transcripts and get_transcript."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_search = patch("poly.project.AgentStudioInterface.search_transcripts").start()
+        self.mock_get = patch("poly.project.AgentStudioInterface.get_transcript").start()
+        self.addCleanup(patch.stopall)
+
+    def test_search_params_always_carry_the_project(self):
+        """The phrase is trimmed and the project id sent, as PATs require it."""
+        self.project.search_transcripts("  cancel my booking ", to_dt="2026-09-30", context_turns=2)
+
+        self.assertEqual(
+            self.mock_search.call_args.kwargs["params"],
+            {
+                "q": "cancel my booking",
+                "project_id": "test_project",
+                "context_turns": 2,
+                "limit": 20,
+                "offset": 0,
+                "to": "2026-10-01T00:00:00",
+            },
+        )
+
+    def test_search_rejects_bad_phrase_context_and_paging(self):
+        """Length, context and paging bounds are checked before any request."""
+        cases = [
+            ({"query": "hi"}, "3 to 300"),
+            ({"query": "x" * 301}, "3 to 300"),
+            ({"query": "refund", "context_turns": 4}, "Context"),
+            ({"query": "refund", "limit": 0}, "Limit"),
+        ]
+        for kwargs, fragment in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.search_transcripts(**kwargs)
+                self.assertIn(fragment, str(ctx.exception))
+        self.mock_search.assert_not_called()
+
+    def test_get_transcript_passes_ids(self):
+        """Transcript fetches carry the conversation and project ids."""
+        self.project.get_transcript(" conv-1 ")
+
+        self.mock_get.assert_called_once_with(
+            "us-1", conversation_id="conv-1", project_id="test_project"
+        )
+        with self.assertRaises(ValueError):
+            self.project.get_transcript("  ")
 
 
 class ProjectMetricBucketWindowTest(unittest.TestCase):

@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v0.80.1 (2026-11-12)
+
+### Bug Fixes
+
+- Reject duplicate names in YAML resources before push
+  ([#418](https://github.com/polyai/adk/pull/418),
+  [`9952605`](https://github.com/polyai/adk/commit/9952605e1485c74e93c1bba31d7494116a6de7dd))
+
+### Documentation
+
+- Replace the expired Discord invite with the permanent one
+  ([#422](https://github.com/polyai/adk/pull/422),
+  [`d0636ed`](https://github.com/polyai/adk/commit/d0636ed1f00f65f9574a293879504494797dd9b2))
+
+
+## v0.80.0 (2026-11-10)
+
+### Features
+
+- **conversations**: Poly conversations search and poly transcripts search|get
+  ([#349](https://github.com/polyai/adk/pull/349),
+  [`714d798`](https://github.com/polyai/adk/commit/714d7984a0a270649520a5b1d2b380b95264c3eb))
+
+
 ## v0.79.0 (2026-11-10)
 
 ### Features

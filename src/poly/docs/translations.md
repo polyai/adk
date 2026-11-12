@@ -29,7 +29,7 @@ translations:
 
 ## Validation
 
-- Translation name cannot be empty.
+- Translation name cannot be empty and must be unique within the file.
 - Each translation must have at least one language entry.
 - If languages are configured (see [Languages](languages.md)), every configured language (default + additional) must have an entry in each translation. Missing languages will cause a validation error.
 
