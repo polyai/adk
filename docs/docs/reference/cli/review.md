@@ -48,7 +48,9 @@ The gist is created privately on GitHub, with one `.diff` file per changed resou
 { "success": true, "link": "https://gist.github.com/..." }
 ~~~
 
-On failure (no changes to review, or a GitHub API/network error):
+With no changes to review, it prints `{ "success": true, "message": "No changes to review." }`.
+
+On a GitHub API/network error, the command exits non-zero:
 
 ~~~json
 { "success": false, "message": "..." }

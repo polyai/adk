@@ -1728,7 +1728,7 @@ class AgentStudioProject:
         deleted_resources.update(subresource_changes.deleted)
 
         if not (updated_resources or new_resources or deleted_resources):
-            return False, "No changes detected", []
+            return True, "No changes detected", []
 
         # 4. Validate all resources with new state
         if not skip_validation:
