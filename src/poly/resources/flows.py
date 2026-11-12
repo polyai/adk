@@ -70,17 +70,70 @@ START_MODE_AGENT = "agent"
 START_MODE_TOOL = "tool"
 START_MODES = (START_MODE_AGENT, START_MODE_TOOL)
 MIN_AGENT_START_DESCRIPTION_WORDS = 5
-# For descriptions written without spaces (e.g. Japanese or Chinese), where words can't be counted.
+# Languages written without spaces between words (e.g. Japanese, Chinese or Thai) can't be
+# measured in words, so they need this many characters instead.
 MIN_AGENT_START_DESCRIPTION_CHARS = 15
 AGENT_START_PLACEHOLDER_PREFIX = "description for flow "
 
-# Ordinal mapping for the proto FlowStartMode enum. Unspecified behaves as "tool", so it maps to
-# None like a missing key.
+# The agent start rules must accept exactly what the platform does, and it uses JavaScript's
+# whitespace (`\s`, `trim`), which unlike Python's leaves out \x1c-\x1f and \x85.
+_JS_WHITESPACE = (
+    "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009"
+    "\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+_JS_WHITESPACE_RUN = re.compile(f"[{_JS_WHITESPACE}]+")
+_NAME_SEPARATOR_RUN = re.compile(f"[{_JS_WHITESPACE}_-]+")
+
+# Code points of the scripts written without spaces between words: Unicode Script=Han, Hiragana,
+# Katakana, Thai, Lao, Khmer and Myanmar. Ranges are joined only across unassigned code points, so
+# punctuation and marks these blocks share with other scripts (、。・ー゛ ฿) are not counted.
+_UNSPACED_SCRIPT_RANGES = (
+    (0x0E01, 0x0E3A),  # Thai
+    (0x0E40, 0x0EDF),  # Thai, Lao
+    (0x1000, 0x109F),  # Myanmar
+    (0x1780, 0x17F9),  # Khmer
+    (0x19E0, 0x19FF),  # Khmer Symbols
+    (0x2E80, 0x2FD5),  # CJK Radicals Supplement, Kangxi Radicals
+    (0x3005, 0x3005),  # CJK Symbols and Punctuation: ideographic iteration mark
+    (0x3007, 0x3007),  # CJK Symbols and Punctuation: ideographic number zero
+    (0x3021, 0x3029),  # CJK Symbols and Punctuation: Hangzhou numerals
+    (0x3038, 0x303B),  # CJK Symbols and Punctuation: Hangzhou numerals, vertical iteration mark
+    (0x3041, 0x3096),  # Hiragana
+    (0x309D, 0x309F),  # Hiragana iteration marks, digraph yori
+    (0x30A1, 0x30FA),  # Katakana
+    (0x30FD, 0x30FF),  # Katakana iteration marks, digraph koto
+    (0x31F0, 0x31FF),  # Katakana Phonetic Extensions
+    (0x32D0, 0x32FE),  # Enclosed CJK Letters and Months: circled katakana
+    (0x3300, 0x3357),  # CJK Compatibility: squared katakana
+    (0x3400, 0x4DBF),  # CJK Unified Ideographs Extension A
+    (0x4E00, 0x9FFF),  # CJK Unified Ideographs
+    (0xA9E0, 0xA9FE),  # Myanmar Extended-B
+    (0xAA60, 0xAA7F),  # Myanmar Extended-A
+    (0xF900, 0xFAD9),  # CJK Compatibility Ideographs
+    (0xFF66, 0xFF6F),  # Halfwidth Katakana
+    (0xFF71, 0xFF9D),  # Halfwidth Katakana
+    (0x116D0, 0x116E3),  # Myanmar Extended-C
+    (0x16FE2, 0x16FE3),  # Ideographic Symbols and Punctuation
+    (0x16FF0, 0x16FF1),  # Ideographic Symbols and Punctuation: Vietnamese alternate reading marks
+    (0x1AFF0, 0x1B167),  # Kana Extended-B, Kana Supplement, Kana Extended-A, Small Kana Extension
+    (0x1F200, 0x1F200),  # Enclosed Ideographic Supplement: square hiragana hoka
+    (0x20000, 0x323AF),  # CJK Unified Ideographs Extensions B to H, Compatibility Supplement
+)
+
+# Ordinal mapping for the proto FlowStartMode enum. Unspecified behaves as "tool", so it parses
+# to None like a missing key.
 START_MODE_FROM_PROTO_INT = {
-    0: None,
+    0: "unspecified",
     1: START_MODE_AGENT,
     2: START_MODE_TOOL,
 }
+
+
+def count_unspaced_script_chars(text: str) -> int:
+    """Count the characters of `text` in scripts written without spaces between words."""
+    return sum(
+        any(start <= ord(char) <= end for start, end in _UNSPACED_SCRIPT_RANGES) for char in text
+    )
 
 
 def parse_projection_start_mode(value: "int | str | None") -> Optional[str]:
@@ -347,12 +400,14 @@ class FlowConfig(YamlResource):
         """Check the description says enough for the agent to know when to start the flow."""
 
         def normalise(text: str) -> str:
-            text = text.strip().lower().replace("_", " ").replace("-", " ")
-            return " ".join(text.removesuffix(".").split())
+            text = _NAME_SEPARATOR_RUN.sub(" ", text.strip(_JS_WHITESPACE).lower())
+            return text.removesuffix(".")
 
-        description = normalise(self.description)
+        trimmed = self.description.strip(_JS_WHITESPACE)
+        description = normalise(trimmed)
         flow_name = normalise(self.name)
-        if self.description.strip().lower().startswith(AGENT_START_PLACEHOLDER_PREFIX):
+        # Any stub, including one left over from the flow's previous name.
+        if f"{trimmed.lower()} ".startswith(AGENT_START_PLACEHOLDER_PREFIX):
             raise ValueError(
                 "Description cannot be the default placeholder when start_mode is 'agent'. "
                 "Describe what the user wants when this flow should start."
@@ -364,16 +419,18 @@ class FlowConfig(YamlResource):
                 "Describe what the user wants when this flow should start."
             )
 
-        words = self.description.split()
-        long_enough = len(words) >= MIN_AGENT_START_DESCRIPTION_WORDS or (
-            len(words) == 1 and len(words[0]) >= MIN_AGENT_START_DESCRIPTION_CHARS
+        words = [word for word in _JS_WHITESPACE_RUN.split(trimmed) if word]
+        long_enough = (
+            len(words) >= MIN_AGENT_START_DESCRIPTION_WORDS
+            or (len(words) == 1 and len(trimmed) >= MIN_AGENT_START_DESCRIPTION_CHARS)
+            or count_unspaced_script_chars(trimmed) >= MIN_AGENT_START_DESCRIPTION_CHARS
         )
         if not long_enough:
             raise ValueError(
                 f"Description must have at least {MIN_AGENT_START_DESCRIPTION_WORDS} words, "
-                f"or {MIN_AGENT_START_DESCRIPTION_CHARS} characters if written without spaces, "
-                "when start_mode is 'agent'. Describe what the user wants when this flow "
-                "should start."
+                f"or {MIN_AGENT_START_DESCRIPTION_CHARS} characters in a language written "
+                "without spaces, when start_mode is 'agent'. Describe what the user wants when "
+                "this flow should start."
             )
 
     def build_update_proto(

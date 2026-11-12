@@ -29,11 +29,13 @@ Information about the flow.
 
 Fields:
 - **name**: Human-readable flow name
-- **description** (required): What this flow does
+- **description** (required): What the user wants when this flow should start, e.g. "The caller wants to book a table". With `start_mode: agent`, the agent reads it to decide when to start the flow.
 - **start_step** (required): Name of the step to enter when the flow is triggered. Must match a real step name.
 - **start_mode** (optional): Who may start the flow. `agent`: the agent may start it itself, from its description. `tool`: only function code starts it, with `conv.goto_flow` (the default when the key is missing). Only `start_mode: agent` is written on pull.
 
-When `start_mode` is `agent`, the description is what the agent reads to decide when to start the flow. Write what the user wants, not how the flow works: "The caller wants to book, change or cancel a table reservation", not "Collects name, party size and date". It must have at least 5 words (or at least 15 characters in a language written without spaces), must not start with the default `Description for flow `, and must not just repeat the flow name. This is checked when the flow is created or its `start_mode`, description or name changes; an unchanged flow only gets a warning.
+When `start_mode` is `agent`, the description is what the agent reads to decide when to start the flow. Write what the user wants, not how the flow works: "The caller wants to book, change or cancel a table reservation", not "Collects name, party size and date". It must have at least 5 words, or 15 characters in a language written without spaces (Chinese, Japanese, Thai, Lao, Khmer or Myanmar characters anywhere in the description count towards the 15). It must not start with the default `Description for flow `, and must not just repeat the flow name. This is checked when the flow is created or its `start_mode`, description or name changes. An agent-started flow whose start mode, description and name are unchanged only gets a warning, so it doesn't block other changes, including to that flow's other fields.
+
+`poly push --force` overwrites the platform's start mode with the local `flow_config.yaml`, like any other field: a flow set to agent-started in Agent Studio after the last pull goes back to tool-only if the file has no `start_mode`. Pull first to keep it.
 
 Example:
 ```yaml

@@ -70,6 +70,7 @@ from poly.resources.flows import (
     ReasoningEffort,
     StepType,
     VADConfig,
+    parse_projection_start_mode,
     parse_reasoning_effort,
 )
 from poly.resources.function import (
@@ -3348,7 +3349,7 @@ start_step: step-1
             ("  DESCRIPTION FOR FLOW renamed_flow".strip(), "default placeholder"),
             ("Books a table.", "at least 5 words"),
             ("Reservations", "at least 5 words"),
-            ("テーブルを予約したい", "15 characters if written without spaces"),
+            ("テーブルを予約したい", "15 characters in a language written without spaces"),
         ]
         for bad_description, message in invalid:
             with self.subTest(description=bad_description):
@@ -3421,6 +3422,59 @@ start_step: step-1
         invalid.known_start = KnownFlowStart.of(self._flow_config("auto", description=good))
         with self.assertRaises(ValueError):
             invalid.validate(resource_mappings=resource_mappings)
+
+    def test_agent_start_description_matches_platform_rule(self):
+        """Accepts and rejects exactly the descriptions the platform does."""
+        issues = {
+            "placeholder": "default placeholder",
+            "restates_name": "repeat the flow name",
+            "too_short": "at least 5 words",
+        }
+        cases = [
+            # (flow name, description, expected issue or None)
+            # Japanese with spaces and a Latin word: 17 Japanese characters
+            ("Test Flow", "お客様が LINE で予約したいときに使います", None),
+            # 13 Han characters and a Latin word
+            ("Test Flow", "顧客想预订餐桌时使用此流程 VIP", "too_short"),
+            # 14 and 15 unspaced-script characters, split by a space
+            ("Test Flow", "顧客想预订餐桌 时使用此流程呢", "too_short"),
+            ("Test Flow", "顧客想预订餐桌 时使用此流程呢吧", None),
+            # 14 and 15 characters with no space at all
+            ("Test Flow", "あいうえおかきくけこさしすせ", "too_short"),
+            ("Test Flow", "あいうえおかきくけこさしすせそ", None),
+            # Shared punctuation and the prolonged sound mark don't count: 13 of 17
+            ("Test Flow", "ケーキを予約したい、 ありがとう。", "too_short"),
+            # Thai, with its combining vowel and tone marks
+            ("Test Flow", "ลูกค้าต้องการ จองโต๊ะ", None),
+            # Latin and Korean are written with spaces, so words are counted
+            ("Test Flow", "Books a table today.", "too_short"),
+            ("Test Flow", "테이블 예약", "too_short"),
+            ("Test Flow", "고객이 테이블을 예약하고 싶을 때", None),
+            ("Test Flow", "Reservations", "too_short"),
+            ("Test Flow", "Reservationsandbookings", None),
+            # Placeholder, bare or followed by any name
+            ("Test Flow", "Description for flow", "placeholder"),
+            ("Test Flow", "description for flow Test Flow", "placeholder"),
+            ("Test Flow", "Description for flowchart reviews and other requests", None),
+            # Separators collapse before one trailing "." is removed
+            ("A b c d e", "a b c d e .", None),
+            ("A b c d e", "a b c d e.", "restates_name"),
+            ("A b c d e", "a_b-c  d e flow", "restates_name"),
+            # Only JavaScript whitespace separates words: not \x1c-\x1f or \x85
+            ("Test Flow", "Book\x1ca table for dinner", "too_short"),
+            ("Test Flow", "Book\x85a table for dinner", "too_short"),
+            ("Test Flow", "Book\u00a0a table for dinner", None),
+            ("Test Flow", "Book\u3000a table for dinner", None),
+        ]
+        for name, description, issue in cases:
+            with self.subTest(name=name, description=description):
+                config = self._flow_config("agent", description=description, name=name)
+                if issue is None:
+                    self.assertIsNone(config._validate_agent_start_description())
+                else:
+                    with self.assertRaises(ValueError) as cm:
+                        config._validate_agent_start_description()
+                    self.assertIn(issues[issue], str(cm.exception))
 
 
 TEST_FLOW_STEP = FlowStep(
@@ -14098,6 +14152,18 @@ class FlowConfigFromProjection(unittest.TestCase):
                     self.assertNotIn("start_mode", config.to_yaml_dict())
                     self.assertEqual(config, pull())
                     self.assertEqual(config.compute_hash(), pull().compute_hash())
+
+    def test_unspecified_start_mode_is_not_logged_as_unknown(self):
+        """Unspecified is a known value; only values that aren't start modes are logged."""
+        for raw in (None, 0, "FLOW_START_MODE_UNSPECIFIED", "unspecified"):
+            with self.subTest(raw=raw):
+                with self.assertNoLogs("poly.resources.flows", level="DEBUG"):
+                    self.assertIsNone(parse_projection_start_mode(raw))
+        for raw in (3, "automatic"):
+            with self.subTest(raw=raw):
+                with self.assertLogs("poly.resources.flows", level="DEBUG") as logs:
+                    self.assertIsNone(parse_projection_start_mode(raw))
+                self.assertIn("Unknown flow start mode", logs.output[0])
 
 
 class FlowStepFromProjection(unittest.TestCase):

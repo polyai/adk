@@ -2413,6 +2413,32 @@ class PushProjectTest(unittest.TestCase):
         self.assertIn(Function, updated)
         self.assertNotIn(FlowConfig, updated)
 
+    def test_push_project_weak_agent_flow_other_field_edit_is_pushed(self):
+        """Changing only the start step of a weak agent flow warns and still pushes the flow."""
+        project_data = deepcopy(PROJECT_DATA)
+        flow_data = project_data["resources"]["flow_config"][self.FLOW_CONFIG_ID]
+        flow_data["description"] = "Books a table."
+        flow_data["start_mode"] = "agent"
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+        local_yaml = (
+            "name: test_flow\ndescription: Books a table.\nstart_step: collect_name\n"
+            "start_mode: agent\n"
+        )
+
+        with (
+            mock_read_from_file({self.FLOW_CONFIG_PATH: local_yaml}),
+            self.assertLogs("poly.resources.flows", level="WARNING") as logs,
+        ):
+            success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        self.assertIn("at least 5 words", "\n".join(logs.output))
+        updated = self.mock_api_handler.queue_resources.call_args.kwargs["updated_resources"]
+        proto = updated[FlowConfig][self.FLOW_CONFIG_ID].build_update_proto()
+        self.assertEqual(proto.start_step_id, "collect_name")
+        self.assertEqual(proto.description, "Books a table.")
+        self.assertEqual(proto.start_mode, FlowStartMode.FLOW_START_MODE_AGENT)
+
     def test_push_project_changed_weak_agent_flow_fails_validation(self):
         """Switching to agent, or weakening an agent flow's description, blocks the push."""
         weak_yaml = "name: test_flow\ndescription: Books a table.\nstart_step: start_step\n"
