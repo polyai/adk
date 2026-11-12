@@ -10896,7 +10896,8 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                 self.assertEqual(
                     errors,
                     [
-                        "Validation error in outbound_campaigns/reminders/campaign.yaml/campaign: "
+                        "Validation error in "
+                        f"{os.path.join('outbound_campaigns', 'reminders', 'campaign.yaml', 'campaign')}: "
                         f"Node name '{duplicate}' is used more than once."
                     ],
                 )
