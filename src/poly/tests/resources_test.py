@@ -1770,6 +1770,50 @@ class TopicTests(unittest.TestCase):
             topic_with_too_many_example_queries.validate(resource_mappings=[])
         self.assertIn("Example queries must be less than 20", str(cm.exception))
 
+    def _topic(self, name: str = "Opening hours", example_queries: list[str] = None) -> Topic:
+        return Topic(
+            resource_id="TOPIC-1",
+            name=name,
+            actions="",
+            content="We open at 9.",
+            example_queries=example_queries or [],
+        )
+
+    def test_validate_accepts_name_that_only_mentions_guardrail(self):
+        """Only the reserved prefix is rejected, not the word itself."""
+        for name in ("Guardrail questions", "About Guardrail - policies", "Guardrail -"):
+            with self.subTest(name=name):
+                self._topic(name=name).validate(resource_mappings=[])
+
+    def test_validate_rejects_guardrail_name_prefix_in_any_case(self):
+        """Agent Studio reserves the `Guardrail - ` prefix for guardrails."""
+        for name in ("Guardrail - Refunds", "guardrail - refunds", "  GUARDRAIL - Refunds"):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError) as cm:
+                    self._topic(name=name).validate(resource_mappings=[])
+                self.assertIn("cannot start with 'Guardrail - '", str(cm.exception))
+
+    def test_validate_accepts_plain_example_queries(self):
+        self._topic(example_queries=["When do you open?", "Are you open on Sunday?"]).validate(
+            resource_mappings=[]
+        )
+
+    def test_validate_rejects_blank_example_query(self):
+        for query in ("", "   "):
+            with self.subTest(query=query):
+                with self.assertRaises(ValueError) as cm:
+                    self._topic(example_queries=["When do you open?", query]).validate(
+                        resource_mappings=[]
+                    )
+                self.assertIn("Example queries must not be empty", str(cm.exception))
+
+    def test_validate_rejects_pipe_in_example_query(self):
+        with self.assertRaises(ValueError) as cm:
+            self._topic(example_queries=["open | closed"]).validate(resource_mappings=[])
+        self.assertIn(
+            "Example query 'open | closed' must not contain the '|' character", str(cm.exception)
+        )
+
     def test_read_local_resource(self):
         """Test reading a topic from a YAML file."""
         test_file_pretty_content = """actions: Run function {{fn:test_function}}
@@ -2271,6 +2315,29 @@ example_queries:
             child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
 
         self.assertIn("Example queries must be less than 20", str(cm.exception))
+
+    def test_topic_name_and_example_query_rules_apply_to_child_topics(self):
+        """A child topic is held to the same name and example query rules as a base topic."""
+        cases = {
+            "cannot start with 'Guardrail - '": {"name": "Guardrail - Horario"},
+            "Example queries must not be empty": {"example_queries": ["  "]},
+            "must not contain the '|' character": {"example_queries": ["abren | cierran"]},
+        }
+        for message, overrides in cases.items():
+            with self.subTest(message=message):
+                fields = {
+                    "resource_id": "TOPIC-es-1",
+                    "name": "Opening Hours",
+                    "variant_id": "VARIANT-es",
+                    "variant_name": "Spanish",
+                    "actions": "",
+                    "content": "",
+                    "example_queries": ["¿a qué hora abren?"],
+                }
+                fields.update(overrides)
+                with self.assertRaises(ValueError) as cm:
+                    ChildTopic(**fields).validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
+                self.assertIn(message, str(cm.exception))
 
     def test_unknown_reference_raises(self):
         """References in actions/content must resolve, as they do for a base topic."""
@@ -7565,6 +7632,28 @@ class PhraseFilterTests(unittest.TestCase):
             pf.validate(resource_mappings=[])
         self.assertIn("regular expression", str(cm.exception).lower())
 
+    def test_validate_accepts_empty_or_valid_language_code(self):
+        """An empty language code applies the filter to every language."""
+        for language_code in ("", "en-GB"):
+            with self.subTest(language_code=language_code):
+                PhraseFilter(
+                    resource_id="sk-1",
+                    name="Filter",
+                    regular_expressions=[r"x"],
+                    language_code=language_code,
+                ).validate(resource_mappings=[])
+
+    def test_validate_invalid_language_code_raises(self):
+        pf = PhraseFilter(
+            resource_id="sk-1",
+            name="Filter",
+            regular_expressions=[r"x"],
+            language_code="not a language",
+        )
+        with self.assertRaises(ValueError) as cm:
+            pf.validate(resource_mappings=[])
+        self.assertIn("Invalid language code: not a language", str(cm.exception))
+
     def test_build_protos(self):
         """build_create_proto, build_update_proto, build_delete_proto set fields correctly."""
         pf = PhraseFilter(
@@ -7690,6 +7779,29 @@ class PronunciationTests(unittest.TestCase):
         """validate succeeds when regex is provided."""
         p = Pronunciation(resource_id="pr-1", regex=r"\bword\b", replacement="x")
         p.validate()
+
+    def test_validate_whitespace_only_regex_raises(self):
+        """A regex of only whitespace counts as missing."""
+        p = Pronunciation(resource_id="pr-1", regex="   ", replacement="x")
+        with self.assertRaises(ValueError) as cm:
+            p.validate()
+        self.assertIn("Regex pattern is required", str(cm.exception))
+
+    def test_validate_accepts_empty_or_valid_language_code(self):
+        """An empty language code applies the rule to every language."""
+        for language_code in ("", "en-GB"):
+            with self.subTest(language_code=language_code):
+                Pronunciation(
+                    resource_id="pr-1", regex=r"x", replacement="y", language_code=language_code
+                ).validate()
+
+    def test_validate_invalid_language_code_raises(self):
+        p = Pronunciation(
+            resource_id="pr-1", regex=r"x", replacement="y", language_code="not a language"
+        )
+        with self.assertRaises(ValueError) as cm:
+            p.validate()
+        self.assertIn("Invalid language code: not a language", str(cm.exception))
 
     def test_build_protos(self):
         """build_create_proto, build_update_proto, build_delete_proto set fields correctly."""
@@ -8501,6 +8613,24 @@ class TranscriptCorrectionTests(unittest.TestCase):
         tc = TranscriptCorrection(
             resource_id="tc-1",
             name="",
+            description="desc",
+            regular_expressions=[
+                RegularExpressionRule(
+                    regular_expression="x",
+                    replacement="y",
+                    replacement_type="full",
+                ),
+            ],
+        )
+        with self.assertRaises(ValueError) as cm:
+            tc.validate()
+        self.assertIn("Correction name is required", str(cm.exception))
+
+    def test_validate_whitespace_only_name_raises(self):
+        """A name of only whitespace counts as missing."""
+        tc = TranscriptCorrection(
+            resource_id="tc-1",
+            name="   ",
             description="desc",
             regular_expressions=[
                 RegularExpressionRule(
@@ -10408,6 +10538,146 @@ class TestCaseTests(unittest.TestCase):
             )
         self.assertIn("Unknown function in assertion: register_phone_numbr", str(cm.exception))
 
+    def _test_case_with_argument(self, **argument) -> TestCase:
+        """A test case asserting one function call argument, read from its YAML shape."""
+        return TestCase.from_yaml_dict(
+            {
+                "name": "Argument assertion",
+                "scenario": "Book a table.",
+                "channel": "voice",
+                "language": "en-GB",
+                "function_call_assertions": [
+                    {
+                        "name": "test_function",
+                        "arguments": [{"parameter_name": "amount", **argument}],
+                    }
+                ],
+            },
+            resource_id="TEST-argument_assertion",
+            name="Argument assertion",
+        )
+
+    def test_validate_accepts_float_value_type(self):
+        """`float` is the decimal value type Agent Studio stores."""
+        self._test_case_with_argument(expected_value="1.5", value_type="float").validate()
+
+    def test_number_value_type_is_read_as_float(self):
+        """`number` in a file is sent to Agent Studio, and written back, as `float`."""
+        test_case = self._test_case_with_argument(expected_value="1.5", value_type="number")
+        test_case.validate()
+
+        call = test_case.assertions.function_calls[0]
+        self.assertEqual(call.arguments[0].value_type, "float")
+        self.assertEqual(call.to_proto().arguments["amount"].value_type, "float")
+        written = test_case.to_yaml_dict()["function_call_assertions"][0]["arguments"][0]
+        self.assertEqual(written["value_type"], "float")
+
+    def test_validate_rejects_unknown_value_type(self):
+        with self.assertRaises(ValueError) as cm:
+            self._test_case_with_argument(expected_value="1.5", value_type="decimal").validate()
+        self.assertIn(
+            "Invalid value type for function call assertion argument: decimal", str(cm.exception)
+        )
+
+    def test_float_assertion_round_trips(self):
+        """A `float` assertion read from YAML is written back unchanged."""
+        test_case = self._test_case_with_argument(expected_value="1.5", value_type="float")
+        yaml_dict = test_case.to_yaml_dict()
+        self.assertEqual(
+            yaml_dict["function_call_assertions"][0]["arguments"],
+            [{"parameter_name": "amount", "expected_value": "1.5", "value_type": "float"}],
+        )
+
+        restored = TestCase.from_yaml_dict(
+            yaml_dict, resource_id="TEST-argument_assertion", name="Argument assertion"
+        )
+        self.assertEqual(restored.to_yaml_dict(), yaml_dict)
+        self.assertEqual(restored.assertions, test_case.assertions)
+
+    def test_validate_accepts_equals_and_any_assertion_types(self):
+        for assertion_type in ("equals", "any"):
+            with self.subTest(assertion_type=assertion_type):
+                self._test_case_with_argument(
+                    expected_value="hello", value_type="string", assertion_type=assertion_type
+                ).validate()
+
+    def test_validate_rejects_unknown_assertion_type(self):
+        with self.assertRaises(ValueError) as cm:
+            self._test_case_with_argument(
+                expected_value="hello", value_type="string", assertion_type="contains"
+            ).validate()
+        self.assertIn(
+            "Invalid assertion type for function call assertion argument: contains",
+            str(cm.exception),
+        )
+
+    def test_validate_accepts_unset_expected_value(self):
+        self._test_case_with_argument(value_type="integer", expected_value=None).validate()
+
+    def test_validate_rejects_blank_expected_value(self):
+        for argument in (
+            {"value_type": "string", "expected_value": ""},
+            {"value_type": "string", "expected_value": "   "},
+            {"value_type": "integer", "expected_value": "  "},
+        ):
+            with self.subTest(argument=argument):
+                with self.assertRaises(ValueError) as cm:
+                    self._test_case_with_argument(**argument).validate()
+                self.assertIn(
+                    "Expected value cannot be blank for function call assertion argument: amount",
+                    str(cm.exception),
+                )
+
+    def test_validate_accepts_expected_values_that_read_as_their_type(self):
+        """Unquoted YAML values count too: they are sent as the text they print as."""
+        cases = {
+            "string": ["hello", "12abc", "true"],
+            "integer": ["4", "-4", " 4 ", "007", 4],
+            "float": ["1.5", "-1.5", "+1.5", ".5", "5.", "4", "1e3", 1.5],
+            "boolean": ["true", "false", " true ", True, False],
+        }
+        for value_type, values in cases.items():
+            for expected_value in values:
+                with self.subTest(value_type=value_type, expected_value=expected_value):
+                    self._test_case_with_argument(
+                        expected_value=expected_value, value_type=value_type
+                    ).validate()
+
+    def test_validate_rejects_expected_values_that_do_not_read_as_their_type(self):
+        cases = {
+            "integer": ["4.0", "12abc", "+4", "1e3", "four", "1_000", "٤"],
+            "float": ["1.5abc", "1,5", "nan", "inf", "Infinity", "1e999", "."],
+            "boolean": ["True", "FALSE", "yes", "1", "0"],
+        }
+        for value_type, values in cases.items():
+            for expected_value in values:
+                with self.subTest(value_type=value_type, expected_value=expected_value):
+                    with self.assertRaises(ValueError) as cm:
+                        self._test_case_with_argument(
+                            expected_value=expected_value, value_type=value_type
+                        ).validate()
+                    self.assertIn(
+                        f"Expected value '{expected_value}' for function call assertion "
+                        f"argument 'amount' is not a valid {value_type}",
+                        str(cm.exception),
+                    )
+
+    def test_validate_rejects_duplicate_tags(self):
+        test_case = self._sample_test_case()
+        test_case.validate()
+
+        test_case.tags.tags = ["booking", "smoke", "booking"]
+        with self.assertRaises(ValueError) as cm:
+            test_case.validate()
+        self.assertIn("Duplicate tags: ['booking']", str(cm.exception))
+
+    def test_validate_rejects_whitespace_only_scenario(self):
+        test_case = self._sample_test_case()
+        test_case.scenario = "   "
+        with self.assertRaises(ValueError) as cm:
+            test_case.validate()
+        self.assertIn("Scenario is required", str(cm.exception))
+
     def test_get_new_updated_deleted_subresources(self):
         test_case = self._sample_test_case()
         new, updated, deleted = test_case.get_new_updated_deleted_subresources()
@@ -11293,6 +11563,17 @@ class TestCaseApiMocksTests(unittest.TestCase):
             test_case.validate()
         self.assertIn("empty operation name", str(ctx.exception))
 
+    def test_validate_rejects_whitespace_only_integration_and_operation_names(self):
+        cases = {
+            "integration name cannot be empty": {"  ": {"get_customer": [ApiResponseRule()]}},
+            "empty operation name": {"crm": {"  ": [ApiResponseRule()]}},
+        }
+        for message, mocks in cases.items():
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as ctx:
+                    self._test_case(api_mocks=self._api_mocks(mocks)).validate()
+                self.assertIn(message, str(ctx.exception))
+
     def test_validate_rejects_an_operation_with_no_response_rules(self):
         test_case = self._test_case(api_mocks=self._api_mocks({"crm": {"get_customer": []}}))
 
@@ -11899,6 +12180,19 @@ class TranslationTests(unittest.TestCase):
             translations={"en-GB": "hello"},
         )
         t.validate()
+
+    def test_validate_blank_language_raises_without_configured_languages(self):
+        """A blank language key is rejected even when the project's languages aren't known."""
+        for language in ("", "   "):
+            with self.subTest(language=language):
+                t = Translation(
+                    resource_id="tn-1",
+                    name="greeting",
+                    translations={"en-GB": "hello", language: "hola"},
+                )
+                with self.assertRaises(ValueError) as cm:
+                    t.validate()
+                self.assertIn("Translation language code cannot be empty", str(cm.exception))
 
 
 class DefaultLanguageTests(unittest.TestCase):
@@ -13219,6 +13513,49 @@ class DocumentTests(unittest.TestCase):
         content = "# Title\nSome markdown content"
         self.assertEqual(Document.make_pretty(content), content)
         self.assertEqual(Document.from_pretty(content), content)
+
+    def _document(self, path: str = "notes.md", contents: str = "hello") -> Document:
+        return Document(resource_id=path, name="notes", path=path, contents=contents)
+
+    def test_validate_accepts_allowed_file_names(self):
+        for path in ("notes.md", "CONTEXT.MD", "_draft-2.v1.md", ".hidden.md", "flows/FLOW_1.MD"):
+            with self.subTest(path=path):
+                self._document(path=path).validate()
+
+    def test_validate_rejects_file_names_agent_studio_does_not_allow(self):
+        cases = {
+            "my notes.md": "contains invalid characters",
+            "café.md": "contains invalid characters",
+            "/notes.md": "contains invalid characters",
+            "notes..md": "must not contain '..'",
+        }
+        for path, message in cases.items():
+            with self.subTest(path=path):
+                with self.assertRaises(ValueError) as cm:
+                    self._document(path=path).validate()
+                self.assertIn(message, str(cm.exception))
+
+    def test_validate_accepts_content_at_the_size_limit(self):
+        self._document(contents="a" * 262_144).validate()
+
+    def test_validate_rejects_content_over_the_size_limit(self):
+        """The limit is on UTF-8 bytes, so fewer characters can still be too many bytes."""
+        for contents in ("a" * 262_145, "é" * 131_073):
+            with self.subTest(characters=len(contents)):
+                with self.assertRaises(ValueError) as cm:
+                    self._document(contents=contents).validate()
+                self.assertIn("over the limit of 262144 bytes", str(cm.exception))
+
+    def _documents(self, count: int) -> dict[str, Document]:
+        return {f"doc_{i}.md": self._document(path=f"doc_{i}.md") for i in range(count)}
+
+    def test_validate_collection_accepts_fifty_documents(self):
+        Document.validate_collection(self._documents(50))
+
+    def test_validate_collection_rejects_more_than_fifty_documents(self):
+        with self.assertRaises(ValueError) as cm:
+            Document.validate_collection(self._documents(51))
+        self.assertIn("at most 50 context documents, found 51", str(cm.exception))
 
     def test_read_local_resource(self):
         import tempfile
@@ -15040,6 +15377,9 @@ class MCPServerTests(unittest.TestCase):
             with self.subTest(auth=auth):
                 _mcp_server(auth=auth).validate()
 
+    def test_validate_accepts_text_enabled_functions(self):
+        _mcp_server(enabled_functions=["search_tickets", "create_ticket"]).validate()
+
     def test_validate_rejects_invalid_config(self):
         cases = {
             "provider_id is required": {"name": ""},
@@ -15048,6 +15388,7 @@ class MCPServerTests(unittest.TestCase):
             "timeout must be between 1 and 30": {"timeout": 31},
             "Duplicate enabled_functions": {"enabled_functions": ["a", "a"]},
             "enabled_functions entries cannot be empty": {"enabled_functions": [""]},
+            "enabled_functions entries must be text": {"enabled_functions": ["a", 1]},
             "only one of header, query_param or oauth": {
                 "auth": MCPAuth(
                     header="Authorization",

@@ -164,6 +164,8 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 ## Validation
 
 - The filename must match the cleaned version of `name` — a mismatch raises a validation error on `pull` or `push`.
+- `name` cannot start with `Guardrail - `, which is reserved for guardrails.
+- An example query cannot be empty or contain `|`.
 
 ## Best practices
 

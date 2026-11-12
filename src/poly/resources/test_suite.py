@@ -5,7 +5,9 @@ Copyright PolyAI Limited
 
 import json
 import logging
+import math
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any, Optional
@@ -57,7 +59,30 @@ INTERNAL_TO_CHANNEL = {
 CHANNEL_TO_INTERNAL = {v: k for k, v in INTERNAL_TO_CHANNEL.items()}
 
 
-ALLOWED_TYPES = ["string", "integer", "number", "boolean"]
+ALLOWED_TYPES = ["string", "integer", "float", "boolean"]
+
+# Value types accepted in YAML under another name than the one Agent Studio stores.
+VALUE_TYPE_ALIASES = {"number": "float"}
+
+ALLOWED_ASSERTION_TYPES = ["equals", "any"]
+
+_INTEGER_PATTERN = re.compile(r"-?[0-9]+")
+
+
+def _reads_as_value_type(expected_value: str, value_type: str) -> bool:
+    """Whether an expected value reads as its value type."""
+    text = expected_value.strip()
+    if value_type == "integer":
+        return bool(_INTEGER_PATTERN.fullmatch(text))
+    if value_type == "float":
+        try:
+            return math.isfinite(float(text))
+        except ValueError:
+            return False
+    if value_type == "boolean":
+        return text in ("true", "false")
+    return True
+
 
 SIMULATED_AT_HINT = "an ISO 8601 datetime, e.g. 2026-01-15T09:30:00Z"
 
@@ -119,6 +144,8 @@ class FunctionCallArgumentAssertion:
         # The projection and YAML can hold a bool or number here; the proto field is a string.
         if self.expected_value is not None and not isinstance(self.expected_value, str):
             self.expected_value = json.dumps(self.expected_value)
+        if isinstance(self.value_type, str):
+            self.value_type = VALUE_TYPE_ALIASES.get(self.value_type, self.value_type)
 
     def to_yaml_dict(self) -> dict:
         return {
@@ -634,12 +661,12 @@ class TestCaseApiMocks:
         trusted here the same way the platform trusts them when cascading renames.
         """
         for integration_name, operations in self.mocks.items():
-            if not integration_name:
+            if utils.is_blank(integration_name):
                 raise ValueError("API mock integration name cannot be empty.")
             if known_integrations and integration_name not in known_integrations:
                 raise ValueError(f"Unknown API integration in mocks: '{integration_name}'.")
             for operation_name, rules in operations.items():
-                if not operation_name:
+                if utils.is_blank(operation_name):
                     raise ValueError(
                         f"API mock for integration '{integration_name}' has an empty "
                         "operation name."
@@ -1071,7 +1098,7 @@ class TestCase(YamlResource):
             raise ValueError(f"Invalid channel: {self.channel}")
 
         # Prompt exists
-        if not self.scenario:
+        if utils.is_blank(self.scenario):
             raise ValueError("Scenario is required")
 
         if not self.language:
@@ -1087,6 +1114,10 @@ class TestCase(YamlResource):
                 f"Language '{self.language}' is not configured. "
                 f"Available languages: {sorted(configured_languages)}"
             )
+
+        duplicate_tags = sorted({tag for tag in self.tags.tags if self.tags.tags.count(tag) > 1})
+        if duplicate_tags:
+            raise ValueError(f"Duplicate tags: {duplicate_tags}")
 
         # Variant is valid if exists
         if self.variant:
@@ -1135,6 +1166,24 @@ class TestCase(YamlResource):
                 if argument.value_type not in ALLOWED_TYPES:
                     raise ValueError(
                         f"Invalid value type for function call assertion argument: {argument.value_type}"
+                    )
+                if argument.assertion_type not in ALLOWED_ASSERTION_TYPES:
+                    raise ValueError(
+                        "Invalid assertion type for function call assertion argument: "
+                        f"{argument.assertion_type}"
+                    )
+                # An unset expected value is allowed; Agent Studio only rejects a blank one.
+                if argument.expected_value is None:
+                    continue
+                if utils.is_blank(argument.expected_value):
+                    raise ValueError(
+                        "Expected value cannot be blank for function call assertion argument: "
+                        f"{argument.parameter_name}"
+                    )
+                if not _reads_as_value_type(argument.expected_value, argument.value_type):
+                    raise ValueError(
+                        f"Expected value '{argument.expected_value}' for function call assertion "
+                        f"argument '{argument.parameter_name}' is not a valid {argument.value_type}"
                     )
 
     def _diff_api_mocks(

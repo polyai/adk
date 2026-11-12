@@ -206,6 +206,8 @@ class PhraseFilter(MultiResourceYamlResource):
             raise ValueError("Name is required")
         if not self.regular_expressions:
             raise ValueError("At least one regular expression is required")
+        if self.language_code and not utils.is_valid_language_code(self.language_code):
+            raise ValueError(f"Invalid language code: {self.language_code}")
 
         resource_mappings = kwargs.get("resource_mappings") or {}
         if self.function:

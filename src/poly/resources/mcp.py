@@ -305,6 +305,9 @@ class MCPServer(MultiResourceYamlResource):
                 f"seconds, got {self.timeout}."
             )
         if self.enabled_functions is not None:
+            non_text = [f for f in self.enabled_functions if not isinstance(f, str)]
+            if non_text:
+                raise ValueError(f"enabled_functions entries must be text, got: {non_text}")
             duplicates = sorted(
                 {f for f in self.enabled_functions if self.enabled_functions.count(f) > 1}
             )

@@ -191,7 +191,7 @@ class TranscriptCorrection(MultiResourceYamlResource):
         )
 
     def validate(self, **kwargs) -> None:
-        if not self.name:
+        if utils.is_blank(self.name):
             raise ValueError("Correction name is required")
         if not self.regular_expressions:
             raise ValueError("At least one regular expression rule is required")

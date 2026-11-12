@@ -233,8 +233,10 @@ class Pronunciation(MultiResourceYamlResource):
         )
 
     def validate(self, **kwargs) -> None:
-        if not self.regex:
+        if utils.is_blank(self.regex):
             raise ValueError("Regex pattern is required")
+        if self.language_code and not utils.is_valid_language_code(self.language_code):
+            raise ValueError(f"Invalid language code: {self.language_code}")
 
     def save(
         self, base_path: str, format: bool = False, save_to_cache: bool = False, **kwargs
