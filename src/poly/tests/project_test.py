@@ -5,6 +5,7 @@ Uses test project in tests/test_project
 Copyright PolyAI Limited
 """
 
+import base64
 import dataclasses
 import json
 import os
@@ -5389,6 +5390,92 @@ class GetBranchHistoryProject(unittest.TestCase):
 
         self.assertEqual(result, expected)
         mock_api.get_branch_history.assert_called_once_with("branch-1")
+
+
+class BranchNamesTest(unittest.TestCase):
+    """Tests for the branch names saved in the status file, so status needs no API call."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        self.project.branch_id = "branch-abc"
+        self.project.save_config()
+        self.mock_api = MagicMock(branch_id="branch-abc")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "my-feature": {"branchId": "branch-abc"},
+        }
+        self.project._api_handler = self.mock_api
+
+    def _saved_status(self) -> dict:
+        with open(os.path.join(self.root, STATUS_FILE), "rb") as f:
+            return json.loads(base64.b64decode(f.read()))
+
+    def test_saved_name_is_used_without_an_api_call(self):
+        self.project.branch_names = {"branch-abc": "my-feature"}
+
+        self.assertEqual(self.project.get_current_branch(), "my-feature")
+        self.mock_api.get_branches.assert_not_called()
+
+    def test_unknown_branch_is_fetched_and_saved(self):
+        self.assertEqual(self.project.get_current_branch(), "my-feature")
+
+        self.assertEqual(
+            self._saved_status()["branch_names"], {"main": "main", "branch-abc": "my-feature"}
+        )
+
+    def test_saving_names_leaves_the_rest_of_the_status_file_alone(self):
+        """A branch lookup mid-operation must not save unsaved resources or the pull time."""
+        before = self._saved_status()
+        self.project.resources = {}
+        self.project.last_updated = datetime(2000, 1, 1)
+
+        self.project.get_branches()
+
+        after = self._saved_status()
+        self.assertEqual(after.pop("branch_names"), {"main": "main", "branch-abc": "my-feature"})
+        before.pop("branch_names")
+        self.assertEqual(after, before)
+
+    def test_names_survive_reloading_the_project(self):
+        self.project.get_branches()
+
+        reloaded = AgentStudioProject.from_dict(self._saved_status(), self.root)
+
+        self.assertEqual(reloaded.branch_names["branch-abc"], "my-feature")
+
+    def test_name_follows_the_current_branch_id(self):
+        """Lookups are by branch ID, so a branch change can't show the old name."""
+        self.project.branch_names = {"branch-abc": "my-feature", "main": "main"}
+        self.project.branch_id = "main"
+
+        self.assertEqual(self.project.get_current_branch(), "main")
+
+    def test_create_branch_saves_the_new_name(self):
+        self.project.branch_id = "main"
+        self.mock_api.create_branch.return_value = "branch-new"
+        with patch.object(AgentStudioProject, "deployment_mode", new=DeploymentMode.RELEASES):
+            self.project.create_branch("new-feature")
+
+        self.assertEqual(self._saved_status()["branch_names"]["branch-new"], "new-feature")
+
+    def test_rename_branch_saves_the_new_name(self):
+        self.mock_api.rename_branch.return_value = True
+
+        self.project.rename_branch("renamed")
+
+        self.assertEqual(self.project.get_current_branch(), "renamed")
+        self.assertEqual(self._saved_status()["branch_names"]["branch-abc"], "renamed")
+
+    def test_delete_branch_drops_its_name(self):
+        self.mock_api.get_branches.return_value["other"] = {"branchId": "branch-other"}
+        self.mock_api.delete_branch.return_value = True
+
+        self.project.delete_branch("other")
+
+        self.assertNotIn("branch-other", self.project.branch_names)
+        self.assertNotIn("branch-other", self._saved_status()["branch_names"])
 
 
 class RenameBranchProject(unittest.TestCase):

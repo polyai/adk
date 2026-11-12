@@ -16,6 +16,8 @@ poly status --path /path/to/project
 
 Prints the account/project panel followed by any of: files with merge conflicts, new files, modified files, and deleted files. If none of these are present, it reports that no changes were detected.
 
+`poly status` reads the current branch name from the branch list saved in the project, instead of fetching it on every run. A branch renamed in Agent Studio shows its new name after the next [`poly branch list`](./branch.md) or `poly branch current`.
+
 `--json` output shape:
 
 ~~~json

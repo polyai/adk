@@ -4356,7 +4356,7 @@ class BranchRenameTest(unittest.TestCase):
         self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
-        self.proj.get_current_branch.return_value = "feature-a"
+        self.proj.get_branches.return_value = ("feature-a", {})
         self.proj.rename_branch.return_value = True
         self.mock_load.return_value = self.proj
 
@@ -4397,7 +4397,7 @@ class BranchRenameTest(unittest.TestCase):
     @patch("poly.output.console.warning")
     def test_no_current_branch_shows_warning(self, mock_warning):
         """When current branch is None, a warning is shown."""
-        self.proj.get_current_branch.return_value = None
+        self.proj.get_branches.return_value = (None, {})
 
         BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
 
@@ -4408,7 +4408,7 @@ class BranchRenameTest(unittest.TestCase):
     @patch("poly.cli_commands.branch.json_print")
     def test_no_current_branch_json(self, mock_json):
         """JSON mode outputs error when no current branch exists."""
-        self.proj.get_current_branch.return_value = None
+        self.proj.get_branches.return_value = (None, {})
 
         BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
 
@@ -4420,7 +4420,7 @@ class BranchRenameTest(unittest.TestCase):
     @patch("poly.output.console.error")
     def test_main_branch_shows_error(self, mock_error):
         """Renaming main branch shows an error."""
-        self.proj.get_current_branch.return_value = "main"
+        self.proj.get_branches.return_value = ("main", {})
 
         BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
 
@@ -4431,7 +4431,7 @@ class BranchRenameTest(unittest.TestCase):
     @patch("poly.cli_commands.branch.json_print")
     def test_main_branch_json(self, mock_json):
         """JSON mode outputs error when trying to rename main."""
-        self.proj.get_current_branch.return_value = "main"
+        self.proj.get_branches.return_value = ("main", {})
 
         BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
 
