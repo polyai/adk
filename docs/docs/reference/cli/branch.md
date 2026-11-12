@@ -234,9 +234,12 @@ Examples:
 poly branch merge 'Merge message'
 poly branch merge 'Merge message' --interactive
 poly branch merge 'Merge message' --resolutions resolutions.json
+poly branch merge 'Merge message' --acknowledge-experiment
 ~~~
 
 If the merge has no conflicts, it completes immediately and the CLI switches your local checkout to the parent branch.
+
+If merging into `main` deploys to `live` while an [experiment](./deployments.md#poly-deployments-experiment) is running, it changes the live version the experiment compares against. The confirmation prompt names the experiment, and answering yes acknowledges it. With `--force` or `--json`, pass `--acknowledge-experiment` instead, or the merge is blocked.
 
 | Argument | Description |
 |---|---|
@@ -247,6 +250,7 @@ If the merge has no conflicts, it completes immediately and the CLI switches you
 | `--interactive`, `-i` | Resolve conflicts in an interactive prompt. Set `$EDITOR` or `$VISUAL` for free-form edits during resolution. Cannot be combined with `--json`. |
 | `--resolutions <source>` | Pre-defined resolutions as a JSON file path, inline JSON string, or `-` for stdin. |
 | `--force`, `-f` | Skip the confirmation prompt shown when merging to `main` would deploy directly to a live environment. |
+| `--acknowledge-experiment` | Allow merging into `main`, which deploys to `live`, while an experiment is running. |
 
 `--json` output shape:
 

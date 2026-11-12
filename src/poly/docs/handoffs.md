@@ -9,7 +9,7 @@ Handoffs configure SIP call transfers for voice agents. They define how and wher
 ## Structure
 
 Each handoff has:
-- **name** (string): Identifier for the handoff. Referenced in rules as `{{ho:handoff_name}}`.
+- **name** (string): Identifier for the handoff, unique within the file. Referenced in rules as `{{ho:handoff_name}}`.
 - **description** (string): What this handoff does.
 - **is_default** (bool): Whether this is the default handoff.
 - **sip_config** (object): Transfer method configuration (see below).

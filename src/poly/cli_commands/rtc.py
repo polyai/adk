@@ -10,7 +10,6 @@ from typing import Optional
 
 from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
-from poly.output.console import edit_in_editor, error, info, success, warning
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 from poly.resources.resource_utils import contains_merge_conflict
@@ -34,6 +33,8 @@ def _merge_rtc_file(
     Returns:
         Merged dict, or None if the user cancelled.
     """
+    from poly.output.console import info, warning
+
     if local == remote:
         return local
     if local == base:
@@ -75,6 +76,8 @@ def _resolve_rtc_conflict_interactively(
         Resolved dict, or None if the user cancelled.
     """
     import questionary
+
+    from poly.output.console import edit_in_editor, error, info, warning
 
     while True:
         choices = [
@@ -301,6 +304,8 @@ class RTCCommand(BaseCommand):
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching RTC sub-handler."""
+        from poly.output.console import error, success
+
         schema_only = getattr(args, "schema", False)
         data_only = getattr(args, "data", False)
 
@@ -430,6 +435,8 @@ class RTCCommand(BaseCommand):
         import questionary
         import requests
 
+        from poly.output.console import error, info
+
         project = load_project(base_path, output_json=output_json)
 
         # Load local files
@@ -527,6 +534,8 @@ class RTCCommand(BaseCommand):
         remote_last_updated: Optional[str],
     ) -> Optional[dict]:
         """Handle drift between local and remote RTC config."""
+        from poly.output.console import info
+
         drift_msg = (
             f"Remote RTC config has changed since your last pull "
             f"(local: {local_last_updated}, remote: {remote_last_updated}). "
@@ -607,6 +616,8 @@ class RTCCommand(BaseCommand):
         """
         import questionary
         import requests
+
+        from poly.output.console import edit_in_editor, info
 
         project = load_project(base_path)
 
@@ -699,6 +710,8 @@ class RTCCommand(BaseCommand):
         """
         import requests
 
+        from poly.output.console import info
+
         project = load_project(base_path, output_json=output_json)
 
         if env == "all":
@@ -736,6 +749,8 @@ class RTCCommand(BaseCommand):
         Returns:
             dict with success status and per-environment validation results.
         """
+        from poly.output.console import error, info, success
+
         project = load_project(base_path, output_json=output_json)
 
         if env == "all":
@@ -769,6 +784,8 @@ class RTCCommand(BaseCommand):
 
 def _print_env_diff(env: str, env_diff: dict) -> None:
     """Print a human-readable diff for one environment."""
+    from poly.output.console import info, success
+
     schema_changes = env_diff.get("schema", [])
     data_changes = env_diff.get("data", [])
 
@@ -794,6 +811,8 @@ def _print_env_diff(env: str, env_diff: dict) -> None:
 
 def _print_change(change: dict) -> None:
     """Print a single field-level change."""
+    from poly.output.console import info
+
     path = change["path"]
     change_type = change["type"]
 

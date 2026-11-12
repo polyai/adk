@@ -7,6 +7,7 @@ from __future__ import annotations
 __all__ = ["Integrations"]
 
 import requests
+from collections.abc import Iterable
 from .available_integrations.opentable import OpenTable as OpenTable
 from .available_integrations.tripleseat import Tripleseat as Tripleseat
 from ..log_utils import ConversationLogger as ConversationLogger
@@ -22,6 +23,11 @@ class Integrations:
         paragon_connection_ids: dict[str, str] | None = None,
         paragon_project_id: str | None = None,
         integration_token: str | None = None,
+        account_id: str | None = None,
+        project_id: str | None = None,
+        environment: str | None = None,
+        janus_token: str | None = None,
+        api_integration_ids: Iterable[str] | None = None,
     ) -> None: ...
     def proxy_request(
         self,

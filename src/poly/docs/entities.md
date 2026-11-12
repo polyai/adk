@@ -12,7 +12,7 @@ They can also be referenced in executed python code.
 ## Structure
 
 Each entity has:
-- **name**: Identifier (snake_case). Used in prompts as `{{entity:entity_name}}`.
+- **name**: Identifier (snake_case), unique within the file. Used in prompts as `{{entity:entity_name}}`.
 - **description**: What the entity represents (shown to the LLM to guide extraction).
 - **entity_type**: One of the types below.
 - **config**: Type-specific settings.
