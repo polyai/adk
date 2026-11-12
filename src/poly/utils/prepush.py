@@ -174,7 +174,7 @@ def group_new_flow_resources(
             dummy = FlowStep(
                 resource_id=f"{flow_config.resource_id}_{dummy_step_id}",
                 step_id=dummy_step_id,
-                name=f"{flow_config.name}-temp",
+                name=f"{function_start_step.name}-temp",
                 flow_id=flow_config.resource_id,
                 flow_name=flow_config.name,
                 step_type=StepType.DEFAULT_STEP,
