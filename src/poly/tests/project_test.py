@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 import poly.resources.resource_utils as resource_utils
 from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
+from poly.handlers.platform_api import PlatformAPIError
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
 from poly.project import STATUS_FILE, AgentStudioProject, DeploymentMode
@@ -2235,7 +2236,7 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_rejected_by_the_platform_returns_its_reason(self):
         """A rejected push returns the platform's reason, not a list of resources."""
-        self.mock_api_handler.send_queued_commands.side_effect = ValueError(
+        self.mock_api_handler.send_queued_commands.side_effect = PlatformAPIError(
             "API error: Topic name is not unique"
         )
         project_data = deepcopy(PROJECT_DATA)

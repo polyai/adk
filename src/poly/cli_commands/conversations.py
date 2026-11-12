@@ -23,6 +23,7 @@ from poly.constants import (
     DATA_MAX_OFFSET,
 )
 from poly.handlers.interface import AgentStudioInterface
+from poly.handlers.platform_api import PlatformAPIError
 from poly.output.json_output import json_print
 
 SEARCH_DEFAULT_FIELDS = ["poly_score_v2", "duration", "channel"]
@@ -286,7 +287,6 @@ class ConversationsCommand(BaseCommand):
             args: Parsed ``search`` flags.
             output_json: If True, emit machine-readable JSON.
         """
-        import requests
 
         from poly.output.console import info, paged_output, print_conversation_search
 
@@ -307,7 +307,7 @@ class ConversationsCommand(BaseCommand):
             )
         except ValueError as e:
             fail(str(e), output_json)
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             fail(describe_data_api_error(e), output_json)
 
         if output_json:

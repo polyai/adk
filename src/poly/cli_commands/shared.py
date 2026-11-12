@@ -27,7 +27,7 @@ from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
 
 if TYPE_CHECKING:
-    import requests
+    from poly.handlers.platform_api import PlatformAPIError
 
 logger = logging.getLogger(__name__)
 
@@ -631,11 +631,11 @@ def add_cohort_arguments(parser: ArgumentParser, *, deployments: bool = True) ->
         )
 
 
-def describe_data_api_error(e: "requests.HTTPError", *, needs_pii: bool = False) -> str:
+def describe_data_api_error(e: "PlatformAPIError", *, needs_pii: bool = False) -> str:
     """Explain a Data API HTTP error in the caller's terms.
 
     Args:
-        e: The error raised by ``requests``.
+        e: The error the Data API call raised.
         needs_pii: True for routes that require the PII read permission outright
             (transcripts), so a 403 names that permission.
     """

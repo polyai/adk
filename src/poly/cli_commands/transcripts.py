@@ -144,9 +144,9 @@ class TranscriptsCommand(BaseCommand):
             args: Parsed ``search`` flags.
             output_json: If True, emit machine-readable JSON.
         """
-        import requests
         from rich.markup import escape
 
+        from poly.handlers.platform_api import PlatformAPIError
         from poly.output.console import info, paged_output, print_transcript_matches
 
         project = load_project(base_path, output_json=output_json)
@@ -161,7 +161,7 @@ class TranscriptsCommand(BaseCommand):
             )
         except ValueError as e:
             fail(str(e), output_json)
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             fail(describe_data_api_error(e, needs_pii=True), output_json)
 
         if output_json:
@@ -194,8 +194,7 @@ class TranscriptsCommand(BaseCommand):
             english: Prefer English translations of non-English turns.
             output_json: If True, emit machine-readable JSON.
         """
-        import requests
-
+        from poly.handlers.platform_api import PlatformAPIError
         from poly.output.console import paged_output, print_transcript
 
         project = load_project(base_path, output_json=output_json)
@@ -203,7 +202,7 @@ class TranscriptsCommand(BaseCommand):
             transcript = project.get_transcript(conversation_id)
         except ValueError as e:
             fail(str(e), output_json)
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             fail(describe_data_api_error(e, needs_pii=True), output_json)
 
         if output_json:

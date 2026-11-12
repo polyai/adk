@@ -64,6 +64,7 @@ from poly.cli_commands.update import (
     display_update_message,
 )
 from poly.cli_commands.utils import CompletionCommand
+from poly.handlers.platform_api import PlatformAPIError
 from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
 
@@ -585,7 +586,7 @@ class BranchDeleteTest(unittest.TestCase):
     def test_direct_delete_when_project_raises_shows_error(self, mock_error, mock_confirm):
         """If project.delete_branch raises, the error is shown to the user and the command exits 1."""
         mock_confirm.return_value.ask.return_value = True
-        self.proj.delete_branch.side_effect = ValueError("API failure")
+        self.proj.delete_branch.side_effect = PlatformAPIError("API failure")
 
         with self.assertRaises(SystemExit):
             BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
@@ -596,7 +597,7 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("poly.cli_commands.branch.json_print")
     def test_direct_delete_when_project_raises_json_mode(self, mock_json):
         """If project.delete_branch raises in JSON mode, error is printed as JSON and exits 1."""
-        self.proj.delete_branch.side_effect = ValueError("API failure")
+        self.proj.delete_branch.side_effect = PlatformAPIError("API failure")
 
         with self.assertRaises(SystemExit):
             BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a", output_json=True)
@@ -1600,7 +1601,6 @@ class PollTestRunLiveTest(unittest.TestCase):
 
     def test_transient_errors_then_success_returns_completed_run(self):
         """Recovers from a few consecutive transient errors and returns the run."""
-        import requests
 
         from poly.output.console import poll_test_run_live
 
@@ -1608,8 +1608,8 @@ class PollTestRunLiveTest(unittest.TestCase):
         # First 2 polls fail transiently, the 3rd succeeds with a completed run.
         get_test_run = MagicMock(
             side_effect=[
-                requests.exceptions.HTTPError("500 Server Error"),
-                requests.exceptions.ConnectionError("connection reset"),
+                PlatformAPIError("500 Server Error"),
+                PlatformAPIError("connection reset"),
                 completed,
             ]
         )
@@ -1627,7 +1627,6 @@ class PollTestRunLiveTest(unittest.TestCase):
 
     def test_error_counter_resets_after_successful_poll(self):
         """A successful poll resets the counter so later errors are tolerated again."""
-        import requests
 
         from poly.output.console import poll_test_run_live
 
@@ -1638,11 +1637,11 @@ class PollTestRunLiveTest(unittest.TestCase):
         pending = {"status": "running", "testHistory": []}
         get_test_run = MagicMock(
             side_effect=[
-                requests.exceptions.HTTPError("boom"),
-                requests.exceptions.HTTPError("boom"),
+                PlatformAPIError("boom"),
+                PlatformAPIError("boom"),
                 pending,
-                requests.exceptions.HTTPError("boom"),
-                requests.exceptions.HTTPError("boom"),
+                PlatformAPIError("boom"),
+                PlatformAPIError("boom"),
                 completed,
             ]
         )
@@ -1660,11 +1659,10 @@ class PollTestRunLiveTest(unittest.TestCase):
 
     def test_persistent_errors_give_up_and_return_empty_dict(self):
         """After max_consecutive_errors failures it gives up without raising."""
-        import requests
 
         from poly.output.console import poll_test_run_live
 
-        get_test_run = MagicMock(side_effect=requests.exceptions.ConnectionError("platform down"))
+        get_test_run = MagicMock(side_effect=PlatformAPIError("platform down"))
 
         result = poll_test_run_live(
             get_test_run,
@@ -1856,12 +1854,11 @@ class ChatLoopTest(unittest.TestCase):
         self.assertEqual(conversation["turns"][0]["response"], "Welcome!")
         self.assertEqual(conversation["turns"][1]["input"], "Hello")
 
-    def test_http_error_is_skipped_and_loop_continues(self):
-        """An HTTPError on one turn is absorbed; the next message still sends."""
-        import requests
+    def test_api_error_is_skipped_and_loop_continues(self):
+        """An API error on one turn is absorbed; the next message still sends."""
 
         self.proj.send_message.side_effect = [
-            requests.HTTPError("500"),
+            PlatformAPIError("500"),
             {"response": "Fine now", "conversation_ended": False},
         ]
 
@@ -1875,10 +1872,9 @@ class ChatLoopTest(unittest.TestCase):
         self.assertEqual(self.proj.send_message.call_count, 2)
 
     def test_json_output_records_error_turn(self):
-        """HTTPErrors in JSON mode are stored as turns with an 'error' key."""
-        import requests
+        """API errors in JSON mode are stored as turns with an 'error' key."""
 
-        self.proj.send_message.side_effect = requests.HTTPError("500 Internal Server Error")
+        self.proj.send_message.side_effect = PlatformAPIError("500 Internal Server Error")
 
         _, conversation = ChatCommand._run_chat_loop(
             self.proj,

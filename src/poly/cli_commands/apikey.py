@@ -27,6 +27,7 @@ from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
 from poly.handlers.interface import AgentStudioInterface
+from poly.handlers.platform_api import PlatformAPIError
 from poly.utils import apikey_session
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
@@ -182,14 +183,12 @@ def _key_works_for_account(
     """Whether `api_key` is accepted on `region` and can reach `account_id`.
 
     Raises:
-        requests.RequestException: The check failed for any reason other than the key being
-            refused, so it says nothing about the key.
+        PlatformAPIError: The check failed for any reason other than the key being refused,
+            so it says nothing about the key.
     """
-    import requests
-
     try:
         return account_id in api.get_accounts_with_key(region=region, api_key=api_key)
-    except requests.HTTPError as e:
+    except PlatformAPIError as e:
         if e.response is not None and e.response.status_code in (401, 403):
             return False
         raise
@@ -216,7 +215,7 @@ def _get_or_create_key(
         ProfileKeyRefused: The profile holds a key that isn't accepted for this account and
             `force` is false. Raised before creating anything, so a re-run doesn't leave
             another unused key behind.
-        requests.RequestException: The check on the profile's key failed.
+        PlatformAPIError: The check on the profile's key failed.
         ValueError: The create call succeeded but returned no key.
     """
     from poly.output.console import mask_secret
@@ -527,7 +526,7 @@ class ApiKeyCommand(BaseCommand):
                             region, e.raw_accounts, sign_in_kept=True
                         ) from None
                     break
-                except requests.HTTPError as e:
+                except PlatformAPIError as e:
                     # A kept sign-in can be revoked before it expires: drop it and sign
                     # in once more. A fresh sign-in that is refused is a real error.
                     unauthorised = e.response is not None and e.response.status_code == 401
@@ -622,5 +621,5 @@ class ApiKeyCommand(BaseCommand):
 
         except (EnvVarConflict, ProfileKeyRefused) as e:
             _fail(e, step, exit_code=2, output_json=output_json, verbose=verbose)
-        except (DeviceFlowError, requests.RequestException, ValueError) as e:
+        except (DeviceFlowError, requests.RequestException, PlatformAPIError, ValueError) as e:
             _fail(e, step, exit_code=1, output_json=output_json, verbose=verbose)

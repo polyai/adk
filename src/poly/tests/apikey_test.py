@@ -10,12 +10,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import requests
-
 from poly.auth.device_flow import DeviceFlowError
 from poly.cli_commands.apikey import NEXT_STEP_URL, ApiKeyCommand
 from poly.cli_commands.base import GETTING_STARTED_GROUP
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
+from poly.handlers.platform_api import PlatformAPIError
 from poly.utils.apikey_session import CachedSession
 from poly.utils.env_profile import EnvVarConflict, ProfileTarget
 
@@ -28,11 +27,11 @@ FAKE_ACCOUNT = "acc-1"
 ME = "me@x.com"
 
 
-def _http_error(status: int) -> requests.HTTPError:
-    """Build the HTTPError the platform handler raises for `status`."""
+def _api_error(status: int) -> PlatformAPIError:
+    """Build the error the platform handler raises for `status`."""
     response = MagicMock()
     response.status_code = status
-    return requests.HTTPError(f"{status} Client Error", response=response)
+    return PlatformAPIError(f"{status} Client Error", response=response)
 
 
 def _cached(token: str = CACHED_JWT) -> CachedSession:
@@ -521,7 +520,7 @@ class SessionCache(ApiKeyTestCase):
         """A refused cached sign-in is dropped, and one fresh sign-in completes the run."""
         self.mocks["session_load"].return_value = _cached()
         self.mocks["authorise"].side_effect = [
-            _http_error(401),
+            _api_error(401),
             {"user": {"is_first_login": False, "email": ME}},
         ]
 
@@ -536,7 +535,7 @@ class SessionCache(ApiKeyTestCase):
     def test_cached_token_401_on_accounts_also_retries(self):
         """A 401 listing accounts with a cached sign-in is retried the same way."""
         self.mocks["session_load"].return_value = _cached()
-        self.mocks["get_accounts"].side_effect = [_http_error(401), [{"id": FAKE_ACCOUNT}]]
+        self.mocks["get_accounts"].side_effect = [_api_error(401), [{"id": FAKE_ACCOUNT}]]
 
         _, _, code = self.run_apikey(region="studio")
 
@@ -547,7 +546,7 @@ class SessionCache(ApiKeyTestCase):
     def test_401_after_fresh_sign_in_is_not_retried(self):
         """A fresh sign-in that is refused is a real error: no loop, exit 1 at authorise."""
         self.mocks["session_load"].return_value = _cached()
-        self.mocks["authorise"].side_effect = _http_error(401)
+        self.mocks["authorise"].side_effect = _api_error(401)
 
         stdout, _, code = self.run_apikey(region="studio", output_json=True)
 
@@ -558,7 +557,7 @@ class SessionCache(ApiKeyTestCase):
 
     def test_401_without_cache_is_not_retried(self):
         """With a fresh token from the start, a 401 surfaces as before."""
-        self.mocks["authorise"].side_effect = _http_error(401)
+        self.mocks["authorise"].side_effect = _api_error(401)
 
         _, _, code = self.run_apikey(region="studio")
 
@@ -599,18 +598,18 @@ class TokenNeverInOutput(ApiKeyTestCase):
         two = [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}]
         return [
             ("device flow", set_("signin", "side_effect", DeviceFlowError("expired")), {}),
-            ("authorise 500", set_("authorise", "side_effect", _http_error(500)), {}),
+            ("authorise 500", set_("authorise", "side_effect", _api_error(500)), {}),
             (
                 "authorise 403",
-                set_("authorise", "side_effect", _http_error(403)),
+                set_("authorise", "side_effect", _api_error(403)),
                 {"region": "us-1"},
             ),
-            ("authorise 401", set_("authorise", "side_effect", _http_error(401)), {}),
+            ("authorise 401", set_("authorise", "side_effect", _api_error(401)), {}),
             ("no account", set_("get_accounts", "return_value", []), {}),
             ("several accounts", set_("get_accounts", "return_value", two), {}),
-            ("accounts 500", set_("get_accounts", "side_effect", _http_error(500)), {}),
+            ("accounts 500", set_("get_accounts", "side_effect", _api_error(500)), {}),
             ("no key", set_("create_key", "return_value", {}), {}),
-            ("create key 500", set_("create_key", "side_effect", _http_error(500)), {}),
+            ("create key 500", set_("create_key", "side_effect", _api_error(500)), {}),
             (
                 "env conflict",
                 set_("write_env", "side_effect", EnvVarConflict("o", "n", Path("/p"))),
@@ -663,11 +662,11 @@ class UnprovisionedEnterpriseUser(ApiKeyTestCase):
     """Tests for the friendly-403 rewrite when authorise fails on an enterprise region."""
 
     @staticmethod
-    def _forbidden_error() -> requests.HTTPError:
-        """Build the HTTPError authorise raises for an unprovisioned enterprise user."""
+    def _forbidden_error() -> PlatformAPIError:
+        """Build the error authorise raises for an unprovisioned enterprise user."""
         response = MagicMock()
         response.status_code = 403
-        return requests.HTTPError("403 Client Error: Forbidden", response=response)
+        return PlatformAPIError("403 Client Error: Forbidden", response=response)
 
     def test_403_on_enterprise_region_is_rewritten(self):
         """A 403 from authorise on us-1 becomes the friendly provisioning message."""
@@ -783,7 +782,7 @@ class ProfileKeyReuse(ApiKeyTestCase):
             with self.subTest(status=status):
                 self.setUp()
                 self.mocks["read_env"].return_value = PROFILE_KEY
-                self.mocks["get_accounts_with_key"].side_effect = _http_error(status)
+                self.mocks["get_accounts_with_key"].side_effect = _api_error(status)
 
                 self._assert_stops_before_creating()
 
@@ -797,9 +796,9 @@ class ProfileKeyReuse(ApiKeyTestCase):
     def test_failed_check_is_a_real_error(self):
         """A check that says nothing about the key exits 1 and doesn't suggest --force."""
         failures = {
-            "server error": _http_error(503),
-            "connection": requests.ConnectionError("connection dropped"),
-            "timeout": requests.Timeout("timed out"),
+            "server error": _api_error(503),
+            "connection": PlatformAPIError("connection dropped"),
+            "timeout": PlatformAPIError("timed out"),
         }
         for name, failure in failures.items():
             with self.subTest(failure=name):

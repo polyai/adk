@@ -26,6 +26,7 @@ from poly.cli_commands.shared import (
     read_project_config,
     resolve_branch_id,
 )
+from poly.handlers.platform_api import PlatformAPIError
 from poly.output.json_output import json_print
 from poly.project import DeploymentMode
 from poly.resources.resource_utils import contains_merge_conflict
@@ -147,7 +148,7 @@ def _build_branch_name_lookup(project: Any, archived: list[dict[str, Any]]) -> d
 
     try:
         _, active = project.get_branches()
-    except ValueError:
+    except (ValueError, PlatformAPIError):
         # The parent column is cosmetic — degrade to showing raw ids rather than
         # failing the whole listing.
         return names
@@ -709,7 +710,7 @@ class BranchCommand(BaseCommand):
             base_branch_name = project.get_current_branch()
         try:
             new_branch_id = project.create_branch(branch_name, source_branch_name=source_branch)
-        except ValueError as e:
+        except (ValueError, PlatformAPIError) as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
             else:
@@ -834,7 +835,7 @@ class BranchCommand(BaseCommand):
                     create=create,
                     source_branch_name=source_branch,
                 )
-            except ValueError as e:
+            except (ValueError, PlatformAPIError) as e:
                 if output_json or output_json_projection:
                     json_print({"success": False, "error": str(e)})
                     sys.exit(1)
@@ -943,7 +944,7 @@ class BranchCommand(BaseCommand):
                     return
             try:
                 deleted = project.delete_branch(branch_name)
-            except ValueError as e:
+            except (ValueError, PlatformAPIError) as e:
                 if output_json:
                     json_print({"success": False, "message": str(e)})
                 else:
@@ -1014,7 +1015,7 @@ class BranchCommand(BaseCommand):
                 else:
                     if not output_json:
                         error(f"Failed to delete branch '{name}'.")
-            except ValueError as e:
+            except (ValueError, PlatformAPIError) as e:
                 if not output_json:
                     error(str(e))
 
@@ -1417,7 +1418,7 @@ class BranchCommand(BaseCommand):
 
         try:
             diffs = project.diff_branch(branch_name=branch_name, file_paths=files)
-        except ValueError as e:
+        except (ValueError, PlatformAPIError) as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
             else:
@@ -1457,7 +1458,7 @@ class BranchCommand(BaseCommand):
 
         try:
             diffs = project.diff_branch(branch_name=branch_name, file_paths=files)
-        except ValueError as e:
+        except (ValueError, PlatformAPIError) as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
             else:
@@ -1533,7 +1534,7 @@ class BranchCommand(BaseCommand):
             new_files, modified_files, deleted_files = project.branch_status(
                 branch_name=branch_name
             )
-        except ValueError as e:
+        except (ValueError, PlatformAPIError) as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
             else:
@@ -1822,7 +1823,7 @@ class BranchCommand(BaseCommand):
 
         try:
             renamed = project.rename_branch(new_branch_name)
-        except ValueError as e:
+        except (ValueError, PlatformAPIError) as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
             else:
@@ -1905,7 +1906,7 @@ class BranchCommand(BaseCommand):
             selected_branch = branch_by_label[selected]
             try:
                 restored = project.restore_branch(selected_branch["branchId"])
-            except ValueError as e:
+            except (ValueError, PlatformAPIError) as e:
                 error(str(e))
                 sys.exit(1)
             if restored:
@@ -1916,7 +1917,7 @@ class BranchCommand(BaseCommand):
 
         try:
             restored = project.restore_branch(branch_id)
-        except ValueError as e:
+        except (ValueError, PlatformAPIError) as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
             else:

@@ -1698,7 +1698,7 @@ def poll_test_run_live(
     """
     import time
 
-    import requests
+    from poly.handlers.platform_api import PlatformAPIError
 
     total = len(matched_tests)
     test_names = {t.resource_id: t.name for t in matched_tests}
@@ -1722,7 +1722,7 @@ def poll_test_run_live(
 
             try:
                 result = get_test_run(test_run_id)
-            except requests.exceptions.RequestException as exc:
+            except PlatformAPIError as exc:
                 consecutive_errors += 1
                 logger.warning(
                     f"Poll {consecutive_errors}/{max_consecutive_errors} for test run "

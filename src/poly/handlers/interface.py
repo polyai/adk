@@ -8,7 +8,7 @@ from typing import Any, NoReturn, Optional
 
 from google.protobuf.message import Message
 
-from poly.handlers.platform_api import PlatformAPIHandler
+from poly.handlers.platform_api import PlatformAPIError, PlatformAPIHandler
 from poly.handlers.posthog import PosthogHandler
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
@@ -70,30 +70,30 @@ class AgentStudioInterface:
         return None
 
     def _handle_api_error(self, e: Exception) -> NoReturn:
-        """Translate an API HTTP error into a user-facing ValueError.
+        """Raise an API error again with a user-facing message.
 
-        Extracts the error_code from the response body and raises a ValueError
-        with a descriptive message. Always raises.
+        Extracts the error_code from the response body and names the project for the codes
+        that mean it can't be reached. Always raises.
 
         Args:
             e: The HTTPError or SourcererAPIError to translate
 
         Raises:
-            ValueError: Always raised with a user-facing message
+            PlatformAPIError: Always raised with a user-facing message
         """
         error_code = self._extract_error_code(e)
 
         if error_code == "FORBIDDEN":
-            raise ValueError(
+            raise PlatformAPIError(
                 f"Forbidden: you do not have permission to access "
                 f"project '{self.project_id}' in account '{self.account_id}'."
             ) from e
         elif error_code == "DEPLOYMENT_NOT_FOUND":
-            raise ValueError(
+            raise PlatformAPIError(
                 f"Project '{self.project_id}' not found in account '{self.account_id}'."
             ) from e
         else:
-            raise ValueError(f"API error: {e}") from e
+            raise PlatformAPIError(f"API error: {e}") from e
 
     @property
     def branch_id(self) -> Optional[str]:
@@ -558,7 +558,7 @@ class AgentStudioInterface:
             bool: True once the commands are sent, or when there was nothing to send
 
         Raises:
-            ValueError: If the batch could not be sent or the platform rejected it
+            PlatformAPIError: If the batch could not be sent or the platform rejected it
         """
         import requests
 
@@ -1500,18 +1500,15 @@ class AgentStudioInterface:
             dict: The created metric record.
 
         Raises:
-            ValueError: If the metric already exists, or the API call fails.
+            ValueError: If the metric already exists.
+            PlatformAPIError: If the API call fails for any other reason.
         """
-        import requests
-
         try:
             return PlatformAPIHandler.create_custom_metric(region, account_id, project_id, data)
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             if e.response is not None and e.response.status_code == 409:
                 raise ValueError(f"Metric '{data.get('name')}' already exists.") from e
-            raise ValueError(
-                f"Failed to create metric: {e.response.text if e.response else e}"
-            ) from e
+            raise
 
     @staticmethod
     def set_custom_metric_api_flag(
@@ -1561,20 +1558,17 @@ class AgentStudioInterface:
             dict: The updated metric record.
 
         Raises:
-            ValueError: If the metric does not exist, or the API call fails.
+            ValueError: If the metric does not exist.
+            PlatformAPIError: If the API call fails for any other reason.
         """
-        import requests
-
         try:
             return PlatformAPIHandler.update_custom_metric(
                 region, account_id, project_id, metric_name, data
             )
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             if e.response is not None and e.response.status_code == 404:
                 raise ValueError(f"Metric '{metric_name}' not found.") from e
-            raise ValueError(
-                f"Failed to update metric: {e.response.text if e.response else e}"
-            ) from e
+            raise
 
     @staticmethod
     def export_custom_metrics(
