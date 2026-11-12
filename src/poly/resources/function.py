@@ -731,13 +731,6 @@ class Function(Resource):
         Raises:
             ValidationError: If the resource is not valid.
         """
-        # Check for syntax errors
-        try:
-            compile(self.code, self.name, "exec")
-        except SyntaxError as e:
-            logger.debug(f"Syntax error validating code={self.code!r}")
-            raise ValueError(f"Syntax error in function code: {e}")
-
         # Check function def exists in code
         default_params = ["conv: Conversation"]
         if self.function_type in (FunctionType.TRANSITION, FunctionType.FUNCTION_STEP):

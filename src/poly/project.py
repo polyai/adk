@@ -79,6 +79,7 @@ from poly.resources.resource import (
 )
 from poly.utils import prepush
 from poly.utils.commands import queue_set_default_commands
+from poly.utils.ty_check import function_code_errors
 
 logger = logging.getLogger(__name__)
 
@@ -3388,8 +3389,8 @@ class AgentStudioProject:
             resource_mappings=resource_mappings,
         )
 
-    @staticmethod
     def validate_resources(
+        self,
         resources_dict: ResourceMap,
         resource_mappings: list[ResourceMapping],
     ) -> list[str]:
@@ -3444,7 +3445,35 @@ class AgentStudioProject:
             except ValueError as e:
                 validation_errors.append(f"Validation error: {e}")
 
+        validation_errors.extend(self._function_code_errors(resources_dict))
         return validation_errors
+
+    def _function_code_errors(self, resources_dict: ResourceMap) -> list[str]:
+        """Unresolved imports between functions, and syntax errors in function code.
+
+        Each file compiles on its own, so a function importing a helper that no longer exists
+        only fails at runtime; ty resolves imports across the project. It also checks syntax
+        against the platform's Python version rather than the one running the ADK. If ty can't
+        run, each function and function step is compiled instead, so syntax is still checked.
+        """
+        errors = function_code_errors(self.root_path)
+        if errors is not None:
+            messages = []
+            for error in errors:
+                path = os.path.join(self.root_path, *error.path.split("/"))
+                messages.append(f"Validation error in {path}, line {error.line}: {error.message}")
+            return messages
+        messages = []
+        for resource_type in (Function, FunctionStep):
+            for resource in resources_dict.get(resource_type, {}).values():
+                try:
+                    compile(resource.code or "", resource.name, "exec")
+                except SyntaxError as e:
+                    messages.append(
+                        f"Validation error in {resource.file_path}: "
+                        f"Syntax error in function code: {e}"
+                    )
+        return messages
 
     def merge_branch(
         self,
