@@ -2207,6 +2207,21 @@ class PushProjectTest(unittest.TestCase):
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
+    def test_push_project_duplicate_entry_names_are_rejected(self):
+        """Two entries sharing a name fail validation and queue nothing."""
+        root = _copy_test_project(self)
+        _append_yaml_entries(
+            root, ENTITIES_FILE, "entities", [_entity_entry("city"), _entity_entry("city")]
+        )
+        project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+        success, message, commands = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertIn("Duplicate name 'city'.", message)
+        self.assertEqual(commands, [])
+        self.mock_api_handler.queue_resources.assert_not_called()
+
     def test_push_project_merge_conflict(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_pull.return_value = (["functions/test_function.py"], {})
@@ -2978,6 +2993,52 @@ class ValidateProjectTest(unittest.TestCase):
             "Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts
         )
         self.assertIn("Start step 'missing_step' not found.", error_texts)
+
+    def test_validate_project_reports_duplicate_entry_names(self):
+        """Entries sharing a name are reported, whether new or already on the platform."""
+        for names in (["city", "city"], ["customer_name"]):
+            with self.subTest(names=names):
+                root = _copy_test_project(self)
+                _append_yaml_entries(
+                    root, ENTITIES_FILE, "entities", [_entity_entry(name) for name in names]
+                )
+                project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+                errors = project.validate_project()
+
+                self.assertIn(f"Duplicate name {names[0]!r}.", errors[0])
+
+    def test_validate_project_reports_names_with_the_same_clean_name(self):
+        """Names that differ only in punctuation or spacing count as the same name."""
+        root = _copy_test_project(self)
+        _append_yaml_entries(
+            root, ENTITIES_FILE, "entities", [_entity_entry("My Entity"), _entity_entry("My_Entity")]
+        )
+        project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+        errors = project.validate_project()
+
+        self.assertIn("Duplicate name 'My Entity'.", errors[0])
+
+ENTITIES_FILE = os.path.join("config", "entities.yaml")
+VARIANTS_FILE = os.path.join("config", "variant_attributes.yaml")
+
+
+def _entity_entry(name: str) -> dict:
+    """Return a valid entities.yaml entry with the given name."""
+    return {"name": name, "description": "A city", "entity_type": "free_text", "config": {}}
+
+
+def _append_yaml_entries(
+    root: str, relative_path: str, top_level_name: str, entries: list[dict]
+) -> None:
+    """Append entries to a top-level list of a multi-resource YAML file under root."""
+    file_path = os.path.join(root, relative_path)
+    with open(file_path, encoding="utf-8") as f:
+        data = resource_utils.load_yaml(f.read())
+    data[top_level_name] = [*data[top_level_name], *entries]
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(resource_utils.dump_yaml(data))
 
 
 class PullProjectTest(unittest.TestCase):

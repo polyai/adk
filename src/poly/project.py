@@ -3399,6 +3399,17 @@ class AgentStudioProject:
             list[str]: A list of validation error messages.
         """
         validation_errors = []
+        seen_paths: set[str] = set()
+        for mapping in resource_mappings:
+            if mapping.file_path in seen_paths:
+                resource = resources_dict.get(mapping.resource_type, {}).get(mapping.resource_id)
+                validation_errors.append(
+                    f"Validation error in {resource.file_path if resource else mapping.file_path}: "
+                    f"Duplicate name '{mapping.resource_name}'. Names must be unique, ignoring "
+                    "punctuation and spacing."
+                )
+            seen_paths.add(mapping.file_path)
+
         for resource_type, resources in resources_dict.items():
             for resource_id, resource in resources.items():
                 try:
