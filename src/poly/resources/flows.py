@@ -222,10 +222,6 @@ class FlowConfig(YamlResource):
         if not found_step:
             raise ValueError(f"Start step '{self.start_step}' not found.")
 
-        # Check description exists
-        if not self.description:
-            raise ValueError("Description cannot be empty.")
-
         if self.description != self.description.strip():
             raise ValueError("Description cannot contain leading or trailing whitespace.")
 
@@ -746,9 +742,6 @@ class FlowStep(BaseFlowStep, YamlResource):
             raise ValueError(
                 "Name must contain only letters (including accented), numbers, and _ & , / . -"
             )
-
-        if self.prompt is None or not self.prompt.strip():
-            raise ValueError("Prompt cannot be empty.")
 
         # Check flow config exists in resource mappings
         found_flow = False

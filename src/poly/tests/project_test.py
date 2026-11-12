@@ -2724,14 +2724,10 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_validation_error(self):
         project_data = deepcopy(PROJECT_DATA)
-        # Create invalid resource (empty description)
-        project_data["resources"]["flow_config"]["FLOW_CONFIG-test_flow"]["description"] = (
-            "description"
-        )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        # Modify the local file to match
+        # Point the local flow at a start step that doesn't exist
         flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
-        invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
+        invalid_content = "name: test_flow\ndescription: desc\nstart_step: missing_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
             success, message, commands = project.push_project(force=True, skip_validation=False)
@@ -2741,14 +2737,10 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_validation_error_skip(self):
         project_data = deepcopy(PROJECT_DATA)
-        # Create invalid resource (empty description)
-        project_data["resources"]["flow_config"]["FLOW_CONFIG-test_flow"]["description"] = (
-            "description"
-        )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        # Modify the local file to match
+        # Point the local flow at a start step that doesn't exist
         flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
-        invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
+        invalid_content = "name: test_flow\ndescription: desc\nstart_step: missing_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
             success, message, commands = project.push_project(force=True, skip_validation=True)
@@ -2967,12 +2959,12 @@ class ValidateProjectTest(unittest.TestCase):
             {
                 os.path.join(
                     TEST_DIR, "flows", "test_flow", "flow_config.yaml"
-                ): "name: test_flow\ndescription: \nstart_step: start_step\n"
+                ): "name: test_flow\ndescription: \nstart_step: missing_step\n"
             }
         ):
             errors = project.validate_project()
         self.assertEqual(len(errors), 1)
-        self.assertIn("Description cannot be empty.", errors[0])
+        self.assertIn("Start step 'missing_step' not found.", errors[0])
 
     def test_validate_project_invalid_multiple(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)

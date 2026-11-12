@@ -12,7 +12,7 @@ Voice settings configure the agent's behavior on the voice (phone call) channel.
 The first message the agent speaks when a call starts.
 
 ### Fields
-- **welcome_message** (required): Text of the greeting. Supports `{{attr:...}}` and `{{vrbl:...}}` references.
+- **welcome_message**: Text of the greeting. Can be empty. Supports `{{attr:...}}` and `{{vrbl:...}}` references.
 - **language_code** (required): BCP-47 language code (e.g. `en-GB`, `en-US`).
 
 ### Example

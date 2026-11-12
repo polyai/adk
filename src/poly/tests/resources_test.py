@@ -2518,16 +2518,14 @@ class VoiceGreetingTests(unittest.TestCase):
         """Test validation of greeting message."""
         self.assertIsNone(TEST_GREETING.validate(resource_mappings=[]))
 
-        # Test with empty message
+        # An empty message is valid
         empty_greeting = VoiceGreeting(
             resource_id="greeting_123",
             name="greeting",
             welcome_message="",
             language_code="en-GB",
         )
-        with self.assertRaises(ValueError) as cm:
-            empty_greeting.validate(resource_mappings=[])
-        self.assertIn("Welcome message cannot be empty.", str(cm.exception))
+        self.assertIsNone(empty_greeting.validate(resource_mappings=[]))
 
         # Test with invalid function reference
         invalid_greeting = VoiceGreeting(
@@ -2567,6 +2565,38 @@ class VoiceGreetingTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             empty_lang_greeting.validate()
         self.assertIn("Language code cannot be empty.", str(cm.exception))
+
+    def test_empty_welcome_message_round_trips(self):
+        """A greeting pulled with an empty welcome message reads back from YAML unchanged."""
+        pulled = VoiceGreeting.from_projection(
+            {
+                "channels": {
+                    "voice": {
+                        "config": {"greeting": {"welcomeMessage": "", "languageCode": "en-GB"}}
+                    }
+                }
+            }
+        )["voice_greeting"]
+
+        yaml_dict = resource_utils.load_yaml(resource_utils.dump_yaml(pulled.to_yaml_dict()))
+        read_back = VoiceGreeting.from_yaml_dict(
+            yaml_dict, resource_id="voice_greeting", name="voice_greeting"
+        )
+
+        self.assertEqual(yaml_dict["welcome_message"], "")
+        self.assertEqual(read_back, pulled)
+        self.assertIsNone(read_back.validate(resource_mappings=[]))
+
+    def test_welcome_message_key_without_value_reads_as_empty(self):
+        """`welcome_message:` with nothing after it reads as an empty message."""
+        greeting = VoiceGreeting.from_yaml_dict(
+            {"welcome_message": None, "language_code": "en-GB"},
+            resource_id="voice_greeting",
+            name="voice_greeting",
+        )
+
+        self.assertEqual(greeting.welcome_message, "")
+        self.assertIsNone(greeting.validate(resource_mappings=[]))
 
     def test_read_local_resource(self):
         """Test reading a greeting from a YAML file."""
@@ -3094,16 +3124,14 @@ class FlowConfigTests(unittest.TestCase):
             invalid_config.validate(resource_mappings=resource_mappings)
         self.assertIn("Start step 'missing-step' not found.", str(cm.exception))
 
-        # Test with empty description
-        invalid_config = FlowConfig(
+        # An empty description is valid
+        empty_description_config = FlowConfig(
             resource_id="flow-123",
             name="Test Flow",
             description="",
             start_step="step-1",
         )
-        with self.assertRaises(ValueError) as cm:
-            invalid_config.validate(resource_mappings=resource_mappings)
-        self.assertIn("Description cannot be empty.", str(cm.exception))
+        self.assertIsNone(empty_description_config.validate(resource_mappings=resource_mappings))
 
         # Test with invalid description
         invalid_config = FlowConfig(
@@ -3117,6 +3145,31 @@ class FlowConfigTests(unittest.TestCase):
         self.assertIn(
             "Description cannot contain leading or trailing whitespace.", str(cm.exception)
         )
+
+    def test_empty_description_round_trips(self):
+        """A flow pulled with an empty description reads back from YAML unchanged."""
+        pulled = FlowConfig.from_projection(
+            {
+                "flows": {
+                    "flows": {
+                        "entities": {
+                            "FLOW-1": {
+                                "name": "Booking",
+                                "description": "",
+                                "startStepId": "STEP-A",
+                                "steps": {"entities": {}},
+                            }
+                        }
+                    }
+                }
+            }
+        )["FLOW-1"]
+
+        yaml_dict = resource_utils.load_yaml(resource_utils.dump_yaml(pulled.to_yaml_dict()))
+        read_back = FlowConfig.from_yaml_dict(yaml_dict, resource_id="FLOW-1", name="Booking")
+
+        self.assertEqual(yaml_dict["description"], "")
+        self.assertEqual(read_back, pulled)
 
     def test_read_local_resource(self):
         """Test reading a flow config from a YAML file."""
@@ -3595,21 +3648,23 @@ conditions:
         ]
         self.assertIsNone(TEST_FLOW_STEP.validate(resource_mappings=resource_mappings))
 
-        # Test with empty prompt
-        invalid_step = FlowStep(
-            resource_id="flow-123_step-1",
-            step_id="step-1",
-            name="Test Step",
-            flow_id="flow-123",
-            flow_name="Test Flow",
-            step_type=StepType.ADVANCED_STEP,
-            conditions=[],
-            prompt=None,
-            position={"x": 0.0, "y": 0.0},
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_step.validate(resource_mappings=resource_mappings)
-        self.assertIn("Prompt cannot be empty.", str(cm.exception))
+        # An empty prompt is valid
+        for prompt in (None, "", "   "):
+            with self.subTest(prompt=prompt):
+                empty_prompt_step = FlowStep(
+                    resource_id="flow-123_step-1",
+                    step_id="step-1",
+                    name="Test Step",
+                    flow_id="flow-123",
+                    flow_name="Test Flow",
+                    step_type=StepType.ADVANCED_STEP,
+                    conditions=[],
+                    prompt=prompt,
+                    position={"x": 0.0, "y": 0.0},
+                )
+                self.assertIsNone(
+                    empty_prompt_step.validate(resource_mappings=resource_mappings)
+                )
 
         # Test with missing flow config
         invalid_step = FlowStep(
@@ -4154,6 +4209,49 @@ conditions:
         self.assertEqual(updated[0].name, "Updated Condition 1")
         self.assertEqual(len(deleted), 1)  # condition_3 is deleted
         self.assertEqual(deleted[0].resource_id, "cond-3")
+
+    def test_empty_prompt_round_trips(self):
+        """A step pulled with an empty prompt reads back from YAML unchanged."""
+        for step_type in ("advanced_step", "default_step"):
+            with self.subTest(step_type=step_type):
+                pulled = FlowStep.from_projection(
+                    {
+                        "flows": {
+                            "flows": {
+                                "entities": {
+                                    "FLOW-1": {
+                                        "name": "Booking",
+                                        "steps": {
+                                            "entities": {
+                                                "STEP-A": {
+                                                    "name": "greet",
+                                                    "type": step_type,
+                                                    "prompt": "",
+                                                    "conditions": [],
+                                                }
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                )["FLOW-1_STEP-A"]
+
+                yaml_dict = resource_utils.load_yaml(
+                    resource_utils.dump_yaml(pulled.to_yaml_dict())
+                )
+                read_back = FlowStep.from_yaml_dict(
+                    yaml_dict,
+                    resource_id="FLOW-1_STEP-A",
+                    file_name="greet",
+                    flow_id="FLOW-1",
+                    flow_name="Booking",
+                )
+
+                self.assertEqual(yaml_dict["prompt"], "")
+                self.assertEqual(read_back.prompt, "")
+                self.assertEqual(read_back.to_yaml_dict(), pulled.to_yaml_dict())
 
     def test_read_local_resource_advanced_step(self):
         """Test reading a flow step from a YAML file with ASR and DTMF."""
