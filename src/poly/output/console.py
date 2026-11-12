@@ -11,7 +11,7 @@ import os
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -26,6 +26,8 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 from rich.tree import Tree
+
+from poly.constants import DATA_AGGS
 
 # Global verbose flag — set by CLI before commands run
 _verbose = False
@@ -1787,3 +1789,333 @@ def poll_test_run_live(
         success(f"Test run {result.get('status', 'unknown')}: {passed}/{total_count} passed")
 
     return result
+
+
+def print_available_metrics(metrics: list[dict[str, Any]]) -> None:
+    """Print the metrics a project can query, built-in metrics included.
+
+    Args:
+        metrics: Metric dicts from the Data API catalog: name, type,
+            description, and ``values`` (expected values for string metrics).
+    """
+    if not metrics:
+        plain("No metrics available for this project.")
+        return
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Name", style="bold yellow", no_wrap=True)
+    table.add_column("Type", no_wrap=True)
+    table.add_column("Values", max_width=30)
+    table.add_column("Description", max_width=60)
+
+    for m in sorted(metrics, key=lambda m: str(m.get("name", "")).lower()):
+        values = m.get("values") or []
+        table.add_row(
+            str(m.get("name", "—")),
+            str(m.get("type", "—")),
+            ", ".join(str(v) for v in values) if values else "—",
+            m.get("description") or "",
+        )
+
+    console.print(table)
+    console.print(f"\n{len(metrics)} metrics. Query one with: poly metrics query <name>")
+
+
+def _format_bucket(value: str, interval: str | None, timezone: str | None) -> str:
+    """Label a time bucket in the timezone the query bucketed in.
+
+    Buckets are UTC unless the query gave a timezone, which the Data API
+    applies to hourly and daily buckets only. The label stays in that
+    timezone, not the machine's, so a day's bucket reads as that day wherever
+    it is printed. Daily, weekly and monthly buckets show the date alone.
+    Hourly buckets name the zone too, which tells apart the two 01:00 hours
+    on the day the clocks go back.
+    """
+    try:
+        start = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if start.tzinfo is not None:
+        local = timezone and interval in ("hourly", "daily")
+        start = start.astimezone(ZoneInfo(timezone) if local else UTC)
+    return start.strftime("%Y-%m-%d %H:%M %Z" if interval == "hourly" else "%Y-%m-%d")
+
+
+def _format_aggregate_cell(
+    column: str, value: Any, interval: str | None = None, timezone: str | None = None
+) -> str:
+    """Format one cell of an aggregate result for the terminal."""
+    if value is None:
+        return "—"
+    if column == "bucket" and isinstance(value, str):
+        return _format_bucket(value, interval, timezone)
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return f"{value:,}"
+    return str(value)
+
+
+def print_aggregate(
+    result: dict[str, Any],
+    headline: str | None = None,
+    note: str | None = None,
+    interval: str | None = None,
+    timezone: str | None = None,
+) -> None:
+    """Print a tabular aggregate result from the Data API.
+
+    Args:
+        result: ``{"columns": [...], "rows": [[...]], "limit", "offset"}``.
+        headline: Optional one-line summary printed above the table.
+        note: Optional remark about the query, printed dimmed above the table.
+        interval: The query's time bucket, which decides how buckets are labelled.
+        timezone: The query's timezone, which the bucket labels stay in.
+    """
+    columns = result.get("columns") or []
+    rows = result.get("rows") or []
+
+    if headline:
+        console.print(f"[bold]{headline}[/bold]")
+    if note:
+        console.print(f"[dim]{note}[/dim]")
+    if headline or note:
+        console.print()
+
+    if not rows:
+        plain("No data in this window.")
+        return
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    for column in columns:
+        justify = "right" if column in DATA_AGGS else "left"
+        table.add_column(column, justify=justify, no_wrap=True)
+
+    for row in rows:
+        table.add_row(
+            *[_format_aggregate_cell(c, v, interval, timezone) for c, v in zip(columns, row)]
+        )
+
+    console.print(table)
+    limit = result.get("limit")
+    if limit is not None and len(rows) >= limit:
+        next_offset = result.get("offset", 0) + limit
+        console.print(
+            f"\nShowing {len(rows)} rows (limit {limit}). "
+            f"Use --offset {next_offset} for the next page."
+        )
+
+
+# ── Data API: conversation search and transcripts ───────────────────
+
+
+def _format_metric_value(value: Any) -> str:
+    """Format one metric value from a conversation search row."""
+    if value is None:
+        return "—"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value) if value else "—"
+    return str(value)
+
+
+def print_conversation_search(
+    result: dict[str, Any],
+    fields: list[str],
+    url_builder: Callable[[str], str] | None = None,
+) -> None:
+    """Print conversation search results with one column per requested metric field.
+
+    Args:
+        result: ``{"conversations": [...], "total", "limit", "offset"}`` from the
+            Data API. Each conversation carries ``conversation_id``,
+            ``started_at``, ``duration_seconds`` and a ``metrics`` map.
+        fields: Metric fields that were requested; each becomes a column.
+            ``duration`` is skipped because the Duration column already shows it.
+        url_builder: Optional callable(conversation_id) -> Studio URL.
+    """
+    conversations = result.get("conversations") or []
+    metric_columns = [f for f in fields if f.lower() != "duration"]
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Conversation ID", style="bold yellow", no_wrap=True)
+    table.add_column("Started", no_wrap=True)
+    table.add_column("Duration", no_wrap=True, justify="right")
+    for column in metric_columns:
+        table.add_column(column, overflow="fold", max_width=48)
+
+    missing: set[str] = set()
+    for c in conversations:
+        cid = c.get("conversation_id", "—")
+        if url_builder and cid != "—":
+            cid_display = f"[link={url_builder(cid)}]{cid}[/link]"
+        else:
+            cid_display = cid
+        started = c.get("started_at")
+        metrics = c.get("metrics") or {}
+        lookup = {str(k).lower(): v for k, v in metrics.items()}
+        row = [
+            cid_display,
+            _format_iso_timestamp(started) if started else "—",
+            _format_duration(c.get("duration_seconds")),
+        ]
+        for column in metric_columns:
+            key = column.lower()
+            if key not in lookup:
+                missing.add(column)
+            row.append(_format_metric_value(lookup.get(key)))
+        table.add_row(*row)
+
+    console.print(table)
+
+    total = result.get("total")
+    shown = len(conversations)
+    offset = result.get("offset", 0) or 0
+    if total is not None and total > offset + shown:
+        console.print(
+            f"\nShowing {offset + 1}-{offset + shown} of {total:,}. "
+            f"Use --offset {offset + shown} for the next page."
+        )
+    pii_fields = {
+        "call_summary",
+        "call_summary_heading",
+        "email_subject",
+        "poly_score_agent_quality_summary",
+        "poly_score_task_success_summary",
+        "poly_score_v2_agent_quality_summary",
+        "poly_score_v2_task_success_summary",
+    }
+    missing_pii = sorted(f for f in missing if f.lower() in pii_fields)
+    if missing_pii:
+        warning(
+            f"{', '.join(missing_pii)} not returned: these are PII fields, so the API key "
+            "needs PII read permission on the project to see them."
+        )
+
+
+def _turn_text(turn: dict[str, Any], side: str, english: bool) -> str | None:
+    """Pick the original or English text for one side of a turn."""
+    key = "user_input" if side == "user" else "agent_response"
+    if english:
+        translated = turn.get(f"english_{key}")
+        if translated:
+            return translated
+    return turn.get(key) or None
+
+
+def _turn_time(turn: dict[str, Any], side: str) -> str:
+    """Format the timestamp for one side of a turn as HH:MM:SS, or blank."""
+    key = "user_input_datetime" if side == "user" else "agent_response_datetime"
+    ts = turn.get(key)
+    if not ts:
+        return "        "
+    try:
+        return datetime.fromisoformat(str(ts)).astimezone().strftime("%H:%M:%S")
+    except (TypeError, ValueError):
+        return "        "
+
+
+def _print_turn(
+    turn: dict[str, Any],
+    *,
+    english: bool,
+    highlight: str | None = None,
+    dim: bool = False,
+    indent: str = "  ",
+) -> None:
+    """Print one transcript turn as user and agent lines with timestamps."""
+    for side, label, colour in (("user", "user: ", "green"), ("agent", "agent:", "cyan")):
+        text_value = _turn_text(turn, side, english)
+        if text_value is None:
+            continue
+        line = Text(f"{indent}{_turn_time(turn, side)} ")
+        line.append(label, style="dim" if dim else colour)
+        line.append(" ")
+        body = Text(text_value, style="dim" if dim else "")
+        if highlight:
+            body.highlight_words([highlight], style="bold yellow", case_sensitive=False)
+        line.append_text(body)
+        console.print(line)
+
+
+def print_transcript_matches(
+    result: dict[str, Any],
+    query: str,
+    *,
+    english: bool = False,
+    url_builder: Callable[[str], str] | None = None,
+) -> None:
+    """Print transcript search results: each conversation, its matched turns and context.
+
+    Args:
+        result: ``{"results": [...], "total", "limit", "offset"}`` from the Data API.
+        query: The search phrase, highlighted where it appears.
+        english: Prefer the English translation of each turn when available.
+        url_builder: Optional callable(conversation_id) -> Studio URL.
+    """
+    results = result.get("results") or []
+    for i, conv in enumerate(results):
+        cid = conv.get("conversation_id", "—")
+        matched = conv.get("matched_turns") or []
+        first_ts = next(
+            (t.get("user_input_datetime") or t.get("agent_response_datetime") for t in matched),
+            None,
+        )
+        when = f"  {_format_iso_timestamp(str(first_ts))}" if first_ts else ""
+        cid_display = f"[link={url_builder(cid)}]{cid}[/link]" if url_builder else cid
+        if i:
+            console.print()
+        console.print(
+            f"[bold yellow]{cid_display}[/bold yellow]{when}  "
+            f"[dim]{len(matched)} match{'es' if len(matched) != 1 else ''}[/dim]"
+        )
+        for j, turn in enumerate(matched):
+            context = turn.get("context") or {}
+            if j:
+                console.print("  [dim]…[/dim]")
+            for before in context.get("before") or []:
+                _print_turn(before, english=english, dim=True)
+            _print_turn(turn, english=english, highlight=query)
+            for after in context.get("after") or []:
+                _print_turn(after, english=english, dim=True)
+
+    total = result.get("total")
+    shown = len(results)
+    offset = result.get("offset", 0) or 0
+    if total is not None and total > offset + shown:
+        console.print(
+            f"\nShowing {offset + 1}-{offset + shown} of {total:,} conversations. "
+            f"Use --offset {offset + shown} for the next page."
+        )
+
+
+def print_transcript(
+    transcript: dict[str, Any],
+    *,
+    english: bool = False,
+    studio_url: str | None = None,
+) -> None:
+    """Print a full conversation transcript, one timestamped line per side of each turn.
+
+    Args:
+        transcript: ``{"conversation_id", "project_id", "turns": [...], "total_turns"}``.
+        english: Prefer the English translation of each turn when available.
+        studio_url: Optional Agent Studio URL for the conversation.
+    """
+    cid = transcript.get("conversation_id", "—")
+    cid_display = f"[link={studio_url}]{cid}[/link]" if studio_url else cid
+    turns = transcript.get("turns") or []
+    total = transcript.get("total_turns", len(turns))
+    console.print(
+        f"[bold]Conversation[/bold] [yellow]{cid_display}[/yellow]  [dim]{total} turns[/dim]"
+    )
+    console.print()
+    if not turns:
+        plain("No turns recorded for this conversation.")
+        return
+    for turn in turns:
+        _print_turn(turn, english=english)
+    console.print()

@@ -16,12 +16,17 @@ from poly.output.console import (
     mask_api_key,
     mask_secret,
     paged_output,
+    print_aggregate,
     print_archived_branches,
+    print_available_metrics,
     print_branch_history,
+    print_conversation_search,
     print_experiment_detail,
     print_experiments,
     print_merge_conflict_interactive_header,
     print_releases_branches,
+    print_transcript,
+    print_transcript_matches,
     resolve_parent_branch_label,
 )
 
@@ -686,3 +691,217 @@ class PrintExperimentDetailTest(unittest.TestCase):
         output = self._render(experiment)
 
         self.assertIn("(— traffic)", output)
+
+
+class PrintAvailableMetricsTest(unittest.TestCase):
+    """Tests for print_available_metrics, the `metrics available` table."""
+
+    def _render(self, metrics: list[dict]) -> str:
+        with console.capture() as capture:
+            print_available_metrics(metrics)
+        return capture.get()
+
+    def test_metrics_are_sorted_with_values_and_description(self):
+        """Rows are alphabetical; string metrics list their expected values."""
+        output = self._render(
+            [
+                {"name": "poly_score", "type": "float", "description": "Overall score"},
+                {"name": "OUTCOME", "type": "string", "values": ["booked", "cancelled"]},
+            ]
+        )
+
+        self.assertLess(output.index("OUTCOME"), output.index("poly_score"))
+        self.assertIn("booked, cancelled", output)
+        self.assertIn("Overall score", output)
+        self.assertIn("2 metrics", output)
+
+    def test_empty_catalog(self):
+        """No metrics prints a one-line notice rather than an empty table."""
+        self.assertIn("No metrics available", self._render([]))
+
+
+class PrintAggregateTest(unittest.TestCase):
+    """Tests for print_aggregate, the `metrics query` / `metrics score` table."""
+
+    def _render(self, result: dict, headline: str | None = None, **query) -> str:
+        with patch.object(console, "_width", 200), console.capture() as capture:
+            print_aggregate(result, headline=headline, **query)
+        return capture.get()
+
+    def _bucket_label(self, bucket: str, **query) -> str:
+        output = self._render({"columns": ["bucket"], "rows": [[bucket]]}, **query)
+        return output.splitlines()[-1].strip()
+
+    def test_numbers_and_buckets_are_formatted(self):
+        """Floats get two decimals, counts get separators, buckets a date."""
+        output = self._render(
+            {
+                "columns": ["bucket", "channel", "avg", "conversation_count"],
+                "rows": [["2026-09-01T00:00:00+00:00", "VOICE-SIP", 4.2134, 1318]],
+                "limit": 20,
+                "offset": 0,
+            },
+            headline="Poly Score: 4.21 average",
+        )
+
+        self.assertIn("Poly Score: 4.21 average", output)
+        self.assertIn("VOICE-SIP", output)
+        self.assertIn("4.21", output)
+        self.assertIn("1,318", output)
+        self.assertNotIn("2026-09-01T00:00:00+00:00", output)
+        self.assertIn("2026-09-01 ", output)
+        self.assertNotIn("Use --offset", output)
+
+    def test_bucket_labels_do_not_depend_on_the_machine_timezone(self):
+        """UTC buckets are labelled in UTC: the date alone, or with the hour when hourly."""
+        bucket = "2026-10-01T00:00:00+00:00"
+
+        self.assertEqual(self._bucket_label(bucket, interval="daily"), "2026-10-01")
+        self.assertEqual(self._bucket_label(bucket, interval="weekly"), "2026-10-01")
+        self.assertEqual(self._bucket_label(bucket, interval="monthly"), "2026-10-01")
+        self.assertEqual(self._bucket_label(bucket, interval="hourly"), "2026-10-01 00:00 UTC")
+
+    def test_bucket_labels_stay_in_the_query_timezone(self):
+        """Hourly and daily buckets are labelled in the timezone they were bucketed in."""
+        zone = "America/New_York"
+        bucket = "2026-11-01T04:00:00+00:00"
+
+        self.assertEqual(self._bucket_label(bucket, interval="daily", timezone=zone), "2026-11-01")
+        self.assertEqual(
+            self._bucket_label(bucket, interval="hourly", timezone=zone), "2026-11-01 00:00 EDT"
+        )
+
+    def test_hourly_labels_tell_apart_the_repeated_hour(self):
+        """When the clocks go back, 01:00 happens twice; the zone name says which is which."""
+        labels = [
+            self._bucket_label(bucket, interval="hourly", timezone="America/New_York")
+            for bucket in ("2026-11-01T05:00:00+00:00", "2026-11-01T06:00:00+00:00")
+        ]
+
+        self.assertEqual(labels, ["2026-11-01 01:00 EDT", "2026-11-01 01:00 EST"])
+
+    def test_weekly_and_monthly_labels_ignore_the_timezone(self):
+        """The Data API buckets weeks and months in UTC whatever timezone is sent."""
+        label = self._bucket_label(
+            "2026-11-02T00:00:00+00:00", interval="weekly", timezone="America/New_York"
+        )
+
+        self.assertEqual(label, "2026-11-02")
+
+    def test_full_page_hints_at_the_next_offset(self):
+        """When the page is full, the footer says where the next page starts."""
+        output = self._render({"columns": ["avg"], "rows": [[1.0], [2.0]], "limit": 2, "offset": 2})
+
+        self.assertIn("Use --offset 4", output)
+
+    def test_no_rows(self):
+        """An empty window prints a notice and no table."""
+        self.assertIn("No data in this window", self._render({"columns": ["avg"], "rows": []}))
+
+
+class PrintConversationSearchTest(unittest.TestCase):
+    """Tests for print_conversation_search, the `conversations search` table."""
+
+    def test_metric_columns_and_pii_warning(self):
+        """Requested fields become columns; missing PII fields produce a warning."""
+        result = {
+            "conversations": [
+                {
+                    "conversation_id": "conv-1",
+                    "started_at": "2026-09-30T10:00:00+00:00",
+                    "duration_seconds": 95,
+                    "metrics": {"poly_score_v2": 4.5, "channel": "CHAT"},
+                }
+            ],
+            "total": 30,
+            "limit": 1,
+            "offset": 0,
+        }
+
+        with (
+            patch("poly.output.console.warning") as mock_warning,
+            # Wide enough that no column truncates, whatever the platform calls UTC.
+            patch.object(console, "_width", 200),
+            console.capture() as capture,
+        ):
+            print_conversation_search(
+                result, fields=["poly_score_v2", "duration", "channel", "call_summary"]
+            )
+        output = capture.get()
+
+        self.assertIn("conv-1", output)
+        self.assertIn("poly_score", output)
+        self.assertIn("4.50", output)
+        self.assertIn("CHAT", output)
+        self.assertEqual(output.lower().count("duration"), 1)
+        self.assertIn("--offset 1", output)
+        self.assertIn("call_summary", mock_warning.call_args[0][0])
+
+
+class PrintTranscriptTest(unittest.TestCase):
+    """Tests for print_transcript_matches and print_transcript."""
+
+    def test_matches_show_context_in_order_with_the_phrase(self):
+        """Matched turns print between their context turns."""
+        result = {
+            "results": [
+                {
+                    "conversation_id": "conv-1",
+                    "project_id": "proj1",
+                    "matched_turns": [
+                        {
+                            "turn_index": 2,
+                            "user_input": "I want to cancel my booking please",
+                            "user_input_datetime": "2026-09-30T10:00:05+00:00",
+                            "agent_response": "Sure, which booking?",
+                            "context": {
+                                "before": [
+                                    {"turn_index": 1, "user_input": "hello", "agent_response": "hi"}
+                                ],
+                                "after": [{"turn_index": 3, "user_input": "the one on friday"}],
+                            },
+                        }
+                    ],
+                }
+            ],
+            "total": 1,
+            "limit": 20,
+            "offset": 0,
+        }
+
+        with console.capture() as capture:
+            print_transcript_matches(result, "cancel my booking")
+        output = capture.get()
+
+        self.assertIn("conv-1", output)
+        self.assertIn("1 match", output)
+        self.assertLess(output.index("hello"), output.index("cancel my booking"))
+        self.assertLess(output.index("cancel my booking"), output.index("the one on friday"))
+
+    def test_transcript_prefers_english_when_asked(self):
+        """--english swaps in the translated text where it exists and falls back otherwise."""
+        transcript = {
+            "conversation_id": "conv-1",
+            "total_turns": 1,
+            "turns": [
+                {
+                    "turn_index": 0,
+                    "user_input": "hola",
+                    "english_user_input": "hello",
+                    "user_input_datetime": "2026-09-30T10:00:00+00:00",
+                    "agent_response": "buenos días",
+                }
+            ],
+        }
+
+        with console.capture() as capture:
+            print_transcript(transcript)
+        original = capture.get()
+        with console.capture() as capture:
+            print_transcript(transcript, english=True)
+        english = capture.get()
+
+        self.assertIn("hola", original)
+        self.assertIn("hello", english)
+        self.assertIn("buenos días", english)
+        self.assertIn("1 turns", english)

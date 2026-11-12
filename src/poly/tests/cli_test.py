@@ -19,6 +19,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
+import argcomplete
 import requests
 import urllib3
 from rich.console import Console
@@ -1006,6 +1007,8 @@ class BranchMergeTest(unittest.TestCase):
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
         self.proj.using_simplified_deployments = True
+        self.proj.experiments_enabled = True
+        self.proj.get_active_experiment.return_value = {}
         self.proj.merge_branch.return_value = (True, [], [])
         self._set_current_branch("feature-a")
         self.mock_load.return_value = self.proj
@@ -1026,7 +1029,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it")
 
         mock_confirm.assert_called_once()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("now live", mock_success.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1047,7 +1052,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it", force=True)
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("now live", mock_success.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1059,7 +1066,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it")
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("main", mock_info.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1073,7 +1082,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it")
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("Release 1", mock_info.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1083,7 +1094,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it", output_json=True)
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
 
     @patch("questionary.select")
@@ -1103,6 +1116,96 @@ class BranchMergeTest(unittest.TestCase):
 
                 choices = [c["name"] for c in mock_select.call_args.kwargs["choices"]]
                 self.assertIn(f"Use parent — {parent}", choices)
+
+    def _start_experiment(self) -> None:
+        """Make the project report a running experiment."""
+        self.proj.get_active_experiment.return_value = {"id": "exp-1", "name": "Greeting test"}
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.warning")
+    def test_running_experiment_is_named_and_confirming_acknowledges_it(
+        self, mock_warning, mock_confirm
+    ):
+        """With an experiment running, the prompt names it and a yes acknowledges it."""
+        self._start_experiment()
+        mock_confirm.return_value.ask.return_value = True
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        self.assertIn("Greeting test", mock_warning.call_args_list[0][0][0])
+        self.assertIn("experiment", mock_confirm.call_args[0][0])
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=True
+        )
+
+    @patch("questionary.confirm")
+    def test_declining_while_experiment_runs_aborts_without_merging(self, mock_confirm):
+        """Answering no while an experiment runs leaves the branch unmerged."""
+        self._start_experiment()
+        mock_confirm.return_value.ask.return_value = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.proj.merge_branch.assert_not_called()
+
+    @patch("questionary.confirm")
+    def test_acknowledge_flag_skips_the_experiment_lookup(self, mock_confirm):
+        """--acknowledge-experiment keeps the deploy prompt but needs no experiment lookup."""
+        mock_confirm.return_value.ask.return_value = True
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it", acknowledge_experiment=True)
+
+        self.proj.get_active_experiment.assert_not_called()
+        self.assertEqual(mock_confirm.call_args[0][0], "Confirm Deployment?")
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=True
+        )
+
+    @patch("questionary.confirm")
+    @patch("poly.cli_commands.branch.json_print")
+    def test_non_interactive_merges_acknowledge_only_with_the_flag(
+        self, mock_json_print, mock_confirm
+    ):
+        """--force and --json never prompt, so only the flag acknowledges the experiment."""
+        self._start_experiment()
+        modes = [{"force": True}, {"output_json": True}]
+        for mode in modes:
+            for acknowledge in (False, True):
+                with self.subTest(mode=mode, acknowledge=acknowledge):
+                    self.proj.merge_branch.reset_mock()
+
+                    BranchCommand.branch_merge(
+                        TEST_DIR, message="ship it", acknowledge_experiment=acknowledge, **mode
+                    )
+
+                    self.proj.merge_branch.assert_called_once_with(
+                        message="ship it",
+                        conflict_resolutions=None,
+                        acknowledge_active_experiment=acknowledge,
+                    )
+        mock_confirm.assert_not_called()
+
+    @patch("poly.output.console.success")
+    def test_conflict_retry_keeps_the_acknowledgement(self, mock_success):
+        """The merge re-sent after resolving conflicts still acknowledges the experiment."""
+        resolutions = [{"path": _GREETING_CONFLICT["path"], "strategy": "theirs"}]
+        self.proj.merge_branch.side_effect = [(False, [_GREETING_CONFLICT], []), (True, [], [])]
+
+        with patch.object(BranchCommand, "_merge_interactively", return_value=resolutions):
+            BranchCommand.branch_merge(
+                TEST_DIR,
+                message="ship it",
+                interactive=True,
+                force=True,
+                acknowledge_experiment=True,
+            )
+
+        retry = self.proj.merge_branch.call_args_list[1].kwargs
+        self.assertEqual(retry["conflict_resolutions"], resolutions)
+        self.assertTrue(retry["acknowledge_active_experiment"])
+        mock_success.assert_called_once()
 
 
 class BranchSyncTest(unittest.TestCase):
@@ -1986,6 +2089,13 @@ class ChatCommandTest(unittest.TestCase):
         self.assertIn("error", payload["push"])
 
 
+class _InProcessCompletionFinder(argcomplete.CompletionFinder):
+    """argcomplete's finder without its debug stream on fd 9, which pytest's capture uses."""
+
+    def _init_debug_stream(self):
+        pass
+
+
 class CompletionCommandTest(unittest.TestCase):
     """Tests for the completion command."""
 
@@ -2021,6 +2131,36 @@ class CompletionCommandTest(unittest.TestCase):
         """Parser rejects shell choices outside bash/zsh/fish."""
         with self.assertRaises(SystemExit):
             AgentStudioCLI().main(sys_args=["completion", "powershell"])
+
+    def _complete(self, line: str) -> list[str]:
+        """Return what the shell would offer for `line`, as argcomplete computes it."""
+        completion_env = {
+            "_ARGCOMPLETE": "1",
+            "COMP_LINE": line,
+            "COMP_POINT": str(len(line)),
+            "_ARGCOMPLETE_IFS": "\013",
+        }
+        with patch.dict(os.environ, completion_env):
+            cli = AgentStudioCLI()
+            cli.register_commands()
+            parser = cli._create_parser()
+            output = StringIO()
+            _InProcessCompletionFinder()(
+                parser,
+                output_stream=output,
+                exit_method=lambda code: None,
+                always_complete_options=False,
+            )
+        return [completion.strip() for completion in output.getvalue().split("\013")]
+
+    def test_completes_command_names(self):
+        """The grouped --help sections must not break completion of command names."""
+        self.assertEqual(self._complete("poly sta"), ["status"])
+
+    def test_completes_grouped_subcommand_names(self):
+        """branch and functions group their subcommands in --help too."""
+        self.assertIn("create", self._complete("poly branch "))
+        self.assertIn("execute", self._complete("poly functions "))
 
 
 class ResolveProjectScopeTest(unittest.TestCase):
@@ -3246,6 +3386,39 @@ class InitProjectTest(unittest.TestCase):
 
         mock_create.assert_called_once_with(
             TEST_DIR, region="eu-west-1", account_id="acc_1", output_json=False
+        )
+
+
+class ListProjectsTest(unittest.TestCase):
+    """Tests for the list project command."""
+
+    @patch("poly.cli_commands.project.json_print")
+    @patch("poly.cli_commands.project.AgentStudioInterface")
+    def test_json_rows_carry_the_agent_id_as_project_id(self, mock_iface_cls, mock_json_print):
+        """The API names the id agentId; the row must not come out with a null project_id."""
+        mock_iface_cls.return_value.list_agents.return_value = [
+            {
+                "agentId": "AGENT-1",
+                "agentName": "My First Agent",
+                "updatedAt": "2026-11-03T19:06:16Z",
+                "branchCount": 2,
+            }
+        ]
+
+        ProjectCommand.list_projects(region="us-1", account_id="acc-456", output_json=True)
+
+        mock_json_print.assert_called_once_with(
+            {
+                "success": True,
+                "agents": [
+                    {
+                        "project_id": "AGENT-1",
+                        "agent_name": "My First Agent",
+                        "updated_at": "2026-11-03T19:06:16Z",
+                        "branch_count": 2,
+                    }
+                ],
+            }
         )
 
 
@@ -4991,6 +5164,28 @@ def _help_body(help_text: str) -> str:
     return body
 
 
+class StartupImportsTest(unittest.TestCase):
+    """Tests for what building the CLI imports before any command runs."""
+
+    # Heavy modules that only some commands need. Each command imports them where it
+    # uses them, so every other command, --help and shell completion skip the cost.
+    DEFERRED_MODULES = ["requests", "rich", "asyncio", "webbrowser", "dateutil"]
+
+    def test_heavy_modules_are_not_imported_at_startup(self):
+        script = (
+            "import sys\n"
+            "from poly.cli import AgentStudioCLI\n"
+            "cli = AgentStudioCLI()\n"
+            "cli.register_commands()\n"
+            "cli._create_parser()\n"
+            f"print(' '.join(m for m in {self.DEFERRED_MODULES!r} if m in sys.modules))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, check=True
+        )
+        self.assertEqual(result.stdout.strip(), "", msg="imported at startup")
+
+
 class GroupedHelpOutputTest(unittest.TestCase):
     """Tests for the grouped section headers in `poly --help`."""
 
@@ -6457,12 +6652,12 @@ class CampaignCommandTest(unittest.TestCase):
         patch.object(AgentStudioProject, "save_config").start()
         patch("poly.handlers.sdk.retrieve_api_key", return_value="test-key").start()
         patch("poly.handlers.platform_api.retrieve_api_key", return_value="test-key").start()
-        self.request = patch("poly.handlers.platform_api.requests.request").start()
+        self.request = patch("requests.request").start()
         self.session = MagicMock()
         patch.object(
             SourcererSDK, "session", new_callable=PropertyMock, return_value=self.session
         ).start()
-        self.post = patch("poly.handlers.sdk.requests.post").start()
+        self.post = patch("requests.post").start()
         self.addCleanup(patch.stopall)
 
         self.campaigns_enabled = patch.object(

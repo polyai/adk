@@ -15,7 +15,7 @@ npx -y skills add https://github.com/polyai/adk -y
 | `poly-adk-workflow` | **Entrypoint** — install and auth, project setup, resource-choice guidance, the core edit → validate → push → test → merge loop |
 | `poly-adk-testing` | Verification — `poly validate`, scripted `poly chat`, the `test_suite/` simulated conversation tests, running functions in isolation |
 | `poly-adk-branching` | Branch management, the three-way merge model, non-interactive conflict resolution, review gists |
-| `poly-adk-conversations` | Inspecting real calls with `poly conversations`, instrumenting functions with `conv.log` and metrics |
+| `poly-adk-conversations` | Inspecting real calls with `poly conversations`, reading Poly Score and metric values with `poly metrics`, searching transcripts with `poly transcripts`, instrumenting functions with `conv.log` and metrics |
 | `poly-adk-rtc` | Per-environment Real-Time Configuration — pull/push cycle, drift protection, live-environment safety |
 
 `poly-adk-workflow` is the always-relevant entrypoint; the others load on demand for their task and point back to it. Resource schemas are deliberately **not** duplicated in the skills — the `poly docs` command ships them with the installed CLI, so they can never drift from the release in use.

@@ -705,14 +705,16 @@ class ApiIntegration(MultiResourceYamlResource):
             if config is not None:
                 config.validate(env_name=env_name)
 
-        seen: set[tuple[str, str]] = set()
+        seen: set[str] = set()
         for op in self.operations:
             op.validate()
 
-            key = (op.name, op.method)
-            if key in seen:
-                raise ValueError(f"Duplicate operation: name='{op.name}', method='{op.method}'.")
-            seen.add(key)
+            if op.name in seen:
+                raise ValueError(
+                    f"Duplicate operation name '{op.name}'. "
+                    "Operation names must be unique within an integration."
+                )
+            seen.add(op.name)
 
     @property
     def command_type(self) -> str:

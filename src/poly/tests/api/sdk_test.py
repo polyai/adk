@@ -169,7 +169,7 @@ class SendCommandBatch(unittest.TestCase):
         return Command(type="entity_create", command_id="cmd-1")
 
     @patch("poly.handlers.sdk.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.sdk.requests.post")
+    @patch("requests.post")
     def test_batch_serialized_with_sequence_and_octet_stream(self, mock_post, _mock_key):
         """The batch is sent as serialized protobuf with the cached sequence."""
         sdk = build_sdk()
@@ -197,7 +197,7 @@ class SendCommandBatch(unittest.TestCase):
         self.assertEqual(parsed.commands[0].command_id, "cmd-1")
 
     @patch("poly.handlers.sdk.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.sdk.requests.post")
+    @patch("requests.post")
     def test_queue_cleared_on_success(self, mock_post, _mock_key):
         """A successful send clears the command queue."""
         sdk = build_sdk()
@@ -222,7 +222,7 @@ class SendCommandBatch(unittest.TestCase):
             sdk.send_command_batch()
 
     @patch("poly.handlers.sdk.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.sdk.requests.post")
+    @patch("requests.post")
     def test_request_failure_raises_sourcerer_error(self, mock_post, _mock_key):
         """A failing batch POST raises SourcererAPIError."""
         sdk = build_sdk()
@@ -289,6 +289,35 @@ class MergeBranch(unittest.TestCase):
         with self.assertRaises(SourcererAPIError):
             sdk.merge_branch(deployment_message="msg")
 
+    def test_experiment_acknowledgement_is_sent_only_when_given(self):
+        """The payload carries acknowledgeActiveExperiment only when the caller sets it."""
+        for acknowledge, expected in [(False, None), (True, True)]:
+            with self.subTest(acknowledge=acknowledge):
+                sdk, session = self._sdk_with_sequence(server_sequence=1750)
+
+                sdk.merge_branch(
+                    deployment_message="msg", acknowledge_active_experiment=acknowledge
+                )
+
+                payload = session.post.call_args.kwargs["json"]
+                self.assertEqual(payload.get("acknowledgeActiveExperiment"), expected)
+
+    def test_active_experiment_block_raises_with_its_error_code(self):
+        """A 409 AB_TEST_ACTIVE raises SourcererAPIError naming the code, so callers can spot it."""
+        sdk, session = self._sdk_with_sequence(server_sequence=1750)
+        session.post.return_value = make_mock_response(
+            409,
+            json_body={
+                "error": "End the experiment before promoting a new version to live",
+                "error_code": "AB_TEST_ACTIVE",
+            },
+        )
+
+        with self.assertRaises(SourcererAPIError) as ctx:
+            sdk.merge_branch(deployment_message="msg")
+
+        self.assertIn("AB_TEST_ACTIVE", str(ctx.exception))
+
 
 class GetBranchCallInfo(unittest.TestCase):
     """Tests for SourcererSDK.get_branch_call_info."""
@@ -349,7 +378,7 @@ class OutboundCampaignRequests(unittest.TestCase):
 
     def setUp(self):
         patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key").start()
-        self.request = patch("poly.handlers.platform_api.requests.request").start()
+        self.request = patch("requests.request").start()
         self.addCleanup(patch.stopall)
 
     def _validate(self, campaign_id: str = "CMPGN-1") -> dict:
@@ -442,7 +471,7 @@ class SendCommandBatchToBranch(unittest.TestCase):
             200, json_body={"lastKnownSequence": "4"}
         )
         patch("poly.handlers.sdk.retrieve_api_key", return_value="secret-key").start()
-        self.post = patch("poly.handlers.sdk.requests.post").start()
+        self.post = patch("requests.post").start()
         self.addCleanup(patch.stopall)
         self.sdk.add_command_to_queue(Command(type="outbound_campaign_pause", command_id="c-1"))
 

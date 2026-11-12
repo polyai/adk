@@ -8842,8 +8842,8 @@ class TestApiIntegrationValidate(unittest.TestCase):
         )
         integration.validate()  # should not raise
 
-    def test_duplicate_operation_name_and_method_raises_value_error(self):
-        """Validation rejects two operations that share the same name and method."""
+    def test_duplicate_operation_name_raises_value_error(self):
+        """Validation rejects two operations that share a name."""
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
@@ -8856,12 +8856,14 @@ class TestApiIntegrationValidate(unittest.TestCase):
         )
         with self.assertRaises(ValueError) as ctx:
             integration.validate()
-        self.assertIn("Duplicate operation", str(ctx.exception))
-        self.assertIn("get_users", str(ctx.exception))
-        self.assertIn("GET", str(ctx.exception))
+        self.assertEqual(
+            str(ctx.exception),
+            "Duplicate operation name 'get_users'. "
+            "Operation names must be unique within an integration.",
+        )
 
-    def test_same_name_different_method_is_allowed(self):
-        """Two operations with the same name but different methods are valid."""
+    def test_same_operation_name_with_different_methods_raises_value_error(self):
+        """An operation name can be used once per integration, whatever the method."""
         integration = self._make_integration(
             operations=[
                 ApiIntegrationOperation(
@@ -8872,7 +8874,9 @@ class TestApiIntegrationValidate(unittest.TestCase):
                 ),
             ]
         )
-        integration.validate()  # should not raise
+        with self.assertRaises(ValueError) as ctx:
+            integration.validate()
+        self.assertIn("Duplicate operation name 'get_users'", str(ctx.exception))
 
     def test_multiple_valid_operations_pass(self):
         """An integration with multiple distinct, complete operations is valid."""

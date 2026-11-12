@@ -681,7 +681,7 @@ class Function(Resource):
             return code
 
         try:
-            module = ast.parse(code)
+            module = utils.parse_python(code)
         except SyntaxError:
             return code
 
@@ -850,7 +850,7 @@ class Function(Resource):
     @staticmethod
     @lru_cache(maxsize=2048)
     def _get_target_function(code: str, function_name: str) -> Optional[FunctionMetadata]:
-        module = ast.parse(code)
+        module = utils.parse_python(code)
         target = next(
             (
                 f

@@ -2,9 +2,10 @@
 """GitHub API helper for Agent Studio CLI utilities (e.g. gists)."""
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import requests
+if TYPE_CHECKING:
+    import requests
 
 GIST_URL = "https://api.github.com/gists"
 GITHUB_API_VERSION = "2022-11-28"
@@ -61,6 +62,8 @@ class GitHubAPIHandler:
         Raises:
             HTTPError: If the request returns an error status code
         """
+        import requests
+
         headers = kwargs.pop("headers", {})
         merged_headers = {**cls._headers(), **headers}
         resp = requests.request(method, url, headers=merged_headers, **kwargs)

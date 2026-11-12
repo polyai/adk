@@ -6,13 +6,25 @@ Copyright PolyAI Limited
 import logging
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
+from datetime import datetime, timedelta
+from typing import Any
 
 from ruamel.yaml import YAML
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
-from poly.cli_commands.shared import load_project
-from poly.output.console import error, plain, print_metrics, success, warning
+from poly.cli_commands.shared import (
+    add_cohort_arguments,
+    add_window_arguments,
+    describe_data_api_error,
+    fail,
+    filter_flags_to_filters,
+    having_flags_to_having,
+    load_project,
+    sort_flag_to_sort,
+)
+from poly.constants import DATA_AGGS, DATA_GROUP_BY, DATA_INTERVALS, DATA_MAX_LIMIT, DATA_MAX_OFFSET
 from poly.output.json_output import json_print
+from poly.project import POLY_SCORE_DEFAULT_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +55,16 @@ class MetricsCommand(BaseCommand):
             help="Manage custom metrics in the Agent Studio project.",
             description=(
                 "Manage custom metrics in the Agent Studio project.\n\n"
+                "Define custom metrics (list, add, edit, import, export) and read\n"
+                "metric values (available, query, score).\n\n"
                 "Examples:\n"
                 "  poly metrics list\n"
                 "  poly metrics add --name SCORE --type int --description 'CSAT Score'\n"
                 "  poly metrics edit CSAT_OFFERED --active false\n"
-                "  poly metrics import metrics.yaml"
+                "  poly metrics import metrics.yaml\n"
+                "  poly metrics available\n"
+                "  poly metrics score --interval weekly\n"
+                "  poly metrics query duration --agg avg --agg p95 --by channel"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -57,10 +74,84 @@ class MetricsCommand(BaseCommand):
         metrics_subparsers.add_parser(
             "list",
             parents=[parents.path, parents.json],
-            help="List all custom metrics in the project.",
-            description="List all custom metrics for the current project.",
+            help="List the custom metrics defined in the project.",
+            description=(
+                "List the custom metrics defined in the current project.\n\n"
+                "For every metric you can query, built-in ones such as poly_score_v2\n"
+                "included, use `poly metrics available`."
+            ),
             formatter_class=RawTextHelpFormatter,
         )
+
+        metrics_subparsers.add_parser(
+            "available",
+            parents=[parents.path, parents.json],
+            help="Show the metrics you can query, including built-in ones such as poly_score_v2.",
+            description=(
+                "Show every metric you can query for the current project: built-in\n"
+                "metrics such as poly_score_v2 and duration, plus the custom metrics\n"
+                "defined in the project. These are the names `poly metrics query`\n"
+                "accepts.\n\n"
+                "Examples:\n"
+                "  poly metrics available\n"
+                "  poly metrics available --json"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+
+        query_parser = metrics_subparsers.add_parser(
+            "query",
+            parents=[parents.path, parents.json],
+            help="Aggregate a metric's values over a time window (experimental API).",
+            description=(
+                "Aggregate one metric over a time window, optionally bucketed by\n"
+                "interval and grouped by channel, environment, deployment or variant.\n"
+                "Metric names come from `poly metrics available`. Backed by the\n"
+                "experimental metrics aggregate endpoint of the Data API.\n\n"
+                "Examples:\n"
+                "  poly metrics query poly_score_v2 --agg avg --from 2026-09-01 --to 2026-09-30\n"
+                "  poly metrics query duration --agg avg --agg p95 --interval daily --by channel\n"
+                "  poly metrics query CSAT --agg avg --filter channel eq VOICE-SIP"
+                " --having avg gte 4\n"
+                "  poly metrics query handoff_reason --agg conversation_count --by value_string\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        query_parser.add_argument("metric", type=str, help="Metric name (case-insensitive).")
+        query_parser.add_argument(
+            "--agg",
+            action="append",
+            choices=DATA_AGGS,
+            default=None,
+            help="Aggregation to compute. Repeatable. Defaults to avg and conversation_count.",
+        )
+        cls._add_query_arguments(query_parser)
+
+        score_parser = metrics_subparsers.add_parser(
+            "score",
+            parents=[parents.path, parents.json],
+            help="Poly Score for the project over a window (default: last 7 days, daily).",
+            description=(
+                "Average Poly Score and conversation count for the current project.\n"
+                "Reads Poly Score (1-5), the score new conversations get; --v1\n"
+                "reads the previous Poly Score (0-10) on older conversations. Shortcut for\n"
+                "`poly metrics query poly_score_v2 --agg avg --agg conversation_count`.\n"
+                "Defaults to the last 7 days bucketed daily.\n\n"
+                "Examples:\n"
+                "  poly metrics score\n"
+                "  poly metrics score --interval weekly --from 2026-09-01\n"
+                "  poly metrics score --by channel --env live\n"
+                "  poly metrics score --v1 --from 2026-03-01 --to 2026-03-31\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        score_parser.add_argument(
+            "--v1",
+            action="store_true",
+            default=False,
+            help="Read the previous Poly Score (0-10) instead of Poly Score (1-5), for older conversations.",
+        )
+        cls._add_query_arguments(score_parser, score=True)
 
         export_parser = metrics_subparsers.add_parser(
             "export",
@@ -205,6 +296,12 @@ class MetricsCommand(BaseCommand):
         """Dispatch to the matching metrics sub-handler."""
         if args.metrics_subcommand == "list":
             cls.metrics_list(args.path, output_json=args.json)
+        elif args.metrics_subcommand == "available":
+            cls.metrics_available(args.path, output_json=args.json)
+        elif args.metrics_subcommand == "query":
+            cls.metrics_query(args.path, args.metric, args, output_json=args.json)
+        elif args.metrics_subcommand == "score":
+            cls.metrics_score(args.path, args, output_json=args.json)
         elif args.metrics_subcommand == "export":
             cls.metrics_export(args.path, file_path=args.file, output_json=args.json)
         elif args.metrics_subcommand == "add":
@@ -235,10 +332,240 @@ class MetricsCommand(BaseCommand):
                 output_json=args.json,
             )
 
+    @staticmethod
+    def _add_query_arguments(parser: ArgumentParser, score: bool = False) -> None:
+        """Register the window, grouping, filter and paging flags shared by query and score."""
+        add_window_arguments(
+            parser,
+            default_help=(
+                f"Defaults to {POLY_SCORE_DEFAULT_DAYS} days ago."
+                if score
+                else "Defaults to no lower bound."
+            ),
+        )
+        parser.add_argument(
+            "--interval",
+            choices=DATA_INTERVALS,
+            default="daily" if score else None,
+            help=(
+                "Time bucket. Defaults to daily." if score else "Time bucket. Omit for one total."
+            ),
+        )
+        parser.add_argument(
+            "--timezone",
+            type=str,
+            default=None,
+            metavar="IANA",
+            help=(
+                "Timezone for hourly and daily buckets, e.g. Europe/London.\n"
+                "--from and --to with no offset are read in it, except with\n"
+                "weekly and monthly buckets, which are always UTC."
+            ),
+        )
+        parser.add_argument(
+            "--by",
+            action="append",
+            choices=DATA_GROUP_BY,
+            default=None,
+            help="Group results by a dimension. Repeatable.",
+        )
+        add_cohort_arguments(parser, deployments=not score)
+        if not score:
+            parser.add_argument(
+                "--filter",
+                action="append",
+                nargs=3,
+                metavar=("METRIC", "OP", "VALUE"),
+                default=None,
+                help=(
+                    "Only count conversations where METRIC OP VALUE. OP is one of eq, gt, gte,\n"
+                    "lt, lte, in, ex, exists (in/ex take a comma-separated list). Repeatable."
+                ),
+            )
+            parser.add_argument(
+                "--any",
+                action="store_true",
+                default=False,
+                help="Match conversations that satisfy any filter instead of all.",
+            )
+            parser.add_argument(
+                "--having",
+                action="append",
+                nargs=3,
+                metavar=("AGG", "OP", "VALUE"),
+                default=None,
+                help="Keep only buckets where AGG OP VALUE, e.g. --having avg gte 4. Repeatable.",
+            )
+            parser.add_argument(
+                "--sort",
+                type=str,
+                default=None,
+                metavar="FIELD[:asc|desc]",
+                help="Secondary sort on a --by dimension or an aggregation.",
+            )
+        parser.add_argument(
+            "--limit", type=int, default=20, help=f"Rows per page, 1 to {DATA_MAX_LIMIT}."
+        )
+        parser.add_argument(
+            "--offset", type=int, default=0, help=f"Rows to skip, up to {DATA_MAX_OFFSET}."
+        )
+
+    @classmethod
+    def metrics_available(cls, base_path: str, output_json: bool = False) -> None:
+        """Show the metrics the project can query, built-in metrics included."""
+        import requests
+
+        from poly.output.console import paged_output, print_available_metrics
+
+        project = load_project(base_path, output_json=output_json)
+        try:
+            result = project.get_available_metrics()
+        except requests.HTTPError as e:
+            fail(describe_data_api_error(e), output_json)
+
+        if output_json:
+            json_print(result)
+        else:
+            with paged_output():
+                print_available_metrics(result.get("metrics", []))
+
+    @classmethod
+    def metrics_query(
+        cls, base_path: str, metric: str, args: Namespace, output_json: bool = False
+    ) -> None:
+        """Aggregate one metric over a window and print the table."""
+        import requests
+
+        from poly.output.console import print_aggregate
+
+        project = load_project(base_path, output_json=output_json)
+        try:
+            result = project.query_metric(
+                metric,
+                args.agg,
+                from_dt=args.from_dt,
+                to_dt=args.to_dt,
+                interval=args.interval,
+                timezone=args.timezone,
+                group_by=args.by,
+                channel=args.channel,
+                client_env=args.env,
+                deployment_id=args.deployment,
+                variant_id=args.variant,
+                filters=filter_flags_to_filters(args.filter),
+                match_any=args.any,
+                having=having_flags_to_having(args.having),
+                sort=sort_flag_to_sort(args.sort),
+                limit=args.limit,
+                offset=args.offset,
+            )
+        except ValueError as e:
+            fail(str(e), output_json)
+        except requests.HTTPError as e:
+            fail(describe_data_api_error(e), output_json)
+
+        if output_json:
+            json_print(result)
+        else:
+            print_aggregate(
+                result,
+                note=cls._window_note(result, args.interval),
+                interval=args.interval,
+                timezone=args.timezone,
+            )
+
+    @classmethod
+    def metrics_score(cls, base_path: str, args: Namespace, output_json: bool = False) -> None:
+        """Poly Score over a window: a headline plus the bucketed table."""
+        import requests
+
+        from poly.output.console import print_aggregate
+
+        project = load_project(base_path, output_json=output_json)
+        try:
+            result = project.get_poly_score(
+                from_dt=args.from_dt,
+                to_dt=args.to_dt,
+                interval=args.interval,
+                timezone=args.timezone,
+                group_by=args.by,
+                channel=args.channel,
+                client_env=args.env,
+                limit=args.limit,
+                offset=args.offset,
+                version="v1" if args.v1 else "v2",
+            )
+        except ValueError as e:
+            fail(str(e), output_json)
+        except requests.HTTPError as e:
+            fail(describe_data_api_error(e), output_json)
+
+        headline = cls._score_headline(result["summary"])
+        if output_json:
+            json_print({**result, "summary": {**result["summary"], "text": headline}})
+        else:
+            print_aggregate(
+                result,
+                headline=headline,
+                note=cls._window_note(result, args.interval),
+                interval=args.interval,
+                timezone=args.timezone,
+            )
+
+    @staticmethod
+    def _window_dates(from_datetime: str | None, to_datetime: str | None) -> tuple[str, str]:
+        """The first and last day of a window, for display.
+
+        The end bound is exclusive, so an end at midnight reads as the day
+        before: ``--to 2026-09-30`` is sent as 1 October and shown as
+        "to 2026-09-30".
+        """
+        start = (from_datetime or "")[:10]
+        end = (to_datetime or "")[:10]
+        if to_datetime and to_datetime[10:].lstrip("T").startswith("00:00:00"):
+            end = (datetime.fromisoformat(to_datetime) - timedelta(days=1)).date().isoformat()
+        return start, end
+
+    @classmethod
+    def _score_headline(cls, summary: dict[str, Any]) -> str:
+        """One line for the overall Poly Score over the window that was queried.
+
+        Names the score and its scale: the same number means something
+        different on Poly Score (1-5) and the previous Poly Score (0-10).
+        """
+        start, end = cls._window_dates(summary.get("from_datetime"), summary.get("to_datetime"))
+        window = f" from {start or '…'} to {end or 'now'}" if start or end else ""
+        version = summary["version"]
+        label = "Poly Score" if version == "v2" else "Previous Poly Score"
+        name = f"{label} ({summary['scale']})"
+        average = summary.get("average")
+        if average is None:
+            hint = (
+                " Older conversations may have a previous Poly Score: try --v1."
+                if version == "v2"
+                else ""
+            )
+            return f"{name}{window}: no scored conversations.{hint}"
+        count = summary["conversations"]
+        return f"{name}{window}: {average} average over {count:,} conversations."
+
+    @classmethod
+    def _window_note(cls, result: dict[str, Any], interval: str | None) -> str | None:
+        """Say so when the project widened the window to whole weeks or months."""
+        window = result.get("window")
+        if not window:
+            return None
+        start, end = cls._window_dates(window.get("from_datetime"), window.get("to_datetime"))
+        unit = "weeks" if interval == "weekly" else "months"
+        span = " ".join(
+            part for part in (f"from {start}" if start else "", f"to {end}" if end else "") if part
+        )
+        return f"{interval.capitalize()} buckets are whole {unit}, so the window is {span}."
+
     @classmethod
     def metrics_list(cls, base_path: str, output_json: bool = False) -> None:
         """List all custom metrics for the project."""
-        from poly.output.console import paged_output
+        from poly.output.console import paged_output, print_metrics
 
         project = load_project(base_path, output_json=output_json)
         metrics = project.get_custom_metrics()
@@ -257,6 +584,8 @@ class MetricsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Export all custom metrics as YAML."""
+        from poly.output.console import success
+
         project = load_project(base_path, output_json=output_json)
         metrics = project.export_custom_metrics()
 
@@ -284,6 +613,8 @@ class MetricsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Create a new custom metric."""
+        from poly.output.console import error, success
+
         project = load_project(base_path, output_json=output_json)
 
         if name is None:
@@ -360,6 +691,8 @@ class MetricsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Update an existing custom metric."""
+        from poly.output.console import error, success
+
         project = load_project(base_path, output_json=output_json)
 
         data: dict = {}
@@ -408,6 +741,8 @@ class MetricsCommand(BaseCommand):
             A dict of fields to update.
         """
         import questionary
+
+        from poly.output.console import error, plain
 
         metrics = project.get_custom_metrics()
 
@@ -494,6 +829,8 @@ class MetricsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Bulk-import metrics from a YAML file."""
+        from poly.output.console import error, plain, success, warning
+
         project = load_project(base_path, output_json=output_json)
 
         try:
@@ -541,6 +878,8 @@ class MetricsCommand(BaseCommand):
         output_json: bool,
     ) -> None:
         """Display the results of a dry-run import."""
+        from poly.output.console import plain, warning
+
         if output_json:
             json_print({"dry_run": True, **preview})
         else:
