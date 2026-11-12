@@ -28,7 +28,7 @@ Each entity has four main parts:
 | Field | Description |
 |---|---|
 | `name` | Identifier for the entity, typically in snake_case. Used in prompts as `{{entity:entity_name}}`. |
-| `description` | Explains what the entity represents. This is shown to the model to guide extraction. |
+| `description` | Explains what the entity represents. This is shown to the model to guide extraction. Required. |
 | `entity_type` | The type of entity being collected. |
 | `config` | Type-specific settings for that entity. |
 
@@ -147,8 +147,13 @@ entities:
 
 ## Validation
 
+- `description` is required.
 - Each `config` field is type-checked against the entity's `entity_type` — for example `min`/`max` on a `numeric` entity must be numbers, and `has_decimal`, `has_range` must be booleans. A mismatched type raises an error on push.
 - Each entity `name` must be unique.
+- On a `numeric` entity, `min` is at least 0 and `max` is at most 1,000,000.
+- When `has_range` is `true`, `max` cannot be less than `min`.
+- On an `alphanumeric` entity, `regular_expression` must be a valid regular expression.
+- Items in `options` and `country_codes` must be text.
 
 ## Best practices
 

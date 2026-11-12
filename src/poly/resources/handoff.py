@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -29,6 +30,13 @@ logger = logging.getLogger(__name__)
 
 VALID_SIP_METHODS = ("invite", "refer", "bye")
 VALID_ENCRYPTION = ("TLS/SRTP", "UDP/RTP")
+
+NAME_MAX = 100
+DESCRIPTION_MAX = 300
+SIP_FIELD_MAX = 100
+SIP_HEADER_NAME_PATTERN = re.compile(r"[A-Za-z0-9!#$%&'*+\-.^_~]{1,100}")
+# Printable ASCII: space to tilde.
+SIP_HEADER_VALUE_PATTERN = re.compile(r"[\x20-\x7E]{0,1000}")
 
 
 @dataclass
@@ -254,6 +262,36 @@ class Handoff(MultiResourceYamlResource):
                 f"Invalid encryption method '{self.sip_config.outbound_encryption}'. "
                 f"Must be one of: {', '.join(VALID_ENCRYPTION)}"
             )
+        for field_name, value, limit in (
+            ("name", self.name, NAME_MAX),
+            ("description", self.description, DESCRIPTION_MAX),
+            ("phone_number", self.sip_config.phone_number, SIP_FIELD_MAX),
+            ("outbound_endpoint", self.sip_config.outbound_endpoint, SIP_FIELD_MAX),
+        ):
+            if len(value or "") > limit:
+                raise ValueError(
+                    f"Handoff '{self.name}': {field_name} is longer than {limit} characters."
+                )
+
+        for header in self.sip_headers:
+            key, value = header.get("key"), header.get("value")
+            # A header with an empty key is left out of a push.
+            if not key:
+                continue
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise ValueError(
+                    f"Handoff '{self.name}': SIP header {key!r} needs a text 'key' and 'value'."
+                )
+            if not SIP_HEADER_NAME_PATTERN.fullmatch(key):
+                raise ValueError(
+                    f"Handoff '{self.name}': SIP header name '{key}' must be at most 100 "
+                    "letters, digits or !#$%&'*+-.^_~"
+                )
+            if not SIP_HEADER_VALUE_PATTERN.fullmatch(value):
+                raise ValueError(
+                    f"Handoff '{self.name}': SIP header '{key}' value must be at most 1000 "
+                    "printable ASCII characters."
+                )
 
     @classmethod
     def validate_collection(
