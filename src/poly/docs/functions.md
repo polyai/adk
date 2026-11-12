@@ -44,8 +44,13 @@ flows/{flow_name}/
 - **`@func_latency_control(...)`** (optional): Configure delay messages while the function runs.
   Supports `delay_before_responses_start`, `silence_after_each_response`, `delay_responses`, and
   `randomize` (shuffle delay response order on each invocation; default `False`).
+  `delay_before_responses_start` and `silence_after_each_response` are integers from 0 to 10, and each `delay_responses` duration is an integer of 0 or more.
 
 Function steps do not support `@func_parameter` or `@func_description`.
+Start and end functions do not support `@func_parameter` or `@func_latency_control`.
+
+Function and parameter names use only letters, digits and underscores, don't start with a digit, and aren't Python reserved words.
+A transition function cannot share its name with a global function.
 
 ### Parameter types
 

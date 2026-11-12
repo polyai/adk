@@ -11,7 +11,7 @@ import typing as ty
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property, lru_cache
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from google.protobuf.message import Message
 
@@ -160,6 +160,17 @@ def parse_latency_control(latency_control_data: dict) -> FunctionLatencyControl:
         delay_responses=delay_responses,
         randomize=latency_control_data.get("randomize", False),
     )
+
+
+def _literal(node: ast.expr, default: Any) -> Any:
+    """Return the value of a literal node, or default if the node is not a literal.
+
+    A signed number such as `-1` is a unary operation, not a constant.
+    """
+    try:
+        return ast.literal_eval(node)
+    except ValueError:
+        return default
 
 
 @dataclass
@@ -731,6 +742,21 @@ class Function(Resource):
         Raises:
             ValidationError: If the resource is not valid.
         """
+        # A function step takes the name of its flow step rather than a function name.
+        if self.function_type != FunctionType.FUNCTION_STEP:
+            utils.validate_python_name(self.name, "Function name")
+
+        if self.function_type in (FunctionType.START, FunctionType.END):
+            if self.parameters:
+                raise ValueError("Start and end functions do not support @func_parameter.")
+            if self.latency_control and self.latency_control.enabled:
+                raise ValueError("Start and end functions do not support @func_latency_control.")
+
+        for parameter in self.parameters:
+            utils.validate_python_name(parameter.name, "Parameter name")
+            if not isinstance(parameter.description, str) or not parameter.description.strip():
+                raise ValueError(f"Parameter '{parameter.name}' description cannot be empty.")
+
         # Check for syntax errors
         try:
             compile(self.code, self.name, "exec")
@@ -763,8 +789,28 @@ class Function(Resource):
         if self.function_type == FunctionType.TRANSITION and not self.flow_id:
             raise ValueError("Can't find flow_id for transition function.")
 
+        if self.function_type == FunctionType.TRANSITION and resource_mappings:
+            # Start and end functions have no prefix, so "fn" selects global functions only.
+            if any(
+                r.resource_type is Function
+                and r.resource_prefix == "fn"
+                and r.resource_name == self.name
+                for r in resource_mappings
+            ):
+                raise ValueError(
+                    f"Transition function '{self.name}' has the same name as a global function. "
+                    "A transition function name must be unique among global functions and "
+                    "the transition functions in its flow."
+                )
+
         # Validate latency control settings
         if self.latency_control and self.latency_control.enabled:
+            for argument, value in (
+                ("delay_before_responses_start", self.latency_control.initial_delay),
+                ("silence_after_each_response", self.latency_control.interval),
+            ):
+                if type(value) is not int:
+                    raise ValueError(f"{argument} must be an integer, got {value!r}.")
             if not (0 <= self.latency_control.initial_delay <= 10):
                 raise ValueError(
                     "delay_before_responses_start must be between 0 and 10, "
@@ -781,6 +827,11 @@ class Function(Resource):
             for dr in self.latency_control.delay_responses:
                 if not dr.message:
                     raise ValueError("Delay response message cannot be empty.")
+                if type(dr.duration) is not int or dr.duration < 0:
+                    raise ValueError(
+                        "Delay response duration must be an integer of 0 or more, "
+                        f"got {dr.duration!r} for '{dr.message}'."
+                    )
 
                 references = utils.get_references_from_prompt(
                     dr.message, DELAY_CONTROL_REFERENCES, raise_on_invalid=True
@@ -954,17 +1005,17 @@ class Function(Resource):
         randomize = False
 
         for kw in decorator.keywords:
-            if kw.arg == "delay_before_responses_start" and isinstance(kw.value, ast.Constant):
-                initial_delay = kw.value.value
-            elif kw.arg == "silence_after_each_response" and isinstance(kw.value, ast.Constant):
-                interval = kw.value.value
+            if kw.arg == "delay_before_responses_start":
+                initial_delay = _literal(kw.value, initial_delay)
+            elif kw.arg == "silence_after_each_response":
+                interval = _literal(kw.value, interval)
             elif kw.arg == "randomize" and isinstance(kw.value, ast.Constant):
                 randomize = bool(kw.value.value)
             elif kw.arg == "delay_responses" and isinstance(kw.value, ast.List):
                 for i, elt in enumerate(kw.value.elts):
                     if isinstance(elt, ast.Tuple) and len(elt.elts) == 2:
                         msg = elt.elts[0].value if isinstance(elt.elts[0], ast.Constant) else ""
-                        dur = elt.elts[1].value if isinstance(elt.elts[1], ast.Constant) else 0
+                        dur = _literal(elt.elts[1], 0)
                         # Preserve existing ID when the message text matches.
                         existing_id = None
                         if known_latency_control and known_latency_control.delay_responses:

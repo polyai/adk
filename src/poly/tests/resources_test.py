@@ -1042,6 +1042,270 @@ def test_code(conv: Conversation, test_param: int):
         func.code = 'def trans_func(conv: Conversation, flow: Flow):\n    # conv.goto_flow("Missing Flow")\n    conv.goto_flow("Other Flow")\n'
         self.assertIsNone(func.validate(resource_mappings=resource_mappings))
 
+    @staticmethod
+    def _global_function(
+        name: str = "my_func",
+        parameters: list[FunctionParameters] | None = None,
+        latency_control: FunctionLatencyControl | None = None,
+        function_type: FunctionType = FunctionType.GLOBAL,
+    ) -> Function:
+        """Build a function whose code matches its name, type and parameters."""
+        signature = ["conv: Conversation"]
+        if function_type == FunctionType.TRANSITION:
+            signature.append("flow: Flow")
+        signature.extend(Function._param_def_string(p) for p in parameters or [])
+        return Function(
+            resource_id="fn-1",
+            name=name,
+            description="desc",
+            code=f"def {name}({', '.join(signature)}):\n    pass\n",
+            parameters=parameters or [],
+            latency_control=latency_control or FunctionLatencyControl(),
+            function_type=function_type,
+            flow_id="flow-1" if function_type == FunctionType.TRANSITION else None,
+            flow_name="Test Flow" if function_type == FunctionType.TRANSITION else None,
+        )
+
+    @staticmethod
+    def _function_mapping(name: str, file_path: str) -> ResourceMapping:
+        """Build a Function ResourceMapping the way the project does, from its file path."""
+        return ResourceMapping(
+            resource_id=f"FUNCTION-{name}",
+            resource_name=name,
+            resource_type=Function,
+            file_path=file_path,
+            resource_prefix=Function.get_resource_prefix(file_path),
+            flow_name=None,
+        )
+
+    def test_validate_ascii_function_and_parameter_names_pass(self):
+        """ASCII identifiers are accepted for the function and its parameters."""
+        func = self._global_function(
+            name="_lookup_booking2",
+            parameters=[FunctionParameters(name="booking_ref", description="Ref", type="string")],
+        )
+        self.assertIsNone(func.validate())
+
+    def test_validate_non_ascii_function_name_raises(self):
+        """Python compiles a non-ASCII function name, but the platform rejects it."""
+        func = self._global_function(name="café")
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn("Function name 'café' must be a valid Python identifier", str(cm.exception))
+
+    def test_validate_reserved_word_function_name_raises(self):
+        """A reserved word is reported as such rather than as a syntax error."""
+        func = self._global_function(name="class")
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn("Function name 'class' is a reserved word in Python", str(cm.exception))
+
+    def test_validate_non_ascii_parameter_name_raises(self):
+        """Parameter names follow the same rule as function names."""
+        func = self._global_function(
+            parameters=[FunctionParameters(name="número", description="Ref", type="string")]
+        )
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn(
+            "Parameter name 'número' must be a valid Python identifier", str(cm.exception)
+        )
+
+    def test_validate_blank_parameter_description_raises(self):
+        """A parameter description needs at least one visible character."""
+        for description in ("", "   ", None):
+            with self.subTest(description=description):
+                func = self._global_function(
+                    parameters=[
+                        FunctionParameters(
+                            name="booking_ref", description=description, type="string"
+                        )
+                    ]
+                )
+                with self.assertRaises(ValueError) as cm:
+                    func.validate()
+                self.assertIn(
+                    "Parameter 'booking_ref' description cannot be empty", str(cm.exception)
+                )
+
+    def test_validate_integer_latency_control_passes(self):
+        """Whole-number delays and durations, including zero, are accepted."""
+        func = self._global_function(
+            latency_control=FunctionLatencyControl(
+                enabled=True,
+                initial_delay=0,
+                interval=10,
+                delay_responses=[
+                    FunctionDelayResponse(message="One moment.", duration=0),
+                    FunctionDelayResponse(message="Still checking.", duration=3),
+                ],
+            )
+        )
+        self.assertIsNone(func.validate())
+
+    def test_validate_non_integer_latency_control_delays_raise(self):
+        """delay_before_responses_start and silence_after_each_response must be integers."""
+        for field_name, argument, value in [
+            ("initial_delay", "delay_before_responses_start", 1.5),
+            ("interval", "silence_after_each_response", 2.0),
+            ("initial_delay", "delay_before_responses_start", "2"),
+            ("interval", "silence_after_each_response", True),
+        ]:
+            with self.subTest(argument=argument, value=value):
+                latency_control = FunctionLatencyControl(
+                    enabled=True,
+                    delay_responses=[FunctionDelayResponse(message="One moment.", duration=1)],
+                )
+                setattr(latency_control, field_name, value)
+                func = self._global_function(latency_control=latency_control)
+                with self.assertRaises(ValueError) as cm:
+                    func.validate()
+                self.assertIn(f"{argument} must be an integer, got {value!r}", str(cm.exception))
+
+    def test_validate_out_of_range_latency_control_delay_still_raises(self):
+        """The 0-10 range applies to integer delays."""
+        func = self._global_function(
+            latency_control=FunctionLatencyControl(
+                enabled=True,
+                initial_delay=11,
+                delay_responses=[FunctionDelayResponse(message="One moment.", duration=1)],
+            )
+        )
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn(
+            "delay_before_responses_start must be between 0 and 10, got 11", str(cm.exception)
+        )
+
+    def test_validate_bad_delay_response_duration_raises(self):
+        """A delay response duration must be an integer of 0 or more."""
+        for duration in (-1, 1.5, "2", True):
+            with self.subTest(duration=duration):
+                func = self._global_function(
+                    latency_control=FunctionLatencyControl(
+                        enabled=True,
+                        delay_responses=[
+                            FunctionDelayResponse(message="One moment.", duration=duration)
+                        ],
+                    )
+                )
+                with self.assertRaises(ValueError) as cm:
+                    func.validate()
+                self.assertIn(
+                    "Delay response duration must be an integer of 0 or more, "
+                    f"got {duration!r} for 'One moment.'",
+                    str(cm.exception),
+                )
+
+    def test_validate_transition_function_with_unique_name_passes(self):
+        """Start/end functions and other flows' functions don't clash with a transition."""
+        func = self._global_function(name="check_input", function_type=FunctionType.TRANSITION)
+        resource_mappings = [
+            self._function_mapping("lookup_booking", os.path.join("functions", "lookup_booking.py")),
+            self._function_mapping("start_function", os.path.join("functions", "start_function.py")),
+            self._function_mapping(
+                "check_input", os.path.join("flows", "other_flow", "functions", "check_input.py")
+            ),
+        ]
+        self.assertIsNone(func.validate(resource_mappings=resource_mappings))
+
+    def test_validate_transition_function_named_like_a_global_function_raises(self):
+        """The platform keeps transition function names unique among global functions."""
+        func = self._global_function(name="lookup_booking", function_type=FunctionType.TRANSITION)
+        resource_mappings = [
+            self._function_mapping("lookup_booking", os.path.join("functions", "lookup_booking.py"))
+        ]
+        with self.assertRaises(ValueError) as cm:
+            func.validate(resource_mappings=resource_mappings)
+        self.assertIn(
+            "Transition function 'lookup_booking' has the same name as a global function",
+            str(cm.exception),
+        )
+
+    def test_validate_plain_start_and_end_functions_pass(self):
+        """Start and end functions take only conv and need no decorators."""
+        for name, function_type in [
+            ("start_function", FunctionType.START),
+            ("end_function", FunctionType.END),
+        ]:
+            with self.subTest(name=name):
+                func = self._global_function(name=name, function_type=function_type)
+                self.assertIsNone(func.validate())
+
+    def test_validate_start_and_end_functions_with_parameters_raise(self):
+        """The platform has no parameters on a start or end function update."""
+        for name, function_type in [
+            ("start_function", FunctionType.START),
+            ("end_function", FunctionType.END),
+        ]:
+            with self.subTest(name=name):
+                func = self._global_function(
+                    name=name,
+                    function_type=function_type,
+                    parameters=[
+                        FunctionParameters(name="caller", description="Caller", type="string")
+                    ],
+                )
+                with self.assertRaises(ValueError) as cm:
+                    func.validate()
+                self.assertIn(
+                    "Start and end functions do not support @func_parameter", str(cm.exception)
+                )
+
+    def test_validate_start_and_end_functions_with_latency_control_raise(self):
+        """The platform only finds global functions when updating latency control."""
+        for name, function_type in [
+            ("start_function", FunctionType.START),
+            ("end_function", FunctionType.END),
+        ]:
+            with self.subTest(name=name):
+                func = self._global_function(
+                    name=name,
+                    function_type=function_type,
+                    latency_control=FunctionLatencyControl(
+                        enabled=True,
+                        delay_responses=[FunctionDelayResponse(message="One moment.", duration=1)],
+                    ),
+                )
+                with self.assertRaises(ValueError) as cm:
+                    func.validate()
+                self.assertIn(
+                    "Start and end functions do not support @func_latency_control",
+                    str(cm.exception),
+                )
+
+    def test_validate_start_function_read_from_a_decorated_file_raises(self):
+        """Decorators in a start function file are parsed on read and rejected by validate."""
+        content = (
+            FUNCTION_HEADER
+            + "\n\n@func_parameter('caller', 'The caller')\n"
+            + "def start_function(conv: Conversation, caller: str):\n    pass\n"
+        )
+        with mock_read_from_file(content):
+            func = Function.read_local_resource(
+                file_path=os.path.join("functions", "start_function.py"),
+                resource_id="fn-start",
+                resource_name="start_function",
+                resource_mappings=[],
+                known_parameters=[],
+            )
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn("Start and end functions do not support @func_parameter", str(cm.exception))
+
+    def test_extract_decorators_reads_negative_latency_values(self):
+        """A negative number is read as written, so validation can reject it."""
+        code = (
+            "@func_latency_control(delay_before_responses_start=-1, "
+            "silence_after_each_response=1, delay_responses=[('One moment', -1)])\n"
+            "def lookup(conv: Conversation):\n    pass\n"
+        )
+
+        _, _, _, latency_control = Function._extract_decorators(code, "lookup", [], None)
+
+        self.assertEqual(latency_control.initial_delay, -1)
+        self.assertEqual(latency_control.delay_responses[0].duration, -1)
+
     def test_extract_decorators_untyped_parameter_raises_value_error(self):
         """A parameter without a type annotation raises ValueError."""
         code = """@func_description('Book a table')
@@ -7427,6 +7691,16 @@ class VariableTest(unittest.TestCase):
         content = "vrbl:customer_name"
         self.assertEqual(Variable.make_pretty(content, []), content)
         self.assertEqual(Variable.from_pretty(content, []), content)
+
+    def test_validate_accepts_an_identifier_name(self):
+        var = Variable(resource_id="VAR-123", name="customer_name")
+        self.assertIsNone(var.validate())
+
+    def test_validate_reserved_word_name_raises(self):
+        var = Variable(resource_id="VAR-123", name="in")
+        with self.assertRaises(ValueError) as cm:
+            var.validate()
+        self.assertIn("Variable name 'in' is a reserved word in Python", str(cm.exception))
 
     def test_discover_resources_from_functions(self):
         """Variables are discovered from conv.state.<name> in function code."""
