@@ -155,7 +155,7 @@ class UpdateCommand(BaseCommand):
 
         # Refuse before hitting the network or announcing anything, so an install we
         # cannot upgrade is not told that an update is on the way.
-        if cls.refuse_if_not_upgradable(output_json):
+        if cls.refuse_if_not_upgradable(output_json, target_version, installing=False):
             return
 
         if target_version:
@@ -191,6 +191,8 @@ class UpdateCommand(BaseCommand):
                 info(f"Update available: {get_package_version()} -> {target}")
             return
 
+        if cls.refuse_if_not_upgradable(output_json, target_version):
+            return
         if not output_json:
             info(f"Updating Poly CLI to version {target}...")
         if not cls.perform_update(output_json, target_version):
@@ -383,7 +385,10 @@ class UpdateCommand(BaseCommand):
             return {
                 "uv-tool": ["uv", "tool", "upgrade", PACKAGE_NAME],
                 "pipx": ["pipx", "upgrade", PACKAGE_NAME],
-                "uv-pip": ["uv", "pip", "install", "--upgrade", package_spec],
+                "uv-pip": [
+                    *("uv", "pip", "install", "--python", sys.executable, "--upgrade"),
+                    package_spec,
+                ],
                 "pip": [sys.executable, "-m", "pip", "install", "--upgrade", package_spec],
             }[method]
 
@@ -394,12 +399,55 @@ class UpdateCommand(BaseCommand):
         return {
             "uv-tool": ["uv", "tool", "install", "--force", spec],
             "pipx": ["pipx", "install", "--force", spec],
-            "uv-pip": ["uv", "pip", "install", spec],
+            "uv-pip": ["uv", "pip", "install", "--python", sys.executable, spec],
             "pip": [sys.executable, "-m", "pip", "install", spec],
         }[method]
 
     @classmethod
-    def refuse_if_not_upgradable(cls, output_json: bool) -> bool:
+    def _not_upgradable_reason(
+        cls, target_version: str | None, installing: bool = True
+    ) -> str | None:
+        """Explain why this install must not be upgraded in place, if it must not.
+
+        On Windows, a running program's files can't be replaced or removed. Every install
+        method's upgrade has to replace files the running ``poly`` is using (``poly.exe``, or
+        the environment it runs from), fails partway through, and leaves ``poly`` unable to
+        start. Run from a new terminal once ``poly`` has exited, the same command succeeds.
+
+        Args:
+            target_version: The version requested via ``--to``, or None for the latest.
+            installing: Whether an install is about to run. Windows installs can still check
+                for updates and refresh skills, so they're refused only when it is.
+
+        Returns:
+            The message to show, or None if the install can be upgraded.
+        """
+        method = cls._detect_install_method()
+        if method in NOT_UPGRADABLE_REASONS:
+            return NOT_UPGRADABLE_REASONS[method]
+        if installing and sys.platform == "win32":
+            command = cls._powershell_command(cls._upgrade_command(method, target_version))
+            return (
+                "On Windows, poly can't update itself while it's running: the update replaces "
+                "files poly is using, and a failed attempt leaves the CLI unable to start. "
+                f"Run this in a new PowerShell window instead:\n  {command}\n"
+                "Then run 'poly update --skills-only' to update the AI agent skills."
+            )
+        return None
+
+    @staticmethod
+    def _powershell_command(args: list[str]) -> str:
+        """`args` as a command to paste into PowerShell, the default shell in Windows Terminal.
+
+        PowerShell reads a quoted program path as a string, so `&` is needed to run it.
+        """
+        command = subprocess.list2cmdline(args)
+        return f"& {command}" if command.startswith('"') else command
+
+    @classmethod
+    def refuse_if_not_upgradable(
+        cls, output_json: bool, target_version: str | None = None, installing: bool = True
+    ) -> bool:
         """Report and refuse installs that must not be upgraded in place.
 
         Called before anything is fetched or announced, so a refused install never
@@ -407,19 +455,24 @@ class UpdateCommand(BaseCommand):
 
         Args:
             output_json: If True, report as JSON instead of a warning.
+            target_version: The version requested via ``--to``, used in any
+                command the message suggests.
+            installing: Whether an install is about to run. See ``_not_upgradable_reason``.
 
         Returns:
             True if the install was refused and the caller should stop.
         """
+        from rich.markup import escape
+
         from poly.output.console import warning
 
-        message = NOT_UPGRADABLE_REASONS.get(cls._detect_install_method())
+        message = cls._not_upgradable_reason(target_version, installing)
         if message is None:
             return False
         if output_json:
             json_print({"success": False, "error": message})
         else:
-            warning(message)
+            warning(escape(message))
         return True
 
     @classmethod
@@ -431,7 +484,7 @@ class UpdateCommand(BaseCommand):
 
         # Defence in depth: update() refuses these up front, but perform_update must
         # stay safe if it is ever called directly.
-        if cls.refuse_if_not_upgradable(output_json):
+        if cls.refuse_if_not_upgradable(output_json, target_version):
             return False
 
         command = cls._upgrade_command(cls._detect_install_method(), target_version)
