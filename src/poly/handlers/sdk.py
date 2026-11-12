@@ -12,13 +12,14 @@ import logging
 import os
 import uuid
 import warnings
-from typing import Any, Optional
-
-import requests
+from typing import TYPE_CHECKING, Any, Optional
 
 from poly.utils import retrieve_api_key
 
 from .protobuf.commands_pb2 import Command, CommandBatch
+
+if TYPE_CHECKING:
+    import requests
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,8 @@ class SourcererSDK:
 
     @property
     def session(self) -> requests.Session:
+        import requests
+
         if self._session is None:
             session = requests.Session()
             correlation_id = f"adk-{uuid.uuid4()}"
@@ -184,6 +187,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails
         """
+        import requests
+
         try:
             response = self.session.get(self._get_branches_url())
             response.raise_for_status()
@@ -218,6 +223,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails
         """
+        import requests
+
         try:
             # Generate a default branch name if not provided
             if branch_name is None:
@@ -250,6 +257,7 @@ class SourcererSDK:
         self,
         deployment_message: str = "",
         conflict_resolutions: Optional[list[dict[str, Any]]] = None,
+        acknowledge_active_experiment: bool = False,
     ) -> dict[str, Any]:
         """Merge the current branch into the parent branch
 
@@ -263,6 +271,8 @@ class SourcererSDK:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value (only used with custom strategy)
+            acknowledge_active_experiment: Allow a merge into main while an experiment
+                is running. Without it the platform rejects that merge with AB_TEST_ACTIVE.
 
         Returns:
             Dictionary containing:
@@ -306,6 +316,8 @@ class SourcererSDK:
                 conflict_resolutions=resolutions
             )
         """
+        import requests
+
         try:
             # Fetch fresh; the cached sequence can lag after a write.
             self._last_known_sequence = self.fetch_last_known_sequence_number()
@@ -318,6 +330,9 @@ class SourcererSDK:
 
             if conflict_resolutions is not None:
                 payload["conflictResolutions"] = conflict_resolutions
+
+            if acknowledge_active_experiment:
+                payload["acknowledgeActiveExperiment"] = True
 
             logger.info(f"Merging branch {self.branch_id} to main")
             logger.debug(f"Merge payload: {payload}")
@@ -413,6 +428,8 @@ class SourcererSDK:
                 conflict_resolutions=resolutions
             )
         """
+        import requests
+
         try:
             self._last_known_sequence = self.fetch_last_known_sequence_number()
             payload = {
@@ -468,6 +485,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails
         """
+        import requests
+
         try:
             # Fetch the branch's projection to get its sequence number
             seq: int = self.fetch_last_known_sequence_number(branch_id=branch_id)
@@ -502,6 +521,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails.
         """
+        import requests
+
         if branch_id is None:
             branch_id = self.branch_id
         try:
@@ -541,6 +562,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails.
         """
+        import requests
+
         use_cache = branch_id is None and at_sequence is None
         if use_cache and self._projection_cache is not None and not force_refresh:
             return self._projection_cache
@@ -594,6 +617,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails.
         """
+        import requests
+
         try:
             response = self.session.get(self._get_deployment_projection_url(deployment_id))
             response.raise_for_status()
@@ -656,6 +681,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails or no commands in queue
         """
+        import requests
+
         if not self._command_queue:
             raise SourcererAPIError("No commands in queue to send")
 
@@ -859,6 +886,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails.
         """
+        import requests
+
         try:
             url = f"{self._get_branches_url()}/{branch_id}/merge-history"
             response = self.session.get(url)
@@ -884,6 +913,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails.
         """
+        import requests
+
         try:
             url = f"{self._get_branches_url()}/archive"
             response = self.session.get(url)
@@ -912,6 +943,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails.
         """
+        import requests
+
         try:
             url = f"{self._get_branches_url()}/{branch_id}/restore"
             response = self.session.post(url)
@@ -940,6 +973,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails or if there is no current branch.
         """
+        import requests
+
         if not self.branch_id:
             raise SourcererAPIError("No current branch found. Cannot rename.")
 
@@ -972,6 +1007,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails or if there is no current branch.
         """
+        import requests
+
         try:
             url = f"{self._get_branches_url()}/{branch_id}/tag"
             payload = {"tag": "staging"}
@@ -1002,6 +1039,8 @@ class SourcererSDK:
             SourcererAPIError: If the API request fails or if there is no current branch.
         """
 
+        import requests
+
         try:
             url = f"{self._get_branches_url()}/{branch_id}/tag"
             response = self.session.delete(url)
@@ -1027,6 +1066,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails.
         """
+        import requests
+
         url = f"{self.base_url}/template-projects"
         try:
             response = self.session.get(url, params={"owner": "adk"})
@@ -1051,6 +1092,8 @@ class SourcererSDK:
         Raises:
             SourcererAPIError: If the API request fails.
         """
+        import requests
+
         url = f"{self.base_url}/template-projects/{template_id}/projection"
         try:
             response = self.session.get(url)

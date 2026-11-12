@@ -11,7 +11,6 @@ import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import requests
 from ruamel.yaml import YAML
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
@@ -76,6 +75,12 @@ FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+# Data API routes, served on the regional api.<region>.poly.ai hosts.
+DATA_METRICS_URL = "/api/v1/metrics"
+DATA_METRICS_AGGREGATE_URL = "/api/v1/metrics/aggregate"
+DATA_CONVERSATIONS_SEARCH_URL = "/api/v1/conversations/search"
+DATA_TRANSCRIPTS_SEARCH_URL = "/api/v1/transcripts/search"
+DATA_TRANSCRIPT_URL = "/api/v1/transcripts/conversation/{conversation_id}"
 
 
 class PlatformAPIHandler:
@@ -148,6 +153,8 @@ class PlatformAPIHandler:
         Returns:
             dict: The parsed response.
         """
+        import requests
+
         url = PlatformAPIHandler.get_base_url(region, use_jupiter_api) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
 
@@ -1031,29 +1038,6 @@ class PlatformAPIHandler:
         )
 
     @staticmethod
-    def list_account_api_keys_internal(
-        region: str, jwt_token: str, account_id: str, source: str = "adk"
-    ) -> list[dict]:
-        """List the account-scoped API keys for an account, via JWT auth.
-
-        Args:
-            region: The region name.
-            jwt_token: A valid JWT access token.
-            account_id: The account ID.
-            source: Value for the ``X-Poly-Source`` header.
-
-        Returns:
-            list[dict]: The raw list of API key records.
-        """
-        return PlatformAPIHandler.make_request(
-            region,
-            f"/jupiter/v2/accounts/{account_id}/api-keys",
-            "GET",
-            headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
-            use_jupiter_api=True,
-        )
-
-    @staticmethod
     def create_account_api_key_internal(
         region: str, jwt_token: str, account_id: str, name: str, source: str = "adk"
     ) -> dict:
@@ -1140,6 +1124,8 @@ class PlatformAPIHandler:
         Returns:
             bytes: The raw WAV audio data.
         """
+        import requests
+
         endpoint = CONVERSATION_AUDIO_URL.format(
             project_id=project_id, conversation_id=conversation_id
         )
@@ -1210,6 +1196,8 @@ class PlatformAPIHandler:
         Returns:
             bytes: The raw WAV audio data.
         """
+        import requests
+
         endpoint = AUDIO_CACHE_FILE_URL.format(project_id=project_id, entry_id=entry_id)
         url = PlatformAPIHandler.get_base_url(region) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -1256,6 +1244,8 @@ class PlatformAPIHandler:
             audio_bytes: Raw WAV audio bytes (max 6MB).
             filename: Optional filename, sent via the X-Filename header.
         """
+        import requests
+
         endpoint = AUDIO_CACHE_FILE_URL.format(project_id=project_id, entry_id=entry_id)
         url = PlatformAPIHandler.get_base_url(region) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -1307,6 +1297,8 @@ class PlatformAPIHandler:
             settings: Dict with "text" and "config" keys (voice tuning settings).
             filename: Filename to use for the multipart file part.
         """
+        import requests
+
         endpoint = AUDIO_CACHE_DETAILS_URL.format(project_id=project_id, entry_id=entry_id)
         url = PlatformAPIHandler.get_base_url(region) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -1393,6 +1385,8 @@ class PlatformAPIHandler:
         Returns:
             bytes: The raw WAV audio data (preview only, not saved to cache).
         """
+        import requests
+
         endpoint = AUDIO_CACHE_SYNTHESIZE_URL.format(project_id=project_id, entry_id=entry_id)
         url = PlatformAPIHandler.get_base_url(region) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -1805,3 +1799,84 @@ class PlatformAPIHandler:
         """
         endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    @staticmethod
+    def get_available_metrics(region: str, project_id: ty.Optional[str] = None) -> dict:
+        """List the metrics that can be queried for an account or project.
+
+        Built-in metrics such as ``poly_score_v2`` are included alongside custom
+        ones, so this is the set a ``query`` may name.
+
+        Args:
+            region: The region name.
+            project_id: Optional project ID to scope the catalog to.
+
+        Returns:
+            dict: ``{"metrics": [{name, description, type, values}], "total": int}``.
+        """
+        params = {"project_id": project_id} if project_id else None
+        return PlatformAPIHandler.make_request(region, DATA_METRICS_URL, "GET", params=params)
+
+    @staticmethod
+    def query_metric(region: str, body: dict) -> dict:
+        """Aggregate one metric over a window, optionally bucketed and grouped.
+
+        Args:
+            region: The region name.
+            body: The aggregate request body (metric, aggs, window, group_by,
+                filters, having, cohort restrictors, sort, pagination).
+
+        Returns:
+            dict: ``{"columns": [...], "rows": [[...]], "limit": int, "offset": int}``.
+        """
+        return PlatformAPIHandler.make_request(
+            region, DATA_METRICS_AGGREGATE_URL, "POST", data=body
+        )
+
+    @staticmethod
+    def search_conversations(region: str, body: dict) -> dict:
+        """Search conversations by metric filters, channel, environment and time.
+
+        Args:
+            region: The region name.
+            body: The search request body.
+
+        Returns:
+            dict: ``{"conversations": [...], "total": int, "limit": int, "offset": int}``.
+        """
+        return PlatformAPIHandler.make_request(
+            region, DATA_CONVERSATIONS_SEARCH_URL, "POST", data=body
+        )
+
+    @staticmethod
+    def search_transcripts(region: str, params: dict) -> dict:
+        """Full-text search over transcript turns with surrounding context.
+
+        Args:
+            region: The region name.
+            params: Query parameters: ``q`` (required), ``project_id``, ``from``,
+                ``to``, ``context_turns``, ``limit``, ``offset``.
+
+        Returns:
+            dict: ``{"results": [...], "total": int, "limit": int, "offset": int}``.
+        """
+        return PlatformAPIHandler.make_request(
+            region, DATA_TRANSCRIPTS_SEARCH_URL, "GET", params=params
+        )
+
+    @staticmethod
+    def get_transcript(region: str, conversation_id: str, project_id: str) -> dict:
+        """Fetch every turn of one conversation, in order.
+
+        Args:
+            region: The region name.
+            conversation_id: The conversation ID.
+            project_id: The project the conversation belongs to.
+
+        Returns:
+            dict: ``{"conversation_id", "project_id", "turns": [...], "total_turns"}``.
+        """
+        endpoint = DATA_TRANSCRIPT_URL.format(conversation_id=conversation_id)
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "GET", params={"project_id": project_id}
+        )

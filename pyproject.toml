@@ -150,10 +150,12 @@ tag_format = "v{version}"
 # templates/.release_notes.md.j2 prepends a "Getting started" block to every
 # GitHub release (DEVP-790); CHANGELOG.md generation is unaffected.
 template_dir = "templates"
+mode = "update"
+insertion_flag = "<!-- version list -->"
 
 [project]
 name = "polyai-adk"
-version = "0.77.1"
+version = "0.80.1"
 description = "Agent Development Kit (ADK) — a CLI for building, testing, and deploying PolyAI voice and chat agents, self-serve"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -192,6 +194,8 @@ dependencies = [
     "langcodes==3.5.1",
     "posthog==7.64.1",
     "packaging>=24.0",
+    # IANA timezone database for `zoneinfo`. Windows has no system copy.
+    "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
 [project.license]

@@ -2217,6 +2217,21 @@ class PushProjectTest(unittest.TestCase):
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
+    def test_push_project_duplicate_entry_names_are_rejected(self):
+        """Two entries sharing a name fail validation and queue nothing."""
+        root = _copy_test_project(self)
+        _append_yaml_entries(
+            root, ENTITIES_FILE, "entities", [_entity_entry("city"), _entity_entry("city")]
+        )
+        project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+        success, message, commands = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertIn("Duplicate name 'city'.", message)
+        self.assertEqual(commands, [])
+        self.mock_api_handler.queue_resources.assert_not_called()
+
     def test_push_project_merge_conflict(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_pull.return_value = (["functions/test_function.py"], {})
@@ -2988,6 +3003,56 @@ class ValidateProjectTest(unittest.TestCase):
             "Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts
         )
         self.assertIn("Start step 'missing_step' not found.", error_texts)
+
+    def test_validate_project_reports_duplicate_entry_names(self):
+        """Entries sharing a name are reported, whether new or already on the platform."""
+        for names in (["city", "city"], ["customer_name"]):
+            with self.subTest(names=names):
+                root = _copy_test_project(self)
+                _append_yaml_entries(
+                    root, ENTITIES_FILE, "entities", [_entity_entry(name) for name in names]
+                )
+                project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+                errors = project.validate_project()
+
+                self.assertIn(f"Duplicate name {names[0]!r}.", errors[0])
+
+    def test_validate_project_reports_names_with_the_same_clean_name(self):
+        """Names that differ only in punctuation or spacing count as the same name."""
+        root = _copy_test_project(self)
+        _append_yaml_entries(
+            root,
+            ENTITIES_FILE,
+            "entities",
+            [_entity_entry("My Entity"), _entity_entry("My_Entity")],
+        )
+        project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+        errors = project.validate_project()
+
+        self.assertIn("Duplicate name 'My Entity'.", errors[0])
+
+
+ENTITIES_FILE = os.path.join("config", "entities.yaml")
+VARIANTS_FILE = os.path.join("config", "variant_attributes.yaml")
+
+
+def _entity_entry(name: str) -> dict:
+    """Return a valid entities.yaml entry with the given name."""
+    return {"name": name, "description": "A city", "entity_type": "free_text", "config": {}}
+
+
+def _append_yaml_entries(
+    root: str, relative_path: str, top_level_name: str, entries: list[dict]
+) -> None:
+    """Append entries to a top-level list of a multi-resource YAML file under root."""
+    file_path = os.path.join(root, relative_path)
+    with open(file_path, encoding="utf-8") as f:
+        data = resource_utils.load_yaml(f.read())
+    data[top_level_name] = [*data[top_level_name], *entries]
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(resource_utils.dump_yaml(data))
 
 
 class PullProjectTest(unittest.TestCase):
@@ -6618,7 +6683,7 @@ class MergeBranchTest(unittest.TestCase):
 
         self.assertEqual(result, (True, [], []))
         self.mock_api.merge_branch.assert_called_once_with(
-            message="ship it", conflict_resolutions=None
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
         )
         self.mock_switch_branch.assert_called_once_with("main", force=True)
 
@@ -6682,6 +6747,50 @@ class MergeBranchTest(unittest.TestCase):
         self.assertEqual(returned_conflicts, conflicts)
         self.assertEqual(returned_errors, errors)
         self.mock_switch_branch.assert_not_called()
+
+    def _merge_blocked_by_experiment(self, acknowledge: bool) -> list[dict]:
+        """Merge feature-a into main while the platform reports a running experiment."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+        blocked = {
+            "path": [],
+            "message": "API Error 409: {'error_code': 'AB_TEST_ACTIVE', 'error': 'End it'}",
+        }
+        self.mock_api.merge_branch.return_value = (False, [], [blocked])
+
+        success, _, errors = self.project.merge_branch(
+            "ship it", acknowledge_active_experiment=acknowledge
+        )
+
+        self.assertFalse(success)
+        self.assertIs(
+            self.mock_api.merge_branch.call_args.kwargs["acknowledge_active_experiment"],
+            acknowledge,
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]["path"], [])
+        return errors
+
+    def test_experiment_block_explains_how_to_acknowledge(self):
+        """Without the acknowledgement, the error says how to give it."""
+        errors = self._merge_blocked_by_experiment(acknowledge=False)
+
+        self.assertIn("--acknowledge-experiment", errors[0]["message"])
+        self.assertIn("acknowledge_active_experiment=True", errors[0]["message"])
+
+    def test_experiment_block_after_acknowledging_says_to_end_it(self):
+        """When the project doesn't allow it even acknowledged, the error says to end it."""
+        errors = self._merge_blocked_by_experiment(acknowledge=True)
+
+        self.assertIn("End the experiment", errors[0]["message"])
+        self.assertNotIn("--acknowledge-experiment", errors[0]["message"])
 
     def test_merging_from_main_is_rejected(self):
         """Main has nothing to merge into, so merging from it is refused."""
@@ -8028,6 +8137,415 @@ class TestProjectFixtureIntegrityTest(unittest.TestCase):
         # Without this the test passes vacuously if the path keying ever breaks.
         self.assertEqual(compared, len(self.mappings))
         self.assertEqual(differing, [])
+
+
+class ProjectQueryMetricTest(unittest.TestCase):
+    """Tests for AgentStudioProject.query_metric: validation and request building."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api = patch("poly.project.AgentStudioInterface.query_metric").start()
+        self.mock_api.return_value = {"columns": [], "rows": []}
+        self.addCleanup(patch.stopall)
+
+    def _body(self) -> dict:
+        return self.mock_api.call_args.kwargs["body"]
+
+    def test_scopes_the_request_to_the_project(self):
+        """The project id and region come from the loaded project."""
+        self.project.query_metric("poly_score")
+
+        self.assertEqual(self.mock_api.call_args.args[0], "us-1")
+        self.assertEqual(
+            self._body(),
+            {
+                "project_id": "test_project",
+                "metric": "poly_score",
+                "aggs": ["avg", "conversation_count"],
+                "limit": 20,
+                "offset": 0,
+            },
+        )
+
+    def test_date_bounds_are_normalised(self):
+        """A bare --to date rolls to the next midnight; Z becomes an offset."""
+        self.project.query_metric("poly_score", from_dt="2026-09-01T09:30:00Z", to_dt="2026-09-30")
+
+        self.assertEqual(self._body()["from_datetime"], "2026-09-01T09:30:00+00:00")
+        self.assertEqual(self._body()["to_datetime"], "2026-10-01T00:00:00")
+
+    def test_having_values_become_numbers_and_sort_order_is_lowercased(self):
+        """Thresholds are sent as floats and the sort order normalised."""
+        self.project.query_metric(
+            "CSAT",
+            ["avg"],
+            having=[{"field": "avg", "op": "GTE", "value": "4"}],
+            sort={"field": "avg", "order": "DESC"},
+        )
+
+        self.assertEqual(self._body()["having"], [{"field": "avg", "op": "gte", "value": 4.0}])
+        self.assertEqual(self._body()["sort"], {"field": "avg", "order": "desc"})
+
+    def test_rejects_what_the_data_api_would_reject(self):
+        """Every enum and bound is checked locally with a clear message."""
+        cases = [
+            ({"metric": ""}, "metric name"),
+            ({"metric": "x", "aggs": ["median"]}, "Aggregation"),
+            ({"metric": "x", "interval": "yearly"}, "Interval"),
+            ({"metric": "x", "group_by": ["caller"]}, "Group-by"),
+            ({"metric": "x", "channel": ["FAX"]}, "Channel"),
+            ({"metric": "x", "client_env": ["prod"]}, "Environment"),
+            ({"metric": "x", "limit": 0}, "Limit"),
+            ({"metric": "x", "limit": 101}, "Limit"),
+            ({"metric": "x", "offset": 1001}, "Offset"),
+            ({"metric": "x", "from_dt": "yesterday"}, "YYYY-MM-DD"),
+            ({"metric": "x", "filters": [{"metric": "a", "op": "like", "value": "b"}]}, "like"),
+            ({"metric": "x", "filters": [{"metric": "a", "op": "in", "value": "b"}]}, "list"),
+            ({"metric": "x", "having": [{"field": "median", "op": "gte", "value": 1}]}, "Having"),
+            ({"metric": "x", "having": [{"field": "avg", "op": "in", "value": 1}]}, "Having"),
+            ({"metric": "x", "having": [{"field": "avg", "op": "gte", "value": "high"}]}, "number"),
+            ({"metric": "x", "sort": {"field": "avg", "order": "sideways"}}, "Sort"),
+        ]
+        for kwargs, fragment in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.query_metric(**kwargs)
+                self.assertIn(fragment, str(ctx.exception))
+        self.mock_api.assert_not_called()
+
+
+class ProjectGetPolyScoreTest(unittest.TestCase):
+    """Tests for AgentStudioProject.get_poly_score."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api = patch("poly.project.AgentStudioInterface.query_metric").start()
+        self.addCleanup(patch.stopall)
+
+    def test_summary_is_fetched_separately_from_the_table(self):
+        """The overall figure comes from an unbucketed query over the same window."""
+        self.mock_api.side_effect = [
+            {"columns": ["avg", "conversation_count"], "rows": [[4.456, 40]]},
+            {"columns": ["bucket", "avg", "conversation_count"], "rows": [["b", 4.0, 10]]},
+        ]
+
+        result = self.project.get_poly_score(from_dt="2026-09-01", to_dt="2026-09-30", limit=5)
+
+        overall, table = (c.kwargs["body"] for c in self.mock_api.call_args_list)
+        self.assertNotIn("interval", overall)
+        self.assertEqual(overall["limit"], 1)
+        self.assertEqual(table["interval"], "daily")
+        self.assertEqual(table["limit"], 5)
+        self.assertEqual(overall["from_datetime"], table["from_datetime"])
+        self.assertEqual(
+            result["summary"],
+            {
+                "version": "v2",
+                "scale": "1-5",
+                "average": 4.46,
+                "conversations": 40,
+                "from_datetime": "2026-09-01T00:00:00",
+                "to_datetime": "2026-10-01T00:00:00",
+            },
+        )
+        self.assertEqual(result["rows"], [["b", 4.0, 10]])
+        self.assertEqual({overall["metric"], table["metric"]}, {"poly_score_v2"})
+
+    def test_v1_reads_the_earlier_score(self):
+        """``version="v1"`` queries the 0-10 score and says so in the summary."""
+        self.mock_api.return_value = {"columns": [], "rows": []}
+
+        result = self.project.get_poly_score(version="v1")
+
+        self.assertEqual(
+            {c.kwargs["body"]["metric"] for c in self.mock_api.call_args_list}, {"poly_score"}
+        )
+        self.assertEqual(result["summary"]["version"], "v1")
+        self.assertEqual(result["summary"]["scale"], "0-10")
+
+    def test_unknown_version_is_refused(self):
+        """Only v1 and v2 exist."""
+        with self.assertRaisesRegex(ValueError, "v2, v1"):
+            self.project.get_poly_score(version="v3")
+
+        self.mock_api.assert_not_called()
+
+    def test_bare_dates_are_read_in_the_timezone_by_both_queries(self):
+        """The summary query has no interval, so the offset has to travel with the dates."""
+        self.mock_api.return_value = {"columns": [], "rows": []}
+
+        self.project.get_poly_score(
+            from_dt="2026-11-01", to_dt="2026-11-03", timezone="America/New_York"
+        )
+
+        overall, table = (c.kwargs["body"] for c in self.mock_api.call_args_list)
+        self.assertEqual(overall["from_datetime"], "2026-11-01T00:00:00-04:00")
+        self.assertEqual(overall["to_datetime"], "2026-11-04T00:00:00-05:00")
+        self.assertEqual(
+            (table["from_datetime"], table["to_datetime"]),
+            (overall["from_datetime"], overall["to_datetime"]),
+        )
+
+    def test_defaults_to_the_last_seven_days(self):
+        """With no bounds the window is the last seven days, applied to both queries."""
+        self.mock_api.return_value = {"columns": [], "rows": []}
+
+        result = self.project.get_poly_score()
+
+        overall = self.mock_api.call_args_list[0].kwargs["body"]
+        start = datetime.fromisoformat(overall["from_datetime"])
+        end = datetime.fromisoformat(overall["to_datetime"])
+        self.assertEqual((end - start).days, 7)
+        self.assertEqual(result["summary"]["average"], None)
+        self.assertEqual(result["summary"]["conversations"], 0)
+
+
+class ProjectSearchConversationsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.search_conversations validation and request building."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api = patch("poly.project.AgentStudioInterface.search_conversations").start()
+        self.mock_api.return_value = {"conversations": [], "total": 0}
+        self.addCleanup(patch.stopall)
+
+    def test_scopes_to_the_project_and_normalises_the_window(self):
+        """The project id is always sent and a bare --to date includes the whole day."""
+        self.project.search_conversations(
+            from_dt="2026-09-01",
+            to_dt="2026-09-30",
+            filters=[{"metric": "call_summary", "op": "CONTAINS", "value": "refund"}],
+            sort={"field": "duration", "order": "DESC"},
+        )
+
+        self.assertEqual(self.mock_api.call_args.args[0], "us-1")
+        self.assertEqual(
+            self.mock_api.call_args.kwargs["body"],
+            {
+                "project_id": "test_project",
+                "limit": 20,
+                "offset": 0,
+                "from": "2026-09-01T00:00:00",
+                "to": "2026-10-01T00:00:00",
+                "filters": [{"metric": "call_summary", "op": "contains", "value": "refund"}],
+                "sort": {"field": "duration", "order": "desc"},
+            },
+        )
+
+    def test_rejects_what_the_data_api_would_reject(self):
+        """Operators, sort fields, cohorts and paging are checked locally."""
+        cases = [
+            ({"filters": [{"metric": "a", "op": "like", "value": "b"}]}, "like"),
+            ({"filters": [{"metric": "a", "op": "in", "value": "b"}]}, "list"),
+            ({"sort": {"field": "poly_score", "order": "asc"}}, "started_at"),
+            ({"sort": {"field": "duration", "order": "sideways"}}, "Sort order"),
+            ({"channel": ["FAX"]}, "Channel"),
+            ({"client_env": ["prod"]}, "Environment"),
+            ({"limit": 101}, "Limit"),
+            ({"offset": -1}, "Offset"),
+            ({"from_dt": "last week"}, "YYYY-MM-DD"),
+        ]
+        for kwargs, fragment in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.search_conversations(**kwargs)
+                self.assertIn(fragment, str(ctx.exception))
+        self.mock_api.assert_not_called()
+
+
+class ProjectSearchTranscriptsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.search_transcripts and get_transcript."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_search = patch("poly.project.AgentStudioInterface.search_transcripts").start()
+        self.mock_get = patch("poly.project.AgentStudioInterface.get_transcript").start()
+        self.addCleanup(patch.stopall)
+
+    def test_search_params_always_carry_the_project(self):
+        """The phrase is trimmed and the project id sent, as PATs require it."""
+        self.project.search_transcripts("  cancel my booking ", to_dt="2026-09-30", context_turns=2)
+
+        self.assertEqual(
+            self.mock_search.call_args.kwargs["params"],
+            {
+                "q": "cancel my booking",
+                "project_id": "test_project",
+                "context_turns": 2,
+                "limit": 20,
+                "offset": 0,
+                "to": "2026-10-01T00:00:00",
+            },
+        )
+
+    def test_search_rejects_bad_phrase_context_and_paging(self):
+        """Length, context and paging bounds are checked before any request."""
+        cases = [
+            ({"query": "hi"}, "3 to 300"),
+            ({"query": "x" * 301}, "3 to 300"),
+            ({"query": "refund", "context_turns": 4}, "Context"),
+            ({"query": "refund", "limit": 0}, "Limit"),
+        ]
+        for kwargs, fragment in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.search_transcripts(**kwargs)
+                self.assertIn(fragment, str(ctx.exception))
+        self.mock_search.assert_not_called()
+
+    def test_get_transcript_passes_ids(self):
+        """Transcript fetches carry the conversation and project ids."""
+        self.project.get_transcript(" conv-1 ")
+
+        self.mock_get.assert_called_once_with(
+            "us-1", conversation_id="conv-1", project_id="test_project"
+        )
+        with self.assertRaises(ValueError):
+            self.project.get_transcript("  ")
+
+
+class ProjectMetricBucketWindowTest(unittest.TestCase):
+    """Weekly and monthly windows are widened to whole buckets.
+
+    The Data API keeps a weekly or monthly bucket only when the bucket starts
+    inside the window, so a window from Thursday 1 October would lose the week
+    of Monday 28 September while an unbucketed total still counted it.
+    """
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api = patch("poly.project.AgentStudioInterface.query_metric").start()
+        self.mock_api.return_value = {"columns": [], "rows": []}
+        self.addCleanup(patch.stopall)
+
+    def _body(self, call: int = -1) -> dict:
+        return self.mock_api.call_args_list[call].kwargs["body"]
+
+    def test_weekly_start_moves_back_to_monday(self):
+        """A mid-week start is sent as that week's Monday and reported in ``window``."""
+        result = self.project.query_metric("poly_score", from_dt="2026-10-01", interval="weekly")
+
+        self.assertEqual(self._body()["from_datetime"], "2026-09-28T00:00:00")
+        self.assertNotIn("to_datetime", self._body())
+        self.assertEqual(
+            result["window"], {"from_datetime": "2026-09-28T00:00:00", "to_datetime": None}
+        )
+
+    def test_past_end_moves_forward_to_the_next_bucket(self):
+        """An end inside a past bucket is sent as the start of the next bucket."""
+        self.project.query_metric(
+            "poly_score", from_dt="2026-09-28", to_dt="2026-10-06", interval="weekly"
+        )
+        self.assertEqual(self._body()["to_datetime"], "2026-10-12T00:00:00")
+
+        result = self.project.query_metric(
+            "poly_score", from_dt="2026-09-15", to_dt="2026-10-06", interval="monthly"
+        )
+        self.assertEqual(
+            result["window"],
+            {"from_datetime": "2026-09-01T00:00:00", "to_datetime": "2026-11-01T00:00:00"},
+        )
+
+    def test_end_in_the_future_is_left_alone(self):
+        """Nothing lies beyond an end that has not happened, so it is sent as given."""
+        result = self.project.query_metric(
+            "poly_score", from_dt="2026-09-28", to_dt="2999-01-02T10:00:00", interval="weekly"
+        )
+
+        self.assertEqual(self._body()["to_datetime"], "2999-01-02T10:00:00")
+        self.assertNotIn("window", result)
+
+    def test_weekly_and_monthly_bounds_stay_utc_with_a_timezone(self):
+        """Weekly and monthly buckets are UTC, so a timezone must not move their bounds.
+
+        Read in the zone, 19 Oct 00:00 New York is 04:00 UTC, past the Monday
+        boundary, and 5 Oct 00:00 Tokyo is Sunday 4 Oct in UTC: either adds a
+        whole extra week.
+        """
+        for timezone in (None, "America/New_York", "Asia/Tokyo"):
+            with self.subTest(timezone=timezone):
+                result = self.project.query_metric(
+                    "poly_score",
+                    from_dt="2026-10-05",
+                    to_dt="2026-10-18",
+                    interval="weekly",
+                    timezone=timezone,
+                )
+                self.assertEqual(self._body()["from_datetime"], "2026-10-05T00:00:00")
+                self.assertEqual(self._body()["to_datetime"], "2026-10-19T00:00:00")
+                self.assertNotIn("window", result)
+
+        result = self.project.query_metric(
+            "poly_score",
+            from_dt="2026-09-01",
+            to_dt="2026-09-30",
+            interval="monthly",
+            timezone="Asia/Tokyo",
+        )
+        self.assertEqual(self._body()["from_datetime"], "2026-09-01T00:00:00")
+        self.assertEqual(self._body()["to_datetime"], "2026-10-01T00:00:00")
+        self.assertNotIn("window", result)
+
+    def test_weekly_score_with_a_timezone_keeps_both_queries_in_utc(self):
+        """The unbucketed headline query uses the same UTC window as the weekly table."""
+        self.project.get_poly_score(
+            from_dt="2026-10-05", to_dt="2026-10-18", interval="weekly", timezone="Asia/Tokyo"
+        )
+
+        overall, table = (c.kwargs["body"] for c in self.mock_api.call_args_list[-2:])
+        for body in (overall, table):
+            self.assertEqual(body["from_datetime"], "2026-10-05T00:00:00")
+            self.assertEqual(body["to_datetime"], "2026-10-19T00:00:00")
+
+    def test_aligned_and_finer_windows_are_untouched(self):
+        """Windows on bucket boundaries, and hourly, daily or unbucketed ones, stay as given."""
+        for interval, start, end in (
+            ("weekly", "2026-09-28", "2026-10-04"),
+            ("monthly", "2026-09-01", "2026-09-30"),
+            ("daily", "2026-10-01", "2026-10-06"),
+            ("hourly", "2026-10-01T09:30:00", None),
+            (None, "2026-10-01", None),
+        ):
+            with self.subTest(interval=interval):
+                result = self.project.query_metric(
+                    "poly_score", from_dt=start, to_dt=end, interval=interval
+                )
+                self.assertTrue(self._body()["from_datetime"].startswith(start))
+                self.assertNotIn("window", result)
+
+    def test_score_summary_and_table_share_the_widened_window(self):
+        """The unbucketed summary query uses the same widened window as the weekly table."""
+        self.mock_api.side_effect = [
+            {"columns": ["avg", "conversation_count"], "rows": [[2.12, 57]]},
+            {
+                "columns": ["bucket", "avg", "conversation_count"],
+                "rows": [["2026-09-28T00:00:00+00:00", 1.4, 45], ["2026-10-05", 4.83, 12]],
+            },
+        ]
+
+        result = self.project.get_poly_score(from_dt="2026-10-01", interval="weekly")
+
+        overall, table = self._body(0), self._body(1)
+        self.assertNotIn("interval", overall)
+        self.assertEqual(overall["from_datetime"], "2026-09-28T00:00:00")
+        self.assertEqual(table["from_datetime"], "2026-09-28T00:00:00")
+        self.assertEqual(result["summary"]["from_datetime"], "2026-09-28T00:00:00")
+        self.assertEqual(result["summary"]["conversations"], 57)
+        self.assertEqual(
+            result["window"], {"from_datetime": "2026-09-28T00:00:00", "to_datetime": None}
+        )
+
+    def test_default_score_window_keeps_ending_now(self):
+        """With no bounds a weekly score starts on a Monday and still ends now."""
+        self.project.get_poly_score(interval="weekly")
+
+        overall, table = self._body(0), self._body(1)
+        start = datetime.fromisoformat(overall["from_datetime"])
+        self.assertEqual((start.weekday(), start.hour, start.minute), (0, 0, 0))
+        self.assertEqual(overall["from_datetime"], table["from_datetime"])
+        self.assertEqual(overall["to_datetime"], table["to_datetime"])
+        end = datetime.fromisoformat(overall["to_datetime"])
+        self.assertLess(abs((datetime.now(end.tzinfo) - end).total_seconds()), 60)
 
 
 class ProjectCreateCustomMetricTest(unittest.TestCase):
@@ -11333,6 +11851,31 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                 self.assertIn(message, error)
                 self.assertIn(message, "\n".join(self.project.validate_project()))
                 self.project.project_status()
+
+    def test_duplicate_node_name_is_reported_once(self):
+        data = self._yaml()
+        for duplicate in ("End", "end!"):
+            with self.subTest(duplicate=duplicate):
+                self._write_yaml(
+                    {
+                        **deepcopy(data),
+                        "nodes": [*data["nodes"], {**data["nodes"][2], "name": duplicate}],
+                    }
+                )
+
+                errors = [
+                    error
+                    for error in self.project.validate_project()
+                    if "more than once" in error or "Duplicate name" in error
+                ]
+
+                self.assertEqual(
+                    errors,
+                    [
+                        "Validation error in outbound_campaigns/reminders/campaign.yaml/campaign: "
+                        f"Node name '{duplicate}' is used more than once."
+                    ],
+                )
 
     def test_function_file_left_behind_by_a_node_rename_fails_validation(self):
         data = self._yaml()

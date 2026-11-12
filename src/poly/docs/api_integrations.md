@@ -16,7 +16,7 @@ API integrations let you define external HTTP APIs in your project and call them
 
 Each API integration has:
 
-- **name**: Identifier for the API. Becomes the namespace at runtime: `conv.api.<name>`.
+- **name**: Identifier for the API, unique within the file. Becomes the namespace at runtime: `conv.api.<name>`.
 - **description**: Optional description of what the API is used for.
 - **environments**: Per-environment config (see below).
 - **operations**: List of HTTP operations (method, name, resource path).
@@ -40,7 +40,7 @@ This lets you test against staging in sandbox and promote without changing code.
 
 Each operation is one HTTP endpoint. You define:
 
-- **name**: Operation name; used at runtime as `conv.api.<api_name>.<operation_name>(...)`.
+- **name**: Operation name, unique within the integration; used at runtime as `conv.api.<api_name>.<operation_name>(...)`.
 - **description**: Optional note on what the operation does (up to 1000 characters).
 - **method**: HTTP method (e.g. `GET`, `POST`, `PUT`, `DELETE`).
 - **resource**: Path template (e.g. `/tickets/{id}`). Path variables are exposed as arguments when calling the operation.

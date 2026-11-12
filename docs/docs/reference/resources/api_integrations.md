@@ -151,12 +151,13 @@ response = conv.api.salesforce.update_contact(
 ## Validation
 
 - `name` is required and must match `^[a-z_][a-z0-9_]*$`.
+- Each integration `name` must be unique.
 - Each environment's `base_url` must be a valid `http(s)://` URL, or empty.
 - `base_url` cannot be empty when `auth_type` is not `none`.
 - `auth_type` must be one of `none`, `basic`, `apiKey`, `oauth2`, `oauth2_client_credentials`,
   `jwt_client_assertion`.
 - Every operation needs a non-empty `name`, a `method` from the supported set, and a `resource` path matching a valid URL-path pattern (optionally with `{param}` placeholders).
-- No two operations in the same integration may share both `name` and `method`.
+- Each operation `name` must be unique within its integration.
 - An operation's `description` is at most 1000 characters.
 - Header names are HTTP tokens (letters, digits and ``!#$%&'*+-^_`|~``), unique ignoring case, and never `Authorization` or `Host`. Values are text, so quote one YAML would otherwise read as a number, date, list or mapping (`X-Version: '1.10'`); `true` and `false` are sent as written. Values are ASCII with no line breaks or control characters, don't start or end with a space, and are at most 4096 characters. An operation has at most 50 headers.
 - Each schema is a mapping that passes the JSON Schema 2020-12 meta-schema, nests objects and arrays at most 64 levels deep, and is at most 64 KB as compact JSON. A `$schema` keyword, if present, must be `https://json-schema.org/draft/2020-12/schema`.
