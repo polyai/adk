@@ -132,6 +132,7 @@ version_toml = ["pyproject.toml:project.version"]
 # Keep skills/*/SKILL.md metadata.version in lockstep with the CLI version.
 # Validated in CI by scripts/validate_skills.py.
 version_variables = [
+    "src/poly/version.py:__version__",
     "skills/poly-adk-branching/SKILL.md:version",
     "skills/poly-adk-conversations/SKILL.md:version",
     "skills/poly-adk-rtc/SKILL.md:version",

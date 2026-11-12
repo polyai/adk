@@ -5,6 +5,7 @@ Uses test project in tests/test_project
 Copyright PolyAI Limited
 """
 
+import base64
 import dataclasses
 import json
 import os
@@ -2799,6 +2800,82 @@ class StatusFileWritesTest(unittest.TestCase):
 
         self.assertEqual(self.project.branch_id, "BRANCH-new")
         save_config.assert_called_once()
+
+
+class SavedFileHashesTest(unittest.TestCase):
+    """Loading a project reuses the file hashes saved in the status file when they're valid."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        self.root = _copy_test_project(self)
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        project.save_config(write_project_yaml=True)
+        self.expected = AgentStudioProject.compute_file_structure_info(project.resources)
+        self.status_file = os.path.join(self.root, STATUS_FILE)
+
+    def _edit_status(self, edit) -> None:
+        with open(self.status_file, "rb") as f:
+            status = json.loads(base64.b64decode(f.read()))
+        edit(status)
+        with open(self.status_file, "wb") as f:
+            f.write(base64.b64encode(json.dumps(status).encode("utf-8")))
+
+    def test_saved_hashes_are_reused(self):
+        with patch.object(AgentStudioProject, "compute_file_structure_info") as compute:
+            project = AgentStudioProject.from_file_path(self.root)
+
+        compute.assert_not_called()
+        self.assertEqual(project.file_structure_info, self.expected)
+
+    def test_hashes_from_another_adk_version_are_not_reused(self):
+        """Another version may format resources differently, so its hashes can't be trusted."""
+        self._edit_status(lambda status: status.update(adk_version="0.0.1"))
+
+        project = AgentStudioProject.from_file_path(self.root)
+
+        self.assertEqual(project.file_structure_info, {})
+
+    def test_hashes_are_not_reused_when_a_migration_ran(self):
+        self._edit_status(lambda status: status.update(migration_flags=[]))
+
+        project = AgentStudioProject.from_file_path(self.root)
+
+        self.assertEqual(project.file_structure_info, {})
+
+    def test_hashes_missing_a_resource_are_not_reused(self):
+        def drop_one(status):
+            status["file_structure_info"].pop(next(iter(status["file_structure_info"])))
+
+        self._edit_status(drop_one)
+
+        project = AgentStudioProject.from_file_path(self.root)
+
+        self.assertEqual(project.file_structure_info, {})
+
+    def test_hashes_saved_with_another_path_separator_are_not_reused(self):
+        """A status file committed on Windows and loaded on macOS or Linux, or the other way."""
+        other_separator = "/" if os.sep == "\\" else "\\"
+
+        def swap_separators(status):
+            status["file_structure_info"] = {
+                path.replace(os.sep, other_separator): info
+                for path, info in status["file_structure_info"].items()
+            }
+
+        self._edit_status(swap_separators)
+
+        project = AgentStudioProject.from_file_path(self.root)
+
+        self.assertEqual(project.file_structure_info, {})
+
+    def test_from_dict_computes_hashes_it_cannot_reuse(self):
+        data = deepcopy(PROJECT_DATA)
+        data["adk_version"] = "0.0.1"
+
+        project = AgentStudioProject.from_dict(data, self.root)
+
+        self.assertEqual(project.file_structure_info, self.expected)
 
 
 class StageSetDefaultCommandsTest(unittest.TestCase):

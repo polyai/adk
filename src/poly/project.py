@@ -79,6 +79,7 @@ from poly.resources.resource import (
 )
 from poly.utils import prepush
 from poly.utils.commands import queue_set_default_commands
+from poly.version import __version__ as ADK_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -500,12 +501,15 @@ class AgentStudioProject:
             json_bytes = base64.b64decode(encoded)
             status_dict = json.loads(json_bytes.decode("utf-8"))
 
-        migration_flags = load_migration_flags(status_dict.get("migration_flags", []))
-        migration_flags = run_migrations(root_path, migration_flags, status_dict=status_dict)
+        loaded_flags = load_migration_flags(status_dict.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, loaded_flags, status_dict=status_dict)
 
         # Load resources
         resources, not_loaded_resources, slim_resources = cls._load_resources_from_status_dict(
             status_dict
+        )
+        file_structure_info = cls._saved_file_structure_info(
+            status_dict, resources, migrated=migration_flags != loaded_flags
         )
 
         last_updated_str = status_dict.get("last_updated")
@@ -521,7 +525,7 @@ class AgentStudioProject:
             resources=resources,
             root_path=root_path,
             last_updated=last_updated,
-            file_structure_info={},
+            file_structure_info=file_structure_info,
             slim_resources=slim_resources,
             branch_id=status_dict.get("branch_id", "main"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
@@ -546,6 +550,7 @@ class AgentStudioProject:
             "slim_resources": [r.to_dict() for r in self.slim_resources or []],
             "last_updated": (self.last_updated.isoformat() if self.last_updated else None),
             "file_structure_info": self.file_structure_info,
+            "adk_version": ADK_VERSION,
             "branch_id": self.branch_id,
             "project_name": self.project_name,
             "account_name": self.account_name,
@@ -558,12 +563,14 @@ class AgentStudioProject:
     @classmethod
     def from_dict(cls, data: dict, root_path: str) -> "AgentStudioProject":
         """Load whole project class from a dictionary"""
-        migration_flags = load_migration_flags(data.get("migration_flags", []))
-        migration_flags = run_migrations(root_path, migration_flags, status_dict=data)
+        loaded_flags = load_migration_flags(data.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, loaded_flags, status_dict=data)
 
         resources, not_loaded_resources, slim_resources = cls._load_resources_from_status_dict(data)
 
-        file_structure_info = cls.compute_file_structure_info(resources)
+        file_structure_info = cls._saved_file_structure_info(
+            data, resources, migrated=migration_flags != loaded_flags
+        ) or cls.compute_file_structure_info(resources)
 
         return cls(
             region=data.get("region", ""),
@@ -581,6 +588,33 @@ class AgentStudioProject:
             slim_resources=slim_resources,
             rtc_metadata=data.get("rtc_metadata"),
         )
+
+    @staticmethod
+    def _saved_file_structure_info(
+        status_dict: dict, resources: ResourceMap, migrated: bool
+    ) -> dict[str, dict[str, str]]:
+        """Return the file hashes saved in the status file, if they still describe `resources`.
+
+        Every change to the saved resources recomputes the hashes before saving, so they
+        stay valid, except when a migration changed the project on this load or a different
+        ADK version wrote them (it may format and so hash resources differently). In those
+        cases, or when they don't key exactly the loaded resources by the paths this OS gives
+        them, this returns {} and the hashes are computed when needed.
+        """
+        saved = status_dict.get("file_structure_info") or {}
+        if migrated or not saved or status_dict.get("adk_version") != ADK_VERSION:
+            return {}
+        loaded = {
+            resource.file_path: (RESOURCE_CLASS_TO_NAME[resource_type], resource_id)
+            for resource_type, resource_dict in resources.items()
+            for resource_id, resource in resource_dict.items()
+        }
+        saved_ids = {
+            path: (info.get("type"), info.get("resource_id")) for path, info in saved.items()
+        }
+        if saved_ids != loaded:
+            return {}
+        return saved
 
     @staticmethod
     def compute_file_structure_info(
