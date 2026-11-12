@@ -18,6 +18,7 @@ from google.protobuf.json_format import MessageToDict
 from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
+from poly.handlers.protobuf.flows_pb2 import FlowStartMode
 from poly.handlers.protobuf.knowledge_base_pb2 import KnowledgeBase_DeleteTopic
 from poly.handlers.protobuf.variant_pb2 import Variant_UpdateVariant
 from poly.resources.agent_settings import (
@@ -64,10 +65,12 @@ from poly.resources.flows import (
     FlowSettings,
     FlowStep,
     FunctionStep,
+    KnownFlowStart,
     LLMConfig,
     ReasoningEffort,
     StepType,
     VADConfig,
+    parse_projection_start_mode,
     parse_reasoning_effort,
 )
 from poly.resources.function import (
@@ -3213,6 +3216,266 @@ start_step: step-1
         restored_yaml = yaml.safe_load(restored_content)
         self.assertEqual(restored_yaml["start_step"], "step-1")
 
+    @staticmethod
+    def _flow_config(start_mode=None, description="A test flow description", name="Test Flow"):
+        return FlowConfig(
+            resource_id="flow-123",
+            name=name,
+            description=description,
+            start_step="step-1",
+            start_mode=start_mode,
+        )
+
+    def test_start_mode_from_yaml_dict(self):
+        """start_mode is read as written, and stays None when the key is missing."""
+        base = {"name": "Test Flow", "description": "A flow", "start_step": "step-1"}
+        for yaml_value, expected in [(None, None), ("agent", "agent"), ("tool", "tool")]:
+            with self.subTest(start_mode=yaml_value):
+                yaml_dict = dict(base) if yaml_value is None else {**base, "start_mode": yaml_value}
+                config = FlowConfig.from_yaml_dict(yaml_dict, resource_id="flow-123", name="x")
+                self.assertEqual(config.start_mode, expected)
+
+    def test_start_mode_written_only_when_agent(self):
+        """Only agent is written to YAML, so tool and a missing key hash the same."""
+        self.assertEqual(self._flow_config("agent").to_yaml_dict()["start_mode"], "agent")
+        self.assertIn("start_mode: agent\n", self._flow_config("agent").raw)
+        self.assertNotIn("start_mode", self._flow_config("tool").to_yaml_dict())
+        self.assertNotIn("start_mode", self._flow_config(None).to_yaml_dict())
+        self.assertEqual(
+            self._flow_config("tool").compute_hash(), self._flow_config(None).compute_hash()
+        )
+        self.assertNotEqual(
+            self._flow_config("agent").compute_hash(), self._flow_config(None).compute_hash()
+        )
+
+    def test_start_mode_equality_treats_tool_as_missing(self):
+        """An explicit tool equals a missing key; agent differs from both."""
+        self.assertEqual(self._flow_config("tool"), self._flow_config(None))
+        self.assertNotEqual(self._flow_config("agent"), self._flow_config(None))
+        self.assertNotEqual(self._flow_config("agent"), self._flow_config("tool"))
+
+    def test_start_mode_round_trips_through_file(self):
+        """A flow with start_mode agent reads back from its own YAML unchanged."""
+        config = self._flow_config("agent")
+        with mock_read_from_file(config.raw):
+            result = FlowConfig.read_local_resource(
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_id="flow-123",
+                resource_name="Test Flow",
+            )
+        self.assertEqual(result.start_mode, "agent")
+        self.assertEqual(result.compute_hash(), config.compute_hash())
+
+    def test_create_proto_start_mode(self):
+        """Create sets AGENT for agent flows and leaves the field unset otherwise."""
+        proto = self._flow_config("agent").build_create_proto()
+        self.assertEqual(proto.start_mode, FlowStartMode.FLOW_START_MODE_AGENT)
+        for start_mode in (None, "tool"):
+            with self.subTest(start_mode=start_mode):
+                proto = self._flow_config(start_mode).build_create_proto()
+                self.assertFalse(proto.HasField("start_mode"))
+
+    def test_update_proto_start_mode(self):
+        """Update sends AGENT, TOOL only when switching back from agent, else nothing."""
+        cases = [
+            # (local start_mode, start_mode at last pull, expected proto value or None)
+            ("agent", None, FlowStartMode.FLOW_START_MODE_AGENT),
+            ("agent", "agent", FlowStartMode.FLOW_START_MODE_AGENT),
+            (None, "agent", FlowStartMode.FLOW_START_MODE_TOOL),
+            ("tool", "agent", FlowStartMode.FLOW_START_MODE_TOOL),
+            (None, None, None),
+            ("tool", None, None),
+            (None, "tool", None),
+            ("tool", "tool", None),
+        ]
+        for start_mode, known_start_mode, expected in cases:
+            with self.subTest(start_mode=start_mode, known_start_mode=known_start_mode):
+                config = self._flow_config(start_mode)
+                if known_start_mode is not None:
+                    config.known_start = KnownFlowStart.of(self._flow_config(known_start_mode))
+                proto = config.build_update_proto()
+                if expected is None:
+                    self.assertFalse(proto.HasField("start_mode"))
+                else:
+                    self.assertEqual(proto.start_mode, expected)
+
+    def test_validate_start_mode(self):
+        """start_mode must be agent or tool; agent needs a description that says when."""
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="flow-123_step-1",
+                resource_name="Start Step",
+                resource_type=FlowStep,
+                file_path="flows/test_flow/steps/start_step.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+                flow_id="flow-123",
+            )
+        ]
+        description = "The caller wants to book a table for dinner."
+        for start_mode in (None, "tool", "agent"):
+            with self.subTest(valid=start_mode):
+                config = self._flow_config(start_mode, description=description)
+                self.assertIsNone(config.validate(resource_mappings=resource_mappings))
+
+        # Written without spaces, 15 characters is enough
+        japanese = "お客様がテーブルの予約を変更したい場合"
+        self.assertGreaterEqual(len(japanese), 15)
+        config = self._flow_config("agent", description=japanese)
+        self.assertIsNone(config.validate(resource_mappings=resource_mappings))
+
+        # tool flows keep the old, looser description rule
+        self.assertIsNone(
+            self._flow_config("tool", description="Test Flow").validate(
+                resource_mappings=resource_mappings
+            )
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            self._flow_config("Agent", description=description).validate(
+                resource_mappings=resource_mappings
+            )
+        self.assertEqual(
+            str(cm.exception), "Start mode 'Agent' invalid, must be one of ['agent', 'tool']."
+        )
+
+        invalid = [
+            ("Description for flow Test Flow", "default placeholder"),
+            ("description for flow test_flow.", "default placeholder"),
+            ("Test Flow", "repeat the flow name"),
+            ("  test-flow. ".strip(), "repeat the flow name"),
+            ("TEST_FLOW flow.", "repeat the flow name"),
+            ("Description for flow Old Booking Name", "default placeholder"),
+            ("  DESCRIPTION FOR FLOW renamed_flow".strip(), "default placeholder"),
+            ("Books a table.", "at least 5 words"),
+            ("Reservations", "at least 5 words"),
+            ("テーブルを予約したい", "15 characters in a language written without spaces"),
+        ]
+        for bad_description, message in invalid:
+            with self.subTest(description=bad_description):
+                config = self._flow_config("agent", description=bad_description)
+                with self.assertRaises(ValueError) as cm:
+                    config.validate(resource_mappings=resource_mappings)
+                self.assertIn(message, str(cm.exception))
+
+        # A five-word name repeated as the description is still caught as a repeat
+        long_name = "Book A Table For Dinner"
+        config = FlowConfig(
+            resource_id="flow-123",
+            name=long_name,
+            description="book_a_table_for_dinner flow",
+            start_step="step-1",
+            start_mode="agent",
+        )
+        mappings = [
+            ResourceMapping(
+                resource_id="flow-123_step-1",
+                resource_name="Start Step",
+                resource_type=FlowStep,
+                file_path="flows/book_a_table_for_dinner/steps/start_step.yaml",
+                resource_prefix=None,
+                flow_name=long_name,
+                flow_id="flow-123",
+            )
+        ]
+        with self.assertRaises(ValueError) as cm:
+            config.validate(resource_mappings=mappings)
+        self.assertIn("repeat the flow name", str(cm.exception))
+
+    def test_validate_agent_description_only_blocks_changed_flows(self):
+        """A weak description on an unchanged agent flow warns; once changed, it errors."""
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="flow-123_step-1",
+                resource_name="Start Step",
+                resource_type=FlowStep,
+                file_path="flows/test_flow/steps/start_step.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+                flow_id="flow-123",
+            )
+        ]
+        weak = "Books a table."
+        good = "The caller wants to book a table for dinner."
+
+        unchanged = self._flow_config("agent", description=weak)
+        unchanged.known_start = KnownFlowStart.of(self._flow_config("agent", description=weak))
+        with self.assertLogs("poly.resources.flows", level="WARNING") as logs:
+            self.assertIsNone(unchanged.validate(resource_mappings=resource_mappings))
+        self.assertIn("at least 5 words", logs.output[0])
+
+        changed_cases = {
+            "new flow": None,
+            "switched to agent": self._flow_config(None, description=weak),
+            "description edited": self._flow_config("agent", description=good),
+            "renamed": self._flow_config("agent", description=weak, name="Old Flow"),
+        }
+        for case, known in changed_cases.items():
+            with self.subTest(case=case):
+                config = self._flow_config("agent", description=weak)
+                config.known_start = KnownFlowStart.of(known) if known else None
+                with self.assertRaises(ValueError):
+                    config.validate(resource_mappings=resource_mappings)
+
+        # An invalid start mode is always an error, changed or not
+        invalid = self._flow_config("auto", description=good)
+        invalid.known_start = KnownFlowStart.of(self._flow_config("auto", description=good))
+        with self.assertRaises(ValueError):
+            invalid.validate(resource_mappings=resource_mappings)
+
+    def test_agent_start_description_matches_platform_rule(self):
+        """Accepts and rejects exactly the descriptions the platform does."""
+        issues = {
+            "placeholder": "default placeholder",
+            "restates_name": "repeat the flow name",
+            "too_short": "at least 5 words",
+        }
+        cases = [
+            # (flow name, description, expected issue or None)
+            # Japanese with spaces and a Latin word: 17 Japanese characters
+            ("Test Flow", "お客様が LINE で予約したいときに使います", None),
+            # 13 Han characters and a Latin word
+            ("Test Flow", "顧客想预订餐桌时使用此流程 VIP", "too_short"),
+            # 14 and 15 unspaced-script characters, split by a space
+            ("Test Flow", "顧客想预订餐桌 时使用此流程呢", "too_short"),
+            ("Test Flow", "顧客想预订餐桌 时使用此流程呢吧", None),
+            # 14 and 15 characters with no space at all
+            ("Test Flow", "あいうえおかきくけこさしすせ", "too_short"),
+            ("Test Flow", "あいうえおかきくけこさしすせそ", None),
+            # Shared punctuation and the prolonged sound mark don't count: 13 of 17
+            ("Test Flow", "ケーキを予約したい、 ありがとう。", "too_short"),
+            # Thai, with its combining vowel and tone marks
+            ("Test Flow", "ลูกค้าต้องการ จองโต๊ะ", None),
+            # Latin and Korean are written with spaces, so words are counted
+            ("Test Flow", "Books a table today.", "too_short"),
+            ("Test Flow", "테이블 예약", "too_short"),
+            ("Test Flow", "고객이 테이블을 예약하고 싶을 때", None),
+            ("Test Flow", "Reservations", "too_short"),
+            ("Test Flow", "Reservationsandbookings", None),
+            # Placeholder, bare or followed by any name
+            ("Test Flow", "Description for flow", "placeholder"),
+            ("Test Flow", "description for flow Test Flow", "placeholder"),
+            ("Test Flow", "Description for flowchart reviews and other requests", None),
+            # Separators collapse before one trailing "." is removed
+            ("A b c d e", "a b c d e .", None),
+            ("A b c d e", "a b c d e.", "restates_name"),
+            ("A b c d e", "a_b-c  d e flow", "restates_name"),
+            # Only JavaScript whitespace separates words: not \x1c-\x1f or \x85
+            ("Test Flow", "Book\x1ca table for dinner", "too_short"),
+            ("Test Flow", "Book\x85a table for dinner", "too_short"),
+            ("Test Flow", "Book\u00a0a table for dinner", None),
+            ("Test Flow", "Book\u3000a table for dinner", None),
+        ]
+        for name, description, issue in cases:
+            with self.subTest(name=name, description=description):
+                config = self._flow_config("agent", description=description, name=name)
+                if issue is None:
+                    self.assertIsNone(config._validate_agent_start_description())
+                else:
+                    with self.assertRaises(ValueError) as cm:
+                        config._validate_agent_start_description()
+                    self.assertIn(issues[issue], str(cm.exception))
+
 
 TEST_FLOW_STEP = FlowStep(
     resource_id="flow-123_step-1",
@@ -6323,9 +6586,7 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
             self._read_disk(self.variants_file)["variants"],
             [{"name": "Site-A"}, {"name": "other"}],
         )
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("Site_A")), {"name": "Site-A"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("Site_A")), {"name": "Site-A"})
 
     def test_delete_then_append_keeps_every_lookup_pointing_at_its_entry(self):
         """Deleting shifts later entries down; a following append lands at the end."""
@@ -6407,17 +6668,13 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
     def test_external_edit_is_seen_after_the_file_changes_on_disk(self):
         """A rewritten file is reloaded, and lookups follow its new entries."""
         self._write(self.variants_file, "variants:\n  - name: alpha\n  - name: beta\n")
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("alpha")), {"name": "alpha"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("alpha")), {"name": "alpha"})
 
         self._write(self.variants_file, "variants:\n  - name: gamma\n  - name: beta\n")
         mtime = os.path.getmtime(self.variants_file) + 10
         os.utime(self.variants_file, (mtime, mtime))
 
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("gamma")), {"name": "gamma"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("gamma")), {"name": "gamma"})
         with self.assertRaises(FileNotFoundError):
             Variant._read_yaml_dict(self._variant_path("alpha"))
 
@@ -6449,12 +6706,8 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
         Variant(resource_id="v3", name="third").save(self.base_path)
         VariantAttribute.delete_resource(self._attribute_path("shared"))
 
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("second")), {"name": "second"}
-        )
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("third")), {"name": "third"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("second")), {"name": "second"})
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("third")), {"name": "third"})
         self.assertEqual(
             VariantAttribute._read_yaml_dict(self._attribute_path("colour"))["name"], "colour"
         )
@@ -6464,9 +6717,7 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             VariantAttribute._read_yaml_dict(self._attribute_path("shared"))
         on_disk = self._read_disk(self.variants_file)
-        self.assertEqual(
-            [v["name"] for v in on_disk["variants"]], ["shared", "second", "third"]
-        )
+        self.assertEqual([v["name"] for v in on_disk["variants"]], ["shared", "second", "third"])
         self.assertEqual([a["name"] for a in on_disk["attributes"]], ["colour", "size"])
 
 
@@ -7110,11 +7361,15 @@ class ApiIntegrationTest(unittest.TestCase):
     def test_subresources_detect_header_only_and_description_only_changes(self):
         """A change to just the headers or just the description is an update; no change is nothing."""
         old = ApiIntegration(
-            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(headers={"Accept": "text/plain"})],
         )
 
         same = ApiIntegration(
-            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(headers={"Accept": "text/plain"})],
         )
         self.assertEqual(same.get_new_updated_deleted_subresources(old), ([], [], []))
 
@@ -7319,7 +7574,9 @@ class ApiIntegrationTest(unittest.TestCase):
             request_body_schema=BODY_SCHEMA,
             response_schemas={"200": OK_SCHEMA},
         ).build_create_proto()
-        self.assertEqual(create.request_query_schema, json.dumps(QUERY_SCHEMA, separators=(",", ":")))
+        self.assertEqual(
+            create.request_query_schema, json.dumps(QUERY_SCHEMA, separators=(",", ":"))
+        )
         self.assertEqual(json.loads(create.request_body_schema), BODY_SCHEMA)
         self.assertEqual(json.loads(create.response_schemas["200"]), OK_SCHEMA)
         self.assertEqual(create.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
@@ -7380,7 +7637,9 @@ class ApiIntegrationTest(unittest.TestCase):
         _, updated, _ = edited.get_new_updated_deleted_subresources(old)
         self.assertEqual([op.request_body_schema for op in updated], [{"type": "object"}])
 
-        relabelled = _integration_with(_operation(request_body_schema=body, schema_source="openapi"))
+        relabelled = _integration_with(
+            _operation(request_body_schema=body, schema_source="openapi")
+        )
         _, updated, _ = relabelled.get_new_updated_deleted_subresources(old)
         self.assertEqual([op.schema_source for op in updated], ["openapi"])
 
@@ -7899,7 +8158,9 @@ class AsrSettingsTests(unittest.TestCase):
     }
 
     def _from_yaml(self, yaml_dict: dict) -> AsrSettings:
-        return AsrSettings.from_yaml_dict(yaml_dict, resource_id="asr_settings", name="asr_settings")
+        return AsrSettings.from_yaml_dict(
+            yaml_dict, resource_id="asr_settings", name="asr_settings"
+        )
 
     def _changes(self, new: dict, old: Optional[dict]):
         old_resource = self._from_yaml(old) if old is not None else None
@@ -13044,7 +13305,9 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         """Type hints are worked out once per class, while values are checked on every call."""
         resource_utils._field_type_hints.cache_clear()
         good = Topic(resource_id="T-1", name="a", actions="x", content="y", example_queries=[])
-        bad = Topic(resource_id="T-2", name="b", actions={"k": "v"}, content="y", example_queries=[])
+        bad = Topic(
+            resource_id="T-2", name="b", actions={"k": "v"}, content="y", example_queries=[]
+        )
 
         with unittest.mock.patch(
             "typing.get_type_hints", wraps=typing.get_type_hints
@@ -13829,6 +14092,78 @@ class FlowConfigFromProjection(unittest.TestCase):
     def test_empty_projection_yields_no_flow_configs(self):
         """An empty projection should return an empty dict."""
         self.assertEqual(FlowConfig.from_projection({}), {})
+
+    def test_parses_start_mode(self):
+        """startMode is read next to startStepId; a missing key stays None."""
+        flows = {}
+        for flow_id, start_mode in [("FLOW-A", "agent"), ("FLOW-T", "tool"), ("FLOW-N", None)]:
+            flows[flow_id] = {
+                "name": flow_id,
+                "description": "Handles bookings",
+                "startStepId": "STEP-A",
+                "steps": {"entities": {}},
+            }
+            if start_mode is not None:
+                flows[flow_id]["startMode"] = start_mode
+        configs = FlowConfig.from_projection({"flows": {"flows": {"entities": flows}}})
+        self.assertEqual(configs["FLOW-A"].start_mode, "agent")
+        self.assertEqual(configs["FLOW-T"].start_mode, "tool")
+        self.assertIsNone(configs["FLOW-N"].start_mode)
+        self.assertEqual(configs["FLOW-A"].to_yaml_dict()["start_mode"], "agent")
+        self.assertNotIn("start_mode", configs["FLOW-T"].to_yaml_dict())
+
+    def test_parses_start_mode_formats(self):
+        """Strings in any case, proto ordinals and enum names all parse; the rest is unset."""
+        cases = [
+            ("agent", "agent"),
+            ("tool", "tool"),
+            ("AGENT", "agent"),
+            ("Tool", "tool"),
+            (1, "agent"),
+            (2, "tool"),
+            (0, None),
+            ("FLOW_START_MODE_AGENT", "agent"),
+            ("FLOW_START_MODE_TOOL", "tool"),
+            ("FLOW_START_MODE_UNSPECIFIED", None),
+            (3, None),
+            (True, None),
+            ("automatic", None),
+            ("", None),
+            ({"mode": "agent"}, None),
+        ]
+        def pull(**start_mode) -> FlowConfig:
+            flow = {
+                "name": "Booking",
+                "description": "Handles bookings",
+                "startStepId": "STEP-A",
+                "steps": {"entities": {}},
+                **start_mode,
+            }
+            return FlowConfig.from_projection({"flows": {"flows": {"entities": {"F-1": flow}}}})[
+                "F-1"
+            ]
+
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                config = pull(startMode=raw)
+                self.assertEqual(config.start_mode, expected)
+                if expected != "agent":
+                    # Same file and same hash as a flow with no start mode
+                    self.assertNotIn("start_mode", config.to_yaml_dict())
+                    self.assertEqual(config, pull())
+                    self.assertEqual(config.compute_hash(), pull().compute_hash())
+
+    def test_unspecified_start_mode_is_not_logged_as_unknown(self):
+        """Unspecified is a known value; only values that aren't start modes are logged."""
+        for raw in (None, 0, "FLOW_START_MODE_UNSPECIFIED", "unspecified"):
+            with self.subTest(raw=raw):
+                with self.assertNoLogs("poly.resources.flows", level="DEBUG"):
+                    self.assertIsNone(parse_projection_start_mode(raw))
+        for raw in (3, "automatic"):
+            with self.subTest(raw=raw):
+                with self.assertLogs("poly.resources.flows", level="DEBUG") as logs:
+                    self.assertIsNone(parse_projection_start_mode(raw))
+                self.assertIn("Unknown flow start mode", logs.output[0])
 
 
 class FlowStepFromProjection(unittest.TestCase):

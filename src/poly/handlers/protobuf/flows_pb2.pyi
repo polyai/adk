@@ -12,6 +12,12 @@ from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Map
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class FlowStartMode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    FLOW_START_MODE_UNSPECIFIED: _ClassVar[FlowStartMode]
+    FLOW_START_MODE_AGENT: _ClassVar[FlowStartMode]
+    FLOW_START_MODE_TOOL: _ClassVar[FlowStartMode]
+
 class ReasoningEffort(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     REASONING_EFFORT_UNSPECIFIED: _ClassVar[ReasoningEffort]
@@ -20,6 +26,9 @@ class ReasoningEffort(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     REASONING_EFFORT_MEDIUM: _ClassVar[ReasoningEffort]
     REASONING_EFFORT_HIGH: _ClassVar[ReasoningEffort]
     REASONING_EFFORT_AUTO: _ClassVar[ReasoningEffort]
+FLOW_START_MODE_UNSPECIFIED: FlowStartMode
+FLOW_START_MODE_AGENT: FlowStartMode
+FLOW_START_MODE_TOOL: FlowStartMode
 REASONING_EFFORT_UNSPECIFIED: ReasoningEffort
 REASONING_EFFORT_MINIMAL: ReasoningEffort
 REASONING_EFFORT_LOW: ReasoningEffort
@@ -28,7 +37,7 @@ REASONING_EFFORT_HIGH: ReasoningEffort
 REASONING_EFFORT_AUTO: ReasoningEffort
 
 class Flow(_message.Message):
-    __slots__ = ("id", "name", "description", "created_at", "created_by", "updated_at", "updated_by", "start_step_id", "transition_functions", "steps", "no_code_steps", "flow_steps", "settings")
+    __slots__ = ("id", "name", "description", "created_at", "created_by", "updated_at", "updated_by", "start_step_id", "transition_functions", "steps", "no_code_steps", "flow_steps", "settings", "start_mode")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
@@ -42,6 +51,7 @@ class Flow(_message.Message):
     NO_CODE_STEPS_FIELD_NUMBER: _ClassVar[int]
     FLOW_STEPS_FIELD_NUMBER: _ClassVar[int]
     SETTINGS_FIELD_NUMBER: _ClassVar[int]
+    START_MODE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     description: str
@@ -55,7 +65,8 @@ class Flow(_message.Message):
     no_code_steps: _containers.RepeatedCompositeFieldContainer[DefaultStep]
     flow_steps: _containers.RepeatedCompositeFieldContainer[Step]
     settings: FlowStepSettings
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., start_step_id: _Optional[str] = ..., transition_functions: _Optional[_Iterable[_Union[TransitionFunction, _Mapping]]] = ..., steps: _Optional[_Iterable[_Union[AdvancedStep, _Mapping]]] = ..., no_code_steps: _Optional[_Iterable[_Union[DefaultStep, _Mapping]]] = ..., flow_steps: _Optional[_Iterable[_Union[Step, _Mapping]]] = ..., settings: _Optional[_Union[FlowStepSettings, _Mapping]] = ...) -> None: ...
+    start_mode: FlowStartMode
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., start_step_id: _Optional[str] = ..., transition_functions: _Optional[_Iterable[_Union[TransitionFunction, _Mapping]]] = ..., steps: _Optional[_Iterable[_Union[AdvancedStep, _Mapping]]] = ..., no_code_steps: _Optional[_Iterable[_Union[DefaultStep, _Mapping]]] = ..., flow_steps: _Optional[_Iterable[_Union[Step, _Mapping]]] = ..., settings: _Optional[_Union[FlowStepSettings, _Mapping]] = ..., start_mode: _Optional[_Union[FlowStartMode, str]] = ...) -> None: ...
 
 class Flows(_message.Message):
     __slots__ = ("flows",)
@@ -473,7 +484,7 @@ class FlowStepSettings(_message.Message):
     def __init__(self, asr_biasing: _Optional[_Union[StepAsrConfig, _Mapping]] = ..., dtmf: _Optional[_Union[StepDtmfConfig, _Mapping]] = ..., asr: _Optional[_Union[FlowASRConfig, _Mapping]] = ..., vad: _Optional[_Union[FlowVADConfig, _Mapping]] = ..., barge_in: _Optional[_Union[FlowBargeInConfig, _Mapping]] = ..., llm: _Optional[_Union[FlowLLMConfig, _Mapping]] = ...) -> None: ...
 
 class Flow_CreateFlow(_message.Message):
-    __slots__ = ("id", "name", "description", "start_step_id", "steps", "transition_functions", "no_code_steps")
+    __slots__ = ("id", "name", "description", "start_step_id", "steps", "transition_functions", "no_code_steps", "start_mode")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
@@ -481,6 +492,7 @@ class Flow_CreateFlow(_message.Message):
     STEPS_FIELD_NUMBER: _ClassVar[int]
     TRANSITION_FUNCTIONS_FIELD_NUMBER: _ClassVar[int]
     NO_CODE_STEPS_FIELD_NUMBER: _ClassVar[int]
+    START_MODE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     description: str
@@ -488,21 +500,24 @@ class Flow_CreateFlow(_message.Message):
     steps: _containers.RepeatedCompositeFieldContainer[CreateAdvancedStep]
     transition_functions: _containers.RepeatedCompositeFieldContainer[TransitionFunction_CreateTransitionFunction]
     no_code_steps: _containers.RepeatedCompositeFieldContainer[CreateNoCodeStep]
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., start_step_id: _Optional[str] = ..., steps: _Optional[_Iterable[_Union[CreateAdvancedStep, _Mapping]]] = ..., transition_functions: _Optional[_Iterable[_Union[TransitionFunction_CreateTransitionFunction, _Mapping]]] = ..., no_code_steps: _Optional[_Iterable[_Union[CreateNoCodeStep, _Mapping]]] = ...) -> None: ...
+    start_mode: FlowStartMode
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., start_step_id: _Optional[str] = ..., steps: _Optional[_Iterable[_Union[CreateAdvancedStep, _Mapping]]] = ..., transition_functions: _Optional[_Iterable[_Union[TransitionFunction_CreateTransitionFunction, _Mapping]]] = ..., no_code_steps: _Optional[_Iterable[_Union[CreateNoCodeStep, _Mapping]]] = ..., start_mode: _Optional[_Union[FlowStartMode, str]] = ...) -> None: ...
 
 class Flow_UpdateFlow(_message.Message):
-    __slots__ = ("flow_id", "name", "description", "start_step_id", "old_flow_name")
+    __slots__ = ("flow_id", "name", "description", "start_step_id", "old_flow_name", "start_mode")
     FLOW_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     START_STEP_ID_FIELD_NUMBER: _ClassVar[int]
     OLD_FLOW_NAME_FIELD_NUMBER: _ClassVar[int]
+    START_MODE_FIELD_NUMBER: _ClassVar[int]
     flow_id: str
     name: str
     description: str
     start_step_id: str
     old_flow_name: str
-    def __init__(self, flow_id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., start_step_id: _Optional[str] = ..., old_flow_name: _Optional[str] = ...) -> None: ...
+    start_mode: FlowStartMode
+    def __init__(self, flow_id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., start_step_id: _Optional[str] = ..., old_flow_name: _Optional[str] = ..., start_mode: _Optional[_Union[FlowStartMode, str]] = ...) -> None: ...
 
 class Flow_DeleteFlow(_message.Message):
     __slots__ = ("flow_id",)
@@ -511,7 +526,7 @@ class Flow_DeleteFlow(_message.Message):
     def __init__(self, flow_id: _Optional[str] = ...) -> None: ...
 
 class Flow_ImportFlow(_message.Message):
-    __slots__ = ("flow_id", "steps", "transition_functions", "global_functions", "handoffs", "sms", "attributes", "no_code_steps", "entities", "function_steps")
+    __slots__ = ("flow_id", "steps", "transition_functions", "global_functions", "handoffs", "sms", "attributes", "no_code_steps", "entities", "function_steps", "start_mode")
     FLOW_ID_FIELD_NUMBER: _ClassVar[int]
     STEPS_FIELD_NUMBER: _ClassVar[int]
     TRANSITION_FUNCTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -522,6 +537,7 @@ class Flow_ImportFlow(_message.Message):
     NO_CODE_STEPS_FIELD_NUMBER: _ClassVar[int]
     ENTITIES_FIELD_NUMBER: _ClassVar[int]
     FUNCTION_STEPS_FIELD_NUMBER: _ClassVar[int]
+    START_MODE_FIELD_NUMBER: _ClassVar[int]
     flow_id: str
     steps: _containers.RepeatedCompositeFieldContainer[ImportFlowStep]
     transition_functions: _containers.RepeatedCompositeFieldContainer[TransitionFunction_CreateTransitionFunction]
@@ -532,7 +548,8 @@ class Flow_ImportFlow(_message.Message):
     no_code_steps: _containers.RepeatedCompositeFieldContainer[ImportNoCodeStep]
     entities: _containers.RepeatedCompositeFieldContainer[_entities_pb2.Entity_Create]
     function_steps: _containers.RepeatedCompositeFieldContainer[CreateFunctionStep]
-    def __init__(self, flow_id: _Optional[str] = ..., steps: _Optional[_Iterable[_Union[ImportFlowStep, _Mapping]]] = ..., transition_functions: _Optional[_Iterable[_Union[TransitionFunction_CreateTransitionFunction, _Mapping]]] = ..., global_functions: _Optional[_Iterable[_Union[_functions_pb2.Function_CreateFunction, _Mapping]]] = ..., handoffs: _Optional[_Iterable[_Union[_handoff_pb2.Handoff_Create, _Mapping]]] = ..., sms: _Optional[_Iterable[_Union[_sms_pb2.SMS_CreateTemplate, _Mapping]]] = ..., attributes: _Optional[_Iterable[_Union[_variant_pb2.Variant_CreateAttribute, _Mapping]]] = ..., no_code_steps: _Optional[_Iterable[_Union[ImportNoCodeStep, _Mapping]]] = ..., entities: _Optional[_Iterable[_Union[_entities_pb2.Entity_Create, _Mapping]]] = ..., function_steps: _Optional[_Iterable[_Union[CreateFunctionStep, _Mapping]]] = ...) -> None: ...
+    start_mode: FlowStartMode
+    def __init__(self, flow_id: _Optional[str] = ..., steps: _Optional[_Iterable[_Union[ImportFlowStep, _Mapping]]] = ..., transition_functions: _Optional[_Iterable[_Union[TransitionFunction_CreateTransitionFunction, _Mapping]]] = ..., global_functions: _Optional[_Iterable[_Union[_functions_pb2.Function_CreateFunction, _Mapping]]] = ..., handoffs: _Optional[_Iterable[_Union[_handoff_pb2.Handoff_Create, _Mapping]]] = ..., sms: _Optional[_Iterable[_Union[_sms_pb2.SMS_CreateTemplate, _Mapping]]] = ..., attributes: _Optional[_Iterable[_Union[_variant_pb2.Variant_CreateAttribute, _Mapping]]] = ..., no_code_steps: _Optional[_Iterable[_Union[ImportNoCodeStep, _Mapping]]] = ..., entities: _Optional[_Iterable[_Union[_entities_pb2.Entity_Create, _Mapping]]] = ..., function_steps: _Optional[_Iterable[_Union[CreateFunctionStep, _Mapping]]] = ..., start_mode: _Optional[_Union[FlowStartMode, str]] = ...) -> None: ...
 
 class Flow_CreateStep(_message.Message):
     __slots__ = ("flow_id", "step")

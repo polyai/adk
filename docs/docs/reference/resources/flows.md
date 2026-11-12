@@ -66,6 +66,17 @@ Default and advanced steps can both override project-level ASR, VAD, barge-in, a
 
 A flow can be entered in several ways.
 
+### By the agent
+
+With `start_mode: agent` in `flow_config.yaml`, the agent may start the flow itself, at its start step, when the conversation matches the flow's description. Flows without it (or with `start_mode: tool`) are started only from code.
+
+The description is what the agent reads to decide, so write what the user wants, not how the flow works:
+
+- good: "The caller wants to book, change or cancel a table reservation"
+- poor: "Collects name, party size and date, then calls the booking API"
+
+`poly push --force` overwrites the platform's start mode with your local `flow_config.yaml`, like any other field. If someone set a flow to be agent-started in Agent Studio after your last pull and your file has no `start_mode`, a forced push makes it tool-only again. Pull first to keep the change.
+
 ### From code
 
 ~~~python
@@ -97,15 +108,17 @@ Each flow includes a `flow_config.yaml` file that defines the flow itself.
 | Field | Required | Description |
 |---|---|---|
 | `name` | No | Human-readable flow name |
-| `description` | Yes | What the flow does |
+| `description` | Yes | What the user wants when this flow should start, for example "The caller wants to book a table". With `start_mode: agent`, the agent reads it to decide when to start the flow |
 | `start_step` | Yes | The step to enter when the flow starts |
+| `start_mode` | No | Who may start the flow: `agent` (the agent may start it itself, from its description) or `tool` (only function code, with `conv.goto_flow`). A missing key behaves as `tool`, and only `agent` is written on pull |
 
 ### Example
 
 ~~~yaml
 name: Example Flow
-description: Handles the booking process
+description: The caller wants to book a table for a specific date and time
 start_step: Collect Details
+start_mode: agent
 ~~~
 
 ## Step types
@@ -384,6 +397,8 @@ Logic reused across flows is usually better placed in global functions.
 
 ## Validation
 
+- `start_mode`, when present, must be `agent` or `tool`.
+- When `start_mode` is `agent`, the flow's description must have at least 5 words, or 15 characters in a language written without spaces (Chinese, Japanese, Thai, Lao, Khmer or Myanmar characters anywhere in the description count towards the 15). It must not start with the default `Description for flow `, and must not just repeat the flow name (for example `Booking Flow` or `booking_flow flow.` for a flow named `Booking Flow`). This is checked when the flow is created or its `start_mode`, description or name changes. An agent-started flow whose start mode, description and name are unchanged only gets a warning, so it doesn't block other changes, including to that flow's other fields.
 - `inter_digit_timeout` and `max_digits` (DTMF configuration) cannot be negative.
 - `vad_start` and `vad_end` (VAD) must be finite and non-negative — `poly validate` rejects a negative or infinite value.
 

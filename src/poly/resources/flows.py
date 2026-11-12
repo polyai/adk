@@ -9,7 +9,7 @@ import os
 import re
 import uuid
 from abc import ABC
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from functools import cached_property
 from typing import Optional
@@ -38,6 +38,7 @@ from poly.handlers.protobuf.flows_pb2 import (
     FlowASRConfig,
     FlowBargeInConfig,
     FlowLLMConfig,
+    FlowStartMode,
     FlowStepSettings,
     FlowVADConfig,
     FunctionStepCondition,
@@ -62,6 +63,115 @@ from poly.resources.resource import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Who may start a flow: the agent from the flow's description, or only function code via
+# conv.goto_flow. A flow with no start mode behaves as "tool".
+START_MODE_AGENT = "agent"
+START_MODE_TOOL = "tool"
+START_MODES = (START_MODE_AGENT, START_MODE_TOOL)
+MIN_AGENT_START_DESCRIPTION_WORDS = 5
+# Languages written without spaces between words (e.g. Japanese, Chinese or Thai) can't be
+# measured in words, so they need this many characters instead.
+MIN_AGENT_START_DESCRIPTION_CHARS = 15
+AGENT_START_PLACEHOLDER_PREFIX = "description for flow "
+
+# The agent start rules must accept exactly what the platform does, and it uses JavaScript's
+# whitespace (`\s`, `trim`), which unlike Python's leaves out \x1c-\x1f and \x85.
+_JS_WHITESPACE = (
+    "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009"
+    "\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+_JS_WHITESPACE_RUN = re.compile(f"[{_JS_WHITESPACE}]+")
+_NAME_SEPARATOR_RUN = re.compile(f"[{_JS_WHITESPACE}_-]+")
+
+# Code points of the scripts written without spaces between words: Unicode Script=Han, Hiragana,
+# Katakana, Thai, Lao, Khmer and Myanmar. Ranges are joined only across unassigned code points, so
+# punctuation and marks these blocks share with other scripts (、。・ー゛ ฿) are not counted.
+_UNSPACED_SCRIPT_RANGES = (
+    (0x0E01, 0x0E3A),  # Thai
+    (0x0E40, 0x0EDF),  # Thai, Lao
+    (0x1000, 0x109F),  # Myanmar
+    (0x1780, 0x17F9),  # Khmer
+    (0x19E0, 0x19FF),  # Khmer Symbols
+    (0x2E80, 0x2FD5),  # CJK Radicals Supplement, Kangxi Radicals
+    (0x3005, 0x3005),  # CJK Symbols and Punctuation: ideographic iteration mark
+    (0x3007, 0x3007),  # CJK Symbols and Punctuation: ideographic number zero
+    (0x3021, 0x3029),  # CJK Symbols and Punctuation: Hangzhou numerals
+    (0x3038, 0x303B),  # CJK Symbols and Punctuation: Hangzhou numerals, vertical iteration mark
+    (0x3041, 0x3096),  # Hiragana
+    (0x309D, 0x309F),  # Hiragana iteration marks, digraph yori
+    (0x30A1, 0x30FA),  # Katakana
+    (0x30FD, 0x30FF),  # Katakana iteration marks, digraph koto
+    (0x31F0, 0x31FF),  # Katakana Phonetic Extensions
+    (0x32D0, 0x32FE),  # Enclosed CJK Letters and Months: circled katakana
+    (0x3300, 0x3357),  # CJK Compatibility: squared katakana
+    (0x3400, 0x4DBF),  # CJK Unified Ideographs Extension A
+    (0x4E00, 0x9FFF),  # CJK Unified Ideographs
+    (0xA9E0, 0xA9FE),  # Myanmar Extended-B
+    (0xAA60, 0xAA7F),  # Myanmar Extended-A
+    (0xF900, 0xFAD9),  # CJK Compatibility Ideographs
+    (0xFF66, 0xFF6F),  # Halfwidth Katakana
+    (0xFF71, 0xFF9D),  # Halfwidth Katakana
+    (0x116D0, 0x116E3),  # Myanmar Extended-C
+    (0x16FE2, 0x16FE3),  # Ideographic Symbols and Punctuation
+    (0x16FF0, 0x16FF1),  # Ideographic Symbols and Punctuation: Vietnamese alternate reading marks
+    (0x1AFF0, 0x1B167),  # Kana Extended-B, Kana Supplement, Kana Extended-A, Small Kana Extension
+    (0x1F200, 0x1F200),  # Enclosed Ideographic Supplement: square hiragana hoka
+    (0x20000, 0x323AF),  # CJK Unified Ideographs Extensions B to H, Compatibility Supplement
+)
+
+# Ordinal mapping for the proto FlowStartMode enum. Unspecified behaves as "tool", so it parses
+# to None like a missing key.
+START_MODE_FROM_PROTO_INT = {
+    0: "unspecified",
+    1: START_MODE_AGENT,
+    2: START_MODE_TOOL,
+}
+
+
+def count_unspaced_script_chars(text: str) -> int:
+    """Count the characters of `text` in scripts written without spaces between words."""
+    return sum(
+        any(start <= ord(char) <= end for start, end in _UNSPACED_SCRIPT_RANGES) for char in text
+    )
+
+
+def parse_projection_start_mode(value: "int | str | None") -> Optional[str]:
+    """Parse a flow start mode from a projection.
+
+    Accepts the lowercase strings, the proto enum's ordinal or its name. Unspecified and
+    unrecognised values become None, so an unexpected value is never written to YAML.
+    """
+    if isinstance(value, int) and not isinstance(value, bool):
+        start_mode = START_MODE_FROM_PROTO_INT.get(value)
+    elif isinstance(value, str):
+        start_mode = value.strip().lower().removeprefix("flow_start_mode_")
+    else:
+        start_mode = None
+
+    if start_mode not in START_MODES:
+        if value is not None and start_mode != "unspecified":
+            logger.debug(f"Unknown flow start mode {value!r}, treated as unset.")
+        return None
+    return start_mode
+
+
+@dataclass(frozen=True)
+class KnownFlowStart:
+    """What a flow's start mode, description and name were at the last pull or push."""
+
+    start_mode: Optional[str]
+    description: str
+    name: str
+
+    @classmethod
+    def of(cls, flow_config: "FlowConfig") -> "KnownFlowStart":
+        """Snapshot the values a later push compares against."""
+        return cls(
+            start_mode=flow_config._yaml_start_mode(),
+            description=flow_config.description.strip(),
+            name=flow_config.name,
+        )
 
 
 FUNCTION_REGEX = re.compile(r"{{f[nt]:([\w-]+)}}")
@@ -90,6 +200,15 @@ class FlowConfig(YamlResource):
 
     description: str = field(default="")
     start_step: str = field(default="")
+    # Compared through _yaml_start_mode in __eq__, so an explicit "tool" equals a missing key.
+    start_mode: Optional[str] = field(default=None, compare=False)
+
+    # The flow as at the last pull or push (None for a new flow). An update uses it to tell a
+    # switch back to "tool" apart from an unrelated edit, and validation to tell whether the
+    # agent start rules apply to this push.
+    known_start: Optional[KnownFlowStart] = field(
+        default=None, repr=False, init=False, compare=False
+    )
 
     # For creating:
     functions: list[Function] = field(default_factory=list, repr=False, init=False)
@@ -100,13 +219,31 @@ class FlowConfig(YamlResource):
         """File path for the resource."""
         return os.path.join("flows", utils.clean_name(self.name), "flow_config.yaml")
 
+    def __eq__(self, other: object) -> bool:
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self._yaml_start_mode() == other._yaml_start_mode() and all(
+            getattr(self, f.name) == getattr(other, f.name) for f in fields(self) if f.compare
+        )
+
+    def _yaml_start_mode(self) -> Optional[str]:
+        """Start mode as written to YAML: "tool" is the default, so it is left out."""
+        return None if self.start_mode == START_MODE_TOOL else self.start_mode
+
     def to_yaml_dict(self) -> dict:
-        """Return a dictionary suitable for YAML serialization."""
-        return {
+        """Return a dictionary suitable for YAML serialization.
+
+        `start_mode: tool` is left out like a missing key, so both hash the same and existing
+        flows don't look modified.
+        """
+        yaml_dict = {
             "name": self.name,
             "description": self.description,
             "start_step": self.start_step,
         }
+        if (start_mode := self._yaml_start_mode()) is not None:
+            yaml_dict["start_mode"] = start_mode
+        return yaml_dict
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "FlowConfig"]:
@@ -123,18 +260,30 @@ class FlowConfig(YamlResource):
                 name=flow_data["name"],
                 description=flow_data.get("description", ""),
                 start_step=flow_data.get("startStepId", ""),
+                start_mode=parse_projection_start_mode(flow_data.get("startMode")),
             )
         return configs
 
     @classmethod
-    def from_yaml_dict(cls, yaml_data: dict, resource_id: str, name: str, **kwargs) -> "FlowConfig":
+    def from_yaml_dict(
+        cls,
+        yaml_data: dict,
+        resource_id: str,
+        name: str,
+        known_flow_config: Optional["FlowConfig"] = None,
+        **kwargs,
+    ) -> "FlowConfig":
         """Create an instance from YAML data and identity fields."""
-        return cls(
+        flow_config = cls(
             resource_id=resource_id,
             name=yaml_data.get("name", ""),
             description=(yaml_data.get("description") or "").strip(),
             start_step=yaml_data.get("start_step", ""),
+            start_mode=yaml_data.get("start_mode"),
         )
+        if known_flow_config is not None:
+            flow_config.known_start = KnownFlowStart.of(known_flow_config)
+        return flow_config
 
     @classmethod
     def read_local_resource(
@@ -229,15 +378,81 @@ class FlowConfig(YamlResource):
         if self.description != self.description.strip():
             raise ValueError("Description cannot contain leading or trailing whitespace.")
 
+        if self.start_mode is not None and self.start_mode not in START_MODES:
+            raise ValueError(
+                f"Start mode '{self.start_mode}' invalid, must be one of {list(START_MODES)}."
+            )
+
+        if self.start_mode == START_MODE_AGENT:
+            try:
+                self._validate_agent_start_description()
+            except ValueError as e:
+                # A flow already agent-started on the platform shouldn't block unrelated pushes.
+                if self._agent_start_changed():
+                    raise
+                logger.warning(f"Flow '{self.name}' ({self.file_path}): {e}")
+
+    def _agent_start_changed(self) -> bool:
+        """Whether this push creates the flow or changes its start mode, description or name."""
+        return self.known_start is None or KnownFlowStart.of(self) != self.known_start
+
+    def _validate_agent_start_description(self) -> None:
+        """Check the description says enough for the agent to know when to start the flow."""
+
+        def normalise(text: str) -> str:
+            text = _NAME_SEPARATOR_RUN.sub(" ", text.strip(_JS_WHITESPACE).lower())
+            return text.removesuffix(".")
+
+        trimmed = self.description.strip(_JS_WHITESPACE)
+        description = normalise(trimmed)
+        flow_name = normalise(self.name)
+        # Any stub, including one left over from the flow's previous name.
+        if f"{trimmed.lower()} ".startswith(AGENT_START_PLACEHOLDER_PREFIX):
+            raise ValueError(
+                "Description cannot be the default placeholder when start_mode is 'agent'. "
+                "Describe what the user wants when this flow should start."
+            )
+
+        if description in (flow_name, f"{flow_name} flow"):
+            raise ValueError(
+                "Description cannot just repeat the flow name when start_mode is 'agent'. "
+                "Describe what the user wants when this flow should start."
+            )
+
+        words = [word for word in _JS_WHITESPACE_RUN.split(trimmed) if word]
+        long_enough = (
+            len(words) >= MIN_AGENT_START_DESCRIPTION_WORDS
+            or (len(words) == 1 and len(trimmed) >= MIN_AGENT_START_DESCRIPTION_CHARS)
+            or count_unspaced_script_chars(trimmed) >= MIN_AGENT_START_DESCRIPTION_CHARS
+        )
+        if not long_enough:
+            raise ValueError(
+                f"Description must have at least {MIN_AGENT_START_DESCRIPTION_WORDS} words, "
+                f"or {MIN_AGENT_START_DESCRIPTION_CHARS} characters in a language written "
+                "without spaces, when start_mode is 'agent'. Describe what the user wants when "
+                "this flow should start."
+            )
+
     def build_update_proto(
         self,
     ) -> Flow_UpdateFlow:
-        """Create a proto for updating the resource."""
+        """Create a proto for updating the resource.
+
+        Sends AGENT when the flow is agent-started, and TOOL only when switching back from
+        agent. Otherwise the start mode is left unset, so the platform keeps its value.
+        """
+        known_start_mode = self.known_start.start_mode if self.known_start else None
+        start_mode = {}
+        if self.start_mode == START_MODE_AGENT:
+            start_mode["start_mode"] = FlowStartMode.FLOW_START_MODE_AGENT
+        elif known_start_mode == START_MODE_AGENT:
+            start_mode["start_mode"] = FlowStartMode.FLOW_START_MODE_TOOL
         return Flow_UpdateFlow(
             flow_id=self.resource_id,
             name=self.name,
             description=self.description,
             start_step_id=self.start_step,
+            **start_mode,
         )
 
     def build_delete_proto(self):
@@ -255,6 +470,11 @@ class FlowConfig(YamlResource):
 
         steps = [step.build_create_proto() for step in all_steps]
 
+        # The platform treats an unset start mode as tool, so a create only needs to say agent.
+        start_mode = {}
+        if self.start_mode == START_MODE_AGENT:
+            start_mode["start_mode"] = FlowStartMode.FLOW_START_MODE_AGENT
+
         return Flow_CreateFlow(
             id=self.resource_id,
             name=self.name,
@@ -263,6 +483,7 @@ class FlowConfig(YamlResource):
             transition_functions=transition_functions,
             no_code_steps=[step for step in steps if isinstance(step, CreateNoCodeStep)],
             steps=[step.step for step in steps if isinstance(step, Flow_CreateStep)],
+            **start_mode,
         )
 
     @property

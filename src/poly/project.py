@@ -2597,6 +2597,11 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == FlowConfig and original_resource:
+            if not isinstance(original_resource, FlowConfig):
+                raise TypeError(f"Original resource is not a FlowConfig: {original_resource}")
+            additional_kwargs["known_flow_config"] = original_resource
+
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):
                 raise TypeError(f"Original resource is not an MCPServer: {original_resource}")

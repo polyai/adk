@@ -170,6 +170,8 @@ description: Collects reservation details and confirms a table booking
 start_step: Collect Name
 ~~~
 
+There is no `start_mode` key, so the flow is started only from code: the `start_booking_flow` function you add later calls `conv.goto_flow`. Adding `start_mode: agent` would let the agent start the flow itself from its description.
+
 ### Step 1 — Collect name
 
 Create `flows/booking_flow/steps/collect_name.yaml`:

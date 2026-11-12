@@ -20,6 +20,7 @@ import poly.resources.resource_utils as resource_utils
 from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
+from poly.handlers.protobuf.flows_pb2 import FlowStartMode
 from poly.handlers.sdk import SourcererAPIError
 from poly.project import STATUS_FILE, AgentStudioProject, DeploymentMode
 from poly.resources import (
@@ -66,6 +67,7 @@ from poly.resources.flows import (
     Condition,
     DTMFConfig,
     FlowSettings,
+    KnownFlowStart,
     StepType,
 )
 from poly.resources.function import FunctionParameters, FunctionType
@@ -216,6 +218,24 @@ class SerializationRoundTripTest(unittest.TestCase):
         restored = FlowConfig(**serialized)
         self.assertEqual(restored.name, "Test Flow")
         self.assertEqual(restored.start_step, "step-1")
+
+    def test_flow_config_round_trip_keeps_start_mode(self):
+        """start_mode survives the status-file round trip; known_start is not stored."""
+        config = FlowConfig(
+            resource_id="flow-123",
+            name="Test Flow",
+            description="A test flow",
+            start_step="step-1",
+            start_mode="agent",
+        )
+        config.known_start = KnownFlowStart.of(config)
+        serialized = resource_utils.resource_to_dict(config)
+        self.assertEqual(serialized["start_mode"], "agent")
+        self.assertNotIn("known_start", serialized)
+
+        restored = FlowConfig(**serialized)
+        self.assertEqual(restored.start_mode, "agent")
+        self.assertIsNone(restored.known_start)
 
     def test_document_round_trip(self):
         """Document serializes and deserializes via status dict correctly."""
@@ -2302,6 +2322,143 @@ class PushProjectTest(unittest.TestCase):
         self.assertEqual(upsert.last_discovered_at, "2026-08-01T12:00:00Z")
         self.assertEqual(upsert.last_discovered_tool_count, 12)
 
+    FLOW_CONFIG_ID = "FLOW_CONFIG-test_flow"
+    FLOW_CONFIG_PATH = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
+    FLOW_CONFIG_YAML = (
+        "name: test_flow\ndescription: Test flow with advanced step as start\n"
+        "start_step: start_step\n"
+    )
+
+    def _push_flow_start_mode(self, platform_start_mode, local_yaml):
+        """Push with the flow's platform start mode set in the status file and local_yaml on disk.
+
+        Returns the push result and the updated FlowConfigs passed to the API.
+        """
+        project_data = deepcopy(PROJECT_DATA)
+        flow_data = project_data["resources"]["flow_config"][self.FLOW_CONFIG_ID]
+        if platform_start_mode is not None:
+            flow_data["start_mode"] = platform_start_mode
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        with mock_read_from_file({self.FLOW_CONFIG_PATH: local_yaml}):
+            success, message, _ = project.push_project(force=True)
+
+        updated = {}
+        if self.mock_api_handler.queue_resources.called:
+            call_args = self.mock_api_handler.queue_resources.call_args
+            updated = call_args.kwargs["updated_resources"].get(FlowConfig, {})
+        return success, message, updated
+
+    def test_push_project_flow_start_mode_pull_then_push_sends_nothing(self):
+        """A pulled flow pushes nothing, whatever its start mode and however tool is written."""
+        cases = [
+            # (platform start mode, local flow_config.yaml)
+            (None, self.FLOW_CONFIG_YAML),
+            ("tool", self.FLOW_CONFIG_YAML),
+            ("agent", self.FLOW_CONFIG_YAML + "start_mode: agent\n"),
+            (None, self.FLOW_CONFIG_YAML + "start_mode: tool\n"),
+            ("tool", self.FLOW_CONFIG_YAML + "start_mode: tool\n"),
+        ]
+        for platform_start_mode, local_yaml in cases:
+            with self.subTest(platform=platform_start_mode, local=local_yaml):
+                self.mock_api_handler.queue_resources.reset_mock()
+                success, message, _ = self._push_flow_start_mode(platform_start_mode, local_yaml)
+                self.assertFalse(success)
+                self.assertEqual(message, "No changes detected")
+                self.mock_api_handler.queue_resources.assert_not_called()
+
+    def test_push_project_flow_start_mode_switch_to_agent(self):
+        """Adding start_mode: agent is pushed as AGENT."""
+        for platform_start_mode in (None, "tool"):
+            with self.subTest(platform=platform_start_mode):
+                success, message, updated = self._push_flow_start_mode(
+                    platform_start_mode, self.FLOW_CONFIG_YAML + "start_mode: agent\n"
+                )
+                self.assertTrue(success, message)
+                proto = updated[self.FLOW_CONFIG_ID].build_update_proto()
+                self.assertEqual(proto.start_mode, FlowStartMode.FLOW_START_MODE_AGENT)
+
+    def test_push_project_flow_start_mode_switch_back_to_tool(self):
+        """Removing start_mode: agent, or writing tool, is pushed as TOOL."""
+        for local_yaml in (self.FLOW_CONFIG_YAML, self.FLOW_CONFIG_YAML + "start_mode: tool\n"):
+            with self.subTest(local=local_yaml):
+                success, message, updated = self._push_flow_start_mode("agent", local_yaml)
+                self.assertTrue(success, message)
+                proto = updated[self.FLOW_CONFIG_ID].build_update_proto()
+                self.assertTrue(proto.HasField("start_mode"))
+                self.assertEqual(proto.start_mode, FlowStartMode.FLOW_START_MODE_TOOL)
+
+    def test_push_project_unchanged_weak_agent_flow_does_not_block_push(self):
+        """An agent flow already on the platform with a weak description only warns."""
+        weak_yaml = "name: test_flow\ndescription: Books a table.\nstart_step: start_step\n"
+        project_data = deepcopy(PROJECT_DATA)
+        flow_data = project_data["resources"]["flow_config"][self.FLOW_CONFIG_ID]
+        flow_data["description"] = "Books a table."
+        flow_data["start_mode"] = "agent"
+        project_data["resources"]["functions"]["FUNCTION-test_function"]["code"] = (
+            'def test_function(conv: Conversation):\n    """A modified test function."""\n'
+            '    return "Modified return value"\n'
+        )
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        with (
+            mock_read_from_file({self.FLOW_CONFIG_PATH: weak_yaml + "start_mode: agent\n"}),
+            self.assertLogs("poly.resources.flows", level="WARNING") as logs,
+        ):
+            success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        self.assertIn("at least 5 words", "\n".join(logs.output))
+        updated = self.mock_api_handler.queue_resources.call_args.kwargs["updated_resources"]
+        self.assertIn(Function, updated)
+        self.assertNotIn(FlowConfig, updated)
+
+    def test_push_project_weak_agent_flow_other_field_edit_is_pushed(self):
+        """Changing only the start step of a weak agent flow warns and still pushes the flow."""
+        project_data = deepcopy(PROJECT_DATA)
+        flow_data = project_data["resources"]["flow_config"][self.FLOW_CONFIG_ID]
+        flow_data["description"] = "Books a table."
+        flow_data["start_mode"] = "agent"
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+        local_yaml = (
+            "name: test_flow\ndescription: Books a table.\nstart_step: collect_name\n"
+            "start_mode: agent\n"
+        )
+
+        with (
+            mock_read_from_file({self.FLOW_CONFIG_PATH: local_yaml}),
+            self.assertLogs("poly.resources.flows", level="WARNING") as logs,
+        ):
+            success, message, _ = project.push_project(force=True)
+
+        self.assertTrue(success, message)
+        self.assertIn("at least 5 words", "\n".join(logs.output))
+        updated = self.mock_api_handler.queue_resources.call_args.kwargs["updated_resources"]
+        proto = updated[FlowConfig][self.FLOW_CONFIG_ID].build_update_proto()
+        self.assertEqual(proto.start_step_id, "collect_name")
+        self.assertEqual(proto.description, "Books a table.")
+        self.assertEqual(proto.start_mode, FlowStartMode.FLOW_START_MODE_AGENT)
+
+    def test_push_project_changed_weak_agent_flow_fails_validation(self):
+        """Switching to agent, or weakening an agent flow's description, blocks the push."""
+        weak_yaml = "name: test_flow\ndescription: Books a table.\nstart_step: start_step\n"
+        for platform_start_mode in (None, "agent"):
+            with self.subTest(platform=platform_start_mode):
+                success, message, _ = self._push_flow_start_mode(
+                    platform_start_mode, weak_yaml + "start_mode: agent\n"
+                )
+                self.assertFalse(success)
+                self.assertIn("Validation errors detected", message)
+                self.assertIn("at least 5 words", message)
+
+    def test_push_project_flow_unrelated_edit_leaves_start_mode_unset(self):
+        """Editing a tool flow's description doesn't send a start mode."""
+        local_yaml = self.FLOW_CONFIG_YAML.replace("as start", "as the start")
+        success, message, updated = self._push_flow_start_mode(None, local_yaml)
+        self.assertTrue(success, message)
+        proto = updated[self.FLOW_CONFIG_ID].build_update_proto()
+        self.assertFalse(proto.HasField("start_mode"))
+
     def test_push_project_renamed_test_case_is_an_update(self):
         """A test case renamed locally keeps its id: one update, no delete and create."""
         project_data = deepcopy(PROJECT_DATA)
@@ -2978,6 +3135,32 @@ class ValidateProjectTest(unittest.TestCase):
             "Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts
         )
         self.assertIn("Start step 'missing_step' not found.", error_texts)
+
+    def test_validate_project_flow_start_mode(self):
+        """An agent-started flow needs a description that says when to start it."""
+        flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
+        base = "name: test_flow\nstart_step: start_step\n"
+        cases = [
+            ("description: The caller wants to change a booking.\nstart_mode: agent\n", None),
+            ("description: Test flow\nstart_mode: tool\n", None),
+            ("description: Test flow\nstart_mode: agent\n", "repeat the flow name"),
+            ("description: Changes a booking.\nstart_mode: agent\n", "at least 5 words"),
+            (
+                "description: Description for flow test_flow\nstart_mode: agent\n",
+                "default placeholder",
+            ),
+            ("description: Test flow description here\nstart_mode: auto\n", "Start mode 'auto'"),
+        ]
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        for flow_yaml, expected_error in cases:
+            with self.subTest(flow_yaml=flow_yaml):
+                with mock_read_from_file({flow_config_path: base + flow_yaml}):
+                    errors = project.validate_project()
+                if expected_error is None:
+                    self.assertEqual(errors, [])
+                else:
+                    self.assertEqual(len(errors), 1, errors)
+                    self.assertIn(expected_error, errors[0])
 
 
 class PullProjectTest(unittest.TestCase):
@@ -8765,6 +8948,132 @@ class PullRemoteRenameTest(unittest.TestCase):
         ) as file:
             self.assertIn("Open 9 to 5", file.read())
         self.assertFalse(os.path.exists(path))
+
+
+def _flow_projection(start_mode=None) -> dict:
+    """One flow with one default step, shaped as the platform serves the projection."""
+    flow = {
+        "id": "FLOW-1",
+        "name": "Booking Flow",
+        "description": "The caller wants to book, change or cancel a table reservation",
+        "startStepId": "STEP-1",
+        "steps": {
+            "ids": ["STEP-1"],
+            "entities": {
+                "STEP-1": {
+                    "id": "STEP-1",
+                    "name": "Collect Name",
+                    "type": "default_step",
+                    "prompt": "Ask for the caller's name.",
+                    "conditions": [],
+                    "position": {"x": 0, "y": 0},
+                }
+            },
+        },
+    }
+    if start_mode is not None:
+        flow["startMode"] = start_mode
+    return {"flows": {"flows": {"ids": ["FLOW-1"], "entities": {"FLOW-1": flow}}}}
+
+
+class FlowStartModeSyncTest(unittest.TestCase):
+    """Pull and push of a flow's start mode through the real projection path."""
+
+    def setUp(self):
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.project = AgentStudioProject(
+            region="us-1",
+            account_id="account",
+            project_id="project",
+            root_path=self.root,
+            resources={},
+            last_updated=datetime.now(),
+            branch_id="main",
+            file_structure_info={},
+        )
+        self.path = os.path.join(self.root, "flows", "booking_flow", "flow_config.yaml")
+
+    def _pull(self, start_mode) -> dict:
+        conflicts, _ = self.project.pull_project(projection_json=_flow_projection(start_mode))
+        self.assertEqual(conflicts, [])
+        with open(self.path, encoding="utf-8") as file:
+            return resource_utils.load_yaml(file.read())
+
+    def test_pull_writes_start_mode_only_for_agent(self):
+        """Every form the platform may send pulls to the same file, with nothing to push."""
+        cases = [
+            ("agent", "agent"),
+            ("tool", "tool"),
+            (None, None),
+            (1, "agent"),
+            (2, "tool"),
+            (0, None),
+            ("FLOW_START_MODE_AGENT", "agent"),
+            ("FLOW_START_MODE_UNSPECIFIED", None),
+            ("something-new", None),
+        ]
+        for raw, expected in cases:
+            with self.subTest(start_mode=raw):
+                flow_yaml = self._pull(raw)
+                self.assertEqual(
+                    flow_yaml.get("start_mode"), "agent" if expected == "agent" else None
+                )
+                self.assertEqual(flow_yaml["start_step"], "Collect Name")
+                self.assertEqual(self.project.project_status(), ([], [], [], []))
+                [flow] = self.project.resources[FlowConfig].values()
+                self.assertEqual(flow.start_mode, expected)
+
+    def test_non_force_push_switches_agent_flow_back_to_tool(self):
+        """Deleting start_mode sends TOOL on a push that re-pulls and merges first."""
+        self._pull("agent")
+        with open(self.path, encoding="utf-8") as file:
+            contents = file.read()
+        with open(self.path, "w", encoding="utf-8") as file:
+            file.write(contents.replace("start_mode: agent\n", ""))
+
+        with patch.object(
+            AgentStudioInterface, "send_queued_commands", return_value=True
+        ) as mock_send:
+            success, message, commands = self.project.push_project(
+                force=False, projection_json=_flow_projection("agent"), parent_projection_json={}
+            )
+
+        self.assertTrue(success, message)
+        mock_send.assert_called_once()
+        [update] = [c.update_flow for c in commands if c.type == "update_flow"]
+        self.assertEqual(update.flow_id, "FLOW-1")
+        self.assertTrue(update.HasField("start_mode"))
+        self.assertEqual(update.start_mode, FlowStartMode.FLOW_START_MODE_TOOL)
+
+    def test_known_start_stays_one_level_deep_across_pushes(self):
+        """Repeated pull/push cycles keep only a snapshot of plain values, never a chain."""
+        self._pull("agent")
+        for cycle in range(4):
+            description = f"The caller wants to book a table, attempt {cycle}"
+            with open(self.path, encoding="utf-8") as file:
+                contents = resource_utils.load_yaml(file.read())
+            contents["description"] = description
+            with open(self.path, "w", encoding="utf-8") as file:
+                file.write(resource_utils.dump_yaml(contents))
+            projection = _flow_projection("agent")
+            if cycle:
+                projection["flows"]["flows"]["entities"]["FLOW-1"]["description"] = (
+                    f"The caller wants to book a table, attempt {cycle - 1}"
+                )
+
+            with patch.object(AgentStudioInterface, "send_queued_commands", return_value=True):
+                success, message, _ = self.project.push_project(
+                    force=False, projection_json=projection, parent_projection_json={}
+                )
+            self.assertTrue(success, message)
+
+            [flow] = self.project.resources[FlowConfig].values()
+            self.assertIsInstance(flow.known_start, KnownFlowStart)
+            for value in dataclasses.asdict(flow.known_start).values():
+                self.assertIsInstance(value, (str, type(None)))
 
 
 _STATUS_QUERY = {"type": "object", "properties": {"include_history": {"type": "boolean"}}}
