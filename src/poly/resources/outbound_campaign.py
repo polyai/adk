@@ -147,7 +147,7 @@ def _drop_unset_settings(settings: Any) -> Any:
     settings = {
         key: value
         for key, value in settings.items()
-        if not (key in SETTINGS_DEFAULTS and value is None)
+        if not (value is None and key in SETTINGS_DEFAULTS and SETTINGS_DEFAULTS[key] is None)
     }
     for key in ("voiceDispatchLimits", "smsDispatchLimits"):
         limits = settings.get(key)
