@@ -81,7 +81,7 @@ from poly.resources.resource import (
     _parse_multi_resource_path,
 )
 from poly.resources.test_suite import TestCaseApiOperationMock
-from poly.tests.testing_utils import mock_read_from_file
+from poly.tests.testing_utils import campaign_projection, mock_read_from_file
 from poly.utils import merge_strings
 
 DIR = os.path.dirname(os.path.abspath(__file__))
@@ -9350,80 +9350,6 @@ class PullRemoteFlowRenameTest(unittest.TestCase):
         )
 
 
-def _campaign_projection(
-    name: str = "Reminders",
-    trigger_code: str = "def map_contacts(contacts, outbound_campaign):\n    return {}\n",
-    campaign_id: str = "CMPGN-ONE",
-    extra_campaigns: tuple[dict, ...] = (),
-    end_label: Optional[str] = "End",
-    **settings,
-) -> dict:
-    def function(function_name: str, code: str = "") -> dict:
-        return {
-            "name": function_name,
-            "description": "",
-            "code": code,
-            "parameters": {"ids": [], "entities": {}},
-        }
-
-    nodes = [
-        {
-            "id": "trigger-1",
-            "position": {"x": 0, "y": 0},
-            "label": "Trigger",
-            "data": {
-                "type": "trigger",
-                "function": function("map_contacts", trigger_code),
-                "routes": [{"targetNodeId": "call-1"}],
-                "sourceType": "csv",
-                "ingestInterval": "daily",
-            },
-        },
-        {
-            "id": "call-1",
-            "position": {"x": 0, "y": 200},
-            "label": "First call",
-            "data": {
-                "type": "call",
-                "flowName": "Booking",
-                "function": function("call_args"),
-                "greeting": "Hi",
-                "voicemailEnabled": False,
-                "maxAttempts": 2,
-                "backoff": 1,
-                "backoffUnit": "hours",
-                "routes": [],
-                "defaultRoute": "end-1",
-            },
-        },
-        {
-            "id": "end-1",
-            "position": {"x": 0, "y": 400},
-            "label": end_label,
-            "data": {"type": "end", "exitReason": "done", "writebackEnabled": False},
-        },
-    ]
-    campaign = {
-        "id": campaign_id,
-        "name": name,
-        "description": None,
-        "status": "draft",
-        "settings": {"fromNumber": "+15550100", "country": "US", **settings},
-        "nodes": {"ids": [n["id"] for n in nodes], "entities": {n["id"]: n for n in nodes}},
-        "publishedNodes": None,
-        "archived": False,
-    }
-    campaigns = [campaign, *extra_campaigns]
-    return {
-        "outboundCampaigns": {
-            "outboundCampaigns": {
-                "ids": [c["id"] for c in campaigns],
-                "entities": {c["id"]: c for c in campaigns},
-            }
-        }
-    }
-
-
 class OutboundCampaignSyncTest(unittest.TestCase):
     """Pull, push and diff of a campaign in a real temp project."""
 
@@ -9432,7 +9358,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def setUp(self):
         patch.object(AgentStudioProject, "save_config").start()
         self.addCleanup(patch.stopall)
-        self._pull_into_new_project(_campaign_projection())
+        self._pull_into_new_project(campaign_projection())
 
     def _pull_into_new_project(self, projection: dict) -> None:
         self.root = tempfile.mkdtemp()
@@ -9599,7 +9525,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(list(data), ["name", "description", "settings", "nodes"])
         self.assertEqual([node["name"] for node in data["nodes"]], ["Trigger", "First call", "End"])
         self.assertEqual(self._node(data, "Trigger")["routes"], [{"next": "First call"}])
-        self.assertEqual(self._node(data, "First call")["defaultRoute"], "End")
+        self.assertEqual(self._node(data, "First call")["default_route"], "End")
         for node in data["nodes"]:
             self.assertFalse({"id", "position", "label", "data"} & set(node))
         self.assertNotIn("routes", self._node(data, "First call"))
@@ -9631,7 +9557,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self._write_yaml(data)
 
         conflicts, _ = self.project.pull_project(
-            projection_json=_campaign_projection(trigger_code="def map_contacts():\n    pass\n")
+            projection_json=campaign_projection(trigger_code="def map_contacts():\n    pass\n")
         )
 
         pulled = self._yaml()
@@ -9645,7 +9571,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def test_data_change_updates_only_that_node(self):
         data = self._yaml()
-        self._node(data, "Trigger")["sourceType"] = "api"
+        self._node(data, "Trigger")["source_type"] = "api"
         self._write_yaml(data)
         self._write_function(
             "trigger", "def map_contacts(outbound_campaign, sync):\n    return {}\n"
@@ -9701,7 +9627,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def test_nodes_are_deleted_then_created_then_updated(self):
         """A replacement can reuse a name or type, so the old node goes first."""
         data = self._yaml()
-        self._node(data, "First call")["defaultRoute"] = "Wait"
+        self._node(data, "First call")["default_route"] = "Wait"
         data["nodes"] = [node for node in data["nodes"] if node["name"] != "End"]
         data["nodes"].append(
             {"name": "Wait", "type": "wait", "amount": 1, "unit": "days", "next": "First call"}
@@ -9741,14 +9667,14 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             {
                 "name": "Trigger",
                 "type": "call",
-                "flowName": "Booking",
+                "flow_name": "Booking",
                 "function": {"name": "call_args", "description": ""},
                 "greeting": "Hi",
-                "voicemailEnabled": False,
-                "maxAttempts": 1,
+                "voicemail_enabled": False,
+                "max_attempts": 1,
                 "backoff": 1,
-                "backoffUnit": "hours",
-                "defaultRoute": "End",
+                "backoff_unit": "hours",
+                "default_route": "End",
             }
         )
         self._write_yaml(data)
@@ -9813,7 +9739,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(self.project.validate_project(), [])
 
     def test_empty_campaign_pulled_from_agent_studio_passes_validation(self):
-        projection = _campaign_projection()
+        projection = campaign_projection()
         campaign = projection["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-ONE"]
         campaign["nodes"] = {"ids": [], "entities": {}}
         self._pull_into_new_project(projection)
@@ -9835,7 +9761,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             for node in data["nodes"]
             if node["name"] != "Trigger"
         ]
-        self._node(data, "First call")["defaultRoute"] = None
+        self._node(data, "First call")["default_route"] = None
         self._write_yaml(data)
         shutil.move(
             os.path.join(self.folder, "functions", "trigger.py"),
@@ -9858,7 +9784,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self._rename_trigger("Start")
         data = self._yaml()
         data["nodes"].append(
-            {"name": "Trigger", "type": "end", "exitReason": "spare", "writebackEnabled": False}
+            {"name": "Trigger", "type": "end", "exit_reason": "spare", "writeback_enabled": False}
         )
         self._write_yaml(data)
 
@@ -9878,9 +9804,9 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def test_new_node_taking_the_renamed_trigger_name_is_placed_after_its_parent(self):
         self._rename_trigger("Start")
         data = self._yaml()
-        self._node(data, "First call")["defaultRoute"] = "Trigger"
+        self._node(data, "First call")["default_route"] = "Trigger"
         data["nodes"].append(
-            {"name": "Trigger", "type": "end", "exitReason": "spare", "writebackEnabled": False}
+            {"name": "Trigger", "type": "end", "exit_reason": "spare", "writeback_enabled": False}
         )
         self._write_yaml(data)
 
@@ -9890,7 +9816,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(create["node"]["position"], {"x": 400.0, "y": 200.0})
 
     def _projection_with(self, *extra_nodes: dict, end_label: str = "End") -> dict:
-        projection = _campaign_projection(end_label=end_label)
+        projection = campaign_projection(end_label=end_label)
         campaign = projection["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-ONE"]
         for node in extra_nodes:
             campaign["nodes"]["ids"].append(node["id"])
@@ -9915,9 +9841,9 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual([node["name"] for node in data["nodes"]][-1], "end 2")
         data["nodes"] = [node for node in data["nodes"] if node["name"] != "End"]
         data["nodes"].append(
-            {"name": "end", "type": "end", "exitReason": "done", "writebackEnabled": False}
+            {"name": "end", "type": "end", "exit_reason": "done", "writeback_enabled": False}
         )
-        self._node(data, "First call")["defaultRoute"] = "end"
+        self._node(data, "First call")["default_route"] = "end"
         self._write_yaml(data)
 
         commands = self._push()
@@ -9941,7 +9867,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         if not keep_the_other:
             data["nodes"] = [node for node in data["nodes"] if node["name"] != "Follow-up 2"]
         self._node(data, "Follow up")["name"] = "Follow-up"
-        self._node(data, "First call")["defaultRoute"] = "Follow-up"
+        self._node(data, "First call")["default_route"] = "Follow-up"
         self._write_yaml(data)
         commands = self._push()
         return commands
@@ -9979,7 +9905,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             ["Follow up", "Follow-up 2", "Follow-up 3"],
         )
         self._node(data, "Follow up")["name"] = "Follow-up"
-        self._node(data, "First call")["defaultRoute"] = "Follow-up"
+        self._node(data, "First call")["default_route"] = "Follow-up"
         self._write_yaml(data)
 
         summary = self._summary(self._push())
@@ -9991,7 +9917,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         )
 
     def test_renamed_trigger_giving_up_a_label_is_relabelled_first(self):
-        projection = _campaign_projection(end_label="Follow up")
+        projection = campaign_projection(end_label="Follow up")
         campaign = projection["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-ONE"]
         campaign["nodes"]["entities"]["trigger-1"]["label"] = "Follow-up"
         campaign["nodes"]["ids"] = ["end-1", "call-1", "trigger-1"]
@@ -10000,7 +9926,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(self._node(data, "Follow-up 2")["type"], "trigger")
         self._node(data, "Follow-up 2")["name"] = "Start"
         self._node(data, "Follow up")["name"] = "Follow-up"
-        self._node(data, "First call")["defaultRoute"] = "Follow-up"
+        self._node(data, "First call")["default_route"] = "Follow-up"
         self._write_yaml(data)
         shutil.move(
             os.path.join(self.folder, "functions", "follow_up_2.py"),
@@ -10075,8 +10001,8 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             "name": "First call",
             "type": "sms",
             "function": {"name": "sms_args", "description": ""},
-            "messageTemplate": "Hi",
-            "defaultRoute": "End",
+            "message_template": "Hi",
+            "default_route": "End",
         }
         self._write_yaml(data)
 
@@ -10120,7 +10046,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(self.project.project_status(), ([], [], [], []))
 
     def test_trigger_type_changes_fail_validation(self):
-        trigger_as_end = {"type": "end", "exitReason": "done", "writebackEnabled": False}
+        trigger_as_end = {"type": "end", "exit_reason": "done", "writeback_enabled": False}
         call_as_trigger = {
             "type": "trigger",
             "function": {"name": "call_args", "description": ""},
@@ -10160,7 +10086,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def test_trigger_and_call_swapping_types_keeps_the_trigger_id(self):
         data = self._yaml()
         data["nodes"] = [
-            {"name": "Trigger", "type": "end", "exitReason": "done", "writebackEnabled": False},
+            {"name": "Trigger", "type": "end", "exit_reason": "done", "writeback_enabled": False},
             {
                 "name": "First call",
                 "type": "trigger",
@@ -10214,8 +10140,79 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         )
         self.assertEqual(commands[1][1]["label"], "Start")
 
+    def test_pulled_branches_have_no_ids_in_the_file_and_status_stays_clean(self):
+        condition = {
+            "id": "condition-1",
+            "label": "Check reply",
+            "position": {"x": 0, "y": 600},
+            "data": {
+                "type": "conditional",
+                "branches": [{"id": "b-1", "variable": "confirmed", "targetNodeId": "end-1"}],
+                "defaultTargetNodeId": "end-1",
+            },
+        }
+        self._pull_into_new_project(self._projection_with(condition))
+
+        node = self._node(self._yaml(), "Check reply")
+
+        self.assertEqual(node["branches"], [{"variable": "confirmed", "next": "End"}])
+        self.assertEqual(node["default_next"], "End")
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+        data = self._yaml()
+        self._node(data, "Check reply")["branches"].append({"variable": "declined", "next": "End"})
+        self._write_yaml(data)
+
+        self.assertEqual(
+            self.project.project_status()[1],
+            [os.path.join(self.folder, "campaign.yaml", "nodes", "Check_reply")],
+        )
+
+    def test_pushed_branches_keep_their_ids_and_a_new_branch_gets_one(self):
+        condition = {
+            "id": "condition-1",
+            "label": "Check reply",
+            "position": {"x": 0, "y": 600},
+            "data": {
+                "type": "conditional",
+                "function": {"name": "check_reply", "description": "", "code": ""},
+                "branches": [{"id": "b-1", "variable": "confirmed", "targetNodeId": "end-1"}],
+                "defaultTargetNodeId": "end-1",
+            },
+        }
+        self._pull_into_new_project(self._projection_with(condition))
+        data = self._yaml()
+        self._node(data, "Check reply")["branches"].insert(
+            0, {"variable": "declined", "next": "End"}
+        )
+        self._write_yaml(data)
+
+        commands = self._push()
+
+        self.assertEqual(
+            self._summary(commands), [("outbound_campaign_update_node", "condition-1")]
+        )
+        declined, confirmed = commands[0][1]["data"]["conditional"]["branches"]
+        self.assertEqual(confirmed["id"], "b-1")
+        self.assertRegex(declined["id"], r"^b-[0-9a-f-]{36}$")
+
+        success, message = self._push_for_real()
+
+        self.assertTrue(success, message)
+        saved = self.project.resources[OutboundCampaignNode]["CMPGN-ONE:condition-1"]
+        pushed_ids = [branch["id"] for branch in saved.data["branches"]]
+        self.assertEqual(pushed_ids[1], "b-1")
+        self.assertEqual(self.project.project_status(), ([], [], [], []))
+        reread = OutboundCampaignNode.read_local_resource(
+            os.path.join(self.folder, "campaign.yaml", "nodes", "Check_reply"),
+            resource_id=saved.resource_id,
+            resource_name=saved.name,
+            known_data=saved.data,
+        )
+        self.assertEqual([branch["id"] for branch in reread.data["branches"]], pushed_ids)
+
     def test_diff_shows_the_label_a_pull_replaced(self):
-        self._pull_into_new_project(_campaign_projection(end_label=None))
+        self._pull_into_new_project(campaign_projection(end_label=None))
 
         diff = "\n".join(self.project.get_diffs().values())
 
@@ -10224,7 +10221,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def test_unlabelled_node_from_pull_is_named_by_the_next_push(self):
         """Agent Studio reports a node without a label until the name pull gave it is pushed."""
-        self._pull_into_new_project(_campaign_projection(end_label=None))
+        self._pull_into_new_project(campaign_projection(end_label=None))
         self.assertEqual(self._node(self._yaml(), "End")["type"], "end")
         self.project = AgentStudioProject.from_dict(self.project.to_dict(), self.root)
 
@@ -10245,7 +10242,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def test_campaign_removed_remotely_with_a_local_node_fails_validation(self):
         """A local node keeps the campaign's file, which then has nodes but no campaign."""
         data = self._yaml()
-        self._node(data, "First call")["defaultRoute"] = "Wait"
+        self._node(data, "First call")["default_route"] = "Wait"
         data["nodes"].append(
             {"name": "Wait", "type": "wait", "amount": 1, "unit": "days", "next": "End"}
         )
@@ -10269,7 +10266,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def test_new_node_is_placed_next_to_the_node_routing_to_it(self):
         data = self._yaml()
-        self._node(data, "First call")["defaultRoute"] = "Wait"
+        self._node(data, "First call")["default_route"] = "Wait"
         data["nodes"].append(
             {"name": "Wait", "type": "wait", "amount": 1, "unit": "days", "next": "End"}
         )
@@ -10282,7 +10279,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def test_settings_change_sends_the_whole_settings_object(self):
         data = self._yaml()
-        data["settings"]["dailyContactLimit"] = 5
+        data["settings"]["daily_contact_limit"] = 5
         self._write_yaml(data)
 
         self.assertEqual(
@@ -10333,8 +10330,8 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                     {
                         "name": "Stop",
                         "type": "end",
-                        "exitReason": "done",
-                        "writebackEnabled": False,
+                        "exit_reason": "done",
+                        "writeback_enabled": False,
                     },
                 ],
             },
@@ -10407,7 +10404,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         """Only the same node names and types say the new folder is the old campaign."""
         data = self._rename_campaign("Monthly reminders", "monthly_reminders")
         self._node(data, "End")["name"] = "Finish"
-        self._node(data, "First call")["defaultRoute"] = "Finish"
+        self._node(data, "First call")["default_route"] = "Finish"
         self._write_yaml(data)
 
         self._assert_push_refused(
@@ -10437,21 +10434,21 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertNotIn("outbound_campaign_delete", command_types)
 
     def test_settings_the_adk_does_not_know_are_kept_and_pass_validation(self):
-        projection = _campaign_projection()
+        projection = campaign_projection()
         self._entity(projection)["settings"]["quietHours"] = {"start": "21:00"}
         self._pull_into_new_project(projection)
         data = self._yaml()
         data["description"] = "Edited"
         self._write_yaml(data)
 
-        self.assertEqual(self._yaml()["settings"]["quietHours"], {"start": "21:00"})
+        self.assertEqual(self._yaml()["settings"]["quiet_hours"], {"start": "21:00"})
         self.assertEqual(self.project.validate_project(), [])
         self.assertEqual(
             [command_type for command_type, _ in self._push()], ["outbound_campaign_update"]
         )
 
     def _pull_with_unknown_setting(self) -> dict:
-        projection = _campaign_projection()
+        projection = campaign_projection()
         self._entity(projection)["settings"]["quietHours"] = {"start": "21:00"}
         self._pull_into_new_project(projection)
         return self._yaml()
@@ -10464,7 +10461,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                 self._write_yaml(data)
 
                 self._assert_push_refused(
-                    "Settings quietHours can't be sent from the ADK, and a settings change "
+                    "Settings quiet_hours can't be sent from the ADK, and a settings change "
                     "replaces them all."
                 )
 
@@ -10474,7 +10471,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             {**data, "name": "Renewals"}, os.path.join(self.root, "outbound_campaigns", "renewals")
         )
 
-        self._assert_push_refused("Settings quietHours can't be sent from the ADK")
+        self._assert_push_refused("Settings quiet_hours can't be sent from the ADK")
 
     def test_renamed_folder_with_settings_the_adk_does_not_know_pushes(self):
         self._pull_with_unknown_setting()
@@ -10486,7 +10483,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         )
 
     def _pull_published(self) -> None:
-        projection = _campaign_projection()
+        projection = campaign_projection()
         self._entity(projection)["status"] = "active"
         self._pull_into_new_project(projection)
 
@@ -10520,7 +10517,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         self.assertEqual(self.project.resources[OutboundCampaign]["CMPGN-ONE"].status, "active")
         data = self._yaml()
-        self._node(data, "Trigger")["sourceType"] = "api"
+        self._node(data, "Trigger")["source_type"] = "api"
         self._write_yaml(data)
         self._assert_push_refused(
             "The contact source stays 'csv' once the campaign has been published."
@@ -10537,7 +10534,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def test_published_trigger_source_type_change_is_refused(self):
         self._pull_published()
         data = self._yaml()
-        self._node(data, "Trigger")["sourceType"] = "api"
+        self._node(data, "Trigger")["source_type"] = "api"
         self._write_yaml(data)
 
         self._assert_push_refused(
@@ -10547,7 +10544,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def test_published_trigger_source_type_change_with_a_folder_rename_is_refused(self):
         self._pull_published()
         data = self._rename_campaign("Monthly", "monthly")
-        self._node(data, "Trigger")["sourceType"] = "api"
+        self._node(data, "Trigger")["source_type"] = "api"
         self._write_yaml(data)
         self._write_function(
             "trigger", "def map_contacts(outbound_campaign, sync):\n    return {}\n"
@@ -10578,7 +10575,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def test_pushed_new_campaign_and_node_leave_nothing_to_push(self):
         data = self._yaml()
-        self._node(data, "First call")["defaultRoute"] = "Wait"
+        self._node(data, "First call")["default_route"] = "Wait"
         data["nodes"].append(
             {"name": "Wait", "type": "wait", "amount": 1, "unit": "days", "next": "End"}
         )
@@ -10710,8 +10707,8 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             "name": "First call",
             "type": "sms",
             "function": {"name": "sms_args", "description": ""},
-            "messageTemplate": "Hi",
-            "defaultRoute": "End",
+            "message_template": "Hi",
+            "default_route": "End",
         }
         self._write_yaml(data)
         self._write_function(
@@ -10731,7 +10728,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def test_retyped_node_with_a_legacy_def_line_fails_validation(self):
         """A retype is pushed as a create, and Agent Studio checks the def line on create."""
-        projection = _campaign_projection()
+        projection = campaign_projection()
         self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
             "def call_args(contact):\n    return {}\n"
         )
@@ -10742,8 +10739,8 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             "name": "First call",
             "type": "sms",
             "function": {"name": "call_args", "description": ""},
-            "messageTemplate": "Hi",
-            "defaultRoute": "End",
+            "message_template": "Hi",
+            "default_route": "End",
         }
         self._write_yaml(data)
 
@@ -10756,7 +10753,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     CALL_CODE = "def call_args(outbound_contact, outbound_campaign):\n    return {}\n"
 
     def _pull_with_call_code(self) -> None:
-        projection = _campaign_projection()
+        projection = campaign_projection()
         self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
             self.CALL_CODE
         )
@@ -10787,7 +10784,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self._write_function("trigger", self.TRIGGER_CODE + "    # local\n")
 
         conflicts, _ = self.project.pull_project(
-            projection_json=_campaign_projection(trigger_code=self.TRIGGER_CODE + "    # remote\n")
+            projection_json=campaign_projection(trigger_code=self.TRIGGER_CODE + "    # remote\n")
         )
 
         trigger_file = os.path.join(self.folder, "functions", "trigger.py")
@@ -10802,8 +10799,8 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             {
                 "name": "Spare",
                 "type": "end",
-                "exitReason": "spare",
-                "writebackEnabled": False,
+                "exit_reason": "spare",
+                "writeback_enabled": False,
                 "function": {"name": "spare", "description": ""},
             }
         )
@@ -10811,14 +10808,14 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self._write_function("spare", "def spare(outbound_contact, outbound_campaign):\n    pass\n")
         self._write_function("stray", "x = 1\n")
 
-        self.project.pull_project(projection_json=_campaign_projection(), force=True)
+        self.project.pull_project(projection_json=campaign_projection(), force=True)
 
         self.assertEqual(os.listdir(os.path.join(self.folder, "functions")), ["trigger.py"])
         self.assertEqual(self.project.validate_project(), [])
 
     def test_revert_by_entry_or_by_code_file_reverts_only_that(self):
         data = self._yaml()
-        self._node(data, "Trigger")["sourceType"] = "api"
+        self._node(data, "Trigger")["source_type"] = "api"
         self._write_yaml(data)
         self._write_function("trigger", "def map_contacts(outbound_campaign, sync):\n    pass\n")
         trigger_file = os.path.join(self.folder, "functions", "trigger.py")
@@ -10826,7 +10823,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         self.project.revert_changes([trigger_entry])
 
-        self.assertEqual(self._node(self._yaml(), "Trigger")["sourceType"], "csv")
+        self.assertEqual(self._node(self._yaml(), "Trigger")["source_type"], "csv")
         self.assertIn("sync", self._read("reminders", "functions", "trigger.py"))
 
         self.project.revert_changes([trigger_file])
@@ -10836,13 +10833,13 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def test_revert_of_everything_keeps_locally_added_nodes_and_their_code(self):
         data = self._yaml()
-        self._node(data, "Trigger")["ingestInterval"] = "hourly"
+        self._node(data, "Trigger")["ingest_interval"] = "hourly"
         data["nodes"].append(
             {
                 "name": "Spare",
                 "type": "end",
-                "exitReason": "spare",
-                "writebackEnabled": False,
+                "exit_reason": "spare",
+                "writeback_enabled": False,
                 "function": {"name": "spare", "description": ""},
             }
         )
@@ -10853,8 +10850,8 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         self.project.revert_changes()
 
-        self.assertNotEqual(self._node(self._yaml(), "Trigger").get("ingestInterval"), "hourly")
-        self.assertEqual(self._node(self._yaml(), "Spare")["exitReason"], "spare")
+        self.assertNotEqual(self._node(self._yaml(), "Trigger").get("ingest_interval"), "hourly")
+        self.assertEqual(self._node(self._yaml(), "Spare")["exit_reason"], "spare")
         self.assertEqual(self._read("reminders", "functions", "spare.py"), spare_code)
         self.assertEqual(self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE)
         spare_entry = os.path.join(self.folder, "campaign.yaml", "nodes", "Spare")
@@ -10895,7 +10892,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         data = self._yaml()
         self._node(data, old)["name"] = new
         for node in data["nodes"]:
-            for key in ("defaultRoute",):
+            for key in ("default_route",):
                 if node.get(key) == old:
                     node[key] = new
             for route in node.get("routes") or []:
@@ -10943,8 +10940,8 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         spare = {
             "name": "Spare",
             "type": "end",
-            "exitReason": "spare",
-            "writebackEnabled": False,
+            "exit_reason": "spare",
+            "writeback_enabled": False,
             "function": {"name": "spare", "description": ""},
         }
         data = self._yaml()
@@ -10990,7 +10987,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             self.assertIn("LIMIT = 5", file.read())
 
     def test_code_edited_here_of_a_node_removed_in_agent_studio_conflicts(self):
-        projection = _campaign_projection()
+        projection = campaign_projection()
         self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
             self.CALL_CODE
         )
@@ -11008,7 +11005,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def test_format_pull_removes_the_unedited_file_of_a_removed_node(self):
         unformatted = "def call_args(outbound_contact,outbound_campaign):\n  return {}\n"
-        projection = _campaign_projection()
+        projection = campaign_projection()
         self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
             unformatted
         )
@@ -11055,7 +11052,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         ]
         for saved, local, remote, expected, conflict in rows:
             with self.subTest(saved=saved, local=local, remote=remote):
-                projection = _campaign_projection()
+                projection = campaign_projection()
                 call = self._entity(projection)["nodes"]["entities"]["call-1"]
                 call["data"]["function"]["code"] = saved
                 self._pull_into_new_project(projection)
@@ -11085,11 +11082,11 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def test_force_pull_after_a_local_trigger_rename_restores_the_trigger_code(self):
         for format in (False, True):
             with self.subTest(format=format):
-                self._pull_into_new_project(_campaign_projection())
+                self._pull_into_new_project(campaign_projection())
                 self._rename_locally("Trigger", "Start")
 
                 self.project.pull_project(
-                    projection_json=_campaign_projection(), force=True, format=format
+                    projection_json=campaign_projection(), force=True, format=format
                 )
 
                 self.assertEqual(os.listdir(os.path.join(self.folder, "functions")), ["trigger.py"])
@@ -11125,7 +11122,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def test_remote_node_rename_carries_a_local_code_edit_to_the_new_file(self):
         edited = self.TRIGGER_CODE + "\n\ndef helper():\n    pass\n"
         self._write_function("trigger", edited)
-        projection = _campaign_projection()
+        projection = campaign_projection()
         self._entity(projection)["nodes"]["entities"]["trigger-1"]["label"] = "Start"
 
         conflicts, _ = self.project.pull_project(projection_json=projection)
@@ -11142,7 +11139,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self._write_yaml(data)
 
         conflicts, _ = self.project.pull_project(
-            projection_json=_campaign_projection(name="Monthly")
+            projection_json=campaign_projection(name="Monthly")
         )
 
         self.assertEqual(conflicts, [])
@@ -11159,14 +11156,14 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def test_remote_campaign_rename_carries_nodes_added_here(self):
         data = self._yaml()
-        self._node(data, "First call")["defaultRoute"] = "Text"
+        self._node(data, "First call")["default_route"] = "Text"
         data["nodes"].append(
             {
                 "name": "Text",
                 "type": "sms",
                 "function": {"name": "sms_args", "description": ""},
-                "messageTemplate": "Hi",
-                "defaultRoute": "End",
+                "message_template": "Hi",
+                "default_route": "End",
             }
         )
         self._write_yaml(data)
@@ -11174,26 +11171,26 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self._write_function("text", code)
 
         conflicts, _ = self.project.pull_project(
-            projection_json=_campaign_projection(name="Monthly")
+            projection_json=campaign_projection(name="Monthly")
         )
 
         self.assertEqual(conflicts, [])
         self.assertFalse(os.path.exists(self.folder))
         self.folder = os.path.join(self.root, "outbound_campaigns", "monthly")
         pulled = self._yaml()
-        self.assertEqual(self._node(pulled, "Text")["messageTemplate"], "Hi")
-        self.assertEqual(self._node(pulled, "First call")["defaultRoute"], "Text")
+        self.assertEqual(self._node(pulled, "Text")["message_template"], "Hi")
+        self.assertEqual(self._node(pulled, "First call")["default_route"], "Text")
         self.assertEqual(self._read("monthly", "functions", "text.py"), code)
         self.assertEqual(self.project.validate_project(), [])
 
     @staticmethod
     def _two_campaigns(first: str, second: str) -> dict:
-        other = _campaign_projection(
+        other = campaign_projection(
             name=second,
             campaign_id="CMPGN-TWO",
             trigger_code="def map_contacts(contacts, outbound_campaign):\n    return {'two': 2}\n",
         )["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-TWO"]
-        return _campaign_projection(name=first, extra_campaigns=(other,))
+        return campaign_projection(name=first, extra_campaigns=(other,))
 
     def test_campaigns_swapping_names_keep_their_own_files(self):
         self._pull_into_new_project(self._two_campaigns("Reminders", "Other"))
@@ -11233,12 +11230,12 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         edited_code = self.TRIGGER_CODE + "\n\nLIMIT = 5\n"
         self._write_function("trigger", edited_code)
         new_code = "def map_contacts(contacts, outbound_campaign):\n    return {'new': 1}\n"
-        new = _campaign_projection(name="Reminders", campaign_id="CMPGN-NEW", trigger_code=new_code)
+        new = campaign_projection(name="Reminders", campaign_id="CMPGN-NEW", trigger_code=new_code)
         new_campaign = new["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-NEW"]
         new_campaign["nodes"]["entities"]["call-1"]["data"]["greeting"] = "Brand new"
 
         conflicts, _ = self.project.pull_project(
-            projection_json=_campaign_projection(name="Monthly", extra_campaigns=(new_campaign,))
+            projection_json=campaign_projection(name="Monthly", extra_campaigns=(new_campaign,))
         )
 
         self.assertEqual(conflicts, [])
@@ -11261,7 +11258,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def test_campaigns_swapping_names_carry_nodes_added_here(self):
         self._pull_into_new_project(self._two_campaigns("Reminders", "Other"))
         data = self._yaml()
-        self._node(data, "First call")["defaultRoute"] = "Wait"
+        self._node(data, "First call")["default_route"] = "Wait"
         data["nodes"].append(
             {"name": "Wait", "type": "wait", "amount": 1, "unit": "days", "next": "End"}
         )
@@ -11279,7 +11276,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def _add_second_call(self, folder: Optional[str] = None) -> str:
         data = self._yaml(folder) if folder else self._yaml()
-        self._node(data, "First call")["defaultRoute"] = "Second call"
+        self._node(data, "First call")["default_route"] = "Second call"
         second = dict(self._node(data, "First call"))
         second["name"] = "Second call"
         second["defaultRoute"] = "End"
@@ -11391,7 +11388,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
     def test_remote_rename_where_code_added_here_takes_a_new_file_name_is_held_back(self):
         added = "def call_args(outbound_contact, outbound_campaign):\n    return {'here': 1}\n"
         self._write_function("second_call", added)
-        projection = _campaign_projection(name="Monthly")
+        projection = campaign_projection(name="Monthly")
         nodes = self._entity(projection)["nodes"]
         upstream = deepcopy(nodes["entities"]["call-1"])
         upstream["id"] = "call-2"
@@ -11428,7 +11425,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         data = self._yaml()
         self._node(data, "First call")["greeting"] = "Hello there"
         self._write_yaml(data)
-        projection = _campaign_projection()
+        projection = campaign_projection()
         self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["greeting"] = "Howdy"
 
         conflicts, _ = self.project.pull_project(projection_json=projection)
@@ -11446,9 +11443,9 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual((new, deleted), ([], []))
 
     def _pull_with_a_draft_problem(self, change) -> None:
-        projection = _campaign_projection()
+        projection = campaign_projection()
         change(self._entity(projection)["nodes"]["entities"])
-        other = _campaign_projection(campaign_id="CMPGN-TWO", name="Renewals")
+        other = campaign_projection(campaign_id="CMPGN-TWO", name="Renewals")
         campaigns = projection["outboundCampaigns"]["outboundCampaigns"]
         campaigns["ids"].append("CMPGN-TWO")
         campaigns["entities"]["CMPGN-TWO"] = other["outboundCampaigns"]["outboundCampaigns"][
@@ -11500,7 +11497,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertIn("map_contacts must take exactly", message)
 
     def test_remote_rename_moves_the_folder(self):
-        self.project.pull_project(projection_json=_campaign_projection(name="Monthly"))
+        self.project.pull_project(projection_json=campaign_projection(name="Monthly"))
 
         self.assertFalse(os.path.exists(self.folder))
         moved = os.path.join(self.root, "outbound_campaigns", "monthly")
@@ -11519,7 +11516,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self._node(data, "First call")["greeting"] = "Edited here"
         self._write_yaml(data)
         before = self._tree()
-        renamed = _campaign_projection(name="Monthly")
+        renamed = campaign_projection(name="Monthly")
 
         conflicts, _ = self.project.pull_project(projection_json=renamed)
 
@@ -11555,7 +11552,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         )
 
     def _monthly_with_its_own_node_ids(self, name: str, code: str) -> dict:
-        campaign = _campaign_projection(name=name, campaign_id="CMPGN-TWO", trigger_code=code)[
+        campaign = campaign_projection(name=name, campaign_id="CMPGN-TWO", trigger_code=code)[
             "outboundCampaigns"
         ]["outboundCampaigns"]["entities"]["CMPGN-TWO"]
         text = json.dumps(campaign)
@@ -11567,7 +11564,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         """A campaign renamed onto the folder of one deleted upstream moves on the next pull."""
         monthly_code = "def map_contacts(contacts, outbound_campaign):\n    return {'m': 1}\n"
         self.project.pull_project(
-            projection_json=_campaign_projection(
+            projection_json=campaign_projection(
                 extra_campaigns=(self._monthly_with_its_own_node_ids("Monthly", monthly_code),)
             )
         )
@@ -11626,7 +11623,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         takes its folder."""
         monthly_code = "def map_contacts(contacts, outbound_campaign):\n    return {'m': 1}\n"
         self.project.pull_project(
-            projection_json=_campaign_projection(
+            projection_json=campaign_projection(
                 extra_campaigns=(self._monthly_with_its_own_node_ids("Monthly", monthly_code),)
             )
         )
@@ -11687,7 +11684,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         """An edit to the deleted campaign keeps its folder, so pulling again alone won't help."""
         monthly_code = "def map_contacts(contacts, outbound_campaign):\n    return {'m': 1}\n"
         self.project.pull_project(
-            projection_json=_campaign_projection(
+            projection_json=campaign_projection(
                 extra_campaigns=(self._monthly_with_its_own_node_ids("Monthly", monthly_code),)
             )
         )
@@ -11728,7 +11725,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                 file.write("x")
 
         conflicts, _ = self.project.pull_project(
-            projection_json=_campaign_projection(name="Monthly")
+            projection_json=campaign_projection(name="Monthly")
         )
 
         self.assertEqual(conflicts, [])
@@ -11748,6 +11745,22 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         _, message, _ = self.project.push_project(dry_run=True)
         self.assertEqual(message, "No changes detected")
 
+    def test_folder_renamed_alike_on_both_sides_merges_a_local_edit_without_a_conflict(self):
+        data = self._yaml()
+        data["name"] = "Monthly"
+        self._node(data, "First call")["greeting"] = "Hello there"
+        moved = os.path.join(self.root, "outbound_campaigns", "monthly")
+        shutil.move(self.folder, moved)
+        self._write_yaml(data, folder=moved)
+
+        conflicts, _ = self.project.pull_project(
+            projection_json=campaign_projection(name="Monthly")
+        )
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._node(self._yaml(moved), "First call")["greeting"], "Hello there")
+        self.assertFalse(os.path.exists(self.folder))
+
     def test_remote_delete_removes_the_folder(self):
         self.project.pull_project(
             projection_json={
@@ -11760,10 +11773,10 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
     def test_campaigns_with_the_same_name_are_both_pulled_and_the_rename_pushed(self):
         """Agent Studio allows duplicate names; one must not stop the pull for the project."""
-        other = _campaign_projection(campaign_id="CMPGN-TWO")["outboundCampaigns"][
+        other = campaign_projection(campaign_id="CMPGN-TWO")["outboundCampaigns"][
             "outboundCampaigns"
         ]
-        projection = _campaign_projection(extra_campaigns=(other["entities"]["CMPGN-TWO"],))
+        projection = campaign_projection(extra_campaigns=(other["entities"]["CMPGN-TWO"],))
 
         conflicts, _ = self.project.pull_project(projection_json=projection)
 

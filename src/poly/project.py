@@ -1496,7 +1496,7 @@ class AgentStudioProject:
         vacated: set[str] = set()
         carried: dict[str, str] = {}
         if not force:
-            held_renames, vacated, moved, carried = self._hold_back_taken_moves(
+            held_renames, vacated, moved, carried, renamed_here = self._hold_back_taken_moves(
                 original_resources,
                 incoming_resources,
                 format=format,
@@ -1508,7 +1508,8 @@ class AgentStudioProject:
             files_with_conflicts = [old_folder for old_folder, _, _ in held_renames]
             self._set_aside_files_added_here(carried, staged)
             original_resources = dict(original_resources)
-            for (resource_type, resource_id), original in moved.items():
+            for resource_type, resource_id in [*moved, *renamed_here]:
+                original = original_resources[resource_type][resource_id]
                 original_resources[resource_type] = {
                     **original_resources[resource_type],
                     resource_id: original.moved_to(incoming_resources[resource_type][resource_id]),
@@ -1819,6 +1820,7 @@ class AgentStudioProject:
         set[str],
         dict[tuple[type[Resource], str], Resource],
         dict[str, str],
+        set[tuple[type[Resource], str]],
     ]:
         """Hold back each upstream move onto a file that is taken here.
 
@@ -1836,8 +1838,9 @@ class AgentStudioProject:
             Each held-back rename's old and new folder, and why it waits ("taken",
             "other_files" or "clash"), so the old folder is reported as a conflict; the saved
             files of single-file resources that free their path; each multi-resource entry that
-            moves to another file, as it was saved, by type and id; and the new path of each
-            file added here that moves with its folder.
+            moves to another file, as it was saved, by type and id; the new path of each
+            file added here that moves with its folder; and, by type and id, each
+            multi-resource entry whose file was already renamed the same way here.
         """
         moves: dict[tuple[type[Resource], str], tuple[str, str]] = {}
         saved_in: dict[str, list[tuple[type[Resource], str]]] = {}
@@ -2017,7 +2020,15 @@ class AgentStudioProject:
         carried_files = {
             file: target for files in carried_by(held).values() for file, target in files.items()
         }
-        return held_renames, vacated, moved, carried_files
+        renamed_here = {
+            key
+            for key, (old_file, new_file) in moves.items()
+            if key not in held
+            and issubclass(key[0], MultiResourceYamlResource)
+            and not os.path.exists(old_file)
+            and os.path.isfile(new_file)
+        }
+        return held_renames, vacated, moved, carried_files, renamed_here
 
     def _file_of(self, resource: Resource) -> str:
         """Return the file a resource lives in."""
