@@ -15961,6 +15961,18 @@ class OutboundCampaignTests(unittest.TestCase):
             campaign.settings,
         )
 
+    def test_an_unset_setting_with_a_default_stays_in_the_file(self):
+        campaign = _campaign()
+        campaign.settings = {**campaign.settings, "dailyContactLimit": None}
+
+        pretty = OutboundCampaign.to_pretty_dict(campaign.to_yaml_dict())
+
+        self.assertIsNone(pretty["settings"]["daily_contact_limit"])
+        self.assertEqual(
+            normalise_settings(OutboundCampaign.from_pretty_dict(pretty)["settings"]),
+            campaign.settings,
+        )
+
     def test_default_variant_is_shown_by_name_and_read_back_as_its_id(self):
         campaign = _campaign()
         campaign.settings["defaultVariantId"] = "VARIANT-1"
