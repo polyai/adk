@@ -879,8 +879,6 @@ class AgentStudioProject:
             self.branch_id = self.api_handler.branch_id
 
         self._check_no_duplicate_resource_paths(incoming_resources)
-        if not force:
-            self._warn_reused_campaign_folders(incoming_resources)
         # -------
         # Update resources
         # -------
@@ -1067,11 +1065,13 @@ class AgentStudioProject:
     def _follow_moved_multi_resources(
         self, original_resources: ResourceMap, incoming_resources: ResourceMap
     ) -> tuple[ResourceMap, dict[tuple[type[Resource], str], Resource]]:
-        """Find saved multi-resource entries that moved to a file not yet on disk.
+        """Find saved multi-resource entries whose file was renamed upstream.
 
         Returns:
             The original resources with each moved entry placed where it now lives, so it
-            merges there, and each moved entry as it was saved, by type and id.
+            merges there, and each entry whose new file is not yet on disk, as it was saved,
+            by type and id. An entry whose old file is gone and new file is on disk, because
+            the same rename was made here, only merges there.
         """
         moved: dict[tuple[type[Resource], str], Resource] = {}
         followed = dict(original_resources)
@@ -1087,12 +1087,12 @@ class AgentStudioProject:
                     incoming[resource_id].get_path(self.root_path)
                 )[0]
                 relocated = original.moved_to(incoming[resource_id])
-                if (
-                    old_file == new_file
-                    or relocated is None
-                    or not os.path.isfile(old_file)
-                    or os.path.exists(new_file)
-                ):
+                if old_file == new_file or relocated is None:
+                    continue
+                if os.path.isfile(old_file) == os.path.exists(new_file):
+                    continue
+                if os.path.exists(new_file):
+                    followed[resource_type] = {**followed[resource_type], resource_id: relocated}
                     continue
                 moved[(resource_type, resource_id)] = original
                 followed[resource_type] = {**followed[resource_type], resource_id: relocated}
@@ -1331,39 +1331,6 @@ class AgentStudioProject:
         MultiResourceYamlResource._file_cache.clear()
 
         return files_with_conflicts, progress_offset
-
-    def _warn_reused_campaign_folders(self, incoming_resources: ResourceMap) -> None:
-        saved = {
-            campaign.folder: campaign
-            for campaign in self.resources.get(OutboundCampaign, {}).values()
-        }
-        reused = [
-            (folder, saved[folder], campaign)
-            for campaign in incoming_resources.get(OutboundCampaign, {}).values()
-            if (folder := campaign.folder) in saved
-            and saved[folder].resource_id != campaign.resource_id
-        ]
-        if not reused:
-            return
-        _, modified, new, deleted = self.project_status()
-        changed = [
-            os.path.relpath(path, self.root_path).replace(os.sep, "/")
-            for path in modified + new + deleted
-        ]
-        for folder, before, after in reused:
-            if not any(path.startswith(f"outbound_campaigns/{folder}/") for path in changed):
-                continue
-            known = self.resources[OutboundCampaign].get(after.resource_id)
-            source = (
-                f"'{known.name}' was renamed to '{after.name}'"
-                if known
-                else f"'{after.name}' was created"
-            )
-            logger.warning(
-                f"outbound_campaigns/{folder} now holds a different campaign: {source} in "
-                f"Agent Studio. Edits made here to '{before.name}' before this pull now apply "
-                "to it: check them before pushing."
-            )
 
     def _update_pulled_resources(
         self,

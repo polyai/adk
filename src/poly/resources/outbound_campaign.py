@@ -7,6 +7,7 @@ import keyword
 import logging
 import os
 import re
+import uuid
 import zoneinfo
 from collections import Counter
 from dataclasses import dataclass, field, replace
@@ -139,6 +140,7 @@ DEFAULT_NODE_NAMES = {
     "end": "End",
 }
 PRETTY_ROUTE_KEYS = {"targetNodeId": "next", "defaultTargetNodeId": "defaultNext"}
+BRANCH_ID_PREFIX = "b-"
 
 CSV_TRIGGER_PARAMETERS = ("contacts: list[dict]", "outbound_campaign: OutboundCampaign")
 API_TRIGGER_PARAMETERS = ("outbound_campaign: OutboundCampaign", "sync: dict")
@@ -176,6 +178,100 @@ def _plain(value: Any) -> Any:
     if isinstance(value, (datetime.date, datetime.datetime)):
         return value.isoformat()
     return value
+
+
+def _convert_keys(value: Any, convert: Callable[[str], str]) -> Any:
+    if isinstance(value, dict):
+        return {
+            convert(key) if isinstance(key, str) and key else key: _convert_keys(item, convert)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_convert_keys(item, convert) for item in value]
+    return value
+
+
+def _from_file_key(key: str) -> str:
+    return key if any(char.isupper() for char in key) else utils.to_camel_case(key)
+
+
+def to_file_keys(values: Any) -> Any:
+    """Turn Agent Studio's camelCase keys, at every level, into the snake_case of the file."""
+    return _convert_keys(values, utils.to_snake_case)
+
+
+def from_file_keys(values: Any) -> Any:
+    """Turn the file's snake_case keys, at every level, back into Agent Studio's camelCase.
+
+    A key already in camelCase is kept as it is.
+    """
+    return _convert_keys(values, _from_file_key)
+
+
+def _drop_unset_settings(settings: Any) -> Any:
+    if not isinstance(settings, dict):
+        return settings
+    settings = {
+        key: value
+        for key, value in settings.items()
+        if not (key in SETTINGS_DEFAULTS and value is None)
+    }
+    for key in ("voiceDispatchLimits", "smsDispatchLimits"):
+        limits = settings.get(key)
+        if isinstance(limits, dict):
+            settings[key] = {
+                limit: value
+                for limit, value in limits.items()
+                if not (limit in DISPATCH_LIMIT_KEYS and value is None)
+            }
+    return settings
+
+
+def _without_branch_ids(data: dict) -> dict:
+    branches = data.get("branches")
+    if not isinstance(branches, list):
+        return data
+    return {
+        **data,
+        "branches": [
+            {key: value for key, value in branch.items() if key != "id"}
+            if isinstance(branch, dict)
+            else branch
+            for branch in branches
+        ],
+    }
+
+
+def with_branch_ids(data: dict, known_branches: Any) -> dict:
+    """Give each branch the id of the saved branch with its `variable`, or a new id.
+
+    Saved branches are matched in order, each once. A branch with no match gets an id like
+    Agent Studio's, `b-<uuid>`.
+    """
+    branches = data.get("branches")
+    if not isinstance(branches, list):
+        return data
+    unused = [
+        branch
+        for branch in known_branches or []
+        if isinstance(branch, dict) and isinstance(branch.get("id"), str)
+    ]
+    resolved = []
+    for branch in branches:
+        if not isinstance(branch, dict):
+            resolved.append(branch)
+            continue
+        branch = {key: value for key, value in branch.items() if key != "id"}
+        match = next(
+            (known for known in unused if known.get("variable") == branch.get("variable")), None
+        )
+        if match is not None:
+            unused.remove(match)
+            branch_id = match["id"]
+        else:
+            branch_id = f"{BRANCH_ID_PREFIX}{uuid.uuid4()}"
+        resolved.append({"id": branch_id, **branch})
+    return {**data, "branches": resolved}
 
 
 def _ordered(values: dict, keys: tuple[str, ...]) -> dict:
@@ -512,6 +608,10 @@ class OutboundCampaign(MultiResourceYamlResource):
     def moved_to(self, other: MultiResourceYamlResource) -> "OutboundCampaign":
         return replace(self, folder_name=other.folder_name)
 
+    @property
+    def raw(self) -> str:
+        return utils.dump_yaml(to_file_keys(utils.strip_strings(self.to_yaml_dict())))
+
     def compute_hash(self) -> str:
         campaign = self.to_yaml_dict()
         if self.platform_label is not None:
@@ -523,7 +623,7 @@ class OutboundCampaign(MultiResourceYamlResource):
         if self.platform_label is None or not other_resource:
             return super().get_diff(other_resource)
         saved = utils.dump_yaml(
-            utils.strip_strings({**self.to_yaml_dict(), "name": self.platform_label})
+            to_file_keys(utils.strip_strings({**self.to_yaml_dict(), "name": self.platform_label}))
         )
         return utils.get_diff(saved, other_resource.raw)
 
@@ -658,24 +758,30 @@ class OutboundCampaign(MultiResourceYamlResource):
     def to_pretty_dict(
         cls, d: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
-        """Show the default variant by name, under `defaultVariant`."""
-        settings = d.get("settings")
+        """Write keys in snake_case, leave unset settings out, and name the default variant.
+
+        The default variant goes under `default_variant`, by name.
+        """
+        d = dict(d)
+        settings = _drop_unset_settings(d.get("settings"))
         if isinstance(settings, dict) and VARIANT_ID_KEY in settings:
             variant_id = settings[VARIANT_ID_KEY]
             if variant_id:
                 variant_id = (
                     utils.resource_name_for_id(variant_id, Variant, resource_mappings) or variant_id
                 )
-            d["settings"] = _rename_key(settings, VARIANT_ID_KEY, VARIANT_NAME_KEY, variant_id)
-        return d
+            settings = _rename_key(settings, VARIANT_ID_KEY, VARIANT_NAME_KEY, variant_id)
+        if "settings" in d:
+            d["settings"] = settings
+        return to_file_keys(d)
 
     @classmethod
     def from_pretty_dict(
         cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
-        """Turn `defaultVariant` back into the variant's id, under `defaultVariantId`."""
-        yaml_dict = super().from_pretty_dict(
-            yaml_dict, resource_mappings=resource_mappings, **kwargs
+        """Read snake_case keys, and turn `default_variant` back into the variant's id."""
+        yaml_dict = from_file_keys(
+            super().from_pretty_dict(yaml_dict, resource_mappings=resource_mappings, **kwargs)
         )
         settings = yaml_dict.get("settings")
         if isinstance(settings, dict) and VARIANT_NAME_KEY in settings:
@@ -883,9 +989,15 @@ def _unsendable_settings_errors(settings: Any) -> list[str]:
     if not unknown:
         return []
     return [
-        f"Settings {', '.join(unknown)} can't be sent from the ADK, and a settings change "
+        f"Settings {', '.join(_file_key(key) for key in unknown)} can't be sent from the ADK, and a settings change "
         "replaces them all. Change this campaign's settings in Agent Studio, or update the ADK."
     ]
+
+
+def _file_key(key: str) -> str:
+    if key == VARIANT_ID_KEY:
+        key = VARIANT_NAME_KEY
+    return utils.to_snake_case(PRETTY_ROUTE_KEYS.get(key, key))
 
 
 def _settings_errors(settings: Any) -> list[str]:
@@ -901,10 +1013,10 @@ def _settings_errors(settings: Any) -> list[str]:
         "defaultTimezone",
     ):
         if settings.get(key) is not None and not isinstance(settings[key], str):
-            errors.append(f"Setting '{key}' must be text or null.")
+            errors.append(f"Setting '{_file_key(key)}' must be text or null.")
     start, end = settings.get("startDate"), settings.get("endDate")
     if isinstance(start, str) and isinstance(end, str) and end < start:
-        errors.append("Setting 'endDate' can't be before 'startDate'.")
+        errors.append("Setting 'end_date' can't be before 'start_date'.")
     country = settings.get("country")
     if country is not None and country not in COUNTRY_CODES:
         errors.append(
@@ -912,30 +1024,33 @@ def _settings_errors(settings: Any) -> list[str]:
         )
     timezone = settings.get("defaultTimezone")
     if isinstance(timezone, str) and timezones() and timezone.lower() not in timezones():
-        errors.append(f"Setting 'defaultTimezone' must be an IANA time zone, not '{timezone}'.")
+        errors.append(f"Setting 'default_timezone' must be an IANA time zone, not '{timezone}'.")
     use_case = settings.get("useCase")
     if use_case is not None and use_case not in USE_CASES:
-        errors.append(f"Setting 'useCase' must be one of: {', '.join(USE_CASES)}.")
+        errors.append(f"Setting 'use_case' must be one of: {', '.join(USE_CASES)}.")
     if not _is_positive_int_or_none(settings.get("dailyContactLimit")):
-        errors.append("Setting 'dailyContactLimit' must be a positive whole number or null.")
+        errors.append("Setting 'daily_contact_limit' must be a positive whole number or null.")
     for key in ("voiceDispatchLimits", "smsDispatchLimits"):
         limits = settings.get(key)
         if limits is None:
             continue
         if not isinstance(limits, dict):
-            errors.append(f"Setting '{key}' must be a mapping or null.")
+            errors.append(f"Setting '{_file_key(key)}' must be a mapping or null.")
             continue
         for limit_key, value in limits.items():
             if limit_key not in DISPATCH_LIMIT_KEYS:
-                errors.append(f"Setting '{key}' has an unknown field '{limit_key}'.")
+                errors.append(
+                    f"Setting '{_file_key(key)}' has an unknown field '{_file_key(limit_key)}'."
+                )
             elif not _is_positive_int_or_none(value):
                 errors.append(
-                    f"Setting '{key}.{limit_key}' must be a positive whole number or null."
+                    f"Setting '{_file_key(key)}.{_file_key(limit_key)}' must be a positive "
+                    "whole number or null."
                 )
     window = settings.get("contactWindow")
     if window is not None:
         if not isinstance(window, dict):
-            errors.append("Setting 'contactWindow' must be a mapping or null.")
+            errors.append("Setting 'contact_window' must be a mapping or null.")
         else:
             errors.extend(_contact_window_errors(window))
     return errors
@@ -946,20 +1061,25 @@ def _contact_window_errors(window: dict) -> list[str]:
     days = window.get("daysOfWeek")
     if not isinstance(days, list) or any(day not in DAYS_OF_WEEK for day in days):
         errors.append(
-            f"Setting 'contactWindow.daysOfWeek' must be a list of: {', '.join(DAYS_OF_WEEK)}."
+            f"Setting 'contact_window.days_of_week' must be a list of: {', '.join(DAYS_OF_WEEK)}."
         )
     elif not days:
-        errors.append("Setting 'contactWindow' needs at least one day.")
+        errors.append("Setting 'contact_window' needs at least one day.")
     times = [window.get(key) for key in ("startTime", "endTime")]
     for key, value in zip(("startTime", "endTime"), times):
         if not isinstance(value, str) or not TIME_OF_DAY.fullmatch(value):
-            errors.append(f"Setting 'contactWindow.{key}' must be a time of day, as \"HH:mm\".")
+            errors.append(
+                f"Setting 'contact_window.{_file_key(key)}' must be a time of day, as \"HH:mm\"."
+            )
     if all(isinstance(value, str) and TIME_OF_DAY.fullmatch(value) for value in times):
         if times[1] <= times[0]:
-            errors.append("Setting 'contactWindow' must end after it starts, on the same day.")
+            errors.append("Setting 'contact_window' must end after it starts, on the same day.")
     unknown = sorted(set(window) - set(CONTACT_WINDOW_KEYS))
     if unknown:
-        errors.append(f"Setting 'contactWindow' has unknown fields: {', '.join(unknown)}.")
+        errors.append(
+            "Setting 'contact_window' has unknown fields: "
+            f"{', '.join(_file_key(key) for key in unknown)}."
+        )
     return errors
 
 
@@ -1016,21 +1136,21 @@ def node_data_errors(data: Any, function_file: str) -> list[str]:
     errors = []
     unknown = sorted(set(data) - {"type", *NODE_FIELDS[node_type]})
     if unknown:
-        pretty = [PRETTY_ROUTE_KEYS.get(key, key) for key in unknown]
+        pretty = [_file_key(key) for key in unknown]
         errors.append(f"unknown fields for a {node_type} node: {', '.join(pretty)}.")
     missing = [key for key in NODE_REQUIRED[node_type] if data.get(key) is None]
     if missing:
-        pretty = [repr(PRETTY_ROUTE_KEYS.get(key, key)) for key in missing]
+        pretty = [repr(_file_key(key)) for key in missing]
         errors.append(f"a {node_type} node needs {', '.join(pretty)}.")
     for key, allowed in NODE_ENUMS.get(node_type, {}).items():
         if data.get(key) is not None and data[key] not in allowed:
-            errors.append(f"'{key}' must be one of: {', '.join(allowed)}.")
+            errors.append(f"'{_file_key(key)}' must be one of: {', '.join(allowed)}.")
     for key in NODE_STRING_FIELDS & set(data):
         if data[key] is not None and not isinstance(data[key], str):
-            errors.append(f"'{PRETTY_ROUTE_KEYS.get(key, key)}' must be text.")
+            errors.append(f"'{_file_key(key)}' must be text.")
     for key in NODE_NULLABLE_STRING_FIELDS & set(data):
         if data[key] is not None and not isinstance(data[key], str):
-            errors.append(f"'{PRETTY_ROUTE_KEYS.get(key, key)}' must be a node name or null.")
+            errors.append(f"'{_file_key(key)}' must be a node name or null.")
     if data.get("function") is not None:
         errors.extend(_function_errors(data["function"], function_file))
     if "routes" in data:
@@ -1039,35 +1159,33 @@ def node_data_errors(data: Any, function_file: str) -> list[str]:
     if node_type == "call":
         attempts = data.get("maxAttempts")
         if attempts is not None and not (_is_int(attempts) and 1 <= attempts <= 5):
-            errors.append("'maxAttempts' must be a whole number from 1 to 5.")
+            errors.append("'max_attempts' must be a whole number from 1 to 5.")
         backoff = data.get("backoff")
         if backoff is not None and not (_is_int(backoff) and backoff >= 0):
             errors.append("'backoff' must be a whole number, 0 or more.")
         if data.get("voicemailEnabled") is not None and not isinstance(
             data["voicemailEnabled"], bool
         ):
-            errors.append("'voicemailEnabled' must be true or false.")
+            errors.append("'voicemail_enabled' must be true or false.")
         if data.get("voicemailEnabled"):
             for key in ("voicemailScript", "voicemailWhen"):
                 if data.get(key) is None:
-                    errors.append(f"'{key}' is required when voicemailEnabled is true.")
+                    errors.append(f"'{_file_key(key)}' is required when voicemail_enabled is true.")
     elif node_type == "sms":
         timeout = data.get("replyTimeoutValue")
         if timeout is not None and not (_is_int(timeout) and timeout >= 0):
-            errors.append("'replyTimeoutValue' must be a whole number, 0 or more.")
+            errors.append("'reply_timeout_value' must be a whole number, 0 or more.")
     elif node_type == "conditional":
         branches = data.get("branches")
         if branches is not None and (
             not isinstance(branches, list)
             or not all(
                 isinstance(branch, dict)
-                and all(
-                    isinstance(branch.get(key), str) for key in ("id", "variable", "targetNodeId")
-                )
+                and all(isinstance(branch.get(key), str) for key in ("variable", "targetNodeId"))
                 for branch in branches
             )
         ):
-            errors.append("Each branch needs text 'id', 'variable' and 'next'.")
+            errors.append("Each branch needs text 'variable' and 'next'.")
     elif node_type == "wait":
         amount = data.get("amount")
         if amount is not None and not (_is_int(amount) and amount > 0):
@@ -1076,7 +1194,7 @@ def node_data_errors(data: Any, function_file: str) -> list[str]:
         if data.get("writebackEnabled") is not None and not isinstance(
             data["writebackEnabled"], bool
         ):
-            errors.append("'writebackEnabled' must be true or false.")
+            errors.append("'writeback_enabled' must be true or false.")
     return errors
 
 
@@ -1236,17 +1354,22 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             return ""
         return super()._entry_key(entry)
 
+    def _file_view(self, name: str) -> str:
+        node = _without_branch_ids({**self.to_yaml_dict(), "name": name})
+        return utils.dump_yaml(to_file_keys(utils.strip_strings(node)))
+
+    @property
+    def raw(self) -> str:
+        return self._file_view(self.name)
+
     def get_diff(self, other_resource: Resource) -> str:
         """Diff from Agent Studio's label when pull named the node differently."""
         if self.platform_label is None or not other_resource:
             return super().get_diff(other_resource)
-        saved = utils.dump_yaml(
-            utils.strip_strings({**self.to_yaml_dict(), "name": self.platform_label})
-        )
-        return utils.get_diff(saved, other_resource.raw)
+        return utils.get_diff(self._file_view(self.platform_label), other_resource.raw)
 
     def compute_hash(self) -> str:
-        node = self.to_yaml_dict()
+        node = _without_branch_ids(self.to_yaml_dict())
         if self.platform_label is not None:
             node["name"] = self.platform_label
         return utils.compute_hash_from_dict(utils.strip_strings(node))
@@ -1269,7 +1392,9 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         node = cls(
             resource_id=resource_id,
             name=node_name,
-            data=normalise_node_data(yaml_dict),
+            data=normalise_node_data(
+                with_branch_ids(yaml_dict, (known_data or {}).get("branches"))
+            ),
             position=known_position,
         )
         node.saved_type = known_type
@@ -1337,10 +1462,13 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         file_path: str = None,
         **kwargs,
     ) -> dict:
-        """Name the nodes each route leads to, under `next` and `defaultNext`."""
+        """Name the nodes routes lead to, leave branch ids out, and write keys in snake_case.
+
+        Routes go under `next` and `default_next`.
+        """
         names = cls._names_by_id(resource_mappings, file_path)
-        d = map_route_targets(d, lambda target: names.get(target, target))
-        return _rename_route_keys(d, PRETTY_ROUTE_KEYS)
+        d = map_route_targets(_without_branch_ids(d), lambda target: names.get(target, target))
+        return to_file_keys(_rename_route_keys(d, PRETTY_ROUTE_KEYS))
 
     @classmethod
     def from_pretty_dict(
@@ -1350,9 +1478,9 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         file_path: str = None,
         **kwargs,
     ) -> dict:
-        """Turn the node names in routes back into node ids."""
-        yaml_dict = super().from_pretty_dict(
-            yaml_dict, resource_mappings=resource_mappings, **kwargs
+        """Read snake_case keys, and turn the node names in routes back into node ids."""
+        yaml_dict = from_file_keys(
+            super().from_pretty_dict(yaml_dict, resource_mappings=resource_mappings, **kwargs)
         )
         yaml_dict = _rename_route_keys(yaml_dict, {v: k for k, v in PRETTY_ROUTE_KEYS.items()})
         ids = {
