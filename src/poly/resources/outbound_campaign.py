@@ -893,7 +893,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         resource_id: str,
         name: str = "",
         known_position: Optional[dict] = None,
-        known_branches: Optional[list] = None,
+        known_data: Optional[dict] = None,
         **kwargs,
     ) -> "OutboundCampaignNode":
         yaml_dict = utils.strip_strings(_plain(yaml_dict or {}))
@@ -901,7 +901,9 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         return cls(
             resource_id=resource_id,
             name=node_name,
-            data=normalise_node_data(with_branch_ids(yaml_dict, known_branches)),
+            data=normalise_node_data(
+                with_branch_ids(yaml_dict, (known_data or {}).get("branches"))
+            ),
             position=known_position,
         )
 

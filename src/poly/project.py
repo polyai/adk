@@ -2670,9 +2670,7 @@ class AgentStudioProject:
                 original_resource if isinstance(original_resource, OutboundCampaignNode) else None
             )
             additional_kwargs["known_position"] = saved_node.position if saved_node else None
-            additional_kwargs["known_branches"] = (
-                saved_node.data.get("branches") if saved_node else None
-            )
+            additional_kwargs["known_data"] = saved_node.data if saved_node else None
 
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):

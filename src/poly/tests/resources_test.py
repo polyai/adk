@@ -15805,7 +15805,7 @@ class OutboundCampaignTests(unittest.TestCase):
         read = OutboundCampaignNode.from_yaml_dict(
             OutboundCampaignNode.from_pretty_dict(pretty),
             resource_id=node.resource_id,
-            known_branches=saved,
+            known_data={"type": "conditional", "branches": saved},
         )
         declined, maybe = read.data["branches"]
         self.assertEqual(declined["id"], "b-2")
