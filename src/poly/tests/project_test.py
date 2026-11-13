@@ -10218,20 +10218,6 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         )
         self._assert_pushed_code_survives_a_remote_rename("reminders", "First Call", "Second")
 
-    def _pull_two_campaigns(self, first: str, second: str) -> None:
-        projection = _campaign_projection(
-            name=first, trigger_code="def map_contacts(a, b):\n    1\n"
-        )
-        other = _campaign_projection(
-            campaign_id="CMPGN-TWO", name=second, trigger_code="def map_contacts(a, b):\n    2\n"
-        )
-        campaigns = projection["outboundCampaigns"]["outboundCampaigns"]
-        campaigns["ids"].append("CMPGN-TWO")
-        campaigns["entities"]["CMPGN-TWO"] = other["outboundCampaigns"]["outboundCampaigns"][
-            "entities"
-        ]["CMPGN-TWO"]
-        self._pull_into_new_project(projection)
-
     def test_retyped_node_with_a_legacy_def_line_fails_validation(self):
         """A retype is pushed as a create, and Agent Studio checks the def line on create."""
         projection = _campaign_projection()
@@ -10337,23 +10323,6 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE)
         self.assertEqual(self.project.project_status(), ([], [], [], []))
 
-    def _pull_a_conflict_into_the_campaign_file(self) -> str:
-        data = self._yaml()
-        self._node(data, "Trigger")["ingestInterval"] = "hourly"
-        data["nodes"].append(
-            {"name": "Spare", "type": "end", "exitReason": "spare", "writebackEnabled": False}
-        )
-        self._write_yaml(data)
-        projection = _campaign_projection()
-        self._entity(projection)["nodes"]["entities"]["trigger-1"]["data"]["ingestInterval"] = (
-            "weekly"
-        )
-        conflicts, _ = self.project.pull_project(projection_json=projection)
-        campaign_file = os.path.join(self.folder, "campaign.yaml")
-        self.assertEqual(conflicts, [campaign_file])
-        self.assertEqual(self.project.project_status()[0], [campaign_file])
-        return campaign_file
-
     def test_revert_of_everything_keeps_locally_added_nodes_and_their_code(self):
         data = self._yaml()
         self._node(data, "Trigger")["ingestInterval"] = "hourly"
@@ -10401,15 +10370,6 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         self.assertEqual((affected, errors), ([trigger_file], []))
         self.assertEqual(self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE)
-
-    def _tree(self) -> dict[str, str]:
-        tree = {}
-        for directory, _, names in os.walk(os.path.join(self.root, "outbound_campaigns")):
-            for name in names:
-                path = os.path.join(directory, name)
-                with open(path, encoding="utf-8") as file:
-                    tree[os.path.relpath(path, self.root)] = file.read()
-        return tree
 
     def _rename_locally(self, old: str, new: str) -> dict:
         data = self._yaml()

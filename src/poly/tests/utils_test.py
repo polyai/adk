@@ -1705,6 +1705,32 @@ class RelabelCampaignNodesFirstTest(unittest.TestCase):
         self.assertEqual(list(pre_push_updated[OutboundCampaignNode]), ["c", "b", "a"])
 
 
+class ResourceLookupTest(unittest.TestCase):
+    def setUp(self):
+        self.mappings = [
+            ResourceMapping("H1", Handoff, "Reception", None, None, None),
+            ResourceMapping("F1", Function, "Reception", None, None, None),
+        ]
+
+    def test_name_and_id_lookups_match_the_resource_type(self):
+        self.assertEqual(
+            resource_utils.resource_name_for_id("H1", Handoff, self.mappings), "Reception"
+        )
+        self.assertEqual(
+            resource_utils.resource_id_for_name("Reception", Function, self.mappings), "F1"
+        )
+
+    def test_unknown_or_missing_mappings_give_none(self):
+        self.assertIsNone(resource_utils.resource_name_for_id("F1", Handoff, self.mappings))
+        self.assertIsNone(resource_utils.resource_id_for_name("Reception", Handoff, None))
+
+    def test_drop_unset_keeps_falsy_values_that_are_set(self):
+        self.assertEqual(
+            resource_utils.drop_unset({"a": None, "b": 0, "c": "", "d": False}),
+            {"b": 0, "c": "", "d": False},
+        )
+
+
 class JsonIoTests(unittest.TestCase):
     """Tests for JSON file read/write helpers."""
 
