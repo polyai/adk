@@ -10882,6 +10882,15 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual((affected, errors), ([trigger_file], []))
         self.assertEqual(self._read("reminders", "functions", "trigger.py"), self.TRIGGER_CODE)
 
+    def _tree(self) -> dict[str, str]:
+        tree = {}
+        for directory, _, names in os.walk(os.path.join(self.root, "outbound_campaigns")):
+            for name in names:
+                path = os.path.join(directory, name)
+                with open(path, encoding="utf-8") as file:
+                    tree[os.path.relpath(path, self.root)] = file.read()
+        return tree
+
     def _rename_locally(self, old: str, new: str) -> dict:
         data = self._yaml()
         self._node(data, old)["name"] = new
