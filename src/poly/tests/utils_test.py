@@ -656,9 +656,7 @@ class SameYamlDataTests(unittest.TestCase):
                 self.assertFalse(resource_utils.same_yaml_data(a, b))
 
     def test_nan_is_never_same(self):
-        self.assertFalse(
-            resource_utils.same_yaml_data({"a": float("nan")}, {"a": float("nan")})
-        )
+        self.assertFalse(resource_utils.same_yaml_data({"a": float("nan")}, {"a": float("nan")}))
 
     def test_unserialisable_keys_are_not_same(self):
         key = datetime.date(2024, 1, 1)
@@ -1425,7 +1423,9 @@ class MemoForMappingsTests(unittest.TestCase):
             "{{ft:flow-function-1}} {{ft:flow-function-2}} {{attr:customer_name}} "
             "{{attr:attr-customer_name}} {{fn:unknown}}"
         )
-        cases = [(flow, direction) for flow in (None, "flow_1", "flow_2") for direction in (True, False)]
+        cases = [
+            (flow, direction) for flow in (None, "flow_1", "flow_2") for direction in (True, False)
+        ]
         expected = {
             (flow, direction): resource_utils.build_reference_swapper(
                 list(mappings), flow, names_to_ids=direction
@@ -1478,9 +1478,7 @@ class MemoForMappingsTests(unittest.TestCase):
     def test_variant_attribute_validate_reports_missing_variants_by_name(self):
         """VariantAttribute.validate checks against every variant in the current list."""
         mappings = [self._variant("v1", "north")]
-        attribute = VariantAttribute(
-            resource_id="attr-1", name="colour", mappings={"v1": "red"}
-        )
+        attribute = VariantAttribute(resource_id="attr-1", name="colour", mappings={"v1": "red"})
         attribute.validate(resource_mappings=mappings)
         mappings.append(self._variant("v2", "south"))
 
@@ -1683,6 +1681,32 @@ class ClearUnusedSettingsFromFlowStepTest(unittest.TestCase):
         self.assertEqual(queued[0].clear_step_settings.step_id, self.STEP_ID)
 
 
+class ResourceLookupTest(unittest.TestCase):
+    def setUp(self):
+        self.mappings = [
+            ResourceMapping("H1", Handoff, "Reception", None, None, None),
+            ResourceMapping("F1", Function, "Reception", None, None, None),
+        ]
+
+    def test_name_and_id_lookups_match_the_resource_type(self):
+        self.assertEqual(
+            resource_utils.resource_name_for_id("H1", Handoff, self.mappings), "Reception"
+        )
+        self.assertEqual(
+            resource_utils.resource_id_for_name("Reception", Function, self.mappings), "F1"
+        )
+
+    def test_unknown_or_missing_mappings_give_none(self):
+        self.assertIsNone(resource_utils.resource_name_for_id("F1", Handoff, self.mappings))
+        self.assertIsNone(resource_utils.resource_id_for_name("Reception", Handoff, None))
+
+    def test_drop_unset_keeps_falsy_values_that_are_set(self):
+        self.assertEqual(
+            resource_utils.drop_unset({"a": None, "b": 0, "c": "", "d": False}),
+            {"b": 0, "c": "", "d": False},
+        )
+
+
 class JsonIoTests(unittest.TestCase):
     """Tests for JSON file read/write helpers."""
 
@@ -1792,7 +1816,9 @@ class LoadYamlParserTests(unittest.TestCase):
         expected = self.pure_loader.load(EDGE_CASE_YAML)
         # ruamel reads these as dates and numbers; ryaml keeps them as written
         expected.update(
-            leading_zero="0777", underscored="1_000", date="2026-09-23",
+            leading_zero="0777",
+            underscored="1_000",
+            date="2026-09-23",
             timestamp="2026-09-23T10:00:00Z",
         )
         self.assertEqual(repr(loaded), repr(expected))
@@ -1805,7 +1831,6 @@ class LoadYamlParserTests(unittest.TestCase):
         for loader in (resource_utils.load_yaml, self.pure_loader.load):
             with self.subTest(loader=loader), self.assertRaises((YAMLError, ValueError)):
                 loader("key: [unclosed")
-
 
 
 class DumpYamlTests(unittest.TestCase):
@@ -1866,7 +1891,8 @@ class FormatYamlTests(unittest.TestCase):
     def test_trailing_spaces_are_trimmed_so_block_style_survives(self):
         source = 'prompt: "Call the agent \\nThen stop.  "\n'
         self.assertEqual(
-            resource_utils.format_yaml(source, "flow.yaml"), "prompt: |-\n  Call the agent\n  Then stop.\n"
+            resource_utils.format_yaml(source, "flow.yaml"),
+            "prompt: |-\n  Call the agent\n  Then stop.\n",
         )
 
     def test_invalid_yaml_is_returned_unchanged(self):
@@ -1884,7 +1910,9 @@ class StripStringsTests(unittest.TestCase):
         )
 
     def test_keeps_leading_indentation_of_inner_lines(self):
-        self.assertEqual(resource_utils.strip_strings("Steps:\n  - one\n  - two"), "Steps:\n  - one\n  - two")
+        self.assertEqual(
+            resource_utils.strip_strings("Steps:\n  - one\n  - two"), "Steps:\n  - one\n  - two"
+        )
 
     def test_removes_zero_width_no_break_spaces(self):
         self.assertEqual(resource_utils.strip_strings("Hello\ufeff\nWorld"), "Hello\nWorld")

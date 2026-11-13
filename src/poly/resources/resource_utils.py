@@ -789,6 +789,39 @@ def clean_name(name: str, lowercase: bool = True) -> str:
     return name
 
 
+def drop_unset(values: dict) -> dict:
+    """Drop keys whose value is None, so unset optional fields don't surface as nulls."""
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def resource_name_for_id(
+    resource_id: str, resource_type: type, resource_mappings: Optional[list["ResourceMapping"]]
+) -> Optional[str]:
+    """Return the name of the `resource_type` resource with `resource_id`, or None if unknown."""
+    return next(
+        (
+            mapping.resource_name
+            for mapping in resource_mappings or []
+            if mapping.resource_type == resource_type and mapping.resource_id == resource_id
+        ),
+        None,
+    )
+
+
+def resource_id_for_name(
+    resource_name: str, resource_type: type, resource_mappings: Optional[list["ResourceMapping"]]
+) -> Optional[str]:
+    """Return the id of the `resource_type` resource named `resource_name`, or None if unknown."""
+    return next(
+        (
+            mapping.resource_id
+            for mapping in resource_mappings or []
+            if mapping.resource_type == resource_type and mapping.resource_name == resource_name
+        ),
+        None,
+    )
+
+
 def to_camel_case(s: str) -> str:
     """Convert a string to camelCase from snake_case"""
     word = "".join(word.capitalize() for word in s.split("_"))
