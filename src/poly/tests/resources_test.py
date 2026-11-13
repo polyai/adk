@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import dataclasses
 import datetime
+import functools
 import json
 import os
 import re
@@ -96,6 +97,8 @@ from poly.resources.outbound_campaign import (
     campaign_names,
     function_file_stem,
     node_names,
+    normalise_node_data,
+    normalise_settings,
 )
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
@@ -140,7 +143,12 @@ from poly.resources.variant_attributes import (
     VariantAttribute,
     _read_attribute_type,
 )
-from poly.tests.testing_utils import mock_read_from_file, mock_variant_attributes_file
+from poly.tests.testing_utils import (
+    campaign_entity,
+    campaigns_projection,
+    mock_read_from_file,
+    mock_variant_attributes_file,
+)
 
 TEST_CODE = """import random
 
@@ -15226,89 +15234,23 @@ class MultiResourceFileCacheTests(unittest.TestCase):
             self.assertTrue(os.path.exists(path))
 
 
-def _campaign_function(name: str, code: str = "") -> dict:
-    return {
-        "name": name,
-        "description": f"{name} description",
-        "code": code,
-        "parameters": {"ids": [], "entities": {}},
-    }
-
-
-def _campaign_entity(
-    campaign_id: str = "CMPGN-ONE",
-    name: str = "Reminders",
-    nodes: Optional[list[dict]] = None,
-    **fields,
-) -> dict:
-    if nodes is None:
-        nodes = [
-            {
-                "id": "trigger-1",
-                "position": {"x": 0, "y": 0},
-                "data": {
-                    "type": "trigger",
-                    "function": _campaign_function("map_contacts", "def map_contacts():\n    pass"),
-                    "routes": [{"targetNodeId": "call-1"}],
-                    "sourceType": "csv",
-                    "ingestInterval": "daily",
-                },
-            },
-            {
-                "id": "call-1",
-                "position": {"x": 0, "y": 200},
-                "label": "First call",
-                "data": {
-                    "type": "call",
-                    "flowName": "Booking",
-                    "function": _campaign_function("call_args"),
-                    "greeting": "Hi",
-                    "voicemailEnabled": False,
-                    "maxAttempts": 2,
-                    "backoff": 1,
-                    "backoffUnit": "hours",
-                    "routes": [],
-                    "defaultRoute": "end-1",
-                },
-            },
-            {
-                "id": "end-1",
-                "position": {"x": 0, "y": 400},
-                "data": {"type": "end", "exitReason": "done", "writebackEnabled": False},
-            },
-        ]
-    return {
-        "id": campaign_id,
-        "name": name,
-        "description": None,
-        "status": "draft",
-        "settings": {"fromNumber": "+15550100", "country": "US"},
-        "nodes": {"ids": [node["id"] for node in nodes], "entities": {n["id"]: n for n in nodes}},
-        "publishedNodes": None,
-        "archived": False,
-        **fields,
-    }
-
-
-def _campaigns_projection(*campaigns: dict) -> dict:
-    return {
-        "outboundCampaigns": {
-            "outboundCampaigns": {
-                "ids": [campaign["id"] for campaign in campaigns],
-                "entities": {campaign["id"]: campaign for campaign in campaigns},
-            }
-        }
-    }
+_campaign_entity = functools.partial(
+    campaign_entity,
+    trigger_label=None,
+    end_label=None,
+    trigger_code="def map_contacts():\n    pass",
+    function_descriptions=True,
+)
 
 
 def _campaign(**fields) -> OutboundCampaign:
-    return OutboundCampaign.from_projection(_campaigns_projection(_campaign_entity(**fields)))[
+    return OutboundCampaign.from_projection(campaigns_projection(_campaign_entity(**fields)))[
         fields.get("campaign_id", "CMPGN-ONE")
     ]
 
 
 def _campaign_nodes(**fields) -> dict[str, OutboundCampaignNode]:
-    return OutboundCampaignNode.from_projection(_campaigns_projection(_campaign_entity(**fields)))
+    return OutboundCampaignNode.from_projection(campaigns_projection(_campaign_entity(**fields)))
 
 
 def _node_mappings(nodes: dict[str, OutboundCampaignNode], root: str = "") -> list[ResourceMapping]:
@@ -15365,10 +15307,10 @@ class OutboundCampaignTests(unittest.TestCase):
         entity = _campaign_entity(nodes=[])
         entity["publishedNodes"] = _campaign_entity()["nodes"]
 
-        self.assertEqual(OutboundCampaignNode.from_projection(_campaigns_projection(entity)), {})
+        self.assertEqual(OutboundCampaignNode.from_projection(campaigns_projection(entity)), {})
 
     def test_from_projection_skips_archived_campaigns(self):
-        projection = _campaigns_projection(
+        projection = campaigns_projection(
             _campaign_entity(),
             _campaign_entity(campaign_id="CMPGN-OLD", name="Old", archived=True),
         )
@@ -15453,7 +15395,7 @@ class OutboundCampaignTests(unittest.TestCase):
 
     def test_campaigns_with_the_same_cleaned_name_are_renamed_from_the_second_oldest(self):
         """Agent Studio allows duplicate names, so a clash must not stop the whole pull."""
-        projection = _campaigns_projection(
+        projection = campaigns_projection(
             _campaign_entity(createdAt="2026-02-01T00:00:00Z"),
             _campaign_entity(campaign_id="CMPGN-TWO", name="Reminders!", createdAt="2026-01-01"),
             _campaign_entity(campaign_id="CMPGN-THREE", createdAt="2026-03-01T00:00:00Z"),
@@ -15503,7 +15445,7 @@ class OutboundCampaignTests(unittest.TestCase):
 
         self.assertEqual(pretty["routes"], [{"next": "First call"}])
         self.assertEqual(
-            call.to_pretty_dict(call.to_yaml_dict(), mappings, call.file_path)["defaultRoute"],
+            call.to_pretty_dict(call.to_yaml_dict(), mappings, call.file_path)["default_route"],
             "End",
         )
         self.assertNotIn("id", pretty)
@@ -15521,8 +15463,8 @@ class OutboundCampaignTests(unittest.TestCase):
             {
                 "name": "Branch",
                 "type": "conditional",
-                "branches": [{"id": "b", "variable": "v", "next": "First call"}],
-                "defaultNext": "End",
+                "branches": [{"variable": "v", "next": "First call"}],
+                "default_next": "End",
             },
             resource_mappings=mappings,
             file_path=file_path,
@@ -15752,7 +15694,7 @@ class OutboundCampaignTests(unittest.TestCase):
 
     def test_function_files_come_from_nodes_with_code_under_their_ids(self):
         functions = OutboundCampaignFunction.from_projection(
-            _campaigns_projection(_campaign_entity())
+            campaigns_projection(_campaign_entity())
         )
 
         self.assertEqual(list(functions), ["CMPGN-ONE:trigger-1"])
@@ -15780,6 +15722,107 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertEqual(read.compute_hash(), before)
         self.assertEqual(trigger.code, "def map_contacts():\n    pass")
 
+    def test_campaign_yaml_keys_are_snake_case_and_read_back_as_agent_studio_keys(self):
+        campaign = _campaign()
+        campaign.settings = normalise_settings(
+            {
+                "fromNumber": "+15550100",
+                "country": "US",
+                "voiceDispatchLimits": {"maxConcurrent": 5},
+                "contactWindow": {
+                    "daysOfWeek": ["monday"],
+                    "startTime": "09:00",
+                    "endTime": "17:00",
+                },
+            }
+        )
+
+        pretty = OutboundCampaign.to_pretty_dict(campaign.to_yaml_dict())
+
+        self.assertEqual(
+            pretty["settings"],
+            {
+                "from_number": "+15550100",
+                "country": "US",
+                "daily_contact_limit": 3,
+                "voice_dispatch_limits": {"max_concurrent": 5},
+                "contact_window": {
+                    "days_of_week": ["monday"],
+                    "start_time": "09:00",
+                    "end_time": "17:00",
+                },
+            },
+        )
+        read_back = OutboundCampaign.from_yaml_dict(
+            OutboundCampaign.from_pretty_dict(pretty), resource_id=campaign.resource_id
+        )
+        self.assertEqual(read_back.settings, campaign.settings)
+
+    def test_node_yaml_keys_are_snake_case_and_read_back_as_agent_studio_keys(self):
+        nodes = _campaign_nodes()
+        mappings = _node_mappings(nodes)
+        call = nodes["CMPGN-ONE:call-1"]
+
+        pretty = call.to_pretty_dict(call.to_yaml_dict(), mappings, call.file_path)
+
+        self.assertEqual(
+            [key for key in pretty if key != key.lower()],
+            [],
+        )
+        self.assertEqual(pretty["flow_name"], "Booking")
+        self.assertEqual(pretty["max_attempts"], 2)
+        data = OutboundCampaignNode.from_pretty_dict(
+            pretty, resource_mappings=mappings, file_path=call.file_path
+        )
+        self.assertEqual(
+            OutboundCampaignNode.from_yaml_dict(data, resource_id=call.resource_id).data,
+            call.data,
+        )
+
+    def test_branch_ids_stay_out_of_the_file_and_are_kept_by_variable(self):
+        saved = [
+            {"id": "b-1", "variable": "confirmed", "targetNodeId": "end-1"},
+            {"id": "b-2", "variable": "declined", "targetNodeId": "end-1"},
+        ]
+        node = OutboundCampaignNode(
+            resource_id="CMPGN-ONE:condition-1",
+            name="Check reply",
+            data=normalise_node_data(
+                {"type": "conditional", "branches": saved, "defaultTargetNodeId": None}
+            ),
+        )
+
+        pretty = OutboundCampaignNode.to_pretty_dict(node.to_yaml_dict())
+
+        self.assertEqual(
+            pretty["branches"],
+            [{"variable": "confirmed", "next": "end-1"}, {"variable": "declined", "next": "end-1"}],
+        )
+        pretty["branches"] = [
+            {"variable": "declined", "next": "end-1"},
+            {"variable": "maybe", "next": "end-1"},
+        ]
+        read = OutboundCampaignNode.from_yaml_dict(
+            OutboundCampaignNode.from_pretty_dict(pretty),
+            resource_id=node.resource_id,
+            known_branches=saved,
+        )
+        declined, maybe = read.data["branches"]
+        self.assertEqual(declined["id"], "b-2")
+        self.assertRegex(maybe["id"], r"^b-[0-9a-f-]{36}$")
+
+    def test_unset_settings_stay_out_of_the_file(self):
+        campaign = _campaign()
+
+        pretty = OutboundCampaign.to_pretty_dict(campaign.to_yaml_dict())
+
+        self.assertNotIn("start_date", pretty["settings"])
+        self.assertNotIn("sms_dispatch_limits", pretty["settings"])
+        self.assertEqual(
+            normalise_settings(OutboundCampaign.from_pretty_dict(pretty)["settings"]),
+            campaign.settings,
+        )
+
     def test_default_variant_is_shown_by_name_and_read_back_as_its_id(self):
         campaign = _campaign()
         campaign.settings["defaultVariantId"] = "VARIANT-1"
@@ -15799,8 +15842,8 @@ class OutboundCampaignTests(unittest.TestCase):
         )
         read_back = OutboundCampaign.from_pretty_dict(pretty, resource_mappings=mappings)
 
-        self.assertEqual(pretty["settings"]["defaultVariant"], "spanish")
-        self.assertNotIn("defaultVariantId", pretty["settings"])
+        self.assertEqual(pretty["settings"]["default_variant"], "spanish")
+        self.assertNotIn("default_variant_id", pretty["settings"])
         self.assertEqual(read_back["settings"]["defaultVariantId"], "VARIANT-1")
 
     def test_validate_rejects_a_default_variant_that_does_not_exist(self):

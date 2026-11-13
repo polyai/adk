@@ -3,6 +3,7 @@
 import datetime
 import logging
 import os
+import uuid
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, ClassVar, Optional
@@ -91,6 +92,7 @@ DEFAULT_NODE_NAMES = {
     "end": "End",
 }
 PRETTY_ROUTE_KEYS = {"targetNodeId": "next", "defaultTargetNodeId": "defaultNext"}
+BRANCH_ID_PREFIX = "b-"
 
 
 def _plain(value: Any) -> Any:
@@ -109,6 +111,100 @@ def _plain(value: Any) -> Any:
     if isinstance(value, (datetime.date, datetime.datetime)):
         return value.isoformat()
     return value
+
+
+def _convert_keys(value: Any, convert: Callable[[str], str]) -> Any:
+    if isinstance(value, dict):
+        return {
+            convert(key) if isinstance(key, str) and key else key: _convert_keys(item, convert)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_convert_keys(item, convert) for item in value]
+    return value
+
+
+def _from_file_key(key: str) -> str:
+    return key if any(char.isupper() for char in key) else utils.to_camel_case(key)
+
+
+def to_file_keys(values: Any) -> Any:
+    """Turn Agent Studio's camelCase keys, at every level, into the snake_case of the file."""
+    return _convert_keys(values, utils.to_snake_case)
+
+
+def from_file_keys(values: Any) -> Any:
+    """Turn the file's snake_case keys, at every level, back into Agent Studio's camelCase.
+
+    A key already in camelCase is kept as it is.
+    """
+    return _convert_keys(values, _from_file_key)
+
+
+def _drop_unset_settings(settings: Any) -> Any:
+    if not isinstance(settings, dict):
+        return settings
+    settings = {
+        key: value
+        for key, value in settings.items()
+        if not (key in SETTINGS_DEFAULTS and value is None)
+    }
+    for key in ("voiceDispatchLimits", "smsDispatchLimits"):
+        limits = settings.get(key)
+        if isinstance(limits, dict):
+            settings[key] = {
+                limit: value
+                for limit, value in limits.items()
+                if not (limit in DISPATCH_LIMIT_KEYS and value is None)
+            }
+    return settings
+
+
+def _without_branch_ids(data: dict) -> dict:
+    branches = data.get("branches")
+    if not isinstance(branches, list):
+        return data
+    return {
+        **data,
+        "branches": [
+            {key: value for key, value in branch.items() if key != "id"}
+            if isinstance(branch, dict)
+            else branch
+            for branch in branches
+        ],
+    }
+
+
+def with_branch_ids(data: dict, known_branches: Any) -> dict:
+    """Give each branch the id of the saved branch with its `variable`, or a new id.
+
+    Saved branches are matched in order, each once. A branch with no match gets an id like
+    Agent Studio's, `b-<uuid>`.
+    """
+    branches = data.get("branches")
+    if not isinstance(branches, list):
+        return data
+    unused = [
+        branch
+        for branch in known_branches or []
+        if isinstance(branch, dict) and isinstance(branch.get("id"), str)
+    ]
+    resolved = []
+    for branch in branches:
+        if not isinstance(branch, dict):
+            resolved.append(branch)
+            continue
+        branch = {key: value for key, value in branch.items() if key != "id"}
+        match = next(
+            (known for known in unused if known.get("variable") == branch.get("variable")), None
+        )
+        if match is not None:
+            unused.remove(match)
+            branch_id = match["id"]
+        else:
+            branch_id = f"{BRANCH_ID_PREFIX}{uuid.uuid4()}"
+        resolved.append({"id": branch_id, **branch})
+    return {**data, "branches": resolved}
 
 
 def _ordered(values: dict, keys: tuple[str, ...]) -> dict:
@@ -379,6 +475,10 @@ class OutboundCampaign(MultiResourceYamlResource):
     def moved_to(self, other: MultiResourceYamlResource) -> "OutboundCampaign":
         return replace(self, folder_name=other.folder_name)
 
+    @property
+    def raw(self) -> str:
+        return utils.dump_yaml(to_file_keys(utils.strip_strings(self.to_yaml_dict())))
+
     def compute_hash(self) -> str:
         campaign = self.to_yaml_dict()
         if self.platform_label is not None:
@@ -390,7 +490,7 @@ class OutboundCampaign(MultiResourceYamlResource):
         if self.platform_label is None or not other_resource:
             return super().get_diff(other_resource)
         saved = utils.dump_yaml(
-            utils.strip_strings({**self.to_yaml_dict(), "name": self.platform_label})
+            to_file_keys(utils.strip_strings({**self.to_yaml_dict(), "name": self.platform_label}))
         )
         return utils.get_diff(saved, other_resource.raw)
 
@@ -518,24 +618,30 @@ class OutboundCampaign(MultiResourceYamlResource):
     def to_pretty_dict(
         cls, d: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
-        """Show the default variant by name, under `defaultVariant`."""
-        settings = d.get("settings")
+        """Write keys in snake_case, leave unset settings out, and name the default variant.
+
+        The default variant goes under `default_variant`, by name.
+        """
+        d = dict(d)
+        settings = _drop_unset_settings(d.get("settings"))
         if isinstance(settings, dict) and VARIANT_ID_KEY in settings:
             variant_id = settings[VARIANT_ID_KEY]
             if variant_id:
                 variant_id = (
                     utils.resource_name_for_id(variant_id, Variant, resource_mappings) or variant_id
                 )
-            d["settings"] = _rename_key(settings, VARIANT_ID_KEY, VARIANT_NAME_KEY, variant_id)
-        return d
+            settings = _rename_key(settings, VARIANT_ID_KEY, VARIANT_NAME_KEY, variant_id)
+        if "settings" in d:
+            d["settings"] = settings
+        return to_file_keys(d)
 
     @classmethod
     def from_pretty_dict(
         cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
-        """Turn `defaultVariant` back into the variant's id, under `defaultVariantId`."""
-        yaml_dict = super().from_pretty_dict(
-            yaml_dict, resource_mappings=resource_mappings, **kwargs
+        """Read snake_case keys, and turn `default_variant` back into the variant's id."""
+        yaml_dict = from_file_keys(
+            super().from_pretty_dict(yaml_dict, resource_mappings=resource_mappings, **kwargs)
         )
         settings = yaml_dict.get("settings")
         if isinstance(settings, dict) and VARIANT_NAME_KEY in settings:
@@ -760,17 +866,22 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             return ""
         return super()._entry_key(entry)
 
+    def _file_view(self, name: str) -> str:
+        node = _without_branch_ids({**self.to_yaml_dict(), "name": name})
+        return utils.dump_yaml(to_file_keys(utils.strip_strings(node)))
+
+    @property
+    def raw(self) -> str:
+        return self._file_view(self.name)
+
     def get_diff(self, other_resource: Resource) -> str:
         """Diff from Agent Studio's label when pull named the node differently."""
         if self.platform_label is None or not other_resource:
             return super().get_diff(other_resource)
-        saved = utils.dump_yaml(
-            utils.strip_strings({**self.to_yaml_dict(), "name": self.platform_label})
-        )
-        return utils.get_diff(saved, other_resource.raw)
+        return utils.get_diff(self._file_view(self.platform_label), other_resource.raw)
 
     def compute_hash(self) -> str:
-        node = self.to_yaml_dict()
+        node = _without_branch_ids(self.to_yaml_dict())
         if self.platform_label is not None:
             node["name"] = self.platform_label
         return utils.compute_hash_from_dict(utils.strip_strings(node))
@@ -782,6 +893,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         resource_id: str,
         name: str = "",
         known_position: Optional[dict] = None,
+        known_branches: Optional[list] = None,
         **kwargs,
     ) -> "OutboundCampaignNode":
         yaml_dict = utils.strip_strings(_plain(yaml_dict or {}))
@@ -789,7 +901,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         return cls(
             resource_id=resource_id,
             name=node_name,
-            data=normalise_node_data(yaml_dict),
+            data=normalise_node_data(with_branch_ids(yaml_dict, known_branches)),
             position=known_position,
         )
 
@@ -851,10 +963,13 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         file_path: str = None,
         **kwargs,
     ) -> dict:
-        """Name the nodes each route leads to, under `next` and `defaultNext`."""
+        """Name the nodes routes lead to, leave branch ids out, and write keys in snake_case.
+
+        Routes go under `next` and `default_next`.
+        """
         names = cls._names_by_id(resource_mappings, file_path)
-        d = map_route_targets(d, lambda target: names.get(target, target))
-        return _rename_route_keys(d, PRETTY_ROUTE_KEYS)
+        d = map_route_targets(_without_branch_ids(d), lambda target: names.get(target, target))
+        return to_file_keys(_rename_route_keys(d, PRETTY_ROUTE_KEYS))
 
     @classmethod
     def from_pretty_dict(
@@ -864,9 +979,9 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         file_path: str = None,
         **kwargs,
     ) -> dict:
-        """Turn the node names in routes back into node ids."""
-        yaml_dict = super().from_pretty_dict(
-            yaml_dict, resource_mappings=resource_mappings, **kwargs
+        """Read snake_case keys, and turn the node names in routes back into node ids."""
+        yaml_dict = from_file_keys(
+            super().from_pretty_dict(yaml_dict, resource_mappings=resource_mappings, **kwargs)
         )
         yaml_dict = _rename_route_keys(yaml_dict, {v: k for k, v in PRETTY_ROUTE_KEYS.items()})
         ids = {

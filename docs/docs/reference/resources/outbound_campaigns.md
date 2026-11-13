@@ -31,7 +31,7 @@ A campaign that has been published can't be deleted. Pause it, then archive it, 
 
 When a campaign is renamed in Agent Studio, a pull moves its folder, and your edits to its saved nodes and code move too, as for a renamed flow. Nodes and function files you added since the last pull stay in the old folder: move them across by hand.
 
-When two campaigns swap names in Agent Studio, or one is deleted and another renamed to its name, the folder then holds a different campaign. Edits you made there before the pull now apply to the campaign that has that name, and the next push sends them to it. A pull warns when this happens. Pull before editing after such changes.
+When two campaigns swap names in Agent Studio, or one is deleted and another renamed to its name, the folder then holds a different campaign. Edits you made there before the pull now apply to the campaign that has that name, and the next push sends them to it. Pull before editing after such changes.
 
 ## What a campaign contains
 
@@ -41,22 +41,22 @@ When two campaigns swap names in Agent Studio, or one is deleted and another ren
 |---|---|---|
 | `name` | Yes | The campaign's name, under 256 characters. |
 | `description` | No | Text under 1024 characters, or empty for none. |
-| `settings` | No | The campaign's settings (below). Fields left out take their defaults. |
+| `settings` | No | The campaign's settings (below). Fields left out take their defaults, and a pull leaves out settings that aren't set. |
 | `nodes` | No | The campaign's nodes (below), in any order you like. |
 
 ### Settings
 
 | Field | Description |
 |---|---|
-| `startDate`, `endDate` | ISO dates the campaign runs between. |
-| `fromNumber`, `smsFromNumber` | Numbers calls and texts come from. |
-| `defaultVariant` | Name of the variant the campaign's calls use. |
+| `start_date`, `end_date` | ISO dates the campaign runs between. |
+| `from_number`, `sms_from_number` | Numbers calls and texts come from. |
+| `default_variant` | Name of the variant the campaign's calls use. |
 | `country` | ISO 3166-1 alpha-2 code in capitals, e.g. `US`. Required to publish. |
-| `useCase` | `transactional` or `marketing`. Required to publish. |
-| `dailyContactLimit` | Most times a contact is reached per day. Defaults to `3`. |
-| `voiceDispatchLimits`, `smsDispatchLimits` | `maxConcurrent`, `perHour` and `perDay` caps. |
-| `defaultTimezone` | IANA time zone, used for a contact with none. |
-| `contactWindow` | `daysOfWeek` (`monday` to `sunday`), and `startTime` and `endTime` as `"HH:mm"` in the contact's time zone. |
+| `use_case` | `transactional` or `marketing`. Required to publish. |
+| `daily_contact_limit` | Most times a contact is reached per day. Defaults to `3`. |
+| `voice_dispatch_limits`, `sms_dispatch_limits` | `max_concurrent`, `per_hour` and `per_day` caps. |
+| `default_timezone` | IANA time zone, used for a contact with none. |
+| `contact_window` | `days_of_week` (`monday` to `sunday`), and `start_time` and `end_time` as `"HH:mm"` in the contact's time zone. |
 
 Settings the ADK doesn't know yet are kept as they were pulled, but the ADK can't send them. A settings change replaces every setting, so change the settings of a campaign that has any in Agent Studio, or update the ADK.
 
@@ -66,22 +66,22 @@ Each node has a `name`, unique in the campaign, and a `type` with that type's fi
 
 | Type | Fields |
 |---|---|
-| `trigger` | `function`, `routes` (each a `next` and an optional `outcome`), `sourceType` (`csv`, `api` or `webhook`; default `csv`), `ingestInterval` (`hourly`, `daily` or `manual`; default `daily`) |
-| `call` | `flowName`, `amdFlowName` (optional), `function`, `greeting`, `voicemailEnabled`, `voicemailScript` and `voicemailWhen` (`detection` or `final_retry`), `maxAttempts` (1 to 5), `backoff`, `backoffUnit` (`minutes`, `hours` or `days`), `defaultRoute` |
-| `sms` | `function`, `messageTemplate`, `replyFlowName`, `replyTimeoutValue` and `replyTimeoutUnit` (all optional), `defaultRoute` |
-| `conditional` | `function`, `branches` (each an `id`, `variable` and `next`), `defaultNext` |
+| `trigger` | `function`, `routes` (each a `next` and an optional `outcome`), `source_type` (`csv`, `api` or `webhook`; default `csv`), `ingest_interval` (`hourly`, `daily` or `manual`; default `daily`) |
+| `call` | `flow_name`, `amd_flow_name` (optional), `function`, `greeting`, `voicemail_enabled`, `voicemail_script` and `voicemail_when` (`detection` or `final_retry`), `max_attempts` (1 to 5), `backoff`, `backoff_unit` (`minutes`, `hours` or `days`), `default_route` |
+| `sms` | `function`, `message_template`, `reply_flow_name`, `reply_timeout_value` and `reply_timeout_unit` (all optional), `default_route` |
+| `conditional` | `function`, `branches` (each a `variable` and `next`), `default_next` |
 | `wait` | `amount`, `unit`, `next` |
 | `writeback` | `target` (`api` or `csv`), `function`, `next` |
-| `end` | `exitReason`, `writebackEnabled`, `function` (optional) |
+| `end` | `exit_reason`, `writeback_enabled`, `function` (optional) |
 
-`next`, `defaultNext` and `defaultRoute` name the node a contact moves to next. A call or text always moves to its `defaultRoute`; put a `conditional` after it to branch on how it went. Flow fields hold a [flow](./flows.md)'s name.
+`next`, `default_next` and `default_route` name the node a contact moves to next. Branches have no id in the file: a branch keeps its id in Agent Studio while its `variable` stays the same, and a new branch gets a new one. A call or text always moves to its `default_route`; put a `conditional` after it to branch on how it went. Flow fields hold a [flow](./flows.md)'s name.
 
 Every node except `wait` and `end` has a `function`, and an `end` node may have one. A function has a `name` (a valid Python name) and a `description`. Its code goes in the node's `.py` file, whose `def` line takes exactly the parameters the node is called with:
 
 | Node | Parameters |
 |---|---|
-| `trigger` with `sourceType: csv` | `contacts`, `outbound_campaign` |
-| `trigger` with `sourceType: api` | `outbound_campaign`, `sync` |
+| `trigger` with `source_type: csv` | `contacts`, `outbound_campaign` |
+| `trigger` with `source_type: api` | `outbound_campaign`, `sync` |
 | `writeback` with `target: csv` | `outbound_contacts`, `outbound_campaign` |
 | Any other `call`, `sms`, `conditional`, `writeback` or `end` | `outbound_contact`, `outbound_campaign` |
 
@@ -99,13 +99,13 @@ Node positions on the Agent Studio canvas are not in the file. A node keeps its 
 name: Appointment reminders
 description: Reminds patients of their appointment.
 settings:
-  fromNumber: '+15550100'
+  from_number: '+15550100'
   country: US
-  useCase: transactional
-  contactWindow:
-    daysOfWeek: [monday, tuesday, wednesday, thursday, friday]
-    startTime: '09:00'
-    endTime: '17:00'
+  use_case: transactional
+  contact_window:
+    days_of_week: [monday, tuesday, wednesday, thursday, friday]
+    start_time: '09:00'
+    end_time: '17:00'
 nodes:
 - name: Import contacts
   type: trigger
@@ -114,18 +114,18 @@ nodes:
   - next: Reminder call
 - name: Reminder call
   type: call
-  flowName: Reminder
+  flow_name: Reminder
   function: {name: call_args, description: Passes the appointment to the call.}
   greeting: Hi, this is a reminder about your appointment.
-  voicemailEnabled: false
-  maxAttempts: 2
+  voicemail_enabled: false
+  max_attempts: 2
   backoff: 1
-  backoffUnit: hours
-  defaultRoute: Done
+  backoff_unit: hours
+  default_route: Done
 - name: Done
   type: end
-  exitReason: completed
-  writebackEnabled: false
+  exit_reason: completed
+  writeback_enabled: false
 ~~~
 
 `functions/import_contacts.py`:
