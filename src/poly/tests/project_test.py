@@ -9047,6 +9047,18 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         success, message, _ = self.project.push_project(force=True)
         return success, message
 
+    def _move_folder(self, name: str) -> None:
+        renamed = os.path.join(self.root, "outbound_campaigns", name)
+        shutil.move(self.folder, renamed)
+        self.folder = renamed
+
+    def _rename_campaign(self, name: str, folder: str) -> dict:
+        self._move_folder(folder)
+        data = self._yaml()
+        data["name"] = name
+        self._write_yaml(data)
+        return data
+
     def test_pull_writes_named_nodes_and_their_function_files(self):
         files = sorted(
             os.path.relpath(os.path.join(directory, name), self.root)
@@ -9109,6 +9121,18 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         with open(os.path.join(self.folder, "functions", "trigger.py"), encoding="utf-8") as file:
             self.assertEqual(file.read(), "def map_contacts():\n    pass\n")
 
+    def test_deleting_the_trigger_of_a_saved_campaign_fails_validation(self):
+        data = self._yaml()
+        data["nodes"] = [node for node in data["nodes"] if node["type"] != "trigger"]
+        self._write_yaml(data)
+        os.remove(os.path.join(self.folder, "functions", "trigger.py"))
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertEqual(commands, [])
+        self.assertIn("rename or replace the trigger rather than delete it", message)
+
     def test_empty_campaign_passes_validation_before_and_after_its_push(self):
         """Only a campaign that had a trigger when last synced must keep one."""
         self._write_yaml(
@@ -9137,6 +9161,44 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             campaign["nodes"]["ids"].append(node["id"])
             campaign["nodes"]["entities"][node["id"]] = node
         return projection
+
+    def test_trigger_type_changes_fail_validation(self):
+        trigger_as_end = {"type": "end", "exitReason": "done", "writebackEnabled": False}
+        call_as_trigger = {
+            "type": "trigger",
+            "function": {"name": "call_args", "description": ""},
+            "routes": [],
+        }
+        cases = {
+            "trigger to end": (
+                {"Trigger": trigger_as_end},
+                ["The trigger can't change type", "rename or replace the trigger"],
+            ),
+            "call to a second trigger": (
+                {"First call": call_as_trigger},
+                ["A campaign can have only one trigger node."],
+            ),
+        }
+        original = self._yaml()
+        for case, (changes, messages) in cases.items():
+            with self.subTest(case=case):
+                data = deepcopy(original)
+                data["nodes"] = [
+                    {"name": node["name"], **changes[node["name"]]}
+                    if node["name"] in changes
+                    else node
+                    for node in data["nodes"]
+                ]
+                self._write_yaml(data)
+                os.remove(os.path.join(self.folder, "functions", "trigger.py"))
+
+                success, error, commands = self.project.push_project(dry_run=True)
+
+                self.assertFalse(success)
+                self.assertEqual(commands, [])
+                for message in messages:
+                    self.assertIn(message, error)
+                self._write_function("trigger", self.TRIGGER_CODE)
 
     def test_diff_shows_the_label_a_pull_replaced(self):
         self._pull_into_new_project(_campaign_projection(end_label=None))
@@ -9171,16 +9233,116 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(commands, [])
         self.assertIn("Name is required.", message)
 
+    def _assert_push_refused(self, message: str) -> None:
+        success, error, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertEqual(commands, [])
+        self.assertIn(message, error)
+        self.assertIn(message, "\n".join(self.project.validate_project()))
+
+    def test_rename_with_different_nodes_is_refused(self):
+        """Only the same node names and types say the new folder is the old campaign."""
+        data = self._rename_campaign("Monthly reminders", "monthly_reminders")
+        self._node(data, "End")["name"] = "Finish"
+        self._node(data, "First call")["defaultRoute"] = "Finish"
+        self._write_yaml(data)
+
+        self._assert_push_refused(
+            "'Reminders' would be deleted and 'Monthly reminders' created. To rename a "
+            "campaign's folder, rename it in a push of its own"
+        )
+
+    def test_two_copies_of_a_removed_campaign_are_refused(self):
+        original = self._yaml()
+        for name in ("copy_a", "copy_b"):
+            self._write_yaml(
+                {**original, "name": name}, os.path.join(self.root, "outbound_campaigns", name)
+            )
+        shutil.rmtree(self.folder)
+
+        self._assert_push_refused("'Reminders' would be deleted and 'copy_a', 'copy_b' created.")
+
+    def _pull_with_unknown_setting(self) -> dict:
+        projection = _campaign_projection()
+        self._entity(projection)["settings"]["quietHours"] = {"start": "21:00"}
+        self._pull_into_new_project(projection)
+        return self._yaml()
+
+    def test_settings_change_with_settings_the_adk_does_not_know_is_refused(self):
+        for key, value in (("quietHours", {"start": "22:00"}), ("country", "GB")):
+            with self.subTest(key=key):
+                data = self._pull_with_unknown_setting()
+                data["settings"][key] = value
+                self._write_yaml(data)
+
+                self._assert_push_refused(
+                    "Settings quietHours can't be sent from the ADK, and a settings change "
+                    "replaces them all."
+                )
+
+    def test_new_campaign_with_settings_the_adk_does_not_know_is_refused(self):
+        data = self._pull_with_unknown_setting()
+        self._write_yaml(
+            {**data, "name": "Renewals"}, os.path.join(self.root, "outbound_campaigns", "renewals")
+        )
+
+        self._assert_push_refused("Settings quietHours can't be sent from the ADK")
+
     def _pull_published(self) -> None:
         projection = _campaign_projection()
         self._entity(projection)["status"] = "active"
         self._pull_into_new_project(projection)
+
+    def test_published_campaign_folder_removed_is_refused(self):
+        self._pull_published()
+        shutil.rmtree(self.folder)
+
+        self._assert_push_refused(
+            "'Reminders' has been published, so it can't be deleted. To retire it, run "
+            "`poly campaign pause` then `poly campaign archive`"
+        )
+
+    def test_published_campaign_folder_removed_after_a_push_is_refused(self):
+        self._pull_published()
+        data = self._yaml()
+        data["description"] = "Edited"
+        self._write_yaml(data)
+        success, message = self._push_for_real()
+        self.assertTrue(success, message)
+        self._handler_patch.stop()
+        shutil.rmtree(self.folder)
+
+        self._assert_push_refused("'Reminders' has been published, so it can't be deleted.")
 
     def test_published_campaign_keeps_its_status_out_of_the_file(self):
         self._pull_published()
 
         self.assertNotIn("status", self._yaml())
         self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_published_trigger_source_type_change_is_refused(self):
+        self._pull_published()
+        data = self._yaml()
+        self._node(data, "Trigger")["sourceType"] = "api"
+        self._write_yaml(data)
+
+        self._assert_push_refused(
+            "The contact source stays 'csv' once the campaign has been published."
+        )
+
+    def test_published_trigger_source_type_change_with_a_folder_rename_is_refused(self):
+        self._pull_published()
+        data = self._rename_campaign("Monthly", "monthly")
+        self._node(data, "Trigger")["sourceType"] = "api"
+        self._write_yaml(data)
+        self._write_function(
+            "trigger", "def map_contacts(outbound_campaign, sync):\n    return {}\n"
+        )
+
+        self._assert_push_refused(
+            "The contact source stays 'csv' once the campaign has been published."
+        )
 
     def test_pushed_new_campaign_and_node_leave_nothing_to_push(self):
         data = self._yaml()
@@ -9262,6 +9424,30 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                 "outboundCampaigns": {"ids": list(entities), "entities": entities}
             }
         }
+
+    def test_retyped_node_with_a_legacy_def_line_fails_validation(self):
+        """A retype is pushed as a create, and Agent Studio checks the def line on create."""
+        projection = _campaign_projection()
+        self._entity(projection)["nodes"]["entities"]["call-1"]["data"]["function"]["code"] = (
+            "def call_args(contact):\n    return {}\n"
+        )
+        self._pull_into_new_project(projection)
+        data = self._yaml()
+        index = data["nodes"].index(self._node(data, "First call"))
+        data["nodes"][index] = {
+            "name": "First call",
+            "type": "sms",
+            "function": {"name": "call_args", "description": ""},
+            "messageTemplate": "Hi",
+            "defaultRoute": "End",
+        }
+        self._write_yaml(data)
+
+        success, message, commands = self.project.push_project(dry_run=True)
+
+        self.assertFalse(success)
+        self.assertEqual(commands, [])
+        self.assertIn("call_args must take exactly", message)
 
     CALL_CODE = "def call_args(outbound_contact, outbound_campaign):\n    return {}\n"
 

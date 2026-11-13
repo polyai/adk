@@ -94,8 +94,11 @@ from poly.resources.outbound_campaign import (
     OutboundCampaignFunction,
     OutboundCampaignNode,
     campaign_names,
+    def_line_error,
     function_file_stem,
+    function_parameters,
     node_names,
+    timezones,
 )
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
@@ -15700,11 +15703,54 @@ class OutboundCampaignTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, re.escape(message)):
                     campaign.validate(resource_mappings=[])
 
+    def test_validate_requires_a_trigger_only_in_a_campaign_that_had_one(self):
+        campaign = _campaign()
+        campaign.node_entries = [{"name": "End", "type": "end"}]
+
+        campaign.validate(resource_mappings=[])
+        campaign.had_trigger = True
+        with self.assertRaisesRegex(ValueError, "rename or replace the trigger rather than"):
+            campaign.validate(resource_mappings=[])
+
+    def test_node_validate_refuses_a_trigger_changing_type(self):
+        end = _campaign_nodes()["CMPGN-ONE:end-1"]
+        end.saved_type = "trigger"
+
+        with self.assertRaisesRegex(ValueError, "The trigger can't change type."):
+            end.validate(resource_mappings=None)
+        end.campaign_has_trigger = True
+        end.validate(resource_mappings=None)
+
     def test_validate_reports_unknown_top_level_fields(self):
         campaign = _campaign()
         campaign.unknown_keys = ["note"]
 
         with self.assertRaisesRegex(ValueError, "Unknown fields: note."):
+            campaign.validate(resource_mappings=[])
+
+    def test_validate_rejects_settings_the_platform_refuses(self):
+        window = {"daysOfWeek": ["monday"], "startTime": "09:00", "endTime": "17:00"}
+        cases = {
+            "can't be before 'startDate'": {"startDate": "2026-02-01", "endDate": "2026-01-31"},
+            "must be an ISO 3166-1": {"country": "XX"},
+            "in capitals": {"country": "gb"},
+            "needs at least one day": {"contactWindow": {**window, "daysOfWeek": []}},
+            'as "HH:mm"': {"contactWindow": {**window, "startTime": "9am"}},
+            "must end after it starts": {"contactWindow": {**window, "endTime": "08:00"}},
+            "'useCase' must be one of": {"useCase": "spam"},
+        }
+        for message, settings in cases.items():
+            with self.subTest(message=message):
+                campaign = _campaign()
+                campaign.settings = {**campaign.settings, **settings}
+                with self.assertRaisesRegex(ValueError, re.escape(message)):
+                    campaign.validate(resource_mappings=[])
+
+    @unittest.skipUnless(timezones(), "no IANA time zone database on this system")
+    def test_validate_rejects_an_unknown_time_zone(self):
+        campaign = _campaign()
+        campaign.settings = {**campaign.settings, "defaultTimezone": "Mars/Olympus_Mons"}
+        with self.assertRaisesRegex(ValueError, "must be an IANA time zone"):
             campaign.validate(resource_mappings=[])
 
     def test_dates_read_as_yaml_dates_are_read_as_iso_text(self):
@@ -15735,6 +15781,84 @@ class OutboundCampaignTests(unittest.TestCase):
         }
 
         campaign.validate(resource_mappings=[])
+
+    def test_node_validate_rejects_shapes_the_platform_refuses(self):
+        cases = {
+            "unknown fields for a call node: routes": {"routes": []},
+            "a call node needs 'greeting'": {"greeting": None},
+            "'maxAttempts' must be a whole number from 1 to 5": {"maxAttempts": 9},
+            "'backoffUnit' must be one of": {"backoffUnit": "weeks"},
+            "'voicemailScript' is required when voicemailEnabled is true": {
+                "voicemailEnabled": True
+            },
+            "'function.name' must be a valid Python name": {
+                "function": {"name": "1x", "description": ""}
+            },
+        }
+        for message, change in cases.items():
+            with self.subTest(message=message):
+                call = _campaign_nodes()["CMPGN-ONE:call-1"]
+                call.data = {**call.data, **change}
+                with self.assertRaisesRegex(ValueError, re.escape(message)):
+                    call.validate(resource_mappings=None)
+
+    def test_node_validate_rejects_a_route_to_a_node_not_in_the_campaign(self):
+        nodes = _campaign_nodes()
+        call = nodes["CMPGN-ONE:call-1"]
+        call.data["defaultRoute"] = "Goodbye"
+
+        with self.assertRaisesRegex(ValueError, "'Goodbye' is not a node in this campaign."):
+            call.validate(resource_mappings=_node_mappings(nodes))
+
+    def test_node_validate_rejects_code_for_a_node_without_a_function(self):
+        end = _campaign_nodes()["CMPGN-ONE:end-1"]
+        end.code = "def finish(outbound_contact, outbound_campaign):\n    pass\n"
+
+        with self.assertRaisesRegex(ValueError, "has code, but the node has no function"):
+            end.validate(resource_mappings=None)
+
+    def test_def_line_must_take_exactly_the_node_parameters(self):
+        contact = ("outbound_contact: OutboundContact", "outbound_campaign: OutboundCampaign")
+        cases = {
+            "def f(outbound_contact, outbound_campaign):\n    pass": None,
+            "def f(outbound_campaign: OutboundCampaign, outbound_contact=None):  # ok\n    pass": None,
+            "def f(outbound_contact, outbound_campaign): return {}": None,
+            "import os\n\ndef f(x):\n    pass\n\ndef f(outbound_contact, outbound_campaign):\n    pass": None,
+            "def f(outbound_contact):\n    pass": "f must take exactly (outbound_contact, outbound_campaign), not (outbound_contact)",
+            "def f(\n    outbound_contact, outbound_campaign\n):\n    pass": "with its whole def line",
+            "def g(outbound_contact, outbound_campaign):\n    pass": "with its whole def line",
+            "   ": None,
+        }
+        for code, error in cases.items():
+            with self.subTest(code=code):
+                found = def_line_error("f", code, contact)
+                if error is None:
+                    self.assertIsNone(found)
+                else:
+                    self.assertIn(error, found)
+
+    def test_function_parameters_follow_the_node_type(self):
+        cases = [
+            ({"type": "trigger", "sourceType": "csv"}, ("contacts", "outbound_campaign")),
+            ({"type": "trigger", "sourceType": "api"}, ("outbound_campaign", "sync")),
+            ({"type": "trigger", "sourceType": "webhook"}, None),
+            ({"type": "writeback", "target": "csv"}, ("outbound_contacts", "outbound_campaign")),
+            ({"type": "writeback", "target": "api"}, ("outbound_contact", "outbound_campaign")),
+            ({"type": "wait"}, None),
+            ({"type": "end"}, ("outbound_contact", "outbound_campaign")),
+        ]
+        for data, names in cases:
+            with self.subTest(data=data):
+                parameters = function_parameters(data)
+                self.assertEqual(
+                    tuple(p.split(":")[0] for p in parameters) if parameters else None, names
+                )
+
+    def test_node_validate_reports_a_wrong_def_line_with_its_file(self):
+        trigger = _campaign_nodes()["CMPGN-ONE:trigger-1"]
+
+        with self.assertRaisesRegex(ValueError, r"trigger\.py: map_contacts must take exactly"):
+            trigger.validate(resource_mappings=None)
 
     def test_function_file_needs_its_node(self):
         campaign, nodes = _campaign(), _campaign_nodes()

@@ -135,6 +135,30 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
     return {"contacts": [...]}
 ~~~
 
+## Validation
+
+`poly validate` and `poly push` check:
+
+- `name` is present and under 256 characters, and `description` under 1024.
+- The folder name matches the campaign's name.
+- A campaign deleted in the push has never been published, and is not replaced by a new one: a renamed folder keeps its nodes' names and types.
+- Settings have the right types and allowed values:
+    - `useCase` is `transactional` or `marketing`, and limits are positive whole numbers.
+    - `country` is a real ISO 3166-1 alpha-2 code, in capitals.
+    - `defaultTimezone` is a valid IANA time zone.
+    - `endDate` is not before `startDate`.
+    - `contactWindow` has at least one day, its times are `HH:mm`, and it ends after it starts.
+    - A campaign with settings the ADK doesn't know has no settings changed, and a new campaign has none.
+- `nodes` is a list, every node has a name, and names are unique in the campaign, ignoring case and punctuation.
+- There is at most one `trigger` node, and a campaign that has a trigger in Agent Studio keeps one: rename or replace its trigger rather than delete it.
+- The trigger changes `type` only when another node becomes the trigger in the same push, and a published campaign's trigger keeps its `sourceType`.
+- Each node has a known `type`, its required fields, allowed values, and no fields its type doesn't have.
+- `voicemailScript` and `voicemailWhen` are set when `voicemailEnabled` is true.
+- On a node that is new, changed type or had its routes changed, every route names a node in the campaign. Agent Studio keeps a route to a deleted node until you change it.
+- Function names are valid Python names, and `code` is not in the YAML.
+- On a node that is new, changed type, or had its code, function name or parameters changed, the function's `def` line is whole on one line and takes exactly the node's parameters.
+- Every file in `functions/` belongs to a node with a function, and a node's file is named after it. After renaming a node, rename its file too.
+
 ## Best practices
 
 - Name nodes after what they do, like `Reminder call`, so routes read clearly.

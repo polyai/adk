@@ -1,13 +1,19 @@
 """Copyright PolyAI Limited"""
 
+import ast
 import datetime
+import functools
+import keyword
 import logging
 import os
+import re
+import zoneinfo
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, ClassVar, Optional
 
 import poly.resources.resource_utils as utils
+from poly.resources.countries import COUNTRY_CODES
 from poly.resources.resource import (
     MultiResourceYamlResource,
     Resource,
@@ -46,6 +52,10 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
 }
 DISPATCH_LIMIT_KEYS = ("maxConcurrent", "perHour", "perDay")
 CONTACT_WINDOW_KEYS = ("daysOfWeek", "startTime", "endTime")
+DAYS_OF_WEEK = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+USE_CASES = ("transactional", "marketing")
+TIME_UNITS = ("minutes", "hours", "days")
+TIME_OF_DAY = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 NODE_FIELDS: dict[str, tuple[str, ...]] = {
     "trigger": ("function", "routes", "sourceType", "ingestInterval"),
@@ -81,6 +91,44 @@ NODE_DEFAULTS: dict[str, dict[str, Any]] = {
     "sms": {"defaultRoute": None},
     "conditional": {"defaultTargetNodeId": None},
 }
+NODE_REQUIRED: dict[str, tuple[str, ...]] = {
+    "trigger": ("function",),
+    "call": (
+        "flowName",
+        "function",
+        "greeting",
+        "voicemailEnabled",
+        "maxAttempts",
+        "backoff",
+        "backoffUnit",
+    ),
+    "sms": ("function", "messageTemplate"),
+    "conditional": ("function", "branches"),
+    "wait": ("amount", "unit", "targetNodeId"),
+    "writeback": ("target", "function", "targetNodeId"),
+    "end": ("exitReason", "writebackEnabled"),
+}
+NODE_ENUMS: dict[str, dict[str, tuple[str, ...]]] = {
+    "trigger": {
+        "sourceType": ("csv", "api", "webhook"),
+        "ingestInterval": ("hourly", "daily", "manual"),
+    },
+    "call": {"voicemailWhen": ("detection", "final_retry"), "backoffUnit": TIME_UNITS},
+    "sms": {"replyTimeoutUnit": TIME_UNITS},
+    "wait": {"unit": TIME_UNITS},
+    "writeback": {"target": ("api", "csv")},
+}
+NODE_STRING_FIELDS = {
+    "flowName",
+    "amdFlowName",
+    "greeting",
+    "voicemailScript",
+    "messageTemplate",
+    "replyFlowName",
+    "targetNodeId",
+    "exitReason",
+}
+NODE_NULLABLE_STRING_FIELDS = {"defaultRoute", "defaultTargetNodeId"}
 DEFAULT_NODE_NAMES = {
     "trigger": "Trigger",
     "call": "Voice call",
@@ -91,6 +139,25 @@ DEFAULT_NODE_NAMES = {
     "end": "End",
 }
 PRETTY_ROUTE_KEYS = {"targetNodeId": "next", "defaultTargetNodeId": "defaultNext"}
+
+CSV_TRIGGER_PARAMETERS = ("contacts: list[dict]", "outbound_campaign: OutboundCampaign")
+API_TRIGGER_PARAMETERS = ("outbound_campaign: OutboundCampaign", "sync: dict")
+CSV_WRITEBACK_PARAMETERS = (
+    "outbound_contacts: list[OutboundContact]",
+    "outbound_campaign: OutboundCampaign",
+)
+PER_CONTACT_PARAMETERS = (
+    "outbound_contact: OutboundContact",
+    "outbound_campaign: OutboundCampaign",
+)
+
+PYTHONIC_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+@functools.cache
+def timezones() -> frozenset[str]:
+    """The IANA time zones this system knows, lowercased; empty with no time zone database."""
+    return frozenset(zone.lower() for zone in zoneinfo.available_timezones())
 
 
 def _plain(value: Any) -> Any:
@@ -191,6 +258,13 @@ def map_route_targets(data: dict, change: Callable[[str], str]) -> dict:
                 for item in data[key]
             ]
     return data
+
+
+def route_targets(data: dict) -> list[str]:
+    """Return the ids (or names) of every node `data` routes to, in order."""
+    targets: list[str] = []
+    map_route_targets(data, lambda target: targets.append(target) or target)
+    return targets
 
 
 def _rename_route_keys(data: dict, renames: dict[str, str]) -> dict:
@@ -327,6 +401,61 @@ def _campaign_folders_on_disk(base_path: str) -> list[str]:
     ]
 
 
+def campaign_nodes(changes: dict, campaign_id: str) -> dict[str, "OutboundCampaignNode"]:
+    """Return the nodes of campaign `campaign_id` among `changes`, by name."""
+    return {
+        node.name: node
+        for node in changes.get(OutboundCampaignNode, {}).values()
+        if isinstance(node, OutboundCampaignNode) and node.campaign_id == campaign_id
+    }
+
+
+def node_pairing_key(node: "OutboundCampaignNode") -> tuple[Optional[str], Optional[str]]:
+    """Return what pairs a node across a campaign rename: its name and type, or the trigger."""
+    node_type = node.data.get("type") if isinstance(node.data, dict) else None
+    return (None if node_type == "trigger" else node.name, node_type)
+
+
+def _node_signature(nodes: dict[str, "OutboundCampaignNode"]) -> tuple:
+    return tuple(sorted((node_pairing_key(node) for node in nodes.values()), key=repr))
+
+
+def _source_type_error(source: Optional[str]) -> str:
+    return f"The contact source stays '{source}' once the campaign has been published."
+
+
+def _source_type_errors(
+    saved: dict[str, "OutboundCampaignNode"], local: dict[str, "OutboundCampaignNode"]
+) -> list[str]:
+    saved_trigger = next((node.data for node in saved.values() if node.is_trigger), {})
+    local_trigger = next((node.data for node in local.values() if node.is_trigger), {})
+    source = saved_trigger.get("sourceType")
+    return [] if local_trigger.get("sourceType") == source else [_source_type_error(source)]
+
+
+def paired_campaigns(new_resources: dict, deleted_resources: dict) -> dict[str, str]:
+    """Pair each deleted campaign with the new one its folder was renamed to, by old id.
+
+    A rename reads as a delete and a create. They pair when the new campaign's nodes have
+    exactly the names and types of the deleted campaign's, and no other campaign's on either
+    side has the same.
+    """
+    new_signatures = {
+        campaign_id: _node_signature(campaign_nodes(new_resources, campaign_id))
+        for campaign_id in new_resources.get(OutboundCampaign, {})
+    }
+    old_signatures = {
+        campaign_id: _node_signature(campaign_nodes(deleted_resources, campaign_id))
+        for campaign_id in deleted_resources.get(OutboundCampaign, {})
+    }
+    pairs = {}
+    for old_id, signature in old_signatures.items():
+        matches = [new_id for new_id, other in new_signatures.items() if other == signature]
+        if signature and len(matches) == 1 and list(old_signatures.values()).count(signature) == 1:
+            pairs[old_id] = matches[0]
+    return pairs
+
+
 @register_resource("outbound_campaigns")
 @dataclass
 class OutboundCampaign(MultiResourceYamlResource):
@@ -335,6 +464,7 @@ class OutboundCampaign(MultiResourceYamlResource):
     The same file holds the campaign's nodes under `nodes`, each an `OutboundCampaignNode`;
     this resource reads and writes only its own keys. `platform_label` is set only when pull
     renamed the campaign because another has its name, so the next push sends the new name.
+    `status` is kept from the last pull and never written to the file or sent.
     """
 
     resource_id_prefix = "CMPGN"
@@ -344,9 +474,12 @@ class OutboundCampaign(MultiResourceYamlResource):
     settings: dict = field(default_factory=lambda: normalise_settings({}))
     folder_name: str = ""
     platform_label: Optional[str] = field(default=None, repr=False, compare=False)
+    status: Optional[str] = field(default=None, repr=False, compare=False)
 
     node_entries: Any = field(default=None, init=False, repr=False, compare=False)
     unknown_keys: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
+    had_trigger: bool = field(default=False, init=False, repr=False, compare=False)
+    saved_settings: Optional[dict] = field(default=None, init=False, repr=False, compare=False)
 
     @property
     def folder(self) -> str:
@@ -400,6 +533,9 @@ class OutboundCampaign(MultiResourceYamlResource):
         yaml_dict: dict,
         resource_id: str,
         name: str = "",
+        had_trigger: bool = False,
+        known_status: Optional[str] = None,
+        known_settings: Optional[dict] = None,
         **kwargs,
     ) -> "OutboundCampaign":
         yaml_dict = utils.strip_strings(_plain(yaml_dict or {}))
@@ -408,7 +544,10 @@ class OutboundCampaign(MultiResourceYamlResource):
             name=yaml_dict.get("name") or "",
             description=yaml_dict.get("description"),
             settings=normalise_settings(yaml_dict.get("settings")),
+            status=known_status,
         )
+        campaign.had_trigger = had_trigger
+        campaign.saved_settings = known_settings
         return campaign
 
     @classmethod
@@ -511,6 +650,7 @@ class OutboundCampaign(MultiResourceYamlResource):
                 settings=utils.strip_strings(normalise_settings(campaign.get("settings"))),
                 folder_name=utils.clean_name(name),
                 platform_label=None if label == name else label,
+                status=campaign.get("status"),
             )
         return resources
 
@@ -611,9 +751,19 @@ class OutboundCampaign(MultiResourceYamlResource):
                 errors.append("Description must be under 1024 characters.")
         if self.unknown_keys:
             errors.append(f"Unknown fields: {', '.join(self.unknown_keys)}.")
-        if not isinstance(self.settings, dict):
-            errors.append("Settings must be a mapping.")
+        errors.extend(_settings_errors(self.settings))
+        if self.saved_settings is not None and self.settings != self.saved_settings:
+            errors.extend(_unsendable_settings_errors(self.settings))
         errors.extend(_node_entry_errors(self.node_entries))
+        if (
+            self.had_trigger
+            and isinstance(self.node_entries, (list, type(None)))
+            and not _has_trigger(self.node_entries)
+        ):
+            errors.append(
+                "The campaign needs its trigger node: rename or replace the trigger rather than "
+                "delete it."
+            )
 
         variant_id = self.settings.get(VARIANT_ID_KEY) if isinstance(self.settings, dict) else None
         if variant_id and resource_mappings is not None:
@@ -624,6 +774,53 @@ class OutboundCampaign(MultiResourceYamlResource):
     def is_modified(self, other_hash: str) -> bool:
         """Treat a node list that can't be read as a change, so validation reports it."""
         return super().is_modified(other_hash) or bool(_node_entry_errors(self.node_entries))
+
+    @classmethod
+    def validate_creates_and_deletes(
+        cls, new_resources: dict, deleted_resources: dict
+    ) -> list[str]:
+        """Refuse deleting a published campaign, or one whose folder rename can't be paired.
+
+        A delete and a create in one push would replace a campaign rather than rename it, so
+        they are refused unless pairing makes them a rename. A draft can still be deleted alone.
+        A new campaign is refused settings the ADK can't send, unless a rename keeps them as
+        they were.
+        """
+        paired = paired_campaigns(new_resources, deleted_resources)
+        created = [
+            campaign.name
+            for campaign_id, campaign in new_resources.get(cls, {}).items()
+            if campaign_id not in paired.values()
+        ]
+        renamed_from = {new_id: old_id for old_id, new_id in paired.items()}
+        errors = []
+        for campaign_id, campaign in new_resources.get(cls, {}).items():
+            saved = deleted_resources.get(cls, {}).get(renamed_from.get(campaign_id))
+            if saved is None or campaign.settings != saved.settings:
+                errors.extend(_unsendable_settings_errors(campaign.settings))
+        for campaign_id, campaign in deleted_resources.get(cls, {}).items():
+            if campaign_id in paired:
+                if campaign.status not in (None, "draft"):
+                    errors.extend(
+                        _source_type_errors(
+                            campaign_nodes(deleted_resources, campaign_id),
+                            campaign_nodes(new_resources, paired[campaign_id]),
+                        )
+                    )
+                continue
+            if campaign.status not in (None, "draft"):
+                errors.append(
+                    f"'{campaign.name}' has been published, so it can't be deleted. To retire "
+                    "it, run `poly campaign pause` then `poly campaign archive`, and restore its "
+                    "folder here. It stops being pulled once it's archived."
+                )
+            elif created:
+                errors.append(
+                    f"'{campaign.name}' would be deleted and "
+                    f"{', '.join(repr(name) for name in created)} created. To rename a "
+                    "campaign's folder, rename it in a push of its own, with its nodes as they are."
+                )
+        return errors
 
     def build_create_proto(self):
         raise NotImplementedError("Outbound campaigns can't be pushed yet.")
@@ -675,6 +872,274 @@ def _node_entry_errors(entries: Any) -> list[str]:
     return errors
 
 
+def _has_trigger(entries: Optional[list]) -> bool:
+    return any(
+        isinstance(entry, dict) and entry.get("type") == "trigger" for entry in entries or []
+    )
+
+
+def _unsendable_settings_errors(settings: Any) -> list[str]:
+    unknown = sorted(set(settings) - set(SETTINGS_DEFAULTS)) if isinstance(settings, dict) else []
+    if not unknown:
+        return []
+    return [
+        f"Settings {', '.join(unknown)} can't be sent from the ADK, and a settings change "
+        "replaces them all. Change this campaign's settings in Agent Studio, or update the ADK."
+    ]
+
+
+def _settings_errors(settings: Any) -> list[str]:
+    if not isinstance(settings, dict):
+        return ["Settings must be a mapping."]
+    errors = []
+    for key in (
+        "startDate",
+        "endDate",
+        "fromNumber",
+        "smsFromNumber",
+        "defaultVariantId",
+        "defaultTimezone",
+    ):
+        if settings.get(key) is not None and not isinstance(settings[key], str):
+            errors.append(f"Setting '{key}' must be text or null.")
+    start, end = settings.get("startDate"), settings.get("endDate")
+    if isinstance(start, str) and isinstance(end, str) and end < start:
+        errors.append("Setting 'endDate' can't be before 'startDate'.")
+    country = settings.get("country")
+    if country is not None and country not in COUNTRY_CODES:
+        errors.append(
+            "Setting 'country' must be an ISO 3166-1 alpha-2 country code in capitals, e.g. US."
+        )
+    timezone = settings.get("defaultTimezone")
+    if isinstance(timezone, str) and timezones() and timezone.lower() not in timezones():
+        errors.append(f"Setting 'defaultTimezone' must be an IANA time zone, not '{timezone}'.")
+    use_case = settings.get("useCase")
+    if use_case is not None and use_case not in USE_CASES:
+        errors.append(f"Setting 'useCase' must be one of: {', '.join(USE_CASES)}.")
+    if not _is_positive_int_or_none(settings.get("dailyContactLimit")):
+        errors.append("Setting 'dailyContactLimit' must be a positive whole number or null.")
+    for key in ("voiceDispatchLimits", "smsDispatchLimits"):
+        limits = settings.get(key)
+        if limits is None:
+            continue
+        if not isinstance(limits, dict):
+            errors.append(f"Setting '{key}' must be a mapping or null.")
+            continue
+        for limit_key, value in limits.items():
+            if limit_key not in DISPATCH_LIMIT_KEYS:
+                errors.append(f"Setting '{key}' has an unknown field '{limit_key}'.")
+            elif not _is_positive_int_or_none(value):
+                errors.append(
+                    f"Setting '{key}.{limit_key}' must be a positive whole number or null."
+                )
+    window = settings.get("contactWindow")
+    if window is not None:
+        if not isinstance(window, dict):
+            errors.append("Setting 'contactWindow' must be a mapping or null.")
+        else:
+            errors.extend(_contact_window_errors(window))
+    return errors
+
+
+def _contact_window_errors(window: dict) -> list[str]:
+    errors = []
+    days = window.get("daysOfWeek")
+    if not isinstance(days, list) or any(day not in DAYS_OF_WEEK for day in days):
+        errors.append(
+            f"Setting 'contactWindow.daysOfWeek' must be a list of: {', '.join(DAYS_OF_WEEK)}."
+        )
+    elif not days:
+        errors.append("Setting 'contactWindow' needs at least one day.")
+    times = [window.get(key) for key in ("startTime", "endTime")]
+    for key, value in zip(("startTime", "endTime"), times):
+        if not isinstance(value, str) or not TIME_OF_DAY.fullmatch(value):
+            errors.append(f"Setting 'contactWindow.{key}' must be a time of day, as \"HH:mm\".")
+    if all(isinstance(value, str) and TIME_OF_DAY.fullmatch(value) for value in times):
+        if times[1] <= times[0]:
+            errors.append("Setting 'contactWindow' must end after it starts, on the same day.")
+    unknown = sorted(set(window) - set(CONTACT_WINDOW_KEYS))
+    if unknown:
+        errors.append(f"Setting 'contactWindow' has unknown fields: {', '.join(unknown)}.")
+    return errors
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_positive_int_or_none(value: Any) -> bool:
+    return value is None or (_is_int(value) and value > 0)
+
+
+def _function_errors(function: Any, function_file: str) -> list[str]:
+    if not isinstance(function, dict):
+        return ["'function' must be a mapping with a name and description."]
+    errors = []
+    if "code" in function:
+        errors.append(
+            f"'function.code' does not belong in {CAMPAIGN_FILE}: put the code in {function_file}."
+        )
+    unknown = sorted(set(function) - set(FUNCTION_KEYS) - {"code"})
+    if unknown:
+        errors.append(f"'function' has unknown fields: {', '.join(unknown)}.")
+    name = function.get("name")
+    if not isinstance(name, str) or not PYTHONIC_NAME.fullmatch(name):
+        errors.append("'function.name' must be a valid Python name.")
+    elif keyword.iskeyword(name):
+        errors.append(f"'function.name' cannot be the Python keyword '{name}'.")
+    if not isinstance(function.get("description"), str):
+        errors.append("'function.description' is required.")
+    return errors
+
+
+def _routes_errors(routes: Any) -> list[str]:
+    if not isinstance(routes, list):
+        return ["'routes' must be a list."]
+    for route in routes:
+        if not isinstance(route, dict) or not isinstance(route.get("targetNodeId"), str):
+            return ["Each route needs a 'next'."]
+        if route.get("outcome") is not None and not isinstance(route["outcome"], str):
+            return ["A route's 'outcome' must be text."]
+        if set(route) - {"targetNodeId", "outcome"}:
+            return ["A route has only 'next' and 'outcome'."]
+    return []
+
+
+def node_data_errors(data: Any, function_file: str) -> list[str]:
+    """Return what the platform would refuse in a node's type and fields."""
+    if not isinstance(data, dict):
+        return ["must be a mapping."]
+    node_type = data.get("type")
+    if node_type not in NODE_FIELDS:
+        return [f"'type' must be one of: {', '.join(NODE_FIELDS)}."]
+
+    errors = []
+    unknown = sorted(set(data) - {"type", *NODE_FIELDS[node_type]})
+    if unknown:
+        pretty = [PRETTY_ROUTE_KEYS.get(key, key) for key in unknown]
+        errors.append(f"unknown fields for a {node_type} node: {', '.join(pretty)}.")
+    missing = [key for key in NODE_REQUIRED[node_type] if data.get(key) is None]
+    if missing:
+        pretty = [repr(PRETTY_ROUTE_KEYS.get(key, key)) for key in missing]
+        errors.append(f"a {node_type} node needs {', '.join(pretty)}.")
+    for key, allowed in NODE_ENUMS.get(node_type, {}).items():
+        if data.get(key) is not None and data[key] not in allowed:
+            errors.append(f"'{key}' must be one of: {', '.join(allowed)}.")
+    for key in NODE_STRING_FIELDS & set(data):
+        if data[key] is not None and not isinstance(data[key], str):
+            errors.append(f"'{PRETTY_ROUTE_KEYS.get(key, key)}' must be text.")
+    for key in NODE_NULLABLE_STRING_FIELDS & set(data):
+        if data[key] is not None and not isinstance(data[key], str):
+            errors.append(f"'{PRETTY_ROUTE_KEYS.get(key, key)}' must be a node name or null.")
+    if data.get("function") is not None:
+        errors.extend(_function_errors(data["function"], function_file))
+    if "routes" in data:
+        errors.extend(_routes_errors(data["routes"]))
+
+    if node_type == "call":
+        attempts = data.get("maxAttempts")
+        if attempts is not None and not (_is_int(attempts) and 1 <= attempts <= 5):
+            errors.append("'maxAttempts' must be a whole number from 1 to 5.")
+        backoff = data.get("backoff")
+        if backoff is not None and not (_is_int(backoff) and backoff >= 0):
+            errors.append("'backoff' must be a whole number, 0 or more.")
+        if data.get("voicemailEnabled") is not None and not isinstance(
+            data["voicemailEnabled"], bool
+        ):
+            errors.append("'voicemailEnabled' must be true or false.")
+        if data.get("voicemailEnabled"):
+            for key in ("voicemailScript", "voicemailWhen"):
+                if data.get(key) is None:
+                    errors.append(f"'{key}' is required when voicemailEnabled is true.")
+    elif node_type == "sms":
+        timeout = data.get("replyTimeoutValue")
+        if timeout is not None and not (_is_int(timeout) and timeout >= 0):
+            errors.append("'replyTimeoutValue' must be a whole number, 0 or more.")
+    elif node_type == "conditional":
+        branches = data.get("branches")
+        if branches is not None and (
+            not isinstance(branches, list)
+            or not all(
+                isinstance(branch, dict)
+                and all(
+                    isinstance(branch.get(key), str) for key in ("id", "variable", "targetNodeId")
+                )
+                for branch in branches
+            )
+        ):
+            errors.append("Each branch needs text 'id', 'variable' and 'next'.")
+    elif node_type == "wait":
+        amount = data.get("amount")
+        if amount is not None and not (_is_int(amount) and amount > 0):
+            errors.append("'amount' must be a positive whole number.")
+    elif node_type == "end":
+        if data.get("writebackEnabled") is not None and not isinstance(
+            data["writebackEnabled"], bool
+        ):
+            errors.append("'writebackEnabled' must be true or false.")
+    return errors
+
+
+def function_parameters(data: dict) -> Optional[tuple[str, ...]]:
+    """Return the parameters the node's function is called with, or None if it runs none."""
+    node_type = data.get("type")
+    if node_type == "wait":
+        return None
+    if node_type == "trigger":
+        source = data.get("sourceType")
+        if source == "webhook":
+            return None
+        return API_TRIGGER_PARAMETERS if source == "api" else CSV_TRIGGER_PARAMETERS
+    if node_type == "writeback" and data.get("target") == "csv":
+        return CSV_WRITEBACK_PARAMETERS
+    return PER_CONTACT_PARAMETERS
+
+
+def def_line_error(function_name: str, code: str, parameters: tuple[str, ...]) -> Optional[str]:
+    """Say why `code` doesn't define `function_name` with exactly `parameters`, or return None.
+
+    The platform reads the last top-level `def` of the function, which must be whole on one line
+    and end in a colon. Parameters are passed by name, so only their names have to match.
+    """
+    if not code.strip():
+        return None
+    def_line = f"def {function_name}({', '.join(parameters)}):"
+    whole_line = (
+        f"the code must define {function_name} with its whole def line, ending in a colon, "
+        f"on one line at the left margin: `{def_line}`"
+    )
+    pattern = re.compile(rf"^def\s+{re.escape(function_name)}\s*\(")
+    lines = [line for line in code.splitlines() if pattern.match(line)]
+    if not lines:
+        return whole_line
+    definition = None
+    for source in (lines[-1], f"{lines[-1]}\n    pass"):
+        try:
+            definition = ast.parse(source).body[0]
+            break
+        except SyntaxError:
+            continue
+    if not isinstance(definition, ast.FunctionDef):
+        return whole_line
+    arguments = definition.args
+    found = [
+        argument.arg
+        for argument in (
+            *arguments.posonlyargs,
+            *arguments.args,
+            *([arguments.vararg] if arguments.vararg else []),
+            *arguments.kwonlyargs,
+            *([arguments.kwarg] if arguments.kwarg else []),
+        )
+    ]
+    expected = [parameter.split(":")[0].strip() for parameter in parameters]
+    if sorted(found) != sorted(expected):
+        return (
+            f"{function_name} must take exactly ({', '.join(expected)}), not ({', '.join(found)})"
+        )
+    return None
+
+
 @register_resource("outbound_campaign_nodes")
 @dataclass
 class OutboundCampaignNode(MultiResourceYamlResource):
@@ -695,6 +1160,12 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     position: Optional[dict] = None
     code: str = ""
     platform_label: Optional[str] = field(default=None, repr=False, compare=False)
+    campaign_published: bool = field(default=False, repr=False, compare=False)
+
+    saved_type: Optional[str] = field(default=None, init=False, repr=False, compare=False)
+    saved_data: Optional[dict] = field(default=None, init=False, repr=False, compare=False)
+    saved_code: Optional[str] = field(default=None, init=False, repr=False, compare=False)
+    campaign_has_trigger: bool = field(default=False, init=False, repr=False, compare=False)
 
     @property
     def campaign_id(self) -> str:
@@ -715,6 +1186,11 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             NODES_KEY,
             utils.clean_name(self.name, lowercase=False),
         )
+
+    @property
+    def is_trigger(self) -> bool:
+        """Whether the node is its campaign's trigger."""
+        return isinstance(self.data, dict) and self.data.get("type") == "trigger"
 
     @property
     def platform_name(self) -> str:
@@ -782,16 +1258,25 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         resource_id: str,
         name: str = "",
         known_position: Optional[dict] = None,
+        known_type: Optional[str] = None,
+        known_data: Optional[dict] = None,
+        known_code: Optional[str] = None,
+        known_published: bool = False,
         **kwargs,
     ) -> "OutboundCampaignNode":
         yaml_dict = utils.strip_strings(_plain(yaml_dict or {}))
         node_name = yaml_dict.pop("name", None) or name
-        return cls(
+        node = cls(
             resource_id=resource_id,
             name=node_name,
             data=normalise_node_data(yaml_dict),
             position=known_position,
         )
+        node.saved_type = known_type
+        node.saved_data = known_data
+        node.saved_code = known_code
+        node.campaign_published = known_published
+        return node
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "OutboundCampaignNode"]:
@@ -813,6 +1298,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
                     position=_normalise_position(platform_node.get("position")),
                     code=(data.get("function") or {}).get("code") or "",
                     platform_label=None if label == name else label,
+                    campaign_published=campaign.get("status") not in (None, "draft"),
                 )
                 nodes[node.resource_id] = node
         return nodes
@@ -879,7 +1365,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     def read_local_resource(
         cls, file_path: str, resource_id: str, resource_name: str, **kwargs
     ) -> "OutboundCampaignNode":
-        """Read the node's entry, and the code in its function file."""
+        """Read the node's entry, and the code in its function file to send with it."""
         node: OutboundCampaignNode = super().read_local_resource(
             file_path, resource_id=resource_id, resource_name=resource_name, **kwargs
         )
@@ -890,6 +1376,9 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         )
         if os.path.isfile(code_path):
             node.code = Resource.read_from_file(code_path)
+        top = cls._get_top_level_data(true_file_path)
+        entries = top.get(NODES_KEY) if isinstance(top, dict) else None
+        node.campaign_has_trigger = _has_trigger(entries if isinstance(entries, list) else None)
         return node
 
     @classmethod
@@ -916,8 +1405,61 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         return discovered
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        errors = node_data_errors(self.data, self.function_file)
+        if (
+            self.saved_type == "trigger"
+            and not self.campaign_has_trigger
+            and (not isinstance(self.data, dict) or self.data.get("type") != "trigger")
+        ):
+            errors.append("The trigger can't change type unless another node becomes the trigger.")
+        source = self.saved_data.get("sourceType") if self.saved_data else None
+        if (
+            self.campaign_published
+            and self.saved_type == "trigger"
+            and self.is_trigger
+            and self.data.get("sourceType") != source
+        ):
+            errors.append(_source_type_error(source))
         if len(self.name) > 256:
-            raise ValueError("The name must be under 256 characters.")
+            errors.append("The name must be under 256 characters.")
+        if resource_mappings is not None and isinstance(self.data, dict) and self._routes_changed():
+            known = self._names_by_id(resource_mappings, self.file_path)
+            errors.extend(
+                f"'{target}' is not a node in this campaign."
+                for target in route_targets(self.data)
+                if target not in known
+            )
+        function = self.data.get("function") if isinstance(self.data, dict) else None
+        if self.code and not function:
+            errors.append(f"{self.function_file} has code, but the node has no function.")
+        parameters = function_parameters(self.data) if isinstance(self.data, dict) else None
+        if (
+            isinstance(function, dict)
+            and isinstance(function.get("name"), str)
+            and PYTHONIC_NAME.fullmatch(function["name"])
+            and parameters
+            and self._function_changed()
+        ):
+            error = def_line_error(function["name"], self.code, parameters)
+            if error:
+                errors.append(f"{self.function_file}: {error}.")
+        if errors:
+            raise ValueError("; ".join(errors))
+
+    def _is_replaced(self) -> bool:
+        return self.saved_data is None or self.saved_data.get("type") != self.data.get("type")
+
+    def _routes_changed(self) -> bool:
+        return self._is_replaced() or route_targets(self.data) != route_targets(self.saved_data)
+
+    def _function_changed(self) -> bool:
+        """Agent Studio checks the `def` line on create, and when the code or contract changes."""
+        if self._is_replaced() or self.code != self.saved_code:
+            return True
+        saved_function = self.saved_data.get("function") or {}
+        return (self.data.get("function") or {}).get("name") != saved_function.get(
+            "name"
+        ) or function_parameters(self.data) != function_parameters(self.saved_data)
 
     def build_create_proto(self):
         raise NotImplementedError("Outbound campaigns can't be pushed yet.")
