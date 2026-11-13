@@ -62,6 +62,8 @@ from poly.resources import (
     FunctionStep,
     MCPServer,
     MultiResourceYamlResource,
+    OutboundCampaign,
+    OutboundCampaignNode,
     Pronunciation,
     Resource,
     ResourceMap,
@@ -71,6 +73,7 @@ from poly.resources import (
     TestCase,
     Topic,
 )
+from poly.resources.outbound_campaign import campaign_folder_of
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
     RESOURCE_NAME_TO_CLASS,
@@ -876,6 +879,8 @@ class AgentStudioProject:
             self.branch_id = self.api_handler.branch_id
 
         self._check_no_duplicate_resource_paths(incoming_resources)
+        if not force:
+            self._warn_reused_campaign_folders(incoming_resources)
         # -------
         # Update resources
         # -------
@@ -894,9 +899,11 @@ class AgentStudioProject:
         # Deal with empty flow folders
         # -------
 
-        flow_folder = os.path.join(self.root_path, "flows")
-        if os.path.exists(flow_folder):
-            self._delete_empty_folders(flow_folder)
+        OutboundCampaign.remove_empty_files(self.root_path)
+        for folder in ("flows", "outbound_campaigns"):
+            folder_path = os.path.join(self.root_path, folder)
+            if os.path.exists(folder_path):
+                self._delete_empty_folders(folder_path)
 
         # Save the updated project configuration
         self.resources = incoming_resources
@@ -1057,6 +1064,47 @@ class AgentStudioProject:
             for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
         }
 
+    def _follow_moved_multi_resources(
+        self, original_resources: ResourceMap, incoming_resources: ResourceMap
+    ) -> tuple[ResourceMap, dict[tuple[type[Resource], str], Resource]]:
+        """Find saved multi-resource entries that moved to a file not yet on disk.
+
+        Returns:
+            The original resources with each moved entry placed where it now lives, so it
+            merges there, and each moved entry as it was saved, by type and id.
+        """
+        moved: dict[tuple[type[Resource], str], Resource] = {}
+        followed = dict(original_resources)
+        for resource_type, originals in original_resources.items():
+            if not issubclass(resource_type, MultiResourceYamlResource):
+                continue
+            incoming = incoming_resources.get(resource_type) or {}
+            for resource_id, original in originals.items():
+                if resource_id not in incoming:
+                    continue
+                old_file = _parse_multi_resource_path(original.get_path(self.root_path))[0]
+                new_file = _parse_multi_resource_path(
+                    incoming[resource_id].get_path(self.root_path)
+                )[0]
+                relocated = original.moved_to(incoming[resource_id])
+                if (
+                    old_file == new_file
+                    or relocated is None
+                    or not os.path.isfile(old_file)
+                    or os.path.exists(new_file)
+                ):
+                    continue
+                moved[(resource_type, resource_id)] = original
+                followed[resource_type] = {**followed[resource_type], resource_id: relocated}
+        return followed, moved
+
+    @staticmethod
+    def _write_yaml_or_remove(file: str, data: dict) -> None:
+        if data:
+            MultiResourceYamlResource.save_to_file(resource_utils.dump_yaml(data), file)
+        elif os.path.exists(file):
+            os.remove(file)
+
     def _update_multi_resource_yaml_resources(
         self,
         original_resources: ResourceMap,
@@ -1068,6 +1116,7 @@ class AgentStudioProject:
         on_save: Callable[[int, int], None] | None = None,
         progress_offset: int = 0,
         progress_total: int = 0,
+        moved: Optional[dict[tuple[type[Resource], str], Resource]] = None,
     ) -> tuple[list[str], int]:
         """Merge MultiResourceYaml resources when pulling
 
@@ -1076,8 +1125,13 @@ class AgentStudioProject:
         - From the incoming resources
         - From what's currently on disk (read + applying formatting)
         Then perform the merge with that and the current file contents.
+
+        `moved` holds, by type and id, the saved entries that moved to another file upstream.
+        Their local version is read from the old file, so local edits move with them.
         """
         files_with_conflicts = []
+        moved = moved or {}
+        moved_from: set[str] = set()
 
         # Merge MultiResourceYaml:
         # Compute original file data
@@ -1171,11 +1225,17 @@ class AgentStudioProject:
                     continue
                 for resource in resources.values():
                     try:
-                        mapping = self._make_resource_mapping(resource)
+                        old = moved.get((resource_type, resource.resource_id))
+                        mapping = self._make_resource_mapping(old or resource)
                         local_resource = self.read_local_resource(
                             resource=mapping,
                             resource_mappings=incoming_resource_mappings,
                         )
+                        if old is not None:
+                            local_resource = local_resource.moved_to(resource)
+                            old_path = old.get_path(self.root_path)
+                            resource_type.delete_resource(old_path, save_to_cache=True)
+                            moved_from.add(_parse_multi_resource_path(old_path)[0])
                         local_resource.save(
                             self.root_path,
                             resource_name=local_resource.name,
@@ -1215,6 +1275,8 @@ class AgentStudioProject:
                     original_data is not None
                     and resource_utils.same_yaml_data(original_data, incoming_data)
                 ):
+                    if file in moved_from:
+                        self._write_yaml_or_remove(file, local_data)
                     continue
                 # Only incoming changed: take incoming
                 if original_data is not None and resource_utils.same_yaml_data(
@@ -1239,7 +1301,7 @@ class AgentStudioProject:
                 os.remove(file)
                 continue
 
-            if merged_contents == local_content:
+            if merged_contents == local_content and file not in moved_from:
                 continue
 
             if resource_utils.contains_merge_conflict(merged_contents):
@@ -1270,6 +1332,39 @@ class AgentStudioProject:
 
         return files_with_conflicts, progress_offset
 
+    def _warn_reused_campaign_folders(self, incoming_resources: ResourceMap) -> None:
+        saved = {
+            campaign.folder: campaign
+            for campaign in self.resources.get(OutboundCampaign, {}).values()
+        }
+        reused = [
+            (folder, saved[folder], campaign)
+            for campaign in incoming_resources.get(OutboundCampaign, {}).values()
+            if (folder := campaign.folder) in saved
+            and saved[folder].resource_id != campaign.resource_id
+        ]
+        if not reused:
+            return
+        _, modified, new, deleted = self.project_status()
+        changed = [
+            os.path.relpath(path, self.root_path).replace(os.sep, "/")
+            for path in modified + new + deleted
+        ]
+        for folder, before, after in reused:
+            if not any(path.startswith(f"outbound_campaigns/{folder}/") for path in changed):
+                continue
+            known = self.resources[OutboundCampaign].get(after.resource_id)
+            source = (
+                f"'{known.name}' was renamed to '{after.name}'"
+                if known
+                else f"'{after.name}' was created"
+            )
+            logger.warning(
+                f"outbound_campaigns/{folder} now holds a different campaign: {source} in "
+                f"Agent Studio. Edits made here to '{before.name}' before this pull now apply "
+                "to it: check them before pushing."
+            )
+
     def _update_pulled_resources(
         self,
         original_resources: ResourceMap,
@@ -1294,6 +1389,11 @@ class AgentStudioProject:
             return []
 
         files_with_conflicts = []
+        moved: dict[tuple[type[Resource], str], Resource] = {}
+        if not force:
+            original_resources, moved = self._follow_moved_multi_resources(
+                original_resources, incoming_resources
+            )
 
         # Generate resource mappings
         incoming_resource_mappings: list[ResourceMapping] = (
@@ -1321,6 +1421,7 @@ class AgentStudioProject:
             on_save=on_save,
             progress_offset=0,
             progress_total=total,
+            moved=moved,
         )
 
         files_with_conflicts.extend(multi_conflicts)
@@ -2597,6 +2698,12 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == OutboundCampaignNode:
+            saved_node = (
+                original_resource if isinstance(original_resource, OutboundCampaignNode) else None
+            )
+            additional_kwargs["known_position"] = saved_node.position if saved_node else None
+
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):
                 raise TypeError(f"Original resource is not an MCPServer: {original_resource}")
@@ -2694,6 +2801,20 @@ class AgentStudioProject:
                 parent_flow = parent_lookup.get(flow_path)
                 flow_paths_to_ids[resource_utils.clean_name(flow_name)] = (
                     parent_flow.resource_id if parent_flow else self.generate_uuid(FlowConfig)
+                )
+
+        campaign_folders_to_ids = {
+            campaign.folder: campaign_id
+            for campaign_id, campaign in self.resources.get(OutboundCampaign, {}).items()
+        }
+        for campaign_path in discovered_resources.get(OutboundCampaign, []):
+            folder = campaign_folder_of(campaign_path)
+            if folder not in campaign_folders_to_ids:
+                parent_campaign = parent_lookup.get(campaign_path)
+                campaign_folders_to_ids[folder] = (
+                    parent_campaign.resource_id
+                    if parent_campaign
+                    else self.generate_uuid(OutboundCampaign)
                 )
 
         if not self.file_structure_info:
@@ -2796,6 +2917,16 @@ class AgentStudioProject:
                         resource_id = flow_id
                     elif resource_type == Document:
                         resource_id = os.path.basename(file_path).upper()
+                    elif resource_type == OutboundCampaign:
+                        resource_id = campaign_folders_to_ids[campaign_folder_of(file_path)]
+                    elif resource_type == OutboundCampaignNode:
+                        campaign_id = campaign_folders_to_ids.get(campaign_folder_of(file_path), "")
+                        node_id = (
+                            parent_resource.node_id
+                            if isinstance(parent_resource, OutboundCampaignNode)
+                            else f"{resource.data.get('type') or 'node'}-{uuid.uuid4()}"
+                        )
+                        resource_id = f"{campaign_id}:{node_id}"
                     elif parent_resource:
                         resource_id = parent_resource.resource_id
                     else:
