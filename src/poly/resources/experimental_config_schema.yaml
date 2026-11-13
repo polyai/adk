@@ -61,7 +61,8 @@ components:
             - googlev2: "chirp_2"
             - riva: models use detailed naming like "parakeet-0.6b-ctc-latency-6.0" specifying
               architecture, size, decoder type, and latency characteristics
-            - openai: "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"
+            - openai: "gpt-transcribe", "gpt-live-transcribe", "gpt-4o-transcribe", "gpt-4o-mini-transcribe",
+              "whisper-1"
             - deepgram: "nova-3", "nova-2"
             - soniox: "stt-rt-v5"
             - assemblyai: "universal-3-5-pro" (GA), "u3-rt-pro-beta-1" (private beta);
@@ -112,7 +113,11 @@ components:
           type: boolean
         provider_config:
           type: object
-          description: Provider specific config.
+          description: |-
+            Provider specific config.
+            - openai "gpt-transcribe" / "gpt-live-transcribe": "prompt", "languages" (language hints),
+              "keywords", "noise_reduction" ("near_field" or "far_field"); "gpt-live-transcribe" also
+              takes "delay" ("minimal", "low", "medium", "high" or "xhigh")
       dependentRequired:
         provider: [model]
         model: [provider]
