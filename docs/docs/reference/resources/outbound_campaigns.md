@@ -141,7 +141,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 
 - `name` is present and under 256 characters, and `description` under 1024.
 - The folder name matches the campaign's name.
-- A campaign deleted in the push has never been published, and is not replaced by a new one: a renamed folder keeps its nodes' names and types.
+- A campaign deleted in the push has never been published.
 - Settings have the right types and allowed values:
     - `use_case` is `transactional` or `marketing`, and limits are positive whole numbers.
     - `country` is a real ISO 3166-1 alpha-2 code, in capitals.
@@ -153,6 +153,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 - There is at most one `trigger` node, and a campaign that has a trigger in Agent Studio keeps one: rename or replace its trigger rather than delete it.
 - The trigger changes `type` only when another node becomes the trigger in the same push, and a published campaign's trigger keeps its `source_type`.
 - Each node has a known `type`, its required fields, allowed values, and no fields its type doesn't have.
+- A `conditional` node uses each branch `variable` once.
 - `voicemail_script` and `voicemail_when` are set when `voicemail_enabled` is true.
 - On a node that is new, changed type or had its routes changed, every route names a node in the campaign. Agent Studio keeps a route to a deleted node until you change it.
 - Function names are valid Python names, and `code` is not in the YAML.
