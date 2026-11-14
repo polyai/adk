@@ -99,6 +99,7 @@ from poly.resources.outbound_campaign import (
     def_line_error,
     function_file_stem,
     function_parameters,
+    node_data_errors,
     node_data_proto,
     node_names,
     normalise_node_data,
@@ -15757,6 +15758,21 @@ class OutboundCampaignTests(unittest.TestCase):
                 call.data = {**call.data, **change}
                 with self.assertRaisesRegex(ValueError, re.escape(message)):
                     call.validate(resource_mappings=None)
+
+    def test_branch_values_must_be_unique_within_a_node(self):
+        def errors(*variables: str) -> list[str]:
+            data = {
+                "type": "conditional",
+                "function": {"name": "pick", "description": ""},
+                "branches": [{"variable": value, "targetNodeId": "end-1"} for value in variables],
+                "defaultTargetNodeId": None,
+            }
+            return node_data_errors(data, "functions/branch.py")
+
+        self.assertEqual(errors("yes", "no"), [])
+        self.assertEqual(
+            errors("yes", "no", "yes"), ["Branch value 'yes' is used by more than one branch."]
+        )
 
     def test_node_validate_rejects_a_route_to_a_node_not_in_the_campaign(self):
         nodes = _campaign_nodes()

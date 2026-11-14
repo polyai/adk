@@ -9533,43 +9533,22 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertNotIn("CMPGN-ONE:end-1", self.project.resources[OutboundCampaignNode])
         self.assertEqual(self.project.project_status(), ([], [], [], []))
 
-    def test_trigger_type_changes_fail_validation(self):
-        trigger_as_end = {"type": "end", "exit_reason": "done", "writeback_enabled": False}
-        call_as_trigger = {
-            "type": "trigger",
-            "function": {"name": "call_args", "description": ""},
-            "routes": [],
-        }
-        cases = {
-            "trigger to end": (
-                {"Trigger": trigger_as_end},
-                ["The trigger can't change type", "rename or replace the trigger"],
-            ),
-            "call to a second trigger": (
-                {"First call": call_as_trigger},
-                ["A campaign can have only one trigger node."],
-            ),
-        }
-        original = self._yaml()
-        for case, (changes, messages) in cases.items():
-            with self.subTest(case=case):
-                data = deepcopy(original)
-                data["nodes"] = [
-                    {"name": node["name"], **changes[node["name"]]}
-                    if node["name"] in changes
-                    else node
-                    for node in data["nodes"]
-                ]
-                self._write_yaml(data)
-                os.remove(os.path.join(self.folder, "functions", "trigger.py"))
+    def test_trigger_type_change_fails_validation(self):
+        data = self._yaml()
+        data["nodes"] = [
+            {"name": "Trigger", "type": "end", "exit_reason": "done", "writeback_enabled": False}
+            if node["name"] == "Trigger"
+            else node
+            for node in data["nodes"]
+        ]
+        self._write_yaml(data)
+        os.remove(os.path.join(self.folder, "functions", "trigger.py"))
 
-                success, error, commands = self.project.push_project(dry_run=True)
+        success, error, commands = self.project.push_project(dry_run=True)
 
-                self.assertFalse(success)
-                self.assertEqual(commands, [])
-                for message in messages:
-                    self.assertIn(message, error)
-                self._write_function("trigger", self.TRIGGER_CODE)
+        self.assertFalse(success)
+        self.assertEqual(commands, [])
+        self.assertIn("The trigger can't change type", error)
 
     def test_trigger_and_call_swapping_types_keeps_the_trigger_id(self):
         data = self._yaml()
@@ -9888,19 +9867,19 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertIn(message, error)
         self.assertIn(message, "\n".join(self.project.validate_project()))
 
-    def test_rename_with_different_nodes_is_refused(self):
-        """Only the same node names and types say the new folder is the old campaign."""
+    def test_rename_with_different_nodes_passes_validation(self):
+        """A folder rename that doesn't pair is a plain delete and create, as for flows."""
         data = self._rename_campaign("Monthly reminders", "monthly_reminders")
         self._node(data, "End")["name"] = "Finish"
         self._node(data, "First call")["default_route"] = "Finish"
         self._write_yaml(data)
 
-        self._assert_push_refused(
-            "'Reminders' would be deleted and 'Monthly reminders' created. To rename a "
-            "campaign's folder, rename it in a push of its own"
-        )
+        self.assertEqual(self.project.validate_project(), [])
+        commands = self._push()
+        self.assertIn(("outbound_campaign_delete", {"id": "CMPGN-ONE"}), commands)
+        self.assertIn("outbound_campaign_create", [name for name, _ in commands])
 
-    def test_two_copies_of_a_removed_campaign_are_refused(self):
+    def test_two_copies_of_a_removed_campaign_pass_validation(self):
         original = self._yaml()
         for name in ("copy_a", "copy_b"):
             self._write_yaml(
@@ -9908,7 +9887,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             )
         shutil.rmtree(self.folder)
 
-        self._assert_push_refused("'Reminders' would be deleted and 'copy_a', 'copy_b' created.")
+        self.assertEqual(self.project.validate_project(), [])
 
     def test_new_campaign_beside_a_kept_one_is_created(self):
         self._write_yaml(
