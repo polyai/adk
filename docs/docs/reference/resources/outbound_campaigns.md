@@ -25,7 +25,7 @@ outbound_campaigns/
 
 Optional. The folder name is the campaign's name, lowercased, with punctuation replaced by `_`. Agent Studio allows two campaigns the same name, but each needs its own folder. When two names are the same ignoring case and punctuation, the oldest campaign keeps its name and a pull renames the other `{name} (1)`, numbered on, with a warning. That campaign shows as changed, so a pull followed by a push sends the new name to Agent Studio.
 
-To rename a campaign, change `name` and rename the folder to match. The campaign keeps its identity, contacts and history when its nodes keep their names and types, though the trigger may be renamed too. A push that would instead delete one campaign and create another fails validation: rename the folder in a push of its own.
+To rename a campaign, change `name` and rename the folder to match. The campaign keeps its identity, contacts and history when its nodes keep their names and types, though the trigger may be renamed too. Otherwise the push deletes the old campaign and creates a new one, with a new id.
 
 A campaign that has been published can't be deleted. Pause it, then archive it, with `poly campaign pause` and `poly campaign archive`. It stops being pulled once it's archived.
 
