@@ -195,6 +195,17 @@ class Resource(BaseResource, ABC):
         pass
 
     @classmethod
+    def validate_creates_and_deletes(
+        cls, new_resources: dict, deleted_resources: dict
+    ) -> list[str]:
+        """Return why the resources of this type in either map can't be created or deleted.
+
+        `new_resources` and `deleted_resources` hold every type's new and deleted resources,
+        for a type whose creates and deletes depend on each other.
+        """
+        return []
+
+    @classmethod
     def validate_collection(cls, resources: dict[str, "BaseResource"]) -> None:
         """Validate a collection of resources.
 
