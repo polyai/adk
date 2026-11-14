@@ -1,0 +1,72 @@
+name: Appointment reminders
+description: Reminds patients of their appointment.
+settings:
+  from_number: '+15550100'
+  sms_from_number: '+15550101'
+  default_variant: spanish
+  country: US
+  use_case: transactional
+  daily_contact_limit: 3
+  voice_dispatch_limits:
+    max_concurrent: 5
+  default_timezone: America/New_York
+  contact_window:
+    days_of_week:
+    - monday
+    - tuesday
+    - wednesday
+    - thursday
+    - friday
+    start_time: 09:00
+    end_time: 17:00
+nodes:
+- name: Import contacts
+  type: trigger
+  function:
+    name: map_contacts
+    description: Maps CSV rows to contacts.
+  routes:
+  - next: Reminder call
+  source_type: csv
+  ingest_interval: daily
+- name: Reminder call
+  type: call
+  flow_name: test_flow
+  function:
+    name: call_args
+    description: Passes the appointment to the call.
+  greeting: Hi, this is a reminder about your appointment.
+  voicemail_enabled: true
+  voicemail_script: Please call us back.
+  voicemail_when: final_retry
+  max_attempts: 2
+  backoff: 1
+  backoff_unit: hours
+  default_route: Reminder text
+- name: Reminder text
+  type: sms
+  function:
+    name: sms_args
+    description: Fills in the reminder text.
+  message_template: Hi {{first_name}}, reply YES to confirm.
+  reply_timeout_value: 1
+  reply_timeout_unit: days
+  default_route: Check reply
+- name: Check reply
+  type: conditional
+  function:
+    name: check_reply
+    description: Branches on the reply.
+  branches:
+  - variable: confirmed
+    next: Done
+  default_next: Wait a day
+- name: Wait a day
+  type: wait
+  amount: 1
+  unit: days
+  next: Done
+- name: Done
+  type: end
+  exit_reason: completed
+  writeback_enabled: false
