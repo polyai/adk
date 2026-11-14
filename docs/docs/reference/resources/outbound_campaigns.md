@@ -25,7 +25,7 @@ outbound_campaigns/
 
 Optional. The folder name is the campaign's name, lowercased, with punctuation replaced by `_`. Agent Studio allows two campaigns the same name, but each needs its own folder. When two names are the same ignoring case and punctuation, the oldest campaign keeps its name and a pull renames the other `{name} (1)`, numbered on, with a warning. That campaign shows as changed, so a pull followed by a push sends the new name to Agent Studio.
 
-To rename a campaign, change `name` and rename the folder to match. The campaign keeps its identity, contacts and history when its nodes keep their names and types, though the trigger may be renamed too. A push that would instead delete one campaign and create another fails validation: rename the folder in a push of its own.
+To rename a campaign, change `name` and rename the folder to match. The campaign keeps its identity, contacts and history when its nodes keep their names and types, though the trigger may be renamed too. Otherwise the push deletes the old campaign and creates a new one, with a new id.
 
 When a campaign is renamed in Agent Studio, a pull moves its folder and carries your edits. If a folder already has the new name here, the pull leaves the campaign where it is and reports it as a conflict: move or delete that folder, then pull again. If the folder belongs to a campaign deleted in Agent Studio and is unedited here, this pull removes it and the next pull moves the renamed campaign. Files you added to that folder keep the rename waiting until you move or delete them. Files you added to the renamed campaign's own folder move with it, unless one has the name of a file Agent Studio added to the campaign: then the rename waits until you rename yours.
 
@@ -139,7 +139,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 
 - `name` is present and under 256 characters, and `description` under 1024.
 - The folder name matches the campaign's name.
-- A campaign deleted in the push has never been published, and is not replaced by a new one: a renamed folder keeps its nodes' names and types.
+- A campaign deleted in the push has never been published.
 - Settings have the right types and allowed values:
     - `use_case` is `transactional` or `marketing`, and limits are positive whole numbers.
     - `country` is a real ISO 3166-1 alpha-2 code, in capitals.
@@ -151,6 +151,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 - There is at most one `trigger` node, and a campaign that has a trigger in Agent Studio keeps one: rename or replace its trigger rather than delete it.
 - The trigger changes `type` only when another node becomes the trigger in the same push, and a published campaign's trigger keeps its `source_type`.
 - Each node has a known `type`, its required fields, allowed values, and no fields its type doesn't have.
+- A `conditional` node uses each branch `variable` once.
 - `voicemail_script` and `voicemail_when` are set when `voicemail_enabled` is true.
 - On a node that is new, changed type or had its routes changed, every route names a node in the campaign. Agent Studio keeps a route to a deleted node until you change it.
 - Function names are valid Python names, and `code` is not in the YAML.
