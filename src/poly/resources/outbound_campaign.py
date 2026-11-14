@@ -14,11 +14,13 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, ClassVar, Optional
 
 import poly.resources.resource_utils as utils
+from poly.handlers.protobuf import outbound_campaigns_pb2 as campaigns_pb2
 from poly.resources.countries import COUNTRY_CODES
 from poly.resources.resource import (
     MultiResourceYamlResource,
     Resource,
     ResourceMapping,
+    SubResource,
     _parse_multi_resource_path,
     register_resource,
 )
@@ -374,6 +376,165 @@ def _rename_route_keys(data: dict, renames: dict[str, str]) -> dict:
     return data
 
 
+def _routes_proto(routes: list[dict]) -> list[campaigns_pb2.RouteEdge]:
+    return [
+        campaigns_pb2.RouteEdge(
+            **utils.drop_unset(
+                dict(target_node_id=route.get("targetNodeId"), outcome=route.get("outcome"))
+            )
+        )
+        for route in routes or []
+    ]
+
+
+def _function_proto(function: Optional[dict], code: str) -> campaigns_pb2.CampaignNodeFunction:
+    function = function or {}
+    return campaigns_pb2.CampaignNodeFunction(
+        name=function.get("name") or "",
+        description=function.get("description") or "",
+        code=code or "",
+    )
+
+
+def node_data_proto(data: dict, code: str) -> tuple[str, Any]:
+    """Return the node-data oneof field name and message for a node's `data` and function code.
+
+    Raises:
+        ValueError: if `data.type` is not a known node type.
+    """
+    node_type = data["type"]
+    function = data.get("function")
+    function_name = (function or {}).get("name") or ""
+    if node_type == "trigger":
+        message = campaigns_pb2.TriggerNodeData(
+            function=function_name,
+            routes=_routes_proto(data.get("routes")),
+            campaign_function=_function_proto(function, code),
+            **utils.drop_unset(
+                dict(source_type=data.get("sourceType"), ingest_interval=data.get("ingestInterval"))
+            ),
+        )
+    elif node_type == "call":
+        message = campaigns_pb2.CallNodeData(
+            flow_name=data.get("flowName") or "",
+            function=function_name,
+            greeting=data.get("greeting") or "",
+            voicemail_enabled=bool(data.get("voicemailEnabled")),
+            max_attempts=data.get("maxAttempts") or 0,
+            backoff=data.get("backoff") or 0,
+            backoff_unit=data.get("backoffUnit") or "",
+            campaign_function=_function_proto(function, code),
+            **utils.drop_unset(
+                dict(
+                    amd_flow_name=data.get("amdFlowName"),
+                    voicemail_script=data.get("voicemailScript"),
+                    voicemail_when=data.get("voicemailWhen"),
+                    default_route=data.get("defaultRoute"),
+                )
+            ),
+        )
+    elif node_type == "sms":
+        message = campaigns_pb2.SmsNodeData(
+            function=function_name,
+            message_template=data.get("messageTemplate") or "",
+            campaign_function=_function_proto(function, code),
+            **utils.drop_unset(
+                dict(
+                    reply_flow_name=data.get("replyFlowName"),
+                    reply_timeout_value=data.get("replyTimeoutValue"),
+                    reply_timeout_unit=data.get("replyTimeoutUnit"),
+                    default_route=data.get("defaultRoute"),
+                )
+            ),
+        )
+    elif node_type == "conditional":
+        message = campaigns_pb2.ConditionalNodeData(
+            function=function_name,
+            branches=[
+                campaigns_pb2.ConditionalBranch(
+                    id=branch.get("id") or "",
+                    variable=branch.get("variable") or "",
+                    target_node_id=branch.get("targetNodeId") or "",
+                )
+                for branch in data.get("branches") or []
+            ],
+            campaign_function=_function_proto(function, code),
+            **utils.drop_unset(dict(default_target_node_id=data.get("defaultTargetNodeId"))),
+        )
+    elif node_type == "wait":
+        message = campaigns_pb2.WaitNodeData(
+            amount=data.get("amount") or 0,
+            unit=data.get("unit") or "",
+            target_node_id=data.get("targetNodeId") or "",
+        )
+    elif node_type == "writeback":
+        message = campaigns_pb2.WritebackNodeData(
+            target=data.get("target") or "",
+            function=function_name,
+            target_node_id=data.get("targetNodeId") or "",
+            campaign_function=_function_proto(function, code),
+        )
+    elif node_type == "end":
+        with_function = (
+            {"function": function_name, "campaign_function": _function_proto(function, code)}
+            if function
+            else {}
+        )
+        message = campaigns_pb2.EndNodeData(
+            exit_reason=data.get("exitReason") or "",
+            writeback_enabled=bool(data.get("writebackEnabled")),
+            **with_function,
+        )
+    else:
+        raise ValueError(f"Unknown node type: {node_type}")
+    return node_type, message
+
+
+def _dispatch_limits_proto(limits: Optional[dict]) -> Optional[campaigns_pb2.DispatchLimits]:
+    if limits is None:
+        return None
+    return campaigns_pb2.DispatchLimits(
+        **utils.drop_unset(
+            dict(
+                max_concurrent=limits.get("maxConcurrent"),
+                per_hour=limits.get("perHour"),
+                per_day=limits.get("perDay"),
+            )
+        )
+    )
+
+
+def settings_proto(settings: dict) -> campaigns_pb2.OutboundCampaignSettings:
+    """Build the settings message from the camelCase settings block."""
+    window = settings.get("contactWindow")
+    return campaigns_pb2.OutboundCampaignSettings(
+        **utils.drop_unset(
+            dict(
+                start_date=settings.get("startDate"),
+                end_date=settings.get("endDate"),
+                from_number=settings.get("fromNumber"),
+                sms_from_number=settings.get("smsFromNumber"),
+                default_variant_id=settings.get("defaultVariantId"),
+                country=settings.get("country"),
+                use_case=settings.get("useCase"),
+                daily_contact_limit=settings.get("dailyContactLimit"),
+                voice_dispatch_limits=_dispatch_limits_proto(settings.get("voiceDispatchLimits")),
+                sms_dispatch_limits=_dispatch_limits_proto(settings.get("smsDispatchLimits")),
+                default_timezone=settings.get("defaultTimezone"),
+                contact_window=(
+                    campaigns_pb2.ContactWindow(
+                        days_of_week=window.get("daysOfWeek") or [],
+                        start_time=window.get("startTime") or "",
+                        end_time=window.get("endTime") or "",
+                    )
+                    if window is not None
+                    else None
+                ),
+            )
+        )
+    )
+
+
 def _projection_campaigns(projection: dict) -> Optional[list[dict]]:
     section = projection.get("outboundCampaigns")
     if not isinstance(section, dict):
@@ -575,6 +736,7 @@ class OutboundCampaign(MultiResourceYamlResource):
     node_entries: Any = field(default=None, init=False, repr=False, compare=False)
     unknown_keys: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
     had_trigger: bool = field(default=False, init=False, repr=False, compare=False)
+    saved_identity: Optional[tuple] = field(default=None, init=False, repr=False, compare=False)
     saved_settings: Optional[dict] = field(default=None, init=False, repr=False, compare=False)
 
     @property
@@ -634,6 +796,7 @@ class OutboundCampaign(MultiResourceYamlResource):
         resource_id: str,
         name: str = "",
         had_trigger: bool = False,
+        known_identity: Optional[tuple] = None,
         known_status: Optional[str] = None,
         known_settings: Optional[dict] = None,
         **kwargs,
@@ -647,6 +810,7 @@ class OutboundCampaign(MultiResourceYamlResource):
             status=known_status,
         )
         campaign.had_trigger = had_trigger
+        campaign.saved_identity = known_identity
         campaign.saved_settings = known_settings
         return campaign
 
@@ -916,14 +1080,46 @@ class OutboundCampaign(MultiResourceYamlResource):
                 )
         return errors
 
-    def build_create_proto(self):
-        raise NotImplementedError("Outbound campaigns can't be pushed yet.")
+    def build_create_proto(self) -> campaigns_pb2.OutboundCampaign_Create:
+        return campaigns_pb2.OutboundCampaign_Create(
+            id=self.resource_id,
+            name=self.name,
+            **utils.drop_unset(dict(description=self.description)),
+        )
 
-    def build_update_proto(self):
-        raise NotImplementedError("Outbound campaigns can't be pushed yet.")
+    def build_update_proto(self) -> campaigns_pb2.OutboundCampaign_Update:
+        description = (
+            {"clear_description": True}
+            if self.description is None
+            else {"description": self.description}
+        )
+        return campaigns_pb2.OutboundCampaign_Update(
+            id=self.resource_id, name=self.name, **description
+        )
 
-    def build_delete_proto(self):
-        raise NotImplementedError("Outbound campaigns can't be pushed yet.")
+    def build_delete_proto(self) -> campaigns_pb2.OutboundCampaign_Delete:
+        return campaigns_pb2.OutboundCampaign_Delete(id=self.resource_id)
+
+    @property
+    def identity(self) -> tuple:
+        """The name and description, as Agent Studio has them: the fields an update sends."""
+        return (self.name if self.platform_label is None else self.platform_label, self.description)
+
+    def settings_change(self) -> "OutboundCampaignSettings":
+        """Return the settings as a change to send. Settings are always sent whole."""
+        return OutboundCampaignSettings(
+            resource_id=self.resource_id, name=self.name, settings=self.settings
+        )
+
+    def get_new_updated_deleted_subresources(
+        self, old_resource: Optional["OutboundCampaign"]
+    ) -> tuple[list[SubResource], list[SubResource], list[SubResource]]:
+        """Return the settings to send: always for a new campaign, otherwise only when changed."""
+        if old_resource is None:
+            return [self.settings_change()], [], []
+        if self.settings != old_resource.settings:
+            return [], [self.settings_change()], []
+        return [], [], []
 
 
 def is_empty_campaign_file(top: Any) -> bool:
@@ -1273,6 +1469,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
     campaign_published: bool = field(default=False, repr=False, compare=False)
 
     saved_type: Optional[str] = field(default=None, init=False, repr=False, compare=False)
+    saved_label: Optional[str] = field(default=None, init=False, repr=False, compare=False)
     saved_data: Optional[dict] = field(default=None, init=False, repr=False, compare=False)
     saved_code: Optional[str] = field(default=None, init=False, repr=False, compare=False)
     campaign_has_trigger: bool = field(default=False, init=False, repr=False, compare=False)
@@ -1374,6 +1571,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
         name: str = "",
         known_position: Optional[dict] = None,
         known_type: Optional[str] = None,
+        known_label: Optional[str] = None,
         known_data: Optional[dict] = None,
         known_code: Optional[str] = None,
         known_published: bool = False,
@@ -1390,6 +1588,7 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             position=known_position,
         )
         node.saved_type = known_type
+        node.saved_label = known_label
         node.saved_data = known_data
         node.saved_code = known_code
         node.campaign_published = known_published
@@ -1581,14 +1780,38 @@ class OutboundCampaignNode(MultiResourceYamlResource):
             "name"
         ) or function_parameters(self.data) != function_parameters(self.saved_data)
 
-    def build_create_proto(self):
-        raise NotImplementedError("Outbound campaigns can't be pushed yet.")
+    def _position_proto(self) -> campaigns_pb2.Position:
+        position = self.position or {}
+        return campaigns_pb2.Position(x=position.get("x", 0.0), y=position.get("y", 0.0))
 
-    def build_update_proto(self):
-        raise NotImplementedError("Outbound campaigns can't be pushed yet.")
+    def _data_proto(self) -> dict:
+        data_field, data = node_data_proto(self.data, self.code)
+        return {data_field: data}
 
-    def build_delete_proto(self):
-        raise NotImplementedError("Outbound campaigns can't be pushed yet.")
+    def build_create_proto(self) -> campaigns_pb2.OutboundCampaign_CreateNode:
+        return campaigns_pb2.OutboundCampaign_CreateNode(
+            outbound_campaign_id=self.campaign_id,
+            node=campaigns_pb2.OutboundCampaignNode(
+                id=self.node_id,
+                position=self._position_proto(),
+                label=self.name,
+                **self._data_proto(),
+            ),
+        )
+
+    def build_update_proto(self) -> campaigns_pb2.OutboundCampaign_UpdateNode:
+        return campaigns_pb2.OutboundCampaign_UpdateNode(
+            outbound_campaign_id=self.campaign_id,
+            node_id=self.node_id,
+            data=campaigns_pb2.OutboundCampaignNodeData(**self._data_proto()),
+            position=self._position_proto(),
+            label=self.name,
+        )
+
+    def build_delete_proto(self) -> campaigns_pb2.OutboundCampaign_DeleteNode:
+        return campaigns_pb2.OutboundCampaign_DeleteNode(
+            outbound_campaign_id=self.campaign_id, node_id=self.node_id
+        )
 
 
 @register_resource("outbound_campaign_functions")
@@ -1690,3 +1913,33 @@ class OutboundCampaignFunction(Resource):
 
     def build_delete_proto(self):
         raise NotImplementedError("Campaign function code is pushed with its node.")
+
+
+@dataclass
+class OutboundCampaignSettings(SubResource):
+    """A campaign's settings, sent as one update command."""
+
+    settings: dict
+
+    @property
+    def command_type(self) -> str:
+        return "outbound_campaign_update_settings"
+
+    @property
+    def create_command_type(self) -> str:
+        return "outbound_campaign_update_settings"
+
+    @property
+    def update_command_type(self) -> str:
+        return "outbound_campaign_update_settings"
+
+    def build_update_proto(self) -> campaigns_pb2.OutboundCampaign_UpdateSettings:
+        return campaigns_pb2.OutboundCampaign_UpdateSettings(
+            id=self.resource_id, settings=settings_proto(self.settings)
+        )
+
+    def build_create_proto(self) -> campaigns_pb2.OutboundCampaign_UpdateSettings:
+        return self.build_update_proto()
+
+    def build_delete_proto(self):
+        raise NotImplementedError("Campaign settings cannot be deleted.")

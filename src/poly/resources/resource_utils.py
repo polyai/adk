@@ -1127,6 +1127,57 @@ _WEBCHAT_CONFIG_TYPES: list[str] = [
 ]
 
 
+def assign_campaign_positions(
+    nodes: list,
+    targets: Callable[[object], list[str]],
+    x_gap: float = 400.0,
+    y_gap: float = 200.0,
+) -> None:
+    """Give every campaign node without a `position` one, keeping the positions already set.
+
+    A node is placed `x_gap` to the right of the first placed node that routes to it, one
+    `y_gap` lower for each sibling already placed there. A node nothing placed routes to goes
+    to the right of everything placed so far. Nodes are visited from the trigger along routes,
+    so parents are placed before their children.
+
+    Args:
+        nodes: Objects with `node_id`, `position` (a `{x, y}` dict or None) and `data`.
+        targets: Returns the node ids a node routes to.
+    """
+    by_id = {node.node_id: node for node in nodes}
+    order: list = []
+    queue = [node for node in nodes if (node.data or {}).get("type") == "trigger"]
+    queue += [node for node in nodes if node not in queue]
+    while queue:
+        node = queue.pop(0)
+        if node in order:
+            continue
+        order.append(node)
+        queue[:0] = [by_id[target] for target in targets(node) if target in by_id]
+
+    parents: dict[str, str] = {}
+    for node in order:
+        for target in targets(node):
+            parents.setdefault(target, node.node_id)
+
+    children_placed: dict[str, int] = {}
+    placed_x = [node.position["x"] for node in nodes if node.position]
+    for node in order:
+        if node.position:
+            continue
+        parent = by_id.get(parents.get(node.node_id, ""))
+        if parent is not None and parent.position:
+            count = children_placed.get(parent.node_id, 0)
+            children_placed[parent.node_id] = count + 1
+            node.position = {
+                "x": float(parent.position["x"] + x_gap),
+                "y": float(parent.position["y"] + count * y_gap),
+            }
+        else:
+            node.position = {"x": float(max(placed_x) + x_gap) if placed_x else 0.0, "y": 0.0}
+        placed_x.append(node.position["x"])
+
+
 def validate_webchat_siblings(
     self_type: type, resource_mappings: list["ResourceMapping"] | None
 ) -> None:

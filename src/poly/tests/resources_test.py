@@ -94,14 +94,17 @@ from poly.resources.outbound_campaign import (
     OutboundCampaign,
     OutboundCampaignFunction,
     OutboundCampaignNode,
+    OutboundCampaignSettings,
     campaign_names,
     def_line_error,
     function_file_stem,
     function_parameters,
     node_data_errors,
+    node_data_proto,
     node_names,
     normalise_node_data,
     normalise_settings,
+    route_targets,
     timezones,
 )
 from poly.resources.phrase_filter import PhraseFilter
@@ -15422,6 +15425,7 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertEqual(campaigns["CMPGN-ONE"].folder, "reminders_1")
         self.assertEqual(campaigns["CMPGN-ONE"].platform_label, "Reminders")
         self.assertIsNone(campaigns["CMPGN-TWO"].platform_label)
+        self.assertEqual(campaigns["CMPGN-ONE"].identity, ("Reminders", None))
         self.assertEqual(nodes["CMPGN-ONE:end-1"].campaign_folder, "reminders_1")
         self.assertIn(
             "Renamed 'Reminders' to 'Reminders (1)': campaign names must be unique.",
@@ -15695,6 +15699,16 @@ class OutboundCampaignTests(unittest.TestCase):
         campaign.settings = {**campaign.settings, "defaultTimezone": "Mars/Olympus_Mons"}
         with self.assertRaisesRegex(ValueError, "must be an IANA time zone"):
             campaign.validate(resource_mappings=[])
+
+    def test_blank_text_settings_are_read_as_unset(self):
+        """Agent Studio returns a blank setting as null, so a blank must not count as a change."""
+        campaign = OutboundCampaign.from_yaml_dict(
+            {"name": "Reminders", "settings": {"fromNumber": "", "country": "US"}}, "CMPGN-ONE"
+        )
+
+        self.assertIsNone(campaign.settings["fromNumber"])
+        settings = MessageToDict(campaign.settings_change().build_update_proto())["settings"]
+        self.assertNotIn("fromNumber", settings)
 
     def test_dates_read_as_yaml_dates_are_read_as_iso_text(self):
         campaign = OutboundCampaign.from_yaml_dict(
@@ -16004,6 +16018,201 @@ class OutboundCampaignTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Variant 'Klingon' not found"):
             campaign.validate(resource_mappings=[])
+
+    def test_settings_go_out_for_a_new_campaign_and_only_when_changed(self):
+        campaign, saved = _campaign(), _campaign()
+
+        self.assertEqual(
+            [type(change) for change in campaign.get_new_updated_deleted_subresources(None)[0]],
+            [OutboundCampaignSettings],
+        )
+        self.assertEqual(campaign.get_new_updated_deleted_subresources(saved), ([], [], []))
+        campaign.settings = {**campaign.settings, "dailyContactLimit": 5}
+        self.assertEqual(len(campaign.get_new_updated_deleted_subresources(saved)[1]), 1)
+
+    def test_node_protos_carry_the_name_as_label_and_ids_split_from_the_resource_id(self):
+        call = _campaign_nodes()["CMPGN-ONE:call-1"]
+
+        create = MessageToDict(call.build_create_proto())
+        update = MessageToDict(call.build_update_proto())
+        delete = MessageToDict(call.build_delete_proto())
+
+        self.assertEqual(create["outboundCampaignId"], "CMPGN-ONE")
+        self.assertEqual(create["node"]["id"], "call-1")
+        self.assertEqual(create["node"]["label"], "First call")
+        self.assertEqual(create["node"]["position"], {"y": 200.0})
+        self.assertEqual(create["node"]["call"]["defaultRoute"], "end-1")
+        self.assertNotIn("routes", create["node"]["call"])
+        self.assertEqual(set(update), {"outboundCampaignId", "nodeId", "data", "position", "label"})
+        self.assertEqual(delete, {"outboundCampaignId": "CMPGN-ONE", "nodeId": "call-1"})
+
+    def test_new_nodes_are_laid_out_around_the_placed_ones(self):
+        nodes = _campaign_nodes()
+        for node in nodes.values():
+            node.position = None
+        nodes["CMPGN-ONE:trigger-1"].position = {"x": 10.0, "y": 20.0}
+        nodes["CMPGN-ONE:trigger-1"].data["routes"].append({"targetNodeId": "end-1"})
+
+        resource_utils.assign_campaign_positions(
+            list(nodes.values()), lambda node: route_targets(node.data)
+        )
+
+        self.assertEqual(nodes["CMPGN-ONE:trigger-1"].position, {"x": 10.0, "y": 20.0})
+        self.assertEqual(nodes["CMPGN-ONE:call-1"].position, {"x": 410.0, "y": 20.0})
+        self.assertEqual(nodes["CMPGN-ONE:end-1"].position, {"x": 410.0, "y": 220.0})
+
+    def test_a_node_nothing_routes_to_goes_right_of_everything(self):
+        nodes = list(_campaign_nodes().values())
+        nodes[2].position = None
+        nodes[1].data["defaultRoute"] = None
+
+        resource_utils.assign_campaign_positions(nodes, lambda node: route_targets(node.data))
+
+        self.assertEqual(nodes[2].position, {"x": 400.0, "y": 0.0})
+
+    def test_node_data_maps_onto_the_wire_field_names(self):
+        """Every node type's camelCase fields map onto the proto fields."""
+        call = {
+            "type": "call",
+            "flowName": "Booking",
+            "amdFlowName": "Voicemail",
+            "function": {"name": "call_args", "description": "d"},
+            "greeting": "Hi",
+            "voicemailEnabled": True,
+            "voicemailScript": "Call back",
+            "voicemailWhen": "final_retry",
+            "maxAttempts": 3,
+            "backoff": 2,
+            "backoffUnit": "days",
+            "defaultRoute": "end-1",
+        }
+        sms = {
+            "type": "sms",
+            "function": {"name": "sms_args", "description": "d"},
+            "messageTemplate": "Hi {{first_name}}",
+            "replyFlowName": "Reply",
+            "replyTimeoutValue": 0,
+            "replyTimeoutUnit": "hours",
+            "defaultRoute": None,
+        }
+        conditional = {
+            "type": "conditional",
+            "function": {"name": "pick", "description": "d"},
+            "branches": [{"id": "b-1", "variable": "yes", "targetNodeId": "end-1"}],
+            "defaultTargetNodeId": "wait-1",
+        }
+        writeback = {
+            "type": "writeback",
+            "target": "api",
+            "function": {"name": "push_crm", "description": "d"},
+            "targetNodeId": "end-1",
+        }
+        expected = {
+            "call": (
+                call,
+                {
+                    "flowName": "Booking",
+                    "amdFlowName": "Voicemail",
+                    "function": "call_args",
+                    "greeting": "Hi",
+                    "voicemailEnabled": True,
+                    "voicemailScript": "Call back",
+                    "voicemailWhen": "final_retry",
+                    "maxAttempts": 3,
+                    "backoff": 2,
+                    "backoffUnit": "days",
+                    "defaultRoute": "end-1",
+                    "campaignFunction": {"name": "call_args", "description": "d", "code": "code"},
+                },
+            ),
+            "sms": (
+                sms,
+                {
+                    "function": "sms_args",
+                    "messageTemplate": "Hi {{first_name}}",
+                    "replyFlowName": "Reply",
+                    "replyTimeoutValue": 0,
+                    "replyTimeoutUnit": "hours",
+                    "campaignFunction": {"name": "sms_args", "description": "d", "code": "code"},
+                },
+            ),
+            "conditional": (
+                conditional,
+                {
+                    "function": "pick",
+                    "branches": [{"id": "b-1", "variable": "yes", "targetNodeId": "end-1"}],
+                    "defaultTargetNodeId": "wait-1",
+                    "campaignFunction": {"name": "pick", "description": "d", "code": "code"},
+                },
+            ),
+            "writeback": (
+                writeback,
+                {
+                    "target": "api",
+                    "function": "push_crm",
+                    "targetNodeId": "end-1",
+                    "campaignFunction": {"name": "push_crm", "description": "d", "code": "code"},
+                },
+            ),
+        }
+        for node_type, (data, wire) in expected.items():
+            with self.subTest(node_type=node_type):
+                field_name, message = node_data_proto(data, "code")
+                self.assertEqual(field_name, node_type)
+                self.assertEqual(MessageToDict(message), wire)
+
+    def test_end_node_without_function_sends_none(self):
+        _, message = node_data_proto(
+            {"type": "end", "exitReason": "done", "writebackEnabled": False}, ""
+        )
+
+        self.assertEqual(MessageToDict(message), {"exitReason": "done"})
+        self.assertFalse(message.HasField("campaign_function"))
+
+    def test_settings_are_sent_whole(self):
+        campaign = _campaign()
+        campaign.settings["voiceDispatchLimits"] = {
+            "maxConcurrent": 5,
+            "perHour": None,
+            "perDay": None,
+        }
+        campaign.settings["contactWindow"] = {
+            "daysOfWeek": ["monday"],
+            "startTime": "09:00",
+            "endTime": "17:00",
+        }
+
+        proto = campaign.settings_change().build_update_proto()
+
+        self.assertEqual(proto.id, "CMPGN-ONE")
+        self.assertEqual(
+            MessageToDict(proto.settings),
+            {
+                "fromNumber": "+15550100",
+                "country": "US",
+                "dailyContactLimit": 3,
+                "voiceDispatchLimits": {"maxConcurrent": 5},
+                "contactWindow": {
+                    "daysOfWeek": ["monday"],
+                    "startTime": "09:00",
+                    "endTime": "17:00",
+                },
+            },
+        )
+        self.assertEqual(
+            campaign.settings_change().create_command_type, "outbound_campaign_update_settings"
+        )
+
+    def test_update_clears_a_removed_description(self):
+        campaign = _campaign()
+
+        proto = campaign.build_update_proto()
+
+        self.assertTrue(proto.clear_description)
+        self.assertFalse(proto.HasField("description"))
+        campaign.description = "Monthly"
+        self.assertEqual(campaign.build_update_proto().description, "Monthly")
+
 
 if __name__ == "__main__":
     unittest.main()

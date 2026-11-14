@@ -59,6 +59,7 @@ from poly.resources.outbound_campaign import (
     OutboundCampaign,
     OutboundCampaignFunction,
     OutboundCampaignNode,
+    OutboundCampaignSettings,
 )
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
