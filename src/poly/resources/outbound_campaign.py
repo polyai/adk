@@ -1049,19 +1049,13 @@ class OutboundCampaign(MultiResourceYamlResource):
     def validate_creates_and_deletes(
         cls, new_resources: dict, deleted_resources: dict
     ) -> list[str]:
-        """Refuse deleting a published campaign, or one whose folder rename can't be paired.
+        """Refuse deleting a published campaign, or changing its trigger's source through a rename.
 
-        A delete and a create in one push would replace a campaign rather than rename it, so
-        they are refused unless pairing makes them a rename. A draft can still be deleted alone.
-        A new campaign is refused settings the ADK can't send, unless a rename keeps them as
-        they were.
+        A folder rename that pairs with a deleted campaign keeps its id; any other delete and
+        create go through as they are. A new campaign is refused settings the ADK can't send,
+        unless a rename keeps them as they were.
         """
         paired = paired_campaigns(new_resources, deleted_resources)
-        created = [
-            campaign.name
-            for campaign_id, campaign in new_resources.get(cls, {}).items()
-            if campaign_id not in paired.values()
-        ]
         renamed_from = {new_id: old_id for old_id, new_id in paired.items()}
         errors = []
         for campaign_id, campaign in new_resources.get(cls, {}).items():
@@ -1083,12 +1077,6 @@ class OutboundCampaign(MultiResourceYamlResource):
                     f"'{campaign.name}' has been published, so it can't be deleted. To retire "
                     "it, run `poly campaign pause` then `poly campaign archive`, and restore its "
                     "folder here. It stops being pulled once it's archived."
-                )
-            elif created:
-                errors.append(
-                    f"'{campaign.name}' would be deleted and "
-                    f"{', '.join(repr(name) for name in created)} created. To rename a "
-                    "campaign's folder, rename it in a push of its own, with its nodes as they are."
                 )
         return errors
 
@@ -1382,6 +1370,10 @@ def node_data_errors(data: Any, function_file: str) -> list[str]:
             )
         ):
             errors.append("Each branch needs text 'variable' and 'next'.")
+        elif branches:
+            variables = [branch["variable"] for branch in branches]
+            for variable in sorted({value for value in variables if variables.count(value) > 1}):
+                errors.append(f"Branch value '{variable}' is used by more than one branch.")
     elif node_type == "wait":
         amount = data.get("amount")
         if amount is not None and not (_is_int(amount) and amount > 0):
