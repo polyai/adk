@@ -10,10 +10,12 @@ import os
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import quote
 
 from ruamel.yaml import YAML
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
+from poly.handlers.sdk import SourcererAPIError
 from poly.handlers.utils import camel_to_snake_keys
 from poly.utils import raise_if_no_credentials, retrieve_api_key
 
@@ -75,6 +77,13 @@ FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT = 30
+OUTBOUND_CAMPAIGN_TEST_START_TIMEOUT = (10, 300)
+OUTBOUND_CAMPAIGN_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/branches/{branch_id}"
+    "/outbound-campaigns/{path}"
+)
+
 # Data API routes, served on the regional api.<region>.poly.ai hosts.
 DATA_METRICS_URL = "/api/v1/metrics"
 DATA_METRICS_AGGREGATE_URL = "/api/v1/metrics/aggregate"
@@ -133,6 +142,7 @@ class PlatformAPIHandler:
         files: ty.Optional[dict] = None,
         response_format: str = "json",
         use_jupiter_api: bool = False,
+        timeout: ty.Optional[ty.Union[float, tuple[float, float]]] = None,
     ) -> dict:
         """Make a request to the Platform API.
 
@@ -149,6 +159,8 @@ class PlatformAPIHandler:
             response_format (str): How to parse the response. "json" (default)
                 or "yaml".
             use_jupiter_api (bool): Whether to use the Jupiter API.
+            timeout (float | tuple[float, float] | None): Seconds to wait for the server to
+                connect and to send data, or a (connect, read) pair. None waits forever.
 
         Returns:
             dict: The parsed response.
@@ -181,6 +193,7 @@ class PlatformAPIHandler:
             allow_redirects=False,
             files=files,
             data=json.dumps(data) if data and not files else None,
+            timeout=timeout,
         )
 
         logger.debug(
@@ -1799,6 +1812,104 @@ class PlatformAPIHandler:
         """
         endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    @staticmethod
+    def _outbound_campaign_request(
+        region: str,
+        account_id: str,
+        project_id: str,
+        branch_id: str,
+        segments: tuple[str, ...],
+        method: str = "POST",
+        data: ty.Optional[dict] = None,
+        timeout: ty.Union[float, tuple[float, float]] = OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT,
+    ) -> dict:
+        import requests
+
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id=quote(branch_id, safe=""),
+            path="/".join(quote(segment, safe="") for segment in segments),
+        )
+        PlatformAPIHandler.get_base_url(region)
+        try:
+            return PlatformAPIHandler.make_request(
+                region, endpoint, method, data=data, timeout=timeout
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
+
+    @staticmethod
+    def validate_outbound_campaign(
+        region: str, account_id: str, project_id: str, branch_id: str, campaign_id: str
+    ) -> dict:
+        """Validate a campaign as it is on `branch_id`.
+
+        Raises:
+            SourcererAPIError: with the platform's status, error code and message.
+        """
+        return PlatformAPIHandler._outbound_campaign_request(
+            region, account_id, project_id, branch_id, (campaign_id, "validate")
+        )
+
+    @staticmethod
+    def dry_run_outbound_campaign(
+        region: str,
+        account_id: str,
+        project_id: str,
+        branch_id: str,
+        campaign_id: str,
+        body: dict,
+    ) -> dict:
+        """Dry-run a campaign on `branch_id`. Nothing is sent or stored.
+
+        Raises:
+            SourcererAPIError: with the platform's status, error code and message.
+        """
+        return PlatformAPIHandler._outbound_campaign_request(
+            region, account_id, project_id, branch_id, (campaign_id, "dry-run"), data=body
+        )
+
+    @staticmethod
+    def start_outbound_campaign_test_step(
+        region: str, account_id: str, project_id: str, campaign_id: str, body: dict
+    ) -> dict:
+        """Start a real test step of the live campaign, on main.
+
+        Raises:
+            SourcererAPIError: with the platform's status, error code and message. After a
+                read timeout, raised from the `requests.ReadTimeout`: the step may have started.
+        """
+        return PlatformAPIHandler._outbound_campaign_request(
+            region,
+            account_id,
+            project_id,
+            "main",
+            (campaign_id, "test-steps"),
+            data=body,
+            timeout=OUTBOUND_CAMPAIGN_TEST_START_TIMEOUT,
+        )
+
+    @staticmethod
+    def get_outbound_campaign_test_step(
+        region: str, account_id: str, project_id: str, campaign_id: str, step_id: str
+    ) -> dict:
+        """Read a test step of the live campaign, on main.
+
+        Raises:
+            SourcererAPIError: with the platform's status, error code and message.
+        """
+        return PlatformAPIHandler._outbound_campaign_request(
+            region,
+            account_id,
+            project_id,
+            "main",
+            (campaign_id, "test-steps", step_id),
+            method="GET",
+        )
 
     @staticmethod
     def get_available_metrics(region: str, project_id: ty.Optional[str] = None) -> dict:

@@ -10,6 +10,7 @@ from google.protobuf.message import Message
 
 from poly.handlers.platform_api import PlatformAPIHandler
 from poly.handlers.posthog import PosthogHandler
+from poly.handlers.protobuf import outbound_campaigns_pb2
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
 from poly.handlers.sync_client import SyncClientHandler
@@ -33,6 +34,13 @@ from poly.resources import (
     Variant,
     VariantAttribute,
 )
+
+LIFECYCLE_COMMANDS = {
+    "outbound_campaign_publish": outbound_campaigns_pb2.OutboundCampaign_Publish,
+    "outbound_campaign_pause": outbound_campaigns_pb2.OutboundCampaign_Pause,
+    "outbound_campaign_resume": outbound_campaigns_pb2.OutboundCampaign_Resume,
+    "outbound_campaign_archive_definition": outbound_campaigns_pb2.OutboundCampaign_ArchiveDefinition,
+}
 
 REGIONS = [
     "us-1",
@@ -115,6 +123,7 @@ class AgentStudioInterface:
         self.region = region
         self.account_id = account_id
         self.project_id = project_id
+        self._remote_branch: Optional[str] = None
         if region and account_id and project_id:
             self.sync_client = SyncClientHandler(region, account_id, project_id, branch_id)
 
@@ -591,6 +600,49 @@ class AgentStudioInterface:
             return self.sync_client.get_queued_commands()
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
+
+    def validate_outbound_campaign(self, campaign_id: str) -> dict[str, Any]:
+        """Validate a campaign on the current branch."""
+        self.ensure_remote_branch()
+        return PlatformAPIHandler.validate_outbound_campaign(
+            self.region, self.account_id, self.project_id, self.branch_id, campaign_id
+        )
+
+    def dry_run_outbound_campaign(self, campaign_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Dry-run a campaign on the current branch. Nothing is sent or stored."""
+        self.ensure_remote_branch()
+        return PlatformAPIHandler.dry_run_outbound_campaign(
+            self.region, self.account_id, self.project_id, self.branch_id, campaign_id, body
+        )
+
+    def start_outbound_campaign_test_step(
+        self, campaign_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Start a real test step of the live campaign."""
+        return PlatformAPIHandler.start_outbound_campaign_test_step(
+            self.region, self.account_id, self.project_id, campaign_id, body
+        )
+
+    def get_outbound_campaign_test_step(self, campaign_id: str, step_id: str) -> dict[str, Any]:
+        """Read a test step of the live campaign."""
+        return PlatformAPIHandler.get_outbound_campaign_test_step(
+            self.region, self.account_id, self.project_id, campaign_id, step_id
+        )
+
+    def ensure_remote_branch(self) -> str:
+        """Return the branch campaign checks run on: this one, or main if it no longer exists.
+
+        Checks the platform once per interface, for the campaign checks only.
+        """
+        if self._remote_branch is None or self._remote_branch != self.branch_id:
+            self._remote_branch = self.sync_client.assert_branch_exists()
+        return self._remote_branch
+
+    def send_outbound_campaign_lifecycle(self, command_type: str, campaign_id: str) -> None:
+        """Send a publish, pause, resume or archive command for a campaign to main."""
+        message_type = LIFECYCLE_COMMANDS[command_type]
+        command = Command(type=command_type, **{command_type: message_type(id=campaign_id)})
+        self.sync_client.send_command_to_main(command)
 
     def get_branches(self) -> dict[str, dict[str, Any]]:
         """Get a list of branches with full metadata.

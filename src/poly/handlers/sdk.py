@@ -12,6 +12,7 @@ import logging
 import os
 import uuid
 import warnings
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Optional
 
 from poly.utils import retrieve_api_key
@@ -31,7 +32,97 @@ warnings.filterwarnings("ignore", category=UserWarning, module="google.protobuf.
 class SourcererAPIError(Exception):
     """Exception raised when the Sourcerer API returns an error"""
 
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        status_code: Optional[int] = None,
+        error_code: Optional[str] = None,
+        server_message: Optional[str] = None,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_code = error_code
+        self.server_message = server_message
+
+    @classmethod
+    def from_request_error(cls, e: requests.exceptions.RequestException) -> "SourcererAPIError":
+        """Build the error for a failed request, keeping the platform's status, code and message.
+
+        The platform answers errors as JSON with `error_code` and `error_message`. A body that
+        is not a JSON object is kept as text, and an HTML error page as its status phrase.
+        """
+        response = getattr(e, "response", None)
+        if response is None:
+            return cls(f"Request failed: {e}")
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            text = response.text or ""
+            if text.lstrip().startswith("<"):
+                try:
+                    text = HTTPStatus(response.status_code).phrase
+                except ValueError:
+                    text = "Unexpected response"
+            return cls(
+                f"API Error {response.status_code}: {text}",
+                status_code=response.status_code,
+                server_message=text or None,
+            )
+        server_message = body.get("error_message") or body.get("error") or body.get("message")
+        return cls(
+            f"API Error {response.status_code}: {body}",
+            status_code=response.status_code,
+            error_code=body.get("error_code"),
+            server_message=str(server_message) if server_message else None,
+        )
+
+
+class CommandBatchNotSent(SourcererAPIError):
+    """A command batch failed before it was sent, so nothing it holds was applied."""
+
+
+def request_outcome(error: SourcererAPIError) -> Optional[str]:
+    """Say how far a failed request got, as far as the transport shows.
+
+    Args:
+        error: The failure, raised from the `requests` exception when there was one.
+
+    Returns:
+        "not_sent" if it never reached the platform: a batch failed before sending, a
+        connection that never opened, a proxy or TLS failure. "timed_out" if the platform
+        did not answer in time, "dropped" if the connection broke after it was made, or
+        None if the transport says nothing and the status must decide.
+    """
+    import requests
+    import urllib3
+
+    if isinstance(error, CommandBatchNotSent):
+        return "not_sent"
+    cause = error.__cause__
+    if isinstance(
+        cause,
+        (
+            requests.exceptions.ConnectTimeout,
+            requests.exceptions.ProxyError,
+            requests.exceptions.SSLError,
+        ),
+    ):
+        return "not_sent"
+    if isinstance(cause, requests.exceptions.ConnectionError):
+        reason = cause.args[0] if cause.args else None
+        if isinstance(getattr(reason, "reason", reason), urllib3.exceptions.ConnectTimeoutError):
+            return "not_sent"
+    if isinstance(cause, requests.exceptions.ReadTimeout):
+        return "timed_out"
+    if error.status_code is None and isinstance(cause, requests.exceptions.ConnectionError):
+        return "dropped"
+    return None
+
+
+class InterruptedBeforeSending(KeyboardInterrupt):
+    """Ctrl+C came before a command batch was sent, so nothing it holds was applied."""
 
 
 class SourcererSDK:
@@ -142,9 +233,9 @@ class SourcererSDK:
         """Get the deployment projection endpoint URL"""
         return f"{self.base_url}/accounts/{self.account_id}/projects/{self.project_id}/deployments/{deployment_id}/projection"
 
-    def _get_command_batch_url(self) -> str:
-        """Get the command batch endpoint URL"""
-        return f"{self.base_url}/accounts/{self.account_id}/projects/{self.project_id}/branches/{self.branch_id}/command-batch"
+    def _get_command_batch_url(self, branch_id: Optional[str] = None) -> str:
+        """Get the command batch endpoint URL of `branch_id`, or of the current branch"""
+        return f"{self._get_branches_url()}/{branch_id or self.branch_id}/command-batch"
 
     def _get_branches_url(self) -> str:
         """Get the branches endpoint URL"""
@@ -508,12 +599,15 @@ class SourcererSDK:
                 error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
-    def fetch_last_known_sequence_number(self, branch_id: Optional[str] = None) -> int:
+    def fetch_last_known_sequence_number(
+        self, branch_id: Optional[str] = None, timeout: Optional[float] = None
+    ) -> int:
         """Get the sequence number from the API.
 
         Args:
             branch_id (Optional[str]): The branch ID to fetch the sequence number for.
                 Defaults to the current branch if not provided.
+            timeout (Optional[float]): Seconds to wait for an answer. None waits forever.
 
         Returns:
             The sequence number as an integer.
@@ -527,19 +621,11 @@ class SourcererSDK:
             branch_id = self.branch_id
         try:
             url = f"{self._get_branches_url()}/{branch_id}/sequence"
-            response = self.session.get(url)
+            response = self.session.get(url, timeout=timeout)
             response.raise_for_status()
             return int(response.json()["lastKnownSequence"])
         except requests.exceptions.RequestException as e:
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except (ValueError, KeyError):
-                    error_msg = f"API request failed: {e}"
-            else:
-                error_msg = f"Request failed: {e}"
-            raise SourcererAPIError(error_msg) from e
+            raise SourcererAPIError.from_request_error(e) from e
 
     def fetch_projection(
         self,
@@ -597,16 +683,7 @@ class SourcererSDK:
             return projection
 
         except requests.exceptions.RequestException as e:
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
-            else:
-                error_msg = f"Request failed: {str(e)}"
-
-            raise SourcererAPIError(error_msg) from e
+            raise SourcererAPIError.from_request_error(e) from e
 
     def fetch_deployment_projection(self, deployment_id: str) -> dict[str, Any]:
         """Fetch projection for a specific deployment from the API.
@@ -665,7 +742,9 @@ class SourcererSDK:
         """Clear all commands from the queue"""
         self._command_queue.clear()
 
-    def send_command_batch(self) -> dict[str, Any]:
+    def send_command_batch(
+        self, branch_id: Optional[str] = None, timeout: Optional[float] = None
+    ) -> dict[str, Any]:
         """Send all queued commands as a batch to the API
 
         This method:
@@ -675,24 +754,46 @@ class SourcererSDK:
         4. Clears the queue after successful send
         5. Refetches the projection to get updated state
 
+        Args:
+            branch_id: The branch to send the batch to, with its sequence number fetched
+                afresh. When given, the projection is not refetched.
+            timeout: Seconds to wait for the sequence number, when `branch_id` is given, and
+                for the batch to be answered. None waits forever.
+
         Returns:
-            The response data from the API
+            The current branch's refetched projection, or the API's response when
+            `branch_id` is given.
 
         Raises:
+            CommandBatchNotSent: If the sequence number of `branch_id` could not be read.
             SourcererAPIError: If the API request fails or no commands in queue
         """
         import requests
 
         if not self._command_queue:
-            raise SourcererAPIError("No commands in queue to send")
+            raise CommandBatchNotSent("No commands in queue to send")
 
         try:
             # Create command batch from queued commands
             command_batch = CommandBatch()
             command_batch.commands.extend(self._command_queue)
 
-            # Set the sequence number from cached value
-            command_batch.last_known_sequence = self.get_last_known_sequence()
+            if branch_id is None:
+                command_batch.last_known_sequence = self.get_last_known_sequence()
+            else:
+                try:
+                    command_batch.last_known_sequence = self.fetch_last_known_sequence_number(
+                        branch_id, timeout=timeout
+                    )
+                except SourcererAPIError as e:
+                    raise CommandBatchNotSent(
+                        f"Could not read the sequence of {branch_id}, so nothing was sent: {e}",
+                        status_code=e.status_code,
+                        error_code=e.error_code,
+                        server_message=e.server_message,
+                    ) from e
+                except KeyboardInterrupt as e:
+                    raise InterruptedBeforeSending() from e
 
             # Validate the command batch before sending
             logger.debug("Command batch validation:")
@@ -703,9 +804,9 @@ class SourcererSDK:
             for i, cmd in enumerate(command_batch.commands):
                 logger.debug(f"  - Command {i}: type={cmd.type}, id={cmd.command_id}")
                 if not cmd.type:
-                    raise SourcererAPIError(f"Command {i} has no type")
+                    raise CommandBatchNotSent(f"Command {i} has no type")
                 if not cmd.command_id:
-                    raise SourcererAPIError(f"Command {i} has no command_id")
+                    raise CommandBatchNotSent(f"Command {i} has no command_id")
 
             # Serialize the protobuf message to bytes
             try:
@@ -721,26 +822,17 @@ class SourcererSDK:
 
             except Exception as e:
                 logger.exception(f"✗ Protobuf serialization failed: {e}")
-                raise SourcererAPIError(f"Failed to serialize command batch: {e}")
+                raise CommandBatchNotSent(f"Failed to serialize command batch: {e}")
 
-            # Update headers for protobuf content
-            correlation_id = f"adk-{uuid.uuid4()}"
-            headers = {
-                "X-API-KEY": retrieve_api_key(self.region),
-                "X-PolyAI-Correlation-Id": correlation_id,
-                "X-Poly-Source": "adk",
-                "Content-Type": "application/octet-stream",
-            }
-            if self.email:
-                headers["X-PolyAI-Email"] = self.email
-
-            logger.info(f"Sending to URL: {self._get_command_batch_url()}")
+            url = self._get_command_batch_url(branch_id)
+            logger.info(f"Sending to URL: {url}")
 
             # Send the protobuf data as binary
             response = requests.post(
-                self._get_command_batch_url(),
+                url,
                 data=command_batch_bytes,
-                headers=headers,
+                headers=self._command_batch_headers(),
+                timeout=timeout,
             )
             response.raise_for_status()
 
@@ -748,28 +840,33 @@ class SourcererSDK:
             try:
                 response_data = response.json()
             except (ValueError, json.JSONDecodeError):
-                raise SourcererAPIError(f"Failed to parse response: {response.text}")
+                raise SourcererAPIError(
+                    f"Failed to parse response: {response.text}",
+                    status_code=response.status_code,
+                )
 
             if response_data.get("error"):
-                raise SourcererAPIError(f"Error: {response_data.get('error')}")
+                raise SourcererAPIError(
+                    f"Error: {response_data['error']}",
+                    status_code=response.status_code,
+                    error_code=response_data.get("error_code"),
+                    server_message=str(response_data["error"]),
+                )
 
             # Clear the queue after successful send
             self.clear_queue()
+
+            if branch_id is not None:
+                if branch_id == self.branch_id:
+                    self._projection_cache = None
+                    self._last_known_sequence = None
+                return response_data
 
             # Refetch projection after successful command batch
             return self.fetch_projection(force_refresh=True)
 
         except requests.exceptions.RequestException as e:
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
-            else:
-                error_msg = f"Request failed: {str(e)}"
-
-            raise SourcererAPIError(error_msg) from e
+            raise SourcererAPIError.from_request_error(e) from e
 
     def get_project_data(self) -> dict[str, Any]:
         """Get the cached projection data
@@ -1102,6 +1199,17 @@ class SourcererSDK:
             return result.get("projection", result)
         except requests.exceptions.RequestException as e:
             raise SourcererAPIError(self._format_request_error(e)) from e
+
+    def _command_batch_headers(self) -> dict[str, str]:
+        headers = {
+            "X-API-KEY": retrieve_api_key(self.region),
+            "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+            "X-Poly-Source": "adk",
+            "Content-Type": "application/octet-stream",
+        }
+        if self.email:
+            headers["X-PolyAI-Email"] = self.email
+        return headers
 
     @staticmethod
     def _format_request_error(e: requests.exceptions.RequestException) -> str:

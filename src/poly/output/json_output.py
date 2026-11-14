@@ -19,6 +19,16 @@ def json_print(data: dict) -> None:
     sys.stdout.write("\n")
 
 
+def json_progress(data: dict) -> None:
+    """Write data as one line of JSON to stderr, flushed, ahead of the result on stdout.
+
+    Args:
+        data: Dictionary to serialize and write.
+    """
+    sys.stderr.write(json.dumps(data, default=str) + "\n")
+    sys.stderr.flush()
+
+
 def commands_to_dicts(commands: list) -> list[dict]:
     """Convert a list of Command protobufs to JSON-serializable dicts.
 
