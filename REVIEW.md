@@ -17,9 +17,10 @@ Report **blocking** issues first, then **nits**. Don't comment on what the ignor
    - `print`, prompts, console output or `sys.exit` inside `project.py`. Project methods return
      data or raise, and the command decides how to show it.
 2. **PR title type.** The title becomes the release. `feat:` for anything a user can see,
-   including output or on-disk changes. `fix:`/`perf:` for patches. `chore:`/`docs:`/`ci:`/`build:`/
-   `refactor:`/`style:`/`test:` don't release, so a user-visible change under one of them never
-   ships a release.
+   including output or on-disk changes. `fix:`/`perf:` for patches. `sync:` (also a patch) only
+   for bringing the bundled experimental config schema or runtime stubs up to date with
+   production. `chore:`/`docs:`/`ci:`/`build:`/`refactor:`/`style:`/`test:` don't release, so a
+   user-visible change under one of them never ships a release.
 3. **Version or changelog edits.** Versions in `pyproject.toml` and `skills/*/SKILL.md`, and
    `CHANGELOG.md`, are written by semantic-release. A hand edit is wrong. Don't ask for a bump
    either.

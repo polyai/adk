@@ -11,7 +11,7 @@ Run every step, even after one fails, then report a summary. All commands run fr
 through `uv run`; don't activate the venv.
 
 1. **PR title.** Take the intended PR title (ask if it isn't known) and check it matches
-   `^(feat|fix|chore|docs|ci|build|perf|refactor|style|test)(\(.+\))?!?: .+`. Check that the
+   `^(feat|fix|sync|chore|docs|ci|build|perf|refactor|style|test)(\(.+\))?!?: .+`. Check that the
    type is right too: anything a user can see is `feat:`. See the release table in `AGENTS.md`.
 2. **Lint:** `uv run ruff check .`
 3. **Format:** `uv run ruff format --check .`

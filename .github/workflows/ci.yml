@@ -16,12 +16,12 @@ jobs:
         PR_TITLE: ${{ github.event.pull_request.title }}
       run: |
         # Conventional commit types from CONTRIBUTING.md
-        pattern='^(feat|fix|chore|docs|ci|build|perf|refactor|style|test)(\(.+\))?!?: .+'
+        pattern='^(feat|fix|sync|chore|docs|ci|build|perf|refactor|style|test)(\(.+\))?!?: .+'
         if [[ ! "$PR_TITLE" =~ $pattern ]]; then
           echo "::error::PR title does not follow conventional commits format."
           echo ""
           echo "Expected: <type>[optional scope][!]: <description>"
-          echo "  Types: feat, fix, chore, docs, ci, build, perf, refactor, style, test"
+          echo "  Types: feat, fix, sync, chore, docs, ci, build, perf, refactor, style, test"
           echo "  Examples:"
           echo "    feat: add poly export command"
           echo "    fix(cli): handle missing config file"

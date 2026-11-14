@@ -143,6 +143,25 @@ commit_message = "chore(release): {version}"
 build_command = "pip install build && python -m build"
 tag_format = "v{version}"
 
+[tool.semantic_release.commit_parser_options]
+# `sync:` marks a commit that only brings bundled platform copies (the experimental config
+# schema, the runtime stubs) up to date with production. It releases a patch, like `fix:`.
+allowed_tags = [
+    "feat",
+    "fix",
+    "perf",
+    "sync",
+    "build",
+    "chore",
+    "ci",
+    "docs",
+    "refactor",
+    "style",
+    "test",
+]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf", "sync"]
+
 [tool.semantic_release.changelog]
 # templates/.release_notes.md.j2 prepends a "Getting started" block to every
 # GitHub release (DEVP-790); CHANGELOG.md generation is unaffected.
