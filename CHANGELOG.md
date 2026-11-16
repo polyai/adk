@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.81.1 (2026-11-16)
+
+### Bug Fixes
+
+- Validate entity, handoff and API integration limits before push
+  ([#420](https://github.com/polyai/adk/pull/420),
+  [`7dc6b67`](https://github.com/polyai/adk/commit/7dc6b67db8a58616293021cf4deb2ed12ef7c40e))
+
+- Validate topics, documents, speech settings and tests before push
+  ([#417](https://github.com/polyai/adk/pull/417),
+  [`61649c4`](https://github.com/polyai/adk/commit/61649c4618ad6fc93feeb176b36e6b9b15b14019))
+
+
 ## v0.81.0 (2026-11-16)
 
 ### Bug Fixes
