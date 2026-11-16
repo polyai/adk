@@ -1269,6 +1269,25 @@ def test_code(conv: Conversation, test_param: int):
         self.assertEqual(latency_control.initial_delay, -1)
         self.assertEqual(latency_control.delay_responses[0].duration, -1)
 
+    def test_validate_latency_value_that_is_not_a_literal_raises(self):
+        """A name or expression is not read as 0, so validation can reject it."""
+        code = (
+            "@func_latency_control(delay_before_responses_start=DELAY, "
+            "silence_after_each_response=1, delay_responses=[('One moment', WAIT * 2)])\n"
+            "def lookup(conv: Conversation):\n    pass\n"
+        )
+
+        _, _, _, latency_control = Function._extract_decorators(code, "lookup", [], None)
+
+        self.assertEqual(latency_control.initial_delay, "DELAY")
+        self.assertEqual(latency_control.delay_responses[0].duration, "WAIT * 2")
+        func = self._global_function(latency_control=latency_control)
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn(
+            "delay_before_responses_start must be an integer, got 'DELAY'", str(cm.exception)
+        )
+
     def test_extract_decorators_untyped_parameter_raises_value_error(self):
         """A parameter without a type annotation raises ValueError."""
         code = """@func_description('Book a table')
