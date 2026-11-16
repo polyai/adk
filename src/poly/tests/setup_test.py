@@ -247,6 +247,8 @@ class SetupAuthStepTest(unittest.TestCase):
         self.mock_select_region.return_value = "studio"
         self.mock_credentials = patch("poly.cli_commands.setup.any_credentials_exist").start()
         self.mock_credentials.return_value = False
+        self.mock_session = patch("poly.cli_commands.setup.apikey_session").start()
+        patch("poly.cli_commands.setup.read_env_var", return_value="key-in-profile").start()
         self.addCleanup(patch.stopall)
 
     def _run_setup(self, **kwargs) -> None:
@@ -275,8 +277,22 @@ class SetupAuthStepTest(unittest.TestCase):
         self._run_setup(region="us-1")
 
         self.mock_select_region.assert_not_called()
-        self.mock_signin.assert_called_once_with("us-1")
+        self.mock_signin.assert_called_once_with("us-1", auth_details=None)
         self.mock_save_key.assert_called_once_with("jwt-token", region="us-1")
+
+    def test_sign_in_is_kept_for_poly_apikey(self):
+        """The sign-in is saved to the apikey session so the account key step can reuse it."""
+        self._run_setup(region="us-1")
+
+        self.mock_session.save.assert_called_once_with("us-1", "jwt-token")
+
+    def test_studio_signs_in_with_the_apikey_client(self):
+        """On studio setup uses the client `poly apikey` uses, so one sign-in serves both."""
+        from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS
+
+        self._run_setup(region="studio")
+
+        self.mock_signin.assert_called_once_with("studio", auth_details=APIKEY_AUTH_DETAILS)
 
     def test_missing_region_is_prompted_for_and_threaded_through(self):
         """Without --region the user picks one, and that choice is used to sign in."""
@@ -285,7 +301,7 @@ class SetupAuthStepTest(unittest.TestCase):
         self._run_setup()
 
         self.mock_select_region.assert_called_once()
-        self.mock_signin.assert_called_once_with("uk-1")
+        self.mock_signin.assert_called_once_with("uk-1", auth_details=None)
         self.mock_save_key.assert_called_once_with("jwt-token", region="uk-1")
 
 
@@ -523,6 +539,66 @@ class SetupProjectStepTest(unittest.TestCase):
         self.assertEqual(os.listdir(self.base_path), [])
 
 
+class SetupAccountKeyStepTest(unittest.TestCase):
+    """Tests for SetupCommand._setup_account_key, the optional `poly apikey` step."""
+
+    def setUp(self):
+        self.mock_apikey = patch("poly.cli_commands.setup.ApiKeyCommand.apikey").start()
+        self.mock_profile = patch("poly.cli_commands.setup.read_env_var", return_value=None).start()
+        self.mock_tty = patch("sys.stdin.isatty", return_value=True).start()
+        self.mock_confirm = patch("questionary.confirm").start()
+        self.mock_confirm.return_value.ask.return_value = True
+        self.mock_select_region = patch(
+            "poly.cli_commands.setup._select_region", return_value="uk-1"
+        ).start()
+        self.addCleanup(patch.stopall)
+
+    def test_yes_runs_poly_apikey_for_the_region(self):
+        """Accepting the offer hands over to `poly apikey` with setup's region."""
+        outcome = SetupCommand._setup_account_key(False, "us-1")
+
+        self.assertEqual(outcome, "done")
+        self.mock_apikey.assert_called_once_with(region="us-1")
+        self.assertIn("Optional for the ADK", self.mock_confirm.call_args.args[0])
+
+    def test_no_declines_without_running_poly_apikey(self):
+        """Declining leaves everything alone and reports it."""
+        self.mock_confirm.return_value.ask.return_value = False
+
+        self.assertEqual(SetupCommand._setup_account_key(False, "us-1"), "declined")
+        self.mock_apikey.assert_not_called()
+
+    def test_key_already_in_the_profile_skips_without_asking(self):
+        """A POLY_API_KEY already exported means there is nothing to offer."""
+        self.mock_profile.return_value = "existing-key"
+
+        self.assertEqual(SetupCommand._setup_account_key(False, "us-1"), "skipped")
+        self.mock_profile.assert_called_once_with("POLY_API_KEY")
+        self.mock_confirm.assert_not_called()
+        self.mock_apikey.assert_not_called()
+
+    def test_skip_auth_and_no_terminal_skip_without_asking(self):
+        """--skip-auth, or no terminal to ask at, skips the step."""
+        self.assertEqual(SetupCommand._setup_account_key(True, "us-1"), "skipped")
+        self.mock_tty.return_value = False
+        self.assertEqual(SetupCommand._setup_account_key(False, "us-1"), "skipped")
+
+        self.mock_confirm.assert_not_called()
+        self.mock_apikey.assert_not_called()
+
+    def test_region_is_asked_for_when_setup_has_none(self):
+        """With credentials already saved setup may hold no region; ask before `poly apikey`."""
+        SetupCommand._setup_account_key(False, None)
+
+        self.mock_apikey.assert_called_once_with(region="uk-1")
+
+    def test_poly_apikey_stopping_does_not_stop_setup(self):
+        """`poly apikey` exits on failure; setup reports the step failed and carries on."""
+        self.mock_apikey.side_effect = SystemExit(1)
+
+        self.assertEqual(SetupCommand._setup_account_key(False, "us-1"), "failed")
+
+
 class SetupTelemetryTest(unittest.TestCase):
     """Tests for the usage events of ``poly setup``: started, one per step, completed.
 
@@ -544,6 +620,9 @@ class SetupTelemetryTest(unittest.TestCase):
         ).start()
         self.mock_gate = patch("poly.cli_commands.setup.node_gate_reason", return_value=None).start()
         patch("poly.cli_commands.setup.install_skills", return_value=True).start()
+        patch("poly.cli_commands.setup.apikey_session").start()
+        # An exported key makes the optional account key step skip itself.
+        patch("poly.cli_commands.setup.read_env_var", return_value="key-in-profile").start()
         self.addCleanup(patch.stopall)
 
     def _run_setup(self, **kwargs) -> None:
@@ -559,15 +638,17 @@ class SetupTelemetryTest(unittest.TestCase):
         }
 
     def test_run_sends_started_then_each_step_then_completed(self):
-        """One started event, the four steps in order, then completed, all under one run id."""
+        """One started event, the five steps in order, then completed, all under one run id."""
         self._run_setup(skip_skills=True)
 
         calls = self.capture.call_args_list
         self.assertEqual(
             [call.args[1] for call in calls],
-            ["setup_started", *["setup_step"] * 4, "setup_completed"],
+            ["setup_started", *["setup_step"] * 5, "setup_completed"],
         )
-        self.assertEqual(list(self._steps()), ["auth", "completion", "skills", "project"])
+        self.assertEqual(
+            list(self._steps()), ["auth", "apikey", "completion", "skills", "project"]
+        )
         run_ids = {call.args[3] for call in calls}
         self.assertEqual(len(run_ids), 1)
         self.assertTrue(run_ids.pop().startswith("setup:"))
@@ -609,6 +690,7 @@ class SetupTelemetryTest(unittest.TestCase):
         with (
             patch.dict(os.environ, {"DO_NOT_TRACK": "1", "SHELL": "/bin/unrecognised-shell"}),
             patch("poly.cli_commands.setup.any_credentials_exist", return_value=True),
+            patch("poly.cli_commands.setup.read_env_var", return_value="key-in-profile"),
             patch("poly.handlers.posthog.get_posthog_client") as mock_client,
         ):
             self._run_setup(skip_skills=True)
@@ -624,7 +706,13 @@ class SetupTelemetryTest(unittest.TestCase):
         steps = self._steps()
         self.assertEqual(
             {name: step["outcome"] for name, step in steps.items()},
-            {"auth": "done", "completion": "skipped", "skills": "done", "project": "skipped"},
+            {
+                "auth": "done",
+                "apikey": "skipped",
+                "completion": "skipped",
+                "skills": "done",
+                "project": "skipped",
+            },
         )
         for step in steps.values():
             self.assertIsInstance(step["duration_ms"], int)
