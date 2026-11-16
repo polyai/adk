@@ -1064,6 +1064,11 @@ class TestCase(YamlResource):
             if file_name.endswith(".yaml")
         ]
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """The variant the test runs as, if any."""
+        return {("Variant", self.variant)} if self.variant else set()
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         """Validate the test case resource."""
         # Channel is Voice or Webchat

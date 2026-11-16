@@ -98,6 +98,13 @@ class FunctionParameters:
     id: Optional[str] = None
 
 
+# `functions.<module>` in saved code: another flow's functions (by cleaned flow ID) or a
+# global module. `flows.<name>.functions`: a flow that didn't resolve when it was read.
+# Each starts with its literal, as in CONV_STATE_DOT_NAME, so scanning large code stays fast.
+_FUNCTIONS_IMPORT = re.compile(r"functions\.(?<!\wfunctions\.)([A-Za-z0-9_]+)")
+_FLOWS_IMPORT = re.compile(r"flows\.(?<!\wflows\.)([A-Za-z0-9_]+)\.functions\b")
+
+
 @dataclass
 class FunctionDelayResponse:
     """Dataclass representing a single delay response message"""
@@ -724,6 +731,25 @@ class Function(Resource):
             code = code[:start] + original_literal.replace(old_msg, new_msg) + code[end:]
 
         return code
+
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Variables its code uses, other flows its code imports, its flow, and delay responses.
+
+        Imports are listed as `functions.<X>` (a resolved flow, by cleaned ID) and
+        `flows.<X>.functions` (unresolved). Global modules such as `functions.utils` match no
+        flow, so they count as unresolved names that only matter if such a flow appears.
+        """
+        code = self.code or ""
+        refs = {("Variable", variable_id) for variable_id in self.variable_references or {}}
+        refs |= {("Variable", name) for name in utils.extract_variable_names_from_code(code)}
+        refs |= {("flow_module", module) for module in _FUNCTIONS_IMPORT.findall(code)}
+        refs |= {("flow_module", module) for module in _FLOWS_IMPORT.findall(code)}
+        if self.flow_id:
+            refs.add(("FlowConfig", self.flow_id))
+        for delay in getattr(self.latency_control, "delay_responses", None) or []:
+            refs |= utils.template_references(delay.message or "")
+        return refs
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the resource.

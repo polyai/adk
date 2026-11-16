@@ -686,6 +686,11 @@ class ApiIntegration(MultiResourceYamlResource):
 
     _NAME_PATTERN: ClassVar[re.Pattern] = re.compile(r"^[a-z_][a-z0-9_]*$")
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """API integrations reference nothing else in the project."""
+        return set()
+
     def validate(
         self,
         resource_mappings: list[ResourceMapping] | None = None,

@@ -153,6 +153,11 @@ class DefaultLanguage(MultiResourceYamlResource):
             return [os.path.join(file_path, "default_language")]
         return []
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Languages reference nothing else in the project."""
+        return set()
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if not self.name:
             raise ValueError("Default language code is required.")
@@ -285,6 +290,11 @@ class AdditionalLanguage(MultiResourceYamlResource):
         top_level = AdditionalLanguage._get_top_level_data(file_path)
         additional = top_level.get("additional_languages") or []
         return [os.path.join(file_path, "additional_languages", lang) for lang in additional]
+
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Languages reference nothing else in the project."""
+        return set()
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if not self.name:

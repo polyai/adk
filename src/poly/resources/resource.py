@@ -185,6 +185,15 @@ class Resource(BaseResource, ABC):
             raise utils.MergeConflictError(file_path)
         return cls.from_pretty(contents, file_path=file_path, **kwargs)
 
+    @property
+    def refers_to(self) -> Optional[set[tuple[str, str]]]:
+        """What this resource references, as (kind, ID or unresolved name) pairs.
+
+        None means the type doesn't declare its references, so its files are always read in
+        full. See poly.resources.references.
+        """
+        return None
+
     @abstractmethod
     def validate(self, **kwargs) -> None:
         """Validate the resource.

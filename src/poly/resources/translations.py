@@ -141,6 +141,11 @@ class Translation(MultiResourceYamlResource):
     def build_delete_proto(self):
         return LanguageHubTranslations_Delete(id=self.resource_id)
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Translations reference nothing else in the project."""
+        return set()
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         if not self.name:
             raise ValueError("Translation name cannot be empty.")

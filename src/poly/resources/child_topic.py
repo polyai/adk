@@ -217,6 +217,11 @@ class ChildTopic(Topic):
             **kwargs,
         )
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """The topic's template references, and the variant it belongs to."""
+        return super().refers_to | {("Variant", self.variant_id)}
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         """Validate the child topic resource."""
         super().validate(resource_mappings=resource_mappings, **kwargs)

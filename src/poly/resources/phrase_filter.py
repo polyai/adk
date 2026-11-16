@@ -201,6 +201,11 @@ class PhraseFilter(MultiResourceYamlResource):
             id=self.resource_id,
         )
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """The global function the filter calls, if any."""
+        return {("Function", self.function)} if self.function else set()
+
     def validate(self, **kwargs) -> None:
         if not self.name:
             raise ValueError("Name is required")

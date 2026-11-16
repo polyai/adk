@@ -164,6 +164,11 @@ class PlatformGuardrail(_GuardrailYamlResource):
             enabled=yaml_dict.get("enabled", True),
         )
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Platform guardrails reference nothing else in the project."""
+        return set()
+
     def validate(self, **kwargs) -> None:
         """Validate the platform guardrail resource."""
         if not self.name:
@@ -294,6 +299,11 @@ class CustomGuardrail(_GuardrailYamlResource):
             action=yaml_dict.get("action", ""),
             enabled=yaml_dict.get("enabled", True),
         )
+
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Template references in the guardrail's action."""
+        return utils.template_references(self.action)
 
     def validate(self, resource_mappings: list = None, **kwargs) -> None:
         """Validate the custom guardrail resource."""

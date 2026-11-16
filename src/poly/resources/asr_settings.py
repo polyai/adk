@@ -234,6 +234,11 @@ class AsrSettings(YamlResource):
             barge_in=yaml_dict.get("barge_in"),
         )
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """ASR settings reference nothing else in the project."""
+        return set()
+
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if self.speech_end_delay_ms is not None and not (
             SPEECH_END_DELAY_MS_MIN <= self.speech_end_delay_ms <= SPEECH_END_DELAY_MS_MAX

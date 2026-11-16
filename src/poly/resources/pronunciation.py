@@ -232,6 +232,11 @@ class Pronunciation(MultiResourceYamlResource):
             id=self.resource_id,
         )
 
+    @property
+    def refers_to(self) -> set[tuple[str, str]]:
+        """Pronunciations reference nothing else in the project."""
+        return set()
+
     def validate(self, **kwargs) -> None:
         if not self.regex:
             raise ValueError("Regex pattern is required")
