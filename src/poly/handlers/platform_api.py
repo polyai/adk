@@ -10,6 +10,7 @@ import os
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 from ruamel.yaml import YAML
 
@@ -1039,7 +1040,13 @@ class PlatformAPIHandler:
 
     @staticmethod
     def create_account_api_key_internal(
-        region: str, jwt_token: str, account_id: str, name: str, source: str = "adk"
+        region: str,
+        jwt_token: str,
+        account_id: str,
+        name: str,
+        source: str = "adk",
+        api_groups: list[str] | None = None,
+        expires_at: datetime | None = None,
     ) -> dict:
         """Create an account-scoped API key, via JWT auth.
 
@@ -1049,15 +1056,49 @@ class PlatformAPIHandler:
             account_id: The account ID to scope the key to.
             name: A label for the API key.
             source: Value for the ``X-Poly-Source`` header.
+            api_groups: API groups to limit the key to (``"models"``, ``"data"``). Omitted
+                from the request when None, which gives a key for every API.
+            expires_at: When the key expires. Omitted from the request when None, which
+                gives a key that never expires.
 
         Returns:
             dict: The full API key record, including the secret under ``key``.
         """
+        body: dict[str, ty.Any] = {"name": name}
+        if api_groups is not None:
+            body["api_groups"] = api_groups
+        if expires_at is not None:
+            body["expires_at"] = expires_at.isoformat()
         return PlatformAPIHandler.make_request(
             region,
             f"/jupiter/v2/accounts/{account_id}/api-keys",
             "POST",
-            data={"name": name},
+            data=body,
+            headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
+            use_jupiter_api=True,
+        )
+
+    @staticmethod
+    def list_account_api_keys_internal(
+        region: str, jwt_token: str, account_id: str, source: str = "adk"
+    ) -> list[dict]:
+        """List an account's API keys, via JWT auth.
+
+        The records carry no secret, only ``key_prefix`` and ``key_suffix``.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID whose keys to list.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The API key records.
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            f"/jupiter/v2/accounts/{account_id}/api-keys",
+            "GET",
             headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
             use_jupiter_api=True,
         )
