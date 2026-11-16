@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.84.0 (2026-11-16)
+
+### Features
+
+- **apikey**: Create Models-only keys with --type model, and keys now expire after 90 days by
+  default ([#430](https://github.com/polyai/adk/pull/430),
+  [`c43b1e8`](https://github.com/polyai/adk/commit/c43b1e895085138fee008648c242849e0624bb4a))
+
+
 ## v0.83.0 (2026-11-16)
 
 ### Features
