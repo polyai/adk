@@ -2,6 +2,63 @@
 
 <!-- version list -->
 
+## v0.81.2 (2026-11-16)
+
+### Bug Fixes
+
+- Stop poly validate rejecting an empty flow description, step prompt or greeting
+  ([#421](https://github.com/polyai/adk/pull/421),
+  [`eec16fd`](https://github.com/polyai/adk/commit/eec16fd2d192a8be0a5f44f0503fcc9ad2c1435f))
+
+
+## v0.81.1 (2026-11-16)
+
+### Bug Fixes
+
+- Validate entity, handoff and API integration limits before push
+  ([#420](https://github.com/polyai/adk/pull/420),
+  [`7dc6b67`](https://github.com/polyai/adk/commit/7dc6b67db8a58616293021cf4deb2ed12ef7c40e))
+
+- Validate topics, documents, speech settings and tests before push
+  ([#417](https://github.com/polyai/adk/pull/417),
+  [`61649c4`](https://github.com/polyai/adk/commit/61649c4618ad6fc93feeb176b36e6b9b15b14019))
+
+
+## v0.81.0 (2026-11-16)
+
+### Bug Fixes
+
+- Show the platform's error when a push is rejected ([#415](https://github.com/polyai/adk/pull/415),
+  [`7c8f3af`](https://github.com/polyai/adk/commit/7c8f3af8e009f3831ef917464961074c3270ec4e))
+
+### Features
+
+- Validate flow conditions and step names before push
+  ([#413](https://github.com/polyai/adk/pull/413),
+  [`1bf35f8`](https://github.com/polyai/adk/commit/1bf35f855b9799a1f4b1eeb952b8a9f73e94bdc9))
+
+### Refactoring
+
+- Share the resource name and id lookups and drop_unset
+  ([#427](https://github.com/polyai/adk/pull/427),
+  [`5917eb1`](https://github.com/polyai/adk/commit/5917eb15b03f07a961cf4238b7b0b1e5208b99a2))
+
+
+## v0.80.1 (2026-11-12)
+
+### Bug Fixes
+
+- Reject duplicate names in YAML resources before push
+  ([#418](https://github.com/polyai/adk/pull/418),
+  [`9952605`](https://github.com/polyai/adk/commit/9952605e1485c74e93c1bba31d7494116a6de7dd))
+
+### Documentation
+
+- Replace the expired Discord invite with the permanent one
+  ([#422](https://github.com/polyai/adk/pull/422),
+  [`d0636ed`](https://github.com/polyai/adk/commit/d0636ed1f00f65f9574a293879504494797dd9b2))
+
+
 ## v0.80.0 (2026-11-10)
 
 ### Features

@@ -1719,6 +1719,44 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertIn(FlowStep, post_deleted)
         self.assertIn("flow-new-func-start_entry_func_start_step_temp", post_deleted[FlowStep])
 
+    def _new_flow_dummy_start_step(self, flow_name: str, other_steps: list[FlowStep]) -> FlowStep:
+        """Push a new flow starting on a function step and return its temporary step."""
+        flow_config = FlowConfig(
+            resource_id="flow-new",
+            name=flow_name,
+            description="Flow with function step as start",
+            start_step="entry_func",
+        )
+        function_start_step = FunctionStep(
+            resource_id="flow-new_entry_func",
+            step_id="entry_func",
+            name="entry",
+            flow_id="flow-new",
+            flow_name=flow_name,
+            code="def entry(conv, flow): pass",
+            function_id="FUNC-entry",
+        )
+        new_resources = {
+            FlowConfig: {"flow-new": flow_config},
+            FunctionStep: {function_start_step.resource_id: function_start_step},
+        }
+        if other_steps:
+            new_resources[FlowStep] = {step.resource_id: step for step in other_steps}
+
+        push_changes = self.project._clean_resources_before_push({}, new_resources, {}, {})
+
+        created_flow = push_changes.main.new[FlowConfig]["flow-new"]
+        dummy_step = next(s for s in created_flow.steps if s.step_id == created_flow.start_step)
+        self.assertIn(dummy_step.resource_id, push_changes.post.deleted[FlowStep])
+        return dummy_step
+
+    def test_clean_resources_before_push_dummy_start_step_is_named_after_the_function_step(self):
+        """The temporary step's name comes from the function step, so it is a valid step name
+        whatever characters the flow name holds."""
+        dummy_step = self._new_flow_dummy_start_step("Billing (v2): refunds", other_steps=[])
+
+        self.assertEqual(dummy_step.name, "entry-temp")
+
     def test_clean_resources_before_push_orphaned_variable_delete_and_recreate(self):
         """When all functions referencing a variable are deleted, variable is delete+recreated."""
         var_id = "VAR-orphan"
@@ -2206,6 +2244,21 @@ class PushProjectTest(unittest.TestCase):
 
         self.assertFalse(success)
         self.assertEqual(message, "No changes detected")
+        self.mock_api_handler.queue_resources.assert_not_called()
+
+    def test_push_project_duplicate_entry_names_are_rejected(self):
+        """Two entries sharing a name fail validation and queue nothing."""
+        root = _copy_test_project(self)
+        _append_yaml_entries(
+            root, ENTITIES_FILE, "entities", [_entity_entry("city"), _entity_entry("city")]
+        )
+        project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+        success, message, commands = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertIn("Duplicate name 'city'.", message)
+        self.assertEqual(commands, [])
         self.mock_api_handler.queue_resources.assert_not_called()
 
     def test_push_project_merge_conflict(self):
@@ -2724,14 +2777,10 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_validation_error(self):
         project_data = deepcopy(PROJECT_DATA)
-        # Create invalid resource (empty description)
-        project_data["resources"]["flow_config"]["FLOW_CONFIG-test_flow"]["description"] = (
-            "description"
-        )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        # Modify the local file to match
+        # Point the local flow at a start step that doesn't exist
         flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
-        invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
+        invalid_content = "name: test_flow\ndescription: desc\nstart_step: missing_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
             success, message, commands = project.push_project(force=True, skip_validation=False)
@@ -2741,14 +2790,10 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_validation_error_skip(self):
         project_data = deepcopy(PROJECT_DATA)
-        # Create invalid resource (empty description)
-        project_data["resources"]["flow_config"]["FLOW_CONFIG-test_flow"]["description"] = (
-            "description"
-        )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        # Modify the local file to match
+        # Point the local flow at a start step that doesn't exist
         flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
-        invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
+        invalid_content = "name: test_flow\ndescription: desc\nstart_step: missing_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
             success, message, commands = project.push_project(force=True, skip_validation=True)
@@ -2967,12 +3012,12 @@ class ValidateProjectTest(unittest.TestCase):
             {
                 os.path.join(
                     TEST_DIR, "flows", "test_flow", "flow_config.yaml"
-                ): "name: test_flow\ndescription: \nstart_step: start_step\n"
+                ): "name: test_flow\ndescription: \nstart_step: missing_step\n"
             }
         ):
             errors = project.validate_project()
         self.assertEqual(len(errors), 1)
-        self.assertIn("Description cannot be empty.", errors[0])
+        self.assertIn("Start step 'missing_step' not found.", errors[0])
 
     def test_validate_project_invalid_multiple(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
@@ -2993,6 +3038,52 @@ class ValidateProjectTest(unittest.TestCase):
             "Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts
         )
         self.assertIn("Start step 'missing_step' not found.", error_texts)
+
+    def test_validate_project_reports_duplicate_entry_names(self):
+        """Entries sharing a name are reported, whether new or already on the platform."""
+        for names in (["city", "city"], ["customer_name"]):
+            with self.subTest(names=names):
+                root = _copy_test_project(self)
+                _append_yaml_entries(
+                    root, ENTITIES_FILE, "entities", [_entity_entry(name) for name in names]
+                )
+                project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+                errors = project.validate_project()
+
+                self.assertIn(f"Duplicate name {names[0]!r}.", errors[0])
+
+    def test_validate_project_reports_names_with_the_same_clean_name(self):
+        """Names that differ only in punctuation or spacing count as the same name."""
+        root = _copy_test_project(self)
+        _append_yaml_entries(
+            root, ENTITIES_FILE, "entities", [_entity_entry("My Entity"), _entity_entry("My_Entity")]
+        )
+        project = AgentStudioProject.from_dict(PROJECT_DATA, root)
+
+        errors = project.validate_project()
+
+        self.assertIn("Duplicate name 'My Entity'.", errors[0])
+
+ENTITIES_FILE = os.path.join("config", "entities.yaml")
+VARIANTS_FILE = os.path.join("config", "variant_attributes.yaml")
+
+
+def _entity_entry(name: str) -> dict:
+    """Return a valid entities.yaml entry with the given name."""
+    return {"name": name, "description": "A city", "entity_type": "free_text", "config": {}}
+
+
+def _append_yaml_entries(
+    root: str, relative_path: str, top_level_name: str, entries: list[dict]
+) -> None:
+    """Append entries to a top-level list of a multi-resource YAML file under root."""
+    file_path = os.path.join(root, relative_path)
+    with open(file_path, encoding="utf-8") as f:
+        data = resource_utils.load_yaml(f.read())
+    data[top_level_name] = [*data[top_level_name], *entries]
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(resource_utils.dump_yaml(data))
 
 
 class PullProjectTest(unittest.TestCase):

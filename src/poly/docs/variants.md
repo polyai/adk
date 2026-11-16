@@ -17,7 +17,7 @@ The file has two top-level keys:
 - **is_default** (optional): Exactly one variant must have `is_default: true`. Used when no variant is resolved at runtime.
 
 ### `attributes` - List of attributes
-- **name**: Attribute identifier. Must be a valid Python identifier (a letter or underscore followed by letters, digits or underscores) and not a Python reserved word, since it is read in code as `conv.variant.<name>`. e.g. `greeting_name`, `support_phone_number`.
+- **name**: Attribute identifier, unique within the list. Must be a valid Python identifier (a letter or underscore followed by letters, digits or underscores) and not a Python reserved word, since it is read in code as `conv.variant.<name>`. e.g. `greeting_name`, `support_phone_number`.
 - **kind** (optional): The attribute's type — one of `string`, `number`, `boolean`, `enum`, `object`. Defaults to `string` when omitted.
 - **config** (optional): Type-specific configuration. Only `enum` takes one: `config.values` lists the allowed values.
 - **values**: Map from **variant name** to value. Must have one entry per variant. Leave a value blank for any kind to mean "not set yet".

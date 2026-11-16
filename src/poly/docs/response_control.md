@@ -19,7 +19,7 @@ A `pronunciations` list where each entry has:
 - **regex** (required): Regex pattern to match in the agent's output text.
 - **replacement** (required): What to replace it with for TTS (can be empty string `""`).
 - **case_sensitive** (bool): Whether the regex is case-sensitive. Default: `false`.
-- **language_code** (string, optional): Restrict the rule to a specific language.
+- **language_code** (string, optional): Restrict the rule to a specific language. Must be a valid BCP-47 language code, e.g. `en-GB`.
 - **description** (string, optional): What this rule does.
 
 Rules are ordered; position in the list matters.
@@ -41,11 +41,11 @@ Intercept or block phrases in the agent's output before they are spoken. Can opt
 
 ### Structure
 A `phrase_filtering` list where each entry has:
-- **name** (required): Identifier for this filter.
+- **name** (required): Identifier for this filter, unique within the file.
 - **description**: What this filter does.
 - **regular_expressions** (required): List of regex patterns to match.
 - **say_phrase** (bool): If `true`, still speak the matched phrase. If `false`, suppress it. Default: `false`.
-- **language_code** (string, optional): Restrict to a specific language.
+- **language_code** (string, optional): Restrict to a specific language. Must be a valid BCP-47 language code, e.g. `en-GB`.
 - **function** (string, optional): Name of a global function to call when a match occurs.
 
 ### Example

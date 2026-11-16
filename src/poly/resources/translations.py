@@ -146,6 +146,8 @@ class Translation(MultiResourceYamlResource):
             raise ValueError("Translation name cannot be empty.")
         if not self.translations:
             raise ValueError("Translations cannot be empty.")
+        if any(utils.is_blank(language) for language in self.translations):
+            raise ValueError("Translation language code cannot be empty.")
 
         if resource_mappings:
             configured_languages = {
