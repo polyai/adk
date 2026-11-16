@@ -134,7 +134,7 @@ ASR biasing is automatically configured based on the entities requested in the s
 | `name` | Human-readable step name |
 | `conditions` | Conditions that control transitions |
 | `extracted_entities` | Entities to collect in the step |
-| `prompt` | Prompt shown to the model |
+| `prompt` | Prompt shown to the model. Can be empty. |
 
 Default steps can also include any of the [step settings](#step-settings) below.
 
@@ -186,7 +186,7 @@ Unlike default steps, they don't define `conditions` or `extracted_entities` —
 |---|---|
 | `step_type` | Must be `advanced_step` |
 | `name` | Human-readable step name |
-| `prompt` | Prompt shown to the model. May call transition functions. |
+| `prompt` | Prompt shown to the model. May call transition functions. Can be empty. |
 
 Advanced steps can also include any of the [step settings](#step-settings) below.
 
@@ -292,7 +292,7 @@ Python should be used for:
 
 !!! warning "Do not put deterministic branching logic into prompts"
 
-    Do not encode logic like “If $x == 0 do A, else do B” in prompts. Put that logic in Python and transition to the correct step explicitly.
+    Do not encode logic like "If $x == 0 do A, else do B" in prompts. Put that logic in Python and transition to the correct step explicitly.
 
 ### Prompt tips
 
