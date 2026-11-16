@@ -2764,7 +2764,9 @@ class AgentStudioProject:
         listing, e.g. `poly branch list` or `poly branch current`.
 
         Returns:
-            Optional[str]: The name of the current branch. None if the current branch does not exist in the remote.
+            Optional[str]: The saved name if the current branch is in the last listing, even
+            if it has since been deleted in Agent Studio. Otherwise the name from a new
+            listing, or None if the branch isn't in it.
         """
         if self.branch_id in self.branch_names:
             return self.branch_names[self.branch_id]
