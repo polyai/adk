@@ -76,6 +76,8 @@ FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+LLM_MODELS_API = "/v1/llm-models"
+ASR_MODELS_API = "/v1/asr-models"
 
 
 class PlatformAPIHandler:
@@ -1805,3 +1807,29 @@ class PlatformAPIHandler:
         """
         endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    @staticmethod
+    def get_llm_models(region: str) -> list[dict]:
+        """Get the list of available LLM models.
+
+        Args:
+            region: The region name.
+
+        Returns:
+            list[dict]: The available LLM models.
+        """
+        endpoint = LLM_MODELS_API
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def get_asr_models(region: str) -> list[dict]:
+        """Get the list of available ASR models.
+
+        Args:
+            region: The region name.
+
+        Returns:
+            list[dict]: The available ASR models.
+        """
+        endpoint = ASR_MODELS_API
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")

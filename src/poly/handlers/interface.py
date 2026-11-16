@@ -1896,3 +1896,25 @@ class AgentStudioInterface:
             project_id=project_id,
             account_id=account_id,
         )
+
+    def get_llm_models(self, region: str) -> list[dict]:
+        """Get the list of available LLM models.
+
+        Args:
+            region (str): The region name.
+
+        Returns:
+            list[dict]: The available LLM models.
+        """
+        return PlatformAPIHandler.get_llm_models(region)
+
+    def get_asr_models(self, region: str) -> list[dict]:
+        """Get the list of available ASR models.
+
+        Args:
+            region (str): The region name.
+
+        Returns:
+            list[dict]: The available ASR models.
+        """
+        return PlatformAPIHandler.get_asr_models(region)

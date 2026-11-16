@@ -4577,3 +4577,19 @@ class AgentStudioProject:
             return datetime.strptime(deployment["created_at"], "%a, %d %b %Y %H:%M:%S %Z")
 
         return max(deployments, key=created_at, default=None)
+
+    def get_llm_models(self) -> list[dict]:
+        """Get the list of available LLM models.
+
+        Returns:
+            list[dict]: The available LLM models.
+        """
+        return self.api_handler.get_llm_models(self.region)
+
+    def get_asr_models(self) -> list[dict]:
+        """Get the list of available ASR models.
+
+        Returns:
+            list[dict]: The available ASR models.
+        """
+        return self.api_handler.get_asr_models(self.region)
