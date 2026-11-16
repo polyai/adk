@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.83.0 (2026-11-16)
+
+### Features
+
+- **setup**: Offer an account API key as an optional step that runs poly apikey
+  ([#399](https://github.com/polyai/adk/pull/399),
+  [`5b540cd`](https://github.com/polyai/adk/commit/5b540cdcca002f06c9f4686b924fe82f9a080b57))
+
+
 ## v0.82.0 (2026-11-16)
 
 ### Features
