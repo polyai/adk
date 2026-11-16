@@ -1066,18 +1066,6 @@ def test_code(conv: Conversation, test_param: int):
             flow_name="Test Flow" if function_type == FunctionType.TRANSITION else None,
         )
 
-    @staticmethod
-    def _function_mapping(name: str, file_path: str) -> ResourceMapping:
-        """Build a Function ResourceMapping the way the project does, from its file path."""
-        return ResourceMapping(
-            resource_id=f"FUNCTION-{name}",
-            resource_name=name,
-            resource_type=Function,
-            file_path=file_path,
-            resource_prefix=Function.get_resource_prefix(file_path),
-            flow_name=None,
-        )
-
     def test_validate_ascii_function_and_parameter_names_pass(self):
         """ASCII identifiers are accepted for the function and its parameters."""
         func = self._global_function(
@@ -1196,31 +1184,6 @@ def test_code(conv: Conversation, test_param: int):
                     f"got {duration!r} for 'One moment.'",
                     str(cm.exception),
                 )
-
-    def test_validate_transition_function_with_unique_name_passes(self):
-        """Start/end functions and other flows' functions don't clash with a transition."""
-        func = self._global_function(name="check_input", function_type=FunctionType.TRANSITION)
-        resource_mappings = [
-            self._function_mapping("lookup_booking", os.path.join("functions", "lookup_booking.py")),
-            self._function_mapping("start_function", os.path.join("functions", "start_function.py")),
-            self._function_mapping(
-                "check_input", os.path.join("flows", "other_flow", "functions", "check_input.py")
-            ),
-        ]
-        self.assertIsNone(func.validate(resource_mappings=resource_mappings))
-
-    def test_validate_transition_function_named_like_a_global_function_raises(self):
-        """The platform keeps transition function names unique among global functions."""
-        func = self._global_function(name="lookup_booking", function_type=FunctionType.TRANSITION)
-        resource_mappings = [
-            self._function_mapping("lookup_booking", os.path.join("functions", "lookup_booking.py"))
-        ]
-        with self.assertRaises(ValueError) as cm:
-            func.validate(resource_mappings=resource_mappings)
-        self.assertIn(
-            "Transition function 'lookup_booking' has the same name as a global function",
-            str(cm.exception),
-        )
 
     def test_validate_plain_start_and_end_functions_pass(self):
         """Start and end functions take only conv and need no decorators."""

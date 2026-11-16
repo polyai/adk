@@ -789,20 +789,6 @@ class Function(Resource):
         if self.function_type == FunctionType.TRANSITION and not self.flow_id:
             raise ValueError("Can't find flow_id for transition function.")
 
-        if self.function_type == FunctionType.TRANSITION and resource_mappings:
-            # Start and end functions have no prefix, so "fn" selects global functions only.
-            if any(
-                r.resource_type is Function
-                and r.resource_prefix == "fn"
-                and r.resource_name == self.name
-                for r in resource_mappings
-            ):
-                raise ValueError(
-                    f"Transition function '{self.name}' has the same name as a global function. "
-                    "A transition function name must be unique among global functions and "
-                    "the transition functions in its flow."
-                )
-
         # Validate latency control settings
         if self.latency_control and self.latency_control.enabled:
             for argument, value in (

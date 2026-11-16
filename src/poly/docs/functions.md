@@ -50,7 +50,6 @@ Function steps do not support `@func_parameter` or `@func_description`.
 Start and end functions do not support `@func_parameter` or `@func_latency_control`.
 
 Function and parameter names use only letters, digits and underscores, don't start with a digit, and aren't Python reserved words.
-A transition function cannot share its name with a global function.
 
 ### Parameter types
 
