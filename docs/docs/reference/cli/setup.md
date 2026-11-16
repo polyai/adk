@@ -37,6 +37,10 @@ The four steps, in order:
 
     Skill installation shells out to `npx`, which requires Node.js 18 or newer. Without it, the step is skipped with a warning and the rest of setup completes normally — install Node and re-run `poly setup` to add the skills later.
 
+!!! info "Anonymous usage telemetry"
+
+    `poly setup` sends anonymous usage telemetry. Set `POLY_NO_TELEMETRY=1` or `DO_NOT_TRACK=1` to turn it off.
+
 !!! tip "Re-run after anything changes"
 
     Because every step checks whether it is already done, `poly setup` doubles as a repair command — re-run it after installing Node, switching shells, or clearing credentials, and only the missing pieces are redone.
