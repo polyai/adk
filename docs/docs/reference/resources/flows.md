@@ -118,6 +118,8 @@ There are three step types:
 2. advanced steps
 3. function steps
 
+A step name must be unique within its flow, across all step types. A default step and a function step in the same flow cannot both be named `lookup`.
+
 ## Default steps
 
 Default steps live in `steps/*.yaml`.
@@ -161,7 +163,7 @@ A condition can:
 
 | Field | Description |
 |---|---|
-| `name` | Label for the condition, 1 to 50 characters and unique within the step |
+| `name` | Label for the condition; 1 to 50 characters (after trimming whitespace), unique within the step |
 | `condition_type` | `step_condition` or `exit_flow_condition` |
 | `description` | When this condition applies |
 | `child_step` | Next step in the same flow, only for `step_condition` |
@@ -173,6 +175,8 @@ Use the correct step identifier depending on target type:
 
 - **Default step** or **advanced step**: use the step's `name`
 - **Function step**: use the Python filename without `.py`
+
+The `child_step` must refer to a step in the **same flow**. Referencing a step from a different flow fails validation.
 
 ## Advanced steps
 
@@ -292,7 +296,7 @@ Python should be used for:
 
 !!! warning "Do not put deterministic branching logic into prompts"
 
-    Do not encode logic like “If $x == 0 do A, else do B” in prompts. Put that logic in Python and transition to the correct step explicitly.
+    Do not encode logic like "If $x == 0 do A, else do B" in prompts. Put that logic in Python and transition to the correct step explicitly.
 
 ### Prompt tips
 
@@ -326,7 +330,7 @@ Function steps:
 - cannot define extra parameters
 - cannot use `@func_description`
 - must control flow explicitly
-- must have a name that is unique across the whole project, not just within their own flow — a duplicate name in a different flow causes a build error
+- must have a name that is unique within their flow, across all step types — a function step and a default step in the same flow cannot share the same name
 
 A function step must call either:
 
@@ -385,9 +389,9 @@ Logic reused across flows is usually better placed in global functions.
 
 ## Validation
 
-- A step `name` must be unique within its flow, across step types.
-- A condition `name` must be 1 to 50 characters and unique within its step.
-- A condition's `child_step` must be a step in the same flow.
+- A step `name` must be unique within its flow, across all step types. A default step and a function step in the same flow cannot share the same name.
+- A condition `name` must be 1 to 50 characters (after trimming whitespace) and unique within its step. Whitespace-only names and names over 50 characters are both rejected.
+- A condition's `child_step` must be a step in the **same flow**. Referencing a step from another flow fails validation.
 - `inter_digit_timeout` and `max_digits` (DTMF configuration) cannot be negative.
 - `vad_start` and `vad_end` (VAD) must be finite and non-negative — `poly validate` rejects a negative or infinite value.
 
