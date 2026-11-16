@@ -90,7 +90,7 @@ class LibraryCommand(BaseCommand):
         """List the ASR models available in the project's region."""
         from poly.output.console import paged_output, print_asr_models
 
-        project = load_project(base_path)
+        project = load_project(base_path, output_json=output_json)
         asr_models = _poly_first(project.get_asr_models(), _is_poly_asr)
 
         if output_json:
@@ -105,7 +105,7 @@ class LibraryCommand(BaseCommand):
         """List the language models available in the project's region."""
         from poly.output.console import paged_output, print_llm_models
 
-        project = load_project(base_path)
+        project = load_project(base_path, output_json=output_json)
         llm_models = _poly_first(project.get_llm_models(), _is_poly_llm)
 
         if output_json:
