@@ -53,7 +53,7 @@ The greeting is the first message the agent sends when a chat session starts.
 
 | Field | Required | Description |
 |---|---|---|
-| `welcome_message` | Yes | Text of the greeting. Supports [`{{attr:...}}`](./variants.md), [`{{vrbl:...}}`](./variables.md), and [`{{tn:...}}`](./translations.md) references. |
+| `welcome_message` | No | Text of the greeting. Can be empty. Supports [`{{attr:...}}`](./variants.md), [`{{vrbl:...}}`](./variables.md), and [`{{tn:...}}`](./translations.md) references. |
 | `language_code` | Yes | BCP-47 language code, for example `en-GB` or `en-US`. |
 
 ### Example
