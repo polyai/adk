@@ -3118,6 +3118,48 @@ class FlowConfigTests(unittest.TestCase):
             "Description cannot contain leading or trailing whitespace.", str(cm.exception)
         )
 
+    @staticmethod
+    def _step_mapping(
+        resource_type: type, step_id: str, name: str, folder: str, flow_id: str = "flow-123"
+    ) -> ResourceMapping:
+        """Build a mapping for a step file in the given flow."""
+        extension = "py" if resource_type is FunctionStep else "yaml"
+        return ResourceMapping(
+            resource_id=f"{flow_id}_{step_id}",
+            resource_name=name,
+            resource_type=resource_type,
+            file_path=f"flows/test_flow/{folder}/{name}.{extension}",
+            resource_prefix=None,
+            flow_name="Test Flow" if flow_id == "flow-123" else "Other Flow",
+            flow_id=flow_id,
+        )
+
+    def test_validate_distinct_step_names_across_types_passes(self):
+        """Steps of different types with different names validate."""
+        resource_mappings = [
+            self._step_mapping(FlowStep, "step-1", "lookup", "steps"),
+            self._step_mapping(FunctionStep, "step-2", "process", "function_steps"),
+            # The same name in another flow is not a clash.
+            self._step_mapping(FunctionStep, "step-9", "lookup", "function_steps", "flow-456"),
+        ]
+
+        self.assertIsNone(TEST_FLOW_CONFIG.validate(resource_mappings=resource_mappings))
+
+    def test_validate_step_name_shared_across_types_raises(self):
+        """A function step named like a YAML step in the same flow is reported once."""
+        resource_mappings = [
+            self._step_mapping(FlowStep, "step-1", "lookup", "steps"),
+            self._step_mapping(FunctionStep, "step-2", "lookup", "function_steps"),
+        ]
+
+        with self.assertRaises(ValueError) as cm:
+            TEST_FLOW_CONFIG.validate(resource_mappings=resource_mappings)
+
+        self.assertEqual(
+            str(cm.exception),
+            "Step names must be unique within a flow. Duplicates: ['lookup']",
+        )
+
     def test_read_local_resource(self):
         """Test reading a flow config from a YAML file."""
         test_file_pretty_content = """name: Test Flow
@@ -3855,6 +3897,121 @@ conditions:
                 resource_mappings=resource_mappings_with_all_entities
             )
         )
+
+    FLOW_CONFIG_MAPPING = ResourceMapping(
+        resource_id="flow-123",
+        resource_name="Test Flow",
+        resource_type=FlowConfig,
+        file_path="flows/test_flow/flow_config.yaml",
+        resource_prefix=None,
+        flow_name="Test Flow",
+        flow_id="flow-123",
+    )
+
+    @staticmethod
+    def _default_step_with_conditions(*condition_names: str) -> FlowStep:
+        """Build a default step with one exit-flow condition per name."""
+        return FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.DEFAULT_STEP,
+            conditions=[
+                Condition(
+                    resource_id=f"cond-{index}",
+                    name=condition_name,
+                    condition_type=ConditionType.EXIT_FLOW,
+                    step_id="step-1",
+                    flow_id="flow-123",
+                )
+                for index, condition_name in enumerate(condition_names)
+            ],
+            prompt="Hello, how can I help you?",
+        )
+
+    def test_validate_condition_name_at_length_limit_passes(self):
+        """A 50-character condition name validates, ignoring surrounding whitespace."""
+        step = self._default_step_with_conditions(f"  {'a' * 50}  ")
+
+        self.assertIsNone(step.validate(resource_mappings=[self.FLOW_CONFIG_MAPPING]))
+
+    def test_validate_condition_name_outside_length_limit_raises(self):
+        """Whitespace-only names and names over 50 characters are rejected."""
+        cases = {
+            "   ": "Condition name cannot be empty.",
+            "a" * 51: "Condition name cannot be longer than 50 characters.",
+        }
+        for condition_name, expected_error in cases.items():
+            with self.subTest(condition_name=condition_name):
+                step = self._default_step_with_conditions(condition_name)
+
+                with self.assertRaises(ValueError) as cm:
+                    step.validate(resource_mappings=[self.FLOW_CONFIG_MAPPING])
+
+                self.assertIn(expected_error, str(cm.exception))
+
+    def test_validate_distinct_condition_names_passes(self):
+        """Condition names that differ, even only by case, validate."""
+        step = self._default_step_with_conditions("yes", "Yes", "no")
+
+        self.assertIsNone(step.validate(resource_mappings=[self.FLOW_CONFIG_MAPPING]))
+
+    def test_validate_duplicate_condition_names_raises(self):
+        """Two conditions in a step with the same trimmed name are rejected."""
+        step = self._default_step_with_conditions("yes", " yes ", "no")
+
+        with self.assertRaises(ValueError) as cm:
+            step.validate(resource_mappings=[self.FLOW_CONFIG_MAPPING])
+
+        self.assertEqual(
+            str(cm.exception),
+            "Condition names must be unique within a step. Duplicates: ['yes']",
+        )
+
+    def _step_condition_to(self, child_step: str) -> Condition:
+        """Build a step condition in flow-123 pointing at the given step id."""
+        return Condition(
+            resource_id="cond-1",
+            name="Next",
+            condition_type=ConditionType.STEP,
+            child_step=child_step,
+            step_id="step-1",
+            flow_id="flow-123",
+        )
+
+    def _step_mappings_in_two_flows(self) -> list[ResourceMapping]:
+        """Mappings for step-2 in flow-123 and step-9 in flow-456."""
+        return [
+            ResourceMapping(
+                resource_id=f"{flow_id}_{step_id}",
+                resource_name=step_id,
+                resource_type=FlowStep,
+                file_path=f"flows/{flow_id}/steps/{step_id}.yaml",
+                resource_prefix=None,
+                flow_name=flow_id,
+                flow_id=flow_id,
+            )
+            for flow_id, step_id in (("flow-123", "step-2"), ("flow-456", "step-9"))
+        ]
+
+    def test_validate_condition_child_step_in_same_flow_passes(self):
+        """A condition pointing at a step in its own flow validates."""
+        condition = self._step_condition_to("step-2")
+
+        self.assertIsNone(
+            condition.validate(resource_mappings=self._step_mappings_in_two_flows())
+        )
+
+    def test_validate_condition_child_step_in_other_flow_raises(self):
+        """A condition pointing at another flow's step is rejected."""
+        condition = self._step_condition_to("step-9")
+
+        with self.assertRaises(ValueError) as cm:
+            condition.validate(resource_mappings=self._step_mappings_in_two_flows())
+
+        self.assertEqual(str(cm.exception), "Step 'step-9' not found in this flow")
 
     def test_get_new_updated_deleted_subresources(self):
         """Test get_new_updated_deleted_subresources for flow step.
