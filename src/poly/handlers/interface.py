@@ -555,7 +555,10 @@ class AgentStudioInterface:
         """Send all queued commands as a batch and clear the queue.
 
         Returns:
-            bool: True if the commands were sent successfully, False otherwise
+            bool: True once the commands are sent, or when there was nothing to send
+
+        Raises:
+            ValueError: If the batch could not be sent or the platform rejected it
         """
         import requests
 

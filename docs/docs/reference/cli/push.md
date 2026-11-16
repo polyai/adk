@@ -20,6 +20,8 @@ poly push --format
 poly push --include-rtc --rtc-env live
 ~~~
 
+If Agent Studio rejects the push, the command prints the reason it gave.
+
 | Flag | Description |
 |---|---|
 | `--force`, `-f` | Force push the project, overwriting remote changes. |

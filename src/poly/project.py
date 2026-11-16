@@ -1743,23 +1743,15 @@ class AgentStudioProject:
             new_state, new_resources, updated_resources, deleted_resources
         )
         if not dry_run:
-            success = self.api_handler.send_queued_commands()
+            try:
+                self.api_handler.send_queued_commands()
+            # The interface raises API failures as ValueError.
+            except ValueError as e:
+                self.branch_id = self.api_handler.branch_id
+                return False, f"{e}\nNothing was pushed.", commands
             self.branch_id = self.api_handler.branch_id
         else:
             self.api_handler.clear_command_queue()
-            success = True
-
-        if not success:
-            failed_resources = []
-            for resource_dict in [
-                new_resources,
-                updated_resources,
-                deleted_resources,
-            ]:
-                for resources in resource_dict.values():
-                    failed_resources.extend([res.name for res in resources.values()])
-            errors_names = "\n-".join(failed_resources)
-            return False, f"Failed to push resources: \n-{errors_names}", commands
 
         if dry_run:
             return True, "Dry run completed. No changes were pushed.", commands
