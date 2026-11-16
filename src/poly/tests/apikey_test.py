@@ -1045,7 +1045,7 @@ class ModelKeyHasItsOwnVariable(ApiKeyTestCase):
         self.assertEqual(payload["env_var"], "POLY_MODEL_API_KEY")
         self.assertEqual(payload["key_type"], "model")
         self.assertIsNone(payload["credentials_file"])
-        self.assertEqual(payload["profile_path"], "/home/user/.zshrc")
+        self.assertEqual(payload["profile_path"], str(Path("/home/user/.zshrc")))
         self.assertIs(payload["key_active"], True)
 
     def test_model_key_summary_points_at_its_variable(self):
