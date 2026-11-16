@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.82.0 (2026-11-16)
+
+### Features
+
+- **setup**: Report setup start, step outcomes and completion to PostHog with an opt-out
+  ([#398](https://github.com/polyai/adk/pull/398),
+  [`e3da1f0`](https://github.com/polyai/adk/commit/e3da1f00716a19ae06a76661e553248d1c044364))
+
+
 ## v0.81.2 (2026-11-16)
 
 ### Bug Fixes
