@@ -2,6 +2,26 @@
 
 <!-- version list -->
 
+## v0.81.0 (2026-11-16)
+
+### Bug Fixes
+
+- Show the platform's error when a push is rejected ([#415](https://github.com/polyai/adk/pull/415),
+  [`7c8f3af`](https://github.com/polyai/adk/commit/7c8f3af8e009f3831ef917464961074c3270ec4e))
+
+### Features
+
+- Validate flow conditions and step names before push
+  ([#413](https://github.com/polyai/adk/pull/413),
+  [`1bf35f8`](https://github.com/polyai/adk/commit/1bf35f855b9799a1f4b1eeb952b8a9f73e94bdc9))
+
+### Refactoring
+
+- Share the resource name and id lookups and drop_unset
+  ([#427](https://github.com/polyai/adk/pull/427),
+  [`5917eb1`](https://github.com/polyai/adk/commit/5917eb15b03f07a961cf4238b7b0b1e5208b99a2))
+
+
 ## v0.80.1 (2026-11-12)
 
 ### Bug Fixes
