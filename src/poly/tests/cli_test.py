@@ -5519,11 +5519,27 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
 
         message = self.warning.call_args[0][0]
         self.assertIn(
-            '& "C:\\Program Files\\Python312\\python.exe" -m pip install --upgrade '
-            "polyai-adk\\[call]",
+            "& 'C:\\Program Files\\Python312\\python.exe' -m pip install --upgrade "
+            "'polyai-adk\\[call]'",
             message,
         )
         self.assertIn("poly update --skills-only", message)
+
+    def test_windows_refusal_quotes_a_path_powershell_would_misread(self):
+        """In PowerShell a `'` ends a string and `$` expands a variable, even in double quotes."""
+        self._patch("sys.executable", new="C:\\Users\\O'Brien\\$work\\python.exe")
+
+        UpdateCommand.refuse_if_not_upgradable(output_json=False)
+
+        self.assertIn(
+            "& 'C:\\Users\\O''Brien\\$work\\python.exe' -m pip", self.warning.call_args[0][0]
+        )
+
+    def test_windows_refusal_keeps_the_command_on_one_line(self):
+        """A command wrapped across two lines doesn't run when pasted."""
+        UpdateCommand.refuse_if_not_upgradable(output_json=False)
+
+        self.assertTrue(self.warning.call_args.kwargs["soft_wrap"])
 
     @patch("poly.cli_commands.update.json_print")
     def test_windows_pip_refusal_pins_the_target_version(self, mock_json_print):
@@ -5532,7 +5548,7 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
 
         payload = mock_json_print.call_args[0][0]
         self.assertFalse(payload["success"])
-        self.assertIn("-m pip install polyai-adk[call]==0.52.0", payload["error"])
+        self.assertIn("-m pip install 'polyai-adk[call]==0.52.0'", payload["error"])
 
     def test_pip_install_off_windows_is_upgradable(self):
         """pip can replace a running script on macOS and Linux, so nothing is refused."""
@@ -5546,8 +5562,8 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
             "uv-tool": "uv tool upgrade polyai-adk",
             "pipx": "pipx upgrade polyai-adk",
             "uv-pip": (
-                'uv pip install --python "C:\\Program Files\\Python312\\python.exe" '
-                "--upgrade polyai-adk"
+                "uv pip install --python 'C:\\Program Files\\Python312\\python.exe' "
+                "--upgrade 'polyai-adk\\[call]'"
             ),
         }
         for method, command in commands.items():

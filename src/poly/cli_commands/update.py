@@ -439,10 +439,14 @@ class UpdateCommand(BaseCommand):
     def _powershell_command(args: list[str]) -> str:
         """`args` as a command to paste into PowerShell, the default shell in Windows Terminal.
 
-        PowerShell reads a quoted program path as a string, so `&` is needed to run it.
+        Arguments other than plain words are single-quoted, where PowerShell expands nothing
+        and a `'` is written twice. `&` runs the program, quoted or not.
         """
-        command = subprocess.list2cmdline(args)
-        return f"& {command}" if command.startswith('"') else command
+        quoted = (
+            arg if re.fullmatch(r"[\w.:=/\\-]+", arg) else "'" + arg.replace("'", "''") + "'"
+            for arg in args
+        )
+        return "& " + " ".join(quoted)
 
     @classmethod
     def refuse_if_not_upgradable(
@@ -472,7 +476,7 @@ class UpdateCommand(BaseCommand):
         if output_json:
             json_print({"success": False, "error": message})
         else:
-            warning(escape(message))
+            warning(escape(message), soft_wrap=True)
         return True
 
     @classmethod
