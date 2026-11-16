@@ -416,6 +416,11 @@ class BranchCommand(BaseCommand):
             action="store_true",
             help="Skip the confirmation prompt when merging into main deploys to a live environment.",
         )
+        branch_merge_parser.add_argument(
+            "--acknowledge-experiment",
+            action="store_true",
+            help="Allow merging into main, which deploys to live, while an experiment is running.",
+        )
         branch_merge_parser.set_defaults(branch_subcommand="merge")
 
         # -- sync --
@@ -575,7 +580,13 @@ class BranchCommand(BaseCommand):
 
         elif args.branch_subcommand == "merge":
             cls.branch_merge(
-                args.path, args.message, args.json, args.interactive, args.resolutions, args.force
+                args.path,
+                args.message,
+                args.json,
+                args.interactive,
+                args.resolutions,
+                args.force,
+                args.acknowledge_experiment,
             )
 
         elif args.branch_subcommand == "sync":
@@ -1189,6 +1200,7 @@ class BranchCommand(BaseCommand):
         interactive: bool = False,
         resolutions_file: str = None,
         force: bool = False,
+        acknowledge_experiment: bool = False,
     ):
         """Merge the current branch into main, with optional conflict resolutions."""
         import questionary
@@ -1258,14 +1270,26 @@ class BranchCommand(BaseCommand):
                 success(f"Branch '{current_branch_name}' merged successfully.")
             info(f"Switched to '{parent_branch_name}' branch after merge.")
 
-        if is_live_deploy:
-            if not output_json and not force:
+        if is_live_deploy and not output_json and not force:
+            # As in Studio's publish dialog, confirming here acknowledges a running experiment.
+            experiment = (
+                project.get_active_experiment()
+                if project.experiments_enabled and not acknowledge_experiment
+                else {}
+            )
+            if experiment:
+                warning(
+                    f"Experiment '{experiment['name']}' is running. Merging into 'main' "
+                    "updates the live version it compares against, which may affect its result."
+                )
+                prompt = "Deploy to live while the experiment is running?"
+            else:
                 warning("Merging into 'main' will deploy changes into live environment")
-                if not questionary.confirm(
-                    "Confirm Deployment?", default=False, auto_enter=False
-                ).ask():
-                    warning("Aborted.")
-                    sys.exit(0)
+                prompt = "Confirm Deployment?"
+            if not questionary.confirm(prompt, default=False, auto_enter=False).ask():
+                warning("Aborted.")
+                sys.exit(0)
+            acknowledge_experiment = acknowledge_experiment or bool(experiment)
 
         ctx = (
             console.status(
@@ -1276,7 +1300,9 @@ class BranchCommand(BaseCommand):
         )
         with ctx:
             merge_success, conflicts, errors = project.merge_branch(
-                message=message, conflict_resolutions=file_resolutions
+                message=message,
+                conflict_resolutions=file_resolutions,
+                acknowledge_active_experiment=acknowledge_experiment,
             )
 
         if output_json:
@@ -1343,7 +1369,9 @@ class BranchCommand(BaseCommand):
             )
             with ctx2:
                 merge_success, conflicts, errors = project.merge_branch(
-                    message=message, conflict_resolutions=resolutions
+                    message=message,
+                    conflict_resolutions=resolutions,
+                    acknowledge_active_experiment=acknowledge_experiment,
                 )
             if merge_success:
                 _report_merge_success()

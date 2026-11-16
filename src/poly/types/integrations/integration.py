@@ -7,6 +7,8 @@ from __future__ import annotations
 __all__ = ["Integration"]
 
 import requests
+from collections.abc import Iterable
+from ..connectors.janus_proxy import JanusProxyClient as JanusProxyClient
 from ..log_utils import ConversationLogger as ConversationLogger
 
 
@@ -15,7 +17,13 @@ class Integration:
     integration_name: str
 
     def __init_subclass__(cls, **kwargs) -> None: ...
-    def __init__(self, log: ConversationLogger, proxy_request) -> None: ...
+    def __init__(
+        self,
+        log: ConversationLogger,
+        proxy_request,
+        janus: JanusProxyClient | None = None,
+        api_integration_ids: Iterable[str] = (),
+    ) -> None: ...
     def proxy_request(
         self,
         endpoint: str,

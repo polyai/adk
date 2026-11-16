@@ -46,7 +46,7 @@ mcp_servers:
     auth:
       oauth:
         client_id: my-client
-        client_secret_name: internal_mcp_oauth_secret
+        client_secret_name: mcp_oauth_client_secret
         token_url: https://internal.example.com/oauth/token
         scope: tools:read
   # Added in Agent Studio as a custom server; keep its provider_id as pulled

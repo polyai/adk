@@ -610,6 +610,17 @@ def _format_def_line(line: str) -> str:
     return line + "\n"
 
 
+@functools.lru_cache(maxsize=4)
+def parse_python(source: str) -> ast.Module:
+    """Parse Python source, reusing the tree for the same source.
+
+    Reading one function file parses the same source in consecutive steps, so they
+    share one parse. Trees are about 45 times the size of their source, so only the
+    last few are kept. The tree is shared between callers, so it must not be modified.
+    """
+    return ast.parse(source)
+
+
 def restore_function_def_line(file_content: str, file_name: str) -> str:
     """Restore the main function definition to be formatted on one line.
 
@@ -626,7 +637,7 @@ def restore_function_def_line(file_content: str, file_name: str) -> str:
     """
 
     try:
-        tree = ast.parse(file_content)
+        tree = parse_python(file_content)
     except SyntaxError:
         return file_content
 
@@ -778,6 +789,39 @@ def clean_name(name: str, lowercase: bool = True) -> str:
     return name
 
 
+def drop_unset(values: dict) -> dict:
+    """Drop keys whose value is None, so unset optional fields don't surface as nulls."""
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def resource_name_for_id(
+    resource_id: str, resource_type: type, resource_mappings: Optional[list["ResourceMapping"]]
+) -> Optional[str]:
+    """Return the name of the `resource_type` resource with `resource_id`, or None if unknown."""
+    return next(
+        (
+            mapping.resource_name
+            for mapping in resource_mappings or []
+            if mapping.resource_type == resource_type and mapping.resource_id == resource_id
+        ),
+        None,
+    )
+
+
+def resource_id_for_name(
+    resource_name: str, resource_type: type, resource_mappings: Optional[list["ResourceMapping"]]
+) -> Optional[str]:
+    """Return the id of the `resource_type` resource named `resource_name`, or None if unknown."""
+    return next(
+        (
+            mapping.resource_id
+            for mapping in resource_mappings or []
+            if mapping.resource_type == resource_type and mapping.resource_name == resource_name
+        ),
+        None,
+    )
+
+
 def to_camel_case(s: str) -> str:
     """Convert a string to camelCase from snake_case"""
     word = "".join(word.capitalize() for word in s.split("_"))
@@ -792,6 +836,13 @@ def to_snake_case(s: str) -> str:
 def convert_keys_to_snake_case(dict_obj: dict) -> dict:
     """Convert config keys to snake_case for consistency."""
     return {to_snake_case(k): v for k, v in dict_obj.items()}
+
+
+def is_blank(value: object) -> bool:
+    """Check if a value is empty, counting a whitespace-only string as empty."""
+    if isinstance(value, str):
+        return not value.strip()
+    return not value
 
 
 def is_valid_language_code(code: str) -> bool:

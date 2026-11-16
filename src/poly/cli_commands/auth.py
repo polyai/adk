@@ -7,12 +7,10 @@ import os
 import sys
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 
-import requests
-
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import REGION_CHOICES, region_type
-from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS
+from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS, AuthDetails
 from poly.handlers.interface import AgentStudioInterface
 from poly.utils import (
     CREDENTIALS_FILE_PATH,
@@ -53,6 +51,8 @@ def authorise_or_explain(
         self_serve_hint: How to reach the self-serve studio region from this command,
             e.g. "run `poly apikey --region studio`".
     """
+    import requests
+
     try:
         return api.authorise(region=region, jwt_token=jwt_token)
     except requests.HTTPError as e:
@@ -129,11 +129,16 @@ def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
             )
 
 
-def _signin(region: str) -> str:
-    """Sign in via the Auth0 device authorization flow and return a JWT access token."""
+def _signin(region: str, auth_details: AuthDetails | None = None) -> str:
+    """Sign in via the Auth0 device authorization flow and return a JWT access token.
+
+    Args:
+        region: The region to sign in to; picks the Auth0 client unless overridden.
+        auth_details: An Auth0 client to use instead of the region's default.
+    """
     from poly.output.console import error, success
 
-    auth_details = REGION_TO_AUTH_DETAILS.get(region)
+    auth_details = auth_details or REGION_TO_AUTH_DETAILS.get(region)
     if auth_details is None:
         error(
             f"Failed to start authorization: Unknown region '{region}'. "

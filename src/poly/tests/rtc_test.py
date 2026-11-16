@@ -655,7 +655,7 @@ class TestRTCEdit(unittest.TestCase):
 
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_happy_path(self, mock_load_project, mock_editor):
         """Verify edit pulls, opens editor, and pushes data."""
@@ -675,7 +675,7 @@ class TestRTCEdit(unittest.TestCase):
         call_kwargs = mock_project.rtc_push_to_api.call_args[1]
         self.assertEqual(call_kwargs["variables"]["flag"], True)
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_schema_flag(self, mock_load_project, mock_editor):
         """Verify --schema edits and pushes schema instead of data."""
@@ -695,7 +695,7 @@ class TestRTCEdit(unittest.TestCase):
         call_kwargs = mock_project.rtc_push_to_api.call_args[1]
         self.assertEqual(call_kwargs["schema"]["title"], "Config")
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_no_changes(self, mock_load_project, mock_editor):
         """Verify no push when editor reports no changes."""
@@ -712,7 +712,7 @@ class TestRTCEdit(unittest.TestCase):
 
         mock_project.rtc_push_to_api.assert_not_called()
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_invalid_json(self, mock_load_project, mock_editor):
         """Verify no push when editor returns invalid JSON."""
@@ -730,7 +730,7 @@ class TestRTCEdit(unittest.TestCase):
         self.assertIn("Invalid JSON", result["error"])
         mock_project.rtc_push_to_api.assert_not_called()
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_race_detected(self, mock_load_project, mock_editor):
         """Verify push aborted when remote changed during editing."""
@@ -748,7 +748,7 @@ class TestRTCEdit(unittest.TestCase):
         mock_project.rtc_push_to_api.assert_not_called()
 
     @patch("questionary.confirm")
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_live_declined(self, mock_load_project, mock_editor, mock_confirm):
         """Verify live edit cancelled when user declines confirmation."""
@@ -766,7 +766,7 @@ class TestRTCEdit(unittest.TestCase):
 
         mock_project.rtc_push_to_api.assert_not_called()
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_updates_via_rtc_push_to_api(self, mock_load_project, mock_editor):
         """Verify edit delegates push to project.rtc_push_to_api."""
@@ -786,7 +786,7 @@ class TestRTCEdit(unittest.TestCase):
         call_kwargs = mock_project.rtc_push_to_api.call_args[1]
         self.assertTrue(call_kwargs["variables"]["flag"])
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_validates_data_against_schema(self, mock_load_project, mock_editor):
         """Verify edit validates edited data against schema before pushing."""
@@ -804,7 +804,7 @@ class TestRTCEdit(unittest.TestCase):
         self.assertIn("validation failed", result["error"])
         mock_project.rtc_push_to_api.assert_not_called()
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_null_variables_opens_empty_object_in_editor(self, mock_load_project, mock_editor):
         """The editor gets {} when the API returns null variables, not literal null.
@@ -827,7 +827,7 @@ class TestRTCEdit(unittest.TestCase):
         editor_content = mock_editor.call_args[0][0]
         self.assertEqual(editor_content, "{}\n")
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_schema_null_opens_empty_object_in_editor(self, mock_load_project, mock_editor):
         """--schema gets {} in the editor when the API returns null schema."""
@@ -846,7 +846,7 @@ class TestRTCEdit(unittest.TestCase):
         editor_content = mock_editor.call_args[0][0]
         self.assertEqual(editor_content, "{}\n")
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_null_schema_skips_data_validation(self, mock_load_project, mock_editor):
         """With a null schema there is nothing to validate against, so the edit pushes."""

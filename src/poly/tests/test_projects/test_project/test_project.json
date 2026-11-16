@@ -1555,7 +1555,7 @@
           "secret_name": "",
           "oauth": {
             "client_id": "adk-test-client",
-            "client_secret_name": "internal_mcp_oauth_secret",
+            "client_secret_name": "mcp_oauth_client_secret",
             "token_url": "https://internal.example.com/oauth/token",
             "audience": "mcp-api",
             "scope": "tools:read tools:write"

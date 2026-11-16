@@ -4,11 +4,12 @@
 the PolyAI APIs and Dialog RSN into your environment, not to set up the ADK itself. It
 signs a user in - via the GitHub-only Auth0 device flow for the default `studio` region, or
 the standard sign-in page for any other region - creates their PolyAI account if needed,
-provisions (or reuses) an account-scoped API key, and writes ``POLY_API_KEY`` into their
-shell profile - or, on Windows, their user environment. It never prompts when run by an
-agent (no terminal, or ``--json``); at a terminal it may ask which account to use. It keeps
-the sign-in so a re-run does not sign in again. To set up the ADK itself,
-use ``poly setup`` or ``poly login`` instead. See ``poly apikey --help`` or
+provisions an account-scoped API key (or reuses the one already in their profile), and
+writes ``POLY_API_KEY`` into their shell profile - or, on Windows, their user environment.
+``--type model`` does the same with a Models-only key in ``POLY_MODEL_API_KEY``.
+It never prompts when run by an agent (no terminal, or ``--json``); at a terminal it may ask
+which account to use. It keeps the sign-in so a re-run does not sign in again. To set up the
+ADK itself, use ``poly setup`` or ``poly login`` instead. See ``poly apikey --help`` or
 ``docs/docs/reference/cli/apikey.md`` for the full step-by-step behaviour.
 
 Copyright PolyAI Limited
@@ -18,7 +19,8 @@ import contextlib
 import sys
 import time
 from argparse import ArgumentParser, Namespace, _SubParsersAction
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Callable
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
@@ -28,15 +30,32 @@ from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
 from poly.handlers.interface import AgentStudioInterface
 from poly.utils import apikey_session
-from poly.utils.api_keys import select_reusable_api_key
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
     load_api_key_from_credential_file,
     save_api_key_credential_file,
 )
-from poly.utils.env_profile import EnvVarConflict, ProfileTarget, write_env_var
+from poly.utils.env_profile import (
+    EnvVarConflict,
+    ProfileTarget,
+    detect_profile,
+    read_env_var,
+    write_env_var,
+)
 
 DEFAULT_KEY_NAME = "cli-generated-key"
+# Key types, and the API groups each asks the platform for. None leaves `api_groups` out of
+# the request, which gives a key for every API ("All APIs" in Agent Studio).
+KEY_TYPE_API_GROUPS: dict[str, list[str] | None] = {"agent": None, "model": ["models"]}
+KEY_TYPE_STUDIO_LABELS = {"agent": "All APIs", "model": "Model API"}
+DEFAULT_KEY_TYPE = "agent"
+# Lifetimes `--expires-in` accepts. None leaves `expires_at` out, so the key never expires.
+EXPIRES_IN_DAYS: dict[str, int | None] = {"30d": 30, "90d": 90, "365d": 365, "never": None}
+DEFAULT_EXPIRES_IN = "90d"
+# Each type has its own profile variable, so a model key never replaces the agent key.
+KEY_TYPE_ENV_VARS = {"agent": "POLY_API_KEY", "model": "POLY_MODEL_API_KEY"}
+# A reused key closer than this to expiring gets a warning to replace it.
+EXPIRY_WARNING_DAYS = 14
 ACCOUNT_POLL_ATTEMPTS = 20
 ACCOUNT_POLL_INTERVAL_SECONDS = 1
 ACCOUNT_POLL_TIMEOUT_SECONDS = ACCOUNT_POLL_ATTEMPTS * ACCOUNT_POLL_INTERVAL_SECONDS
@@ -65,9 +84,141 @@ class MultipleAccountsError(ValueError):
         self.raw_accounts = accounts
 
 
-def _default_key_name(region: str) -> str:
-    """The default API key name - disambiguated by region so keys never collide."""
-    return DEFAULT_KEY_NAME if region == "studio" else f"{DEFAULT_KEY_NAME}-{region}"
+class ProfileKeyRefused(Exception):
+    """The key in the profile isn't accepted for the chosen account and region."""
+
+    def __init__(
+        self,
+        masked_key: str,
+        account_id: str,
+        region: str,
+        path: Path,
+        key_type: str = DEFAULT_KEY_TYPE,
+        record: dict | None = None,
+        record_lookup_ok: bool = False,
+    ):
+        """Build the refusal message.
+
+        Args:
+            record: The account's key-list entry for the refused key, if one was found.
+            record_lookup_ok: Whether the key list was read, so a missing `record` means the
+                key isn't in this account's list.
+        """
+        type_flag = "" if key_type == DEFAULT_KEY_TYPE else f" --type {key_type}"
+        expiry = None if record is None else _key_details(record, key_type, None)[1]
+        days_left = _days_left(expiry)
+        where = f"{KEY_TYPE_ENV_VARS[key_type]} in {path} ({masked_key})"
+        if days_left is not None and days_left < 0:
+            reason = f"{where} expired on {_format_expiry(expiry)}."
+        elif record is None and record_lookup_ok:
+            reason = (
+                f"{where} isn't accepted for account {account_id} on {region}. It isn't in"
+                " the account's key list, so it was revoked or belongs to another account."
+            )
+        else:
+            reason = (
+                f"{where} isn't accepted for account {account_id} on {region}."
+                " It may have expired or been revoked."
+            )
+        super().__init__(
+            f"{reason} Re-run `poly apikey --region {region}{type_flag} --force` to create a"
+            " new key and replace it."
+        )
+
+
+def _default_key_name(region: str, key_type: str = DEFAULT_KEY_TYPE) -> str:
+    """The default API key name - disambiguated by region and type so keys never collide."""
+    name = DEFAULT_KEY_NAME if region == "studio" else f"{DEFAULT_KEY_NAME}-{region}"
+    return name if key_type == DEFAULT_KEY_TYPE else f"{name}-{key_type}"
+
+
+def _expires_at(expires_in: str, now: datetime | None = None) -> datetime | None:
+    """The absolute UTC expiry for an `--expires-in` value, or None for `never`."""
+    days = EXPIRES_IN_DAYS[expires_in]
+    if days is None:
+        return None
+    return (now or datetime.now(UTC)) + timedelta(days=days)
+
+
+def _key_details(
+    response: dict, key_type: str, expires_at: datetime | None
+) -> tuple[str, str | None]:
+    """A key's type and expiry, read from its record (a create response or a list entry).
+
+    Falls back to `key_type` and `expires_at` when the record doesn't say.
+
+    Returns:
+        tuple[str, str | None]: The key type, and its ISO expiry (None if it never expires).
+    """
+    groups = response.get("api_groups", KEY_TYPE_API_GROUPS[key_type])
+    # The platform reports every API as null, the same as the request leaves it out.
+    type_by_groups = {tuple(g or ()): name for name, g in KEY_TYPE_API_GROUPS.items()}
+    actual_type = type_by_groups.get(tuple(groups or ()), key_type)
+
+    if response.get("never_expires") is True:
+        return actual_type, None
+    actual_expiry = response.get("expires_at")
+    if actual_expiry is None and expires_at is not None:
+        actual_expiry = expires_at.isoformat()
+    return actual_type, actual_expiry
+
+
+def _days_left(expires_at: str | None, now: datetime | None = None) -> int | None:
+    """Whole days until `expires_at`, or None if it never expires or can't be read."""
+    if expires_at is None:
+        return None
+    try:
+        expiry = datetime.fromisoformat(expires_at)
+    except ValueError:
+        return None
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=UTC)
+    return (expiry - (now or datetime.now(UTC))).days
+
+
+def _lookup_key_record(
+    api: AgentStudioInterface, region: str, jwt_token: str, account_id: str, api_key: str
+) -> tuple[dict | None, bool]:
+    """The account's record for `api_key`, matched on the prefix and suffix the list returns.
+
+    Best effort: the record only adds detail to the output, so a failed lookup, no match, or
+    more than one match gives no record rather than an error.
+
+    Returns:
+        tuple[dict | None, bool]: The record if exactly one matched, and whether the list was
+            read at all (so a missing record means the key isn't in it).
+    """
+    import requests
+
+    try:
+        records = api.list_account_api_keys_internal(
+            region=region, jwt_token=jwt_token, account_id=account_id, source=APIKEY_SOURCE
+        )
+    except (requests.RequestException, ValueError):
+        return None, False
+    if not isinstance(records, list):
+        return None, False
+    matches = [
+        r
+        for r in records
+        if isinstance(r, dict)
+        and r.get("key_prefix") == api_key[:4]
+        and r.get("key_suffix") == api_key[-4:]
+    ]
+    if len(matches) > 1:
+        # Ambiguous, so say nothing about it rather than describe the wrong key.
+        return None, False
+    return (matches[0] if matches else None), True
+
+
+def _format_expiry(expires_at: str | None) -> str:
+    """A human-readable expiry date."""
+    if expires_at is None:
+        return "never"
+    try:
+        return datetime.fromisoformat(expires_at).strftime("%Y-%m-%d")
+    except ValueError:
+        return expires_at
 
 
 def _say(output_json: bool, fn: Callable[[str], None], message: str) -> None:
@@ -161,23 +312,69 @@ def _resolve_account_id(
     )
 
 
-def _get_or_create_key(
-    api: AgentStudioInterface, region: str, jwt_token: str, account_id: str, key_name: str
-) -> tuple[str, bool]:
-    """Reuse an active, unexpired key named `key_name`, or create one.
-
-    Returns:
-        tuple[str, bool]: The key, and whether it was reused rather than created.
+def _key_works_for_account(
+    api: AgentStudioInterface, region: str, api_key: str, account_id: str
+) -> bool:
+    """Whether `api_key` is accepted on `region` and can reach `account_id`.
 
     Raises:
+        requests.RequestException: The check failed for any reason other than the key being
+            refused, so it says nothing about the key.
+    """
+    import requests
+
+    try:
+        return account_id in api.get_accounts_with_key(region=region, api_key=api_key)
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code in (401, 403):
+            return False
+        raise
+
+
+def _get_or_create_key(
+    api: AgentStudioInterface,
+    region: str,
+    jwt_token: str,
+    account_id: str,
+    key_name: str,
+    *,
+    force: bool,
+    key_type: str = DEFAULT_KEY_TYPE,
+    expires_at: datetime | None = None,
+) -> tuple[str, bool, dict]:
+    """Reuse the key already in the profile for `key_type` if it works, or create one.
+
+    The platform only shows a key's secret when it is created, so the profile is the one place
+    an existing key can be read back from. Each type has its own variable
+    (`KEY_TYPE_ENV_VARS`), so reusing or replacing one never touches the other.
+
+    Returns:
+        tuple[str, bool, dict]: The key, whether it was reused rather than created, and the
+            create response (empty when reused).
+
+    Raises:
+        ProfileKeyRefused: The profile holds a key that isn't accepted for this account and
+            `force` is false. Raised before creating anything, so a re-run doesn't leave
+            another unused key behind.
+        requests.RequestException: The check on the profile's key failed.
         ValueError: The create call succeeded but returned no key.
     """
-    keys = api.list_account_api_keys_internal(
-        region=region, jwt_token=jwt_token, account_id=account_id, source=APIKEY_SOURCE
-    )
-    existing_key = select_reusable_api_key(keys, key_name, datetime.now(timezone.utc))
+    from poly.output.console import mask_secret
+
+    existing_key = None if force else read_env_var(KEY_TYPE_ENV_VARS[key_type])
     if existing_key is not None:
-        return existing_key, True
+        if _key_works_for_account(api, region, existing_key, account_id):
+            return existing_key, True, {}
+        record, lookup_ok = _lookup_key_record(api, region, jwt_token, account_id, existing_key)
+        raise ProfileKeyRefused(
+            mask_secret(existing_key),
+            account_id,
+            region,
+            detect_profile().path,
+            key_type,
+            record=record,
+            record_lookup_ok=lookup_ok,
+        )
 
     response = api.create_account_api_key_internal(
         region=region,
@@ -185,11 +382,13 @@ def _get_or_create_key(
         account_id=account_id,
         name=key_name,
         source=APIKEY_SOURCE,
+        api_groups=KEY_TYPE_API_GROUPS[key_type],
+        expires_at=expires_at,
     )
     api_key = response.get("key")
     if not api_key:
         raise ValueError("API key not found in response. Please contact support.")
-    return api_key, False
+    return api_key, False, response
 
 
 def _wait_for_key_active(api: AgentStudioInterface, region: str, api_key: str) -> bool:
@@ -214,6 +413,30 @@ def _wait_for_key_active(api: AgentStudioInterface, region: str, api_key: str) -
     return False
 
 
+NOT_ACTIVE_WARNING = (
+    "API key was saved but is not active yet. If your next command fails, wait a moment and retry."
+)
+
+
+def _wait_for_activation(
+    api: AgentStudioInterface, region: str, api_key: str, output_json: bool
+) -> bool:
+    """Wait for `api_key` to activate, with a spinner at a terminal.
+
+    Returns:
+        bool: Whether the key became active within the poll window.
+    """
+    from poly.output.console import console
+
+    status_ctx = (
+        contextlib.nullcontext()
+        if output_json
+        else console.status("[info]Verifying API key is active...[/info]")
+    )
+    with status_ctx:
+        return _wait_for_key_active(api, region, api_key)
+
+
 def _save_credentials(region: str, api_key: str) -> tuple[bool, str]:
     """Save `api_key` to the credential file, unless `region` already has one.
 
@@ -227,14 +450,27 @@ def _save_credentials(region: str, api_key: str) -> tuple[bool, str]:
     return True, f"{CREDENTIALS_FILE_PATH} ({region})"
 
 
+def _type_and_expiry_lines(key_type: str | None, expires_at: str | None) -> list[str]:
+    """The summary lines for a key's type and expiry, or a note when they aren't known."""
+    if key_type is None:
+        return ["  Type:      not known (the reused key wasn't found in the account's key list)"]
+    return [
+        f"  Type:      {key_type} ({KEY_TYPE_STUDIO_LABELS.get(key_type, key_type)})",
+        f"  Expires:   {_format_expiry(expires_at)}",
+    ]
+
+
 def _print_summary(
     account_id: str,
     api_key: str,
     key_name: str,
     key_reused: bool,
-    credentials_summary: str,
+    credentials_summary: str | None,
     target: ProfileTarget,
     masked_line: str,
+    key_type: str | None = None,
+    expires_at: str | None = None,
+    env_var: str = KEY_TYPE_ENV_VARS[DEFAULT_KEY_TYPE],
 ) -> None:
     """Print the human-readable completion summary."""
     from poly.output.console import mask_api_key, plain
@@ -242,19 +478,25 @@ def _print_summary(
     plain("")
     plain("Done.")
     plain(f"  Account:   {account_id}")
-    plain(
-        f"  API key:   {mask_api_key(api_key)}   "
-        f"({key_name}, {'reused' if key_reused else 'created'})"
-    )
-    plain(f"  Saved to:  {credentials_summary}")
+    origin = "reused from your profile" if key_reused else f"{key_name}, created"
+    plain(f"  API key:   {mask_api_key(api_key)}   ({origin})")
+    for line in _type_and_expiry_lines(key_type, expires_at):
+        plain(line)
+    if credentials_summary is None:
+        plain("  Saved to:  not the ADK credential file (a model key can't run the ADK)")
+    else:
+        plain(f"  Saved to:  {credentials_summary}")
     plain(f"  Profile:   {target.path}  ({masked_line})")
     plain("")
     if target.shell == "powershell":
-        plain("Open a new terminal to pick up POLY_API_KEY.")
+        plain(f"Open a new terminal to pick up {env_var}.")
     else:
-        plain(f"Open a new terminal, or run `source {target.path}`, to pick up POLY_API_KEY.")
+        plain(f"Open a new terminal, or run `source {target.path}`, to pick up {env_var}.")
     plain("")
-    plain("Next: make your first API call (POLY_API_KEY is already set).")
+    if env_var == KEY_TYPE_ENV_VARS[DEFAULT_KEY_TYPE]:
+        plain(f"Next: make your first API call ({env_var} is already set).")
+    else:
+        plain(f"Next: make your first realtime API call, reading the key from {env_var}.")
 
 
 def _print_json(
@@ -262,11 +504,15 @@ def _print_json(
     api_key: str,
     key_name: str,
     key_reused: bool,
-    credentials_summary: str,
+    credentials_summary: str | None,
     target: ProfileTarget,
     key_active: bool,
+    key_type: str | None = None,
+    expires_at: str | None = None,
+    env_var: str = KEY_TYPE_ENV_VARS[DEFAULT_KEY_TYPE],
+    warnings: list[str] | None = None,
 ) -> None:
-    """Print the --json completion object."""
+    """Print the --json completion object. The key itself is only ever masked."""
     from poly.output.console import mask_secret
     from poly.output.json_output import json_print
 
@@ -274,16 +520,52 @@ def _print_json(
         {
             "success": True,
             "account_id": account_id,
-            "key_name": key_name,
+            "key_name": None if key_reused else key_name,
             "key_reused": key_reused,
+            "key_type": key_type,
+            "expires_at": expires_at,
+            "env_var": env_var,
             "api_key_masked": mask_secret(api_key),
             "credentials_file": credentials_summary,
             "profile_path": str(target.path),
             "profile_shell": target.shell,
             "key_active": key_active,
+            "warnings": warnings or [],
             "next_step_url": NEXT_STEP_URL,
         }
     )
+
+
+def _with_article(word: str) -> str:
+    """`word` with "a" or "an" in front."""
+    return f"{'an' if word[:1] in 'aeiou' else 'a'} {word}"
+
+
+def _reused_key_warnings(
+    key_details: tuple[str | None, str | None], key_type: str, expires_in: str | None
+) -> list[str]:
+    """What a reused key is that the caller may not expect. Nothing about it is changed."""
+    found_type, found_expiry = key_details
+    env_var = KEY_TYPE_ENV_VARS[key_type]
+    type_flag = "" if key_type == DEFAULT_KEY_TYPE else f" --type {key_type}"
+    warnings = []
+    if expires_in is not None:
+        warnings.append(
+            "--expires-in didn't apply: the reused key keeps the expiry it was created with."
+            " Re-run with --force to create a fresh key."
+        )
+    if found_type is not None and found_type != key_type:
+        warnings.append(
+            f"The key in {env_var} is {_with_article(found_type)} key, not {key_type}."
+            f" Re-run with{type_flag} --force to replace it with {_with_article(key_type)} key."
+        )
+    days_left = _days_left(found_expiry)
+    if days_left is not None and days_left <= EXPIRY_WARNING_DAYS:
+        warnings.append(
+            f"This key expires on {_format_expiry(found_expiry)} (in {max(days_left, 0)} days)."
+            f" Re-run with{type_flag} --force to replace it."
+        )
+    return warnings
 
 
 class ApiKeyCommand(BaseCommand):
@@ -301,7 +583,8 @@ class ApiKeyCommand(BaseCommand):
             parents=[parents.verbose, parents.debug, parents.json],
             help="Create an account API key and export POLY_API_KEY for the PolyAI APIs.",
             description=(
-                "Sign in, create (or reuse) an account-scoped API key, and export it as"
+                "Sign in, create an account-scoped API key (or reuse the one in your profile),"
+                " and export it as"
                 " POLY_API_KEY for use with the PolyAI APIs and Dialog RSN. Never prompts when"
                 " run by an AI coding assistant (no terminal, or --json); at a terminal it"
                 " asks which account to use if you have more than one. The sign-in is kept,"
@@ -314,6 +597,8 @@ class ApiKeyCommand(BaseCommand):
                 "  poly apikey --region studio --account-id acc-123\n"
                 "  poly apikey --region us\n"
                 "  poly apikey --region studio --json\n"
+                "  poly apikey --region studio --type model --expires-in 30d"
+                "   # exports POLY_MODEL_API_KEY\n"
             ),
         )
         apikey_parser.add_argument(
@@ -333,7 +618,32 @@ class ApiKeyCommand(BaseCommand):
             default=None,
             help=(
                 f"Name for the account-scoped API key. Defaults to '{DEFAULT_KEY_NAME}' for"
-                f" studio, or '{DEFAULT_KEY_NAME}-<region>' for any other region."
+                f" studio, or '{DEFAULT_KEY_NAME}-<region>' for any other region, with"
+                " '-model' added for a model key."
+            ),
+        )
+        apikey_parser.add_argument(
+            "--type",
+            dest="key_type",
+            choices=list(KEY_TYPE_API_GROUPS),
+            default=None,
+            help=(
+                f"Kind of key. Defaults to '{DEFAULT_KEY_TYPE}'. 'agent' can call every API,"
+                " including what the ADK needs ('All APIs' in Agent Studio), and is exported"
+                " as POLY_API_KEY. 'model' can call only the Models / realtime API ('Model"
+                " API' in Agent Studio) and is exported as POLY_MODEL_API_KEY instead, never"
+                " replacing POLY_API_KEY or the ADK credential. Each type is reused and"
+                " replaced on its own, and a model key gets its own default name."
+            ),
+        )
+        apikey_parser.add_argument(
+            "--expires-in",
+            choices=list(EXPIRES_IN_DAYS),
+            default=None,
+            help=(
+                f"How long until the new key expires. Defaults to '{DEFAULT_EXPIRES_IN}'."
+                " 'never' creates a key that doesn't expire. Doesn't change a key reused"
+                " from your profile; use --force to create a fresh one."
             ),
         )
         apikey_parser.add_argument(
@@ -351,7 +661,10 @@ class ApiKeyCommand(BaseCommand):
             "--force",
             "-f",
             action="store_true",
-            help="Overwrite an existing POLY_API_KEY in your profile if it holds a different value.",
+            help=(
+                "Create a new key and overwrite any POLY_API_KEY already in your profile,"
+                " even one that still works."
+            ),
         )
         apikey_parser.add_argument(
             "--no-session-cache",
@@ -369,6 +682,8 @@ class ApiKeyCommand(BaseCommand):
         cls.apikey(
             region=args.region,
             key_name=args.key_name,
+            key_type=args.key_type,
+            expires_in=args.expires_in,
             account_id=args.account_id,
             force=args.force,
             output_json=args.json,
@@ -386,13 +701,21 @@ class ApiKeyCommand(BaseCommand):
         output_json: bool = False,
         verbose: bool = False,
         no_session_cache: bool = False,
+        key_type: str | None = None,
+        expires_in: str | None = None,
     ) -> None:
-        """Sign in and provision an account API key for `region`, then export it."""
+        """Sign in and provision an account API key for `region`, then export it.
+
+        `expires_in` is None when not passed, so a reused key can say it was ignored only
+        when it was asked for.
+        """
         import requests
 
-        from poly.output.console import err_console, info, mask_api_key, plain, success
+        from poly.output.console import err_console, info, mask_api_key, plain, success, warning
 
-        key_name = key_name if key_name is not None else _default_key_name(region)
+        key_type = key_type or DEFAULT_KEY_TYPE
+        is_model_key = key_type == "model"
+        key_name = key_name if key_name is not None else _default_key_name(region, key_type)
 
         step = "start"
         try:
@@ -505,45 +828,58 @@ class ApiKeyCommand(BaseCommand):
                 )
 
             step = "key"
-            api_key, key_reused = _get_or_create_key(
-                api, region, jwt_token, resolved_account_id, key_name
+            # Also returned in --json, where the printed warnings are suppressed.
+            warnings: list[str] = []
+            env_var = KEY_TYPE_ENV_VARS[key_type]
+            requested_expiry = _expires_at(expires_in or DEFAULT_EXPIRES_IN)
+            api_key, key_reused, response = _get_or_create_key(
+                api,
+                region,
+                jwt_token,
+                resolved_account_id,
+                key_name,
+                force=force,
+                key_type=key_type,
+                expires_at=requested_expiry,
             )
             if key_reused:
+                where = "your profile" if not is_model_key else f"your profile ({env_var})"
                 _say(
                     output_json,
                     success,
-                    f"Reusing existing '{key_name}' key: {mask_api_key(api_key)}",
+                    f"Reusing the key already in {where}: {mask_api_key(api_key)}",
                 )
+                record, _ = _lookup_key_record(api, region, jwt_token, resolved_account_id, api_key)
+                key_details = (
+                    (None, None) if record is None else _key_details(record, key_type, None)
+                )
+                warnings.extend(_reused_key_warnings(key_details, key_type, expires_in))
+                for message in warnings:
+                    _say(output_json, warning, message)
             else:
+                key_details = _key_details(response, key_type, requested_expiry)
                 _say(output_json, success, f"Created API key '{key_name}': {mask_api_key(api_key)}")
+            found_type, found_expiry = key_details
 
             step = "credentials"
-            saved, credentials_summary = _save_credentials(region, api_key)
-            if saved:
-                _say(output_json, info, f"Saved to {credentials_summary}.")
+            if is_model_key:
+                # A model key can't run the ADK, so it never becomes the ADK credential.
+                credentials_summary = None
             else:
-                _say(output_json, info, f"Existing ADK credential for {region} kept.")
+                saved, credentials_summary = _save_credentials(region, api_key)
+                if saved:
+                    _say(output_json, info, f"Saved to {credentials_summary}.")
+                else:
+                    _say(output_json, info, f"Existing ADK credential for {region} kept.")
 
             step = "activation"
-            from poly.output.console import console, warning
-
-            status_ctx = (
-                contextlib.nullcontext()
-                if output_json
-                else console.status("[info]Verifying API key is active...[/info]")
-            )
-            with status_ctx:
-                key_active = _wait_for_key_active(api, region, api_key)
+            key_active = _wait_for_activation(api, region, api_key, output_json)
             if not key_active:
-                _say(
-                    output_json,
-                    warning,
-                    "API key was saved but is not active yet."
-                    " If your next command fails, wait a moment and retry.",
-                )
+                warnings.append(NOT_ACTIVE_WARNING)
+                _say(output_json, warning, NOT_ACTIVE_WARNING)
 
             step = "env"
-            target, masked_line = write_env_var("POLY_API_KEY", api_key, force=force)
+            target, masked_line = write_env_var(env_var, api_key, force=force)
             _say(output_json, info, f"Wrote to {target.path}:")
             _say(output_json, plain, f"  {masked_line}")
 
@@ -556,6 +892,10 @@ class ApiKeyCommand(BaseCommand):
                     credentials_summary,
                     target,
                     key_active,
+                    key_type=found_type,
+                    expires_at=found_expiry,
+                    env_var=env_var,
+                    warnings=warnings,
                 )
             else:
                 _print_summary(
@@ -566,9 +906,12 @@ class ApiKeyCommand(BaseCommand):
                     credentials_summary,
                     target,
                     masked_line,
+                    key_type=found_type,
+                    expires_at=found_expiry,
+                    env_var=env_var,
                 )
 
-        except EnvVarConflict as e:
+        except (EnvVarConflict, ProfileKeyRefused) as e:
             _fail(e, step, exit_code=2, output_json=output_json, verbose=verbose)
-        except (DeviceFlowError, requests.HTTPError, ValueError) as e:
+        except (DeviceFlowError, requests.RequestException, ValueError) as e:
             _fail(e, step, exit_code=1, output_json=output_json, verbose=verbose)

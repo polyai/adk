@@ -64,6 +64,19 @@ class SendQueuedCommands(unittest.TestCase):
         handler._sdk.send_command_batch.assert_called_once()
 
 
+    def test_rejected_send_raises(self):
+        """A batch the platform rejects raises, so the caller can report the reason."""
+        handler = build_handler()
+        handler._sdk.get_queue_size.return_value = 1
+        handler._sdk.branch_id = "branch-1"
+        handler._sdk._command_queue = [Command()]
+        handler._sdk.fetch_branches.return_value = {"branches": [{"branchId": "branch-1"}]}
+        handler._sdk.send_command_batch.side_effect = SourcererAPIError("rejected")
+
+        with self.assertRaises(SourcererAPIError):
+            handler.send_queued_commands()
+
+
 class GetBranchHistory(unittest.TestCase):
     """Tests for SyncClientHandler.get_branch_history."""
 
@@ -238,6 +251,18 @@ class MergeBranch(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertEqual(errors[0]["path"], [])
         self.assertIn("sequence mismatch", errors[0]["message"])
+
+    def test_merge_passes_experiment_acknowledgement_to_sdk(self):
+        """The acknowledgement reaches the SDK call unchanged."""
+        handler = self._handler_on_branch()
+        handler._sdk.merge_branch.return_value = {"sequence": "2"}
+
+        success, _, _ = handler.merge_branch(message="msg", acknowledge_active_experiment=True)
+
+        self.assertTrue(success)
+        self.assertTrue(
+            handler._sdk.merge_branch.call_args.kwargs["acknowledge_active_experiment"]
+        )
 
     def test_sync_api_error_is_returned_in_errors(self):
         """sync_branch reports API errors the same way as merge_branch."""

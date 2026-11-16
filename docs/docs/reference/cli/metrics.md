@@ -5,7 +5,9 @@ description: Reference for the `poly metrics` command.
 
 # `poly metrics`
 
-Manage the custom metrics defined for a project, which functions access and write via `conv.write_metric(...)`. `poly metrics` requires a subcommand.
+Manage the custom metrics defined for a project, which functions access and write via `conv.write_metric(...)`, and read metric values — Poly Score included — through the Data API. `poly metrics` requires a subcommand.
+
+Two kinds of subcommand live here. `list`, `export`, `add`, `edit` and `import` manage **definitions**. `available`, `query` and `score` read **values**: they call the Data API for the project's live conversation data, need no push, and page with `--limit` / `--offset` (the API allows 100 requests a minute per key).
 
 Metrics are defined per project, not per branch or environment. Creating, editing, or importing a metric takes effect immediately for the whole project; there is no push step and nothing is written to the local resource tree.
 
@@ -35,6 +37,132 @@ poly metrics list --json
   }
 ]
 ~~~
+
+## `poly metrics available`
+
+Show every metric the project can query: built-in metrics such as `poly_score_v2`, `duration` and `handoff`, plus the custom metrics defined in the project. These are the names `poly metrics query` and the `--filter` flags accept (case-insensitive).
+
+Examples:
+
+~~~bash
+poly metrics available
+poly metrics available --json
+~~~
+
+`--json` output shape:
+
+~~~json
+{
+  "metrics": [
+    { "name": "POLY_SCORE_V2", "description": "...", "type": "float", "values": null }
+  ],
+  "total": 0
+}
+~~~
+
+## `poly metrics query`
+
+Aggregate one metric over a time window, optionally bucketed by interval and grouped by dimension. Backed by the Data API's aggregate endpoint, which is marked experimental by the service.
+
+Examples:
+
+~~~bash
+poly metrics query poly_score_v2 --agg avg --from 2026-09-01 --to 2026-09-30
+poly metrics query duration --agg avg --agg p95 --interval daily --by channel
+poly metrics query CSAT --agg avg --filter channel eq VOICE-SIP --having avg gte 4
+poly metrics query handoff_reason --agg conversation_count --by value_string --json
+~~~
+
+The table has one row per bucket and group: a `bucket` column when `--interval` is set, one column per `--by` dimension, then one column per `--agg`. Rows are sorted by bucket ascending, then by `--sort`.
+
+Buckets are labelled in the timezone they were bucketed in: UTC, or `--timezone` for hourly and daily buckets. The label never depends on the machine's timezone. Daily, weekly and monthly buckets show the date they start on (`2026-10-01`); hourly buckets add the time and zone (`2026-10-01 14:00 UTC`). `--json` keeps the timestamps as the Data API returns them.
+
+| Argument | Description |
+|---|---|
+| `metric` | **Required.** Metric name from `poly metrics available` (case-insensitive). |
+
+| Flag | Description |
+|---|---|
+| `--agg` | Aggregation to compute: `sum`, `avg`, `min`, `max`, `p50`, `p95`, `p99`, `conversation_count`, `distinct_count`. Repeatable. Defaults to `avg` and `conversation_count`. |
+| `--from` | Inclusive window start, `YYYY-MM-DD` or an ISO 8601 datetime. Defaults to no lower bound. |
+| `--to` | Exclusive window end. A bare date includes the whole of that day. |
+| `--interval` | Time bucket: `hourly`, `daily`, `weekly`, `monthly`. Omit for one total. Weekly and monthly buckets are whole weeks (from Monday, UTC) and whole months, so the window is widened to match: see below. |
+| `--timezone` | IANA timezone for hourly and daily buckets, e.g. `Europe/London`. `--from` and `--to` with no offset are read as local time in it for hourly, daily and unbucketed queries. Weekly and monthly buckets are always UTC, so their bounds stay UTC dates. |
+| `--by` | Group by `channel`, `deployment_id`, `variant_id`, `client_env`, `experiment_id`, `experiment_version_id` or, for a string metric, `value_string`. Repeatable. |
+| `--filter METRIC OP VALUE` | Only count conversations where the condition holds. `OP` is `eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ex`, `exists`; `in`/`ex` take a comma-separated list. Repeatable. |
+| `--any` | Match conversations that satisfy any `--filter` instead of all. |
+| `--having AGG OP VALUE` | Keep only buckets where the aggregate passes the threshold, e.g. `--having avg gte 4`. Repeatable. |
+| `--channel` | Restrict to a channel: `VOICE-SIP`, `CHAT`, `WEBCHAT`, `SMS`, `RCS`. Repeatable. |
+| `--env` | Restrict to an environment: `test`, `sandbox`, `pre-release` (Staging), `live`, `scenarios`. Repeatable. |
+| `--deployment`, `--variant` | Restrict to deployment or variant IDs. Repeatable. |
+| `--sort FIELD[:asc\|desc]` | Secondary sort on a `--by` dimension or an aggregation. |
+| `--limit`, `--offset` | Rows per page (1 to 100, default 20) and rows to skip (up to 1000). Checked locally before the request. |
+
+`--json` output shape:
+
+~~~json
+{
+  "columns": ["bucket", "channel", "avg", "conversation_count"],
+  "rows": [["2026-09-01T00:00:00Z", "VOICE-SIP", 4.21, 318]],
+  "limit": 20,
+  "offset": 0
+}
+~~~
+
+### Weekly and monthly windows
+
+Weekly buckets are whole calendar weeks starting on Monday (UTC) and monthly buckets are whole calendar months. With `--interval weekly` or `--interval monthly` the window is widened to whole buckets: `--from` moves back to the start of its week or month, and a `--to` in the past moves forward to the end of its week or month. `--from 2026-10-01 --interval weekly` (a Thursday) therefore queries from Monday 28 September.
+
+When this happens the table is preceded by a line such as `Weekly buckets are whole weeks, so the window is from 2026-09-28.`, and `--json` output gains a `window` object with the `from_datetime` and `to_datetime` that were sent. `poly metrics score` uses the widened window for its headline as well, so the headline and the table rows always add up.
+
+## `poly metrics score`
+
+Poly Score for the project: a one-line headline (average and conversation count over the whole window) above the bucketed table. Shortcut for `poly metrics query poly_score_v2 --agg avg --agg conversation_count`, defaulting to the last 7 days bucketed daily. The headline comes from a separate unbucketed request, so it covers the full window whatever `--limit` and `--offset` leave in the table.
+
+`score` reads **Poly Score** (1 to 5), the score new conversations get (the `poly_score_v2` metric). `--v1` reads the **previous Poly Score** (0 to 10, the `poly_score` metric), which only older conversations have. The headline names the score and its scale, because the same number means something different on each: `Poly Score (1-5) from 2026-11-03 to 2026-11-09: 3.7 average over 1,369 conversations.` With `--v1` it starts `Previous Poly Score (0-10)`.
+
+Examples:
+
+~~~bash
+poly metrics score
+poly metrics score --interval weekly --from 2026-09-01
+poly metrics score --by channel --env live
+poly metrics score --v1 --from 2026-03-01 --to 2026-03-31
+poly metrics score --json
+~~~
+
+| Flag | Description |
+|---|---|
+| `--v1` | Read the previous Poly Score (0 to 10) instead of Poly Score (1 to 5), for older conversations. |
+| `--from`, `--to` | Window bounds as for `query`. Defaults to the last 7 days. |
+| `--interval` | Time bucket. Defaults to `daily`. Weekly and monthly widen the window to whole buckets, as for `query`. |
+| `--timezone` | IANA timezone for hourly and daily buckets. `--from` and `--to` with no offset are read in it, for the headline as well as the table. Weekly and monthly bounds stay UTC, as for `query`. |
+| `--by` | Group by a dimension, as for `query`. Repeatable. |
+| `--channel`, `--env` | Restrict to channels or environments, as for `query`. Repeatable. |
+| `--limit`, `--offset` | Rows per page and rows to skip. |
+
+`--json` output shape:
+
+~~~json
+{
+  "columns": ["bucket", "avg", "conversation_count"],
+  "rows": [["2026-09-28T00:00:00Z", 4.35, 290]],
+  "limit": 20,
+  "offset": 0,
+  "summary": {
+    "version": "v2",
+    "scale": "1-5",
+    "average": 4.3,
+    "conversations": 2012,
+    "from_datetime": "2026-09-28T00:00:00",
+    "to_datetime": "2026-10-05T00:00:00",
+    "text": "Poly Score (1-5) from 2026-09-28 to 2026-10-04: 4.3 average over 2,012 conversations."
+  }
+}
+~~~
+
+!!! info "Permissions"
+    `available`, `query` and `score` need an API key with read permission on conversations. They return no PII, so PII read permission is not required. See [`poly conversations search`](./conversations.md#poly-conversations-search) and [`poly transcripts`](./transcripts.md) for the routes that are PII-gated.
 
 ## `poly metrics export`
 

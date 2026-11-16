@@ -7,6 +7,7 @@ each command family implements. Command modules import these directly
 Copyright PolyAI Limited
 """
 
+import os
 import re
 from abc import ABC, abstractmethod
 from argparse import (
@@ -182,6 +183,11 @@ def group_subcommands(
     Returns:
         None. ``subparsers`` is modified in place.
     """
+    # argcomplete completes subcommand names by looking each help entry up as a
+    # subcommand, so the header entries would crash it. Headers only matter in --help.
+    if "_ARGCOMPLETE" in os.environ:
+        return
+
     entries = list(subparsers._choices_actions)
 
     grouped: list[Action] = []

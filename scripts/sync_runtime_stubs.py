@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync type stubs from genai_lambda_runtime into src/poly/types/.
+"""Sync type stubs from the agent runtime into src/poly/types/.
 
 Uses mypy's ``stubgen`` to generate stubs, then post-processes them into
 runtime-safe ``.py`` modules — the committed files are byte-identical to what
@@ -8,6 +8,7 @@ review and CI validate exactly what ships:
 - Rewrites ``runtime.`` / ``utils.`` imports to relative
 - Injects ``__all__`` from imports.json
 - Drops imports of internal-only modules, erasing their names to ``Any``
+- Blanks URL default arguments (``url: str = "https://..."`` → ``url: str = ...``)
 - Binds module-level annotation-only declarations (``X: T`` → ``X: T = ...``)
   and adds ``from __future__ import annotations`` so the stubs import cleanly
   at runtime (user files execute ``from _gen import *``)
@@ -24,9 +25,9 @@ Two lists control what ships beyond ``imports.json``:
   entry, so nothing advertises them to users.
 
 Usage:
-    python scripts/sync_runtime_stubs.py [--python-root PATH] [--skip-git-check]
+    python scripts/sync_runtime_stubs.py --python-root PATH [--skip-git-check]
 
-Default python root: ../genai_lambda_runtime/python
+``--python-root`` is the ``python/`` directory of a runtime checkout.
 """
 
 from __future__ import annotations
@@ -57,6 +58,10 @@ FAKE_IMPORT_MODULES = {"pydantic": {"BaseModel": "object"}}
 
 # Matches module-level annotation-only declarations e.g. "SupportedLanguageCodes: Any"
 _MODULE_ANNOTATION_RE = re.compile(r"^([A-Za-z_]\w*: [^=\n]+?)\s*$", re.MULTILINE)
+
+# Default arguments that are URLs: the stubs are public and the runtime's defaults
+# can point at internal hosts.
+_URL_DEFAULT_RE = re.compile(r"""= (["'])https?://.*?\1""")
 
 # Regex patterns for import rewriting
 _FROM_RUNTIME_RE = re.compile(r"^from runtime\.(\S+)", re.MULTILINE)
@@ -254,6 +259,7 @@ def _postprocess(
     # runtime (via _gen), where an unassigned annotation binds nothing and
     # breaks "from _gen.x import X" — give module-level declarations a value.
     source = _MODULE_ANNOTATION_RE.sub(r"\1 = ...", source)
+    source = _URL_DEFAULT_RE.sub("= ...", source)
     # Inject __all__ from imports.json, filtered to names available in the stub.
     # imports.json is the only source of truth, so a runtime-declared __all__ is replaced.
     if all_names:
@@ -395,8 +401,8 @@ def main() -> None:
     parser.add_argument(
         "--python-root",
         type=Path,
-        default=Path(__file__).resolve().parent.parent.parent / "genai_lambda_runtime" / "python",
-        help="Path to the genai_lambda_runtime/python directory",
+        required=True,
+        help="Path to the python directory of a runtime checkout",
     )
     parser.add_argument(
         "--skip-git-check",

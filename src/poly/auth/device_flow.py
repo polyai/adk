@@ -6,11 +6,8 @@ Copyright PolyAI Limited
 
 import logging
 import time
-import webbrowser
 from collections.abc import Callable
 from typing import Optional
-
-import requests
 
 from poly.handlers.auth0_handler import Auth0Handler, AuthDetails
 
@@ -50,6 +47,10 @@ def signin_with_device_flow(
     Raises:
         DeviceFlowError: The flow could not start, timed out, or was rejected.
     """
+    import webbrowser
+
+    import requests
+
     from poly.output.console import console, info
 
     try:

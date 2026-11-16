@@ -47,7 +47,7 @@ class _LLMClient:
         client_env: str,
         conversation_id: str,
         correlation_id: str | None = None,
-        base_url: str = "https://api.internal.polyai.app",
+        base_url: str = ...,
         timeout: int = 8,
     ) -> None: ...
     def chat_completion(self, request: _ChatCompletionRequest) -> _ChatCompletionResponse: ...

@@ -17,6 +17,7 @@ __all__ = [
     "JanusProxyTimeout",
     "JanusProxyRateLimited",
     "JanusProxyAuthError",
+    "JanusProxyPathForbidden",
     "janus_base_url",
     "normalize_environment",
     "build_response",
@@ -27,7 +28,13 @@ DEFAULT_BASE_URL: str = ...
 DEFAULT_TIMEOUT_SECONDS: int = ...
 
 
-class JanusProxyError(Exception): ...
+class JanusProxyError(Exception):
+    error_code: Any
+    status_code: Any
+
+    def __init__(
+        self, *args: object, error_code: str | None = None, status_code: int | None = None
+    ) -> None: ...
 
 
 class JanusProxyConfigError(JanusProxyError): ...
@@ -46,6 +53,9 @@ class JanusProxyRateLimited(JanusProxyError): ...
 
 
 class JanusProxyAuthError(JanusProxyError): ...
+
+
+class JanusProxyPathForbidden(JanusProxyError): ...
 
 
 def janus_base_url() -> str: ...
@@ -85,4 +95,5 @@ class JanusProxyClient:
         headers: dict[str, str] | None = None,
         body: dict | None = None,
         form: dict | None = None,
+        timeout: float | None = None,
     ) -> requests.Response: ...

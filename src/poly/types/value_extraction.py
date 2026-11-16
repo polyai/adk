@@ -63,7 +63,7 @@ class _ValueExtractionClient:
         conversation_id: str,
         turn_index: int | None,
         correlation_id: str | None = None,
-        base_url: str = "https://api.internal.polyai.app",
+        base_url: str = ...,
         timeout: int = 8,
     ) -> None: ...
     def extract_address(self, request: _AddressExtractionRequest) -> _AddressExtractionResponse: ...
