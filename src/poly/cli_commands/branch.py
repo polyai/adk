@@ -676,7 +676,9 @@ class BranchCommand(BaseCommand):
         source_branch: str = None,
     ) -> None:
         """Create a new branch in the Agent Studio project."""
-        from poly.output.console import error, success, warning
+        from rich.markup import escape
+
+        from poly.output.console import error, plain, success, warning
 
         project = load_project(base_path, output_json=output_json)
 
@@ -741,12 +743,16 @@ class BranchCommand(BaseCommand):
         if env in ["pre-release", "live"]:
             project.pull_project_from_env(env=env, format=False)
             success(f"Pulled {project.account_id}/{project.project_id}")
-            project.push_project(
+            push_ok, output, _ = project.push_project(
                 force=True,
                 skip_validation=True,
                 dry_run=False,
                 format=False,
             )
+            if not push_ok:
+                error(f"Failed to push the {env} state to '{branch_name}'.")
+                plain(escape(output))
+                sys.exit(1)
 
     @classmethod
     def branch_switch(

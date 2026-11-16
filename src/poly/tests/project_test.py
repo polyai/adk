@@ -4185,6 +4185,20 @@ class GetRemoteResourcesByNameLocalTest(unittest.TestCase):
     def tearDown(self):
         patch.stopall()
 
+    def test_diff_against_a_name_that_matches_nothing_raises(self):
+        """A name that resolves to no resources is an error, not an empty diff."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        with patch.object(
+            AgentStudioProject,
+            "get_remote_resources_by_name",
+            side_effect=[({}, []), (project.resources, [])],
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                project.diff_remote_named_versions(before_name="typo", after_name="local")
+
+        self.assertIn("named 'typo' was found", str(ctx.exception))
+
     def test_local_returns_local_resources(self):
         """'local' should resolve to the current local filesystem state."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)

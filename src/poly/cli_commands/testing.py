@@ -183,7 +183,14 @@ class TestingCommand(BaseCommand):
         dry_run: bool = False,
     ) -> None:
         """Run tests for the project."""
-        from poly.output.console import error, info, plain, poll_test_run_live, success
+        from poly.output.console import (
+            error,
+            info,
+            plain,
+            poll_test_run_live,
+            success,
+            test_run_passed,
+        )
 
         project = load_project(base_path)
 
@@ -264,7 +271,9 @@ class TestingCommand(BaseCommand):
             )
             return
 
-        poll_test_run_live(project.get_test_run, test_run_id, matched)
+        result = poll_test_run_live(project.get_test_run, test_run_id, matched)
+        if not test_run_passed(result):
+            sys.exit(1)
 
     @classmethod
     def testing_list(

@@ -735,7 +735,7 @@ class DeploymentsCommand(BaseCommand):
 
         if dry_run:
             if output_json:
-                json_print({**result, "dry_run": True})
+                json_print({**result, "success": True, "dry_run": True})
             else:
                 plain("[dim]Dry run — no changes were made.[/dim]")
             return
@@ -835,7 +835,7 @@ class DeploymentsCommand(BaseCommand):
 
         if dry_run:
             if output_json:
-                json_print({**result, "dry_run": True})
+                json_print({**result, "success": True, "dry_run": True})
             else:
                 plain("[dim]Dry run — no changes were made.[/dim]")
             return

@@ -319,6 +319,8 @@ class RTCCommand(BaseCommand):
             )
             if args.json:
                 json_print(result)
+                if not result["success"]:
+                    sys.exit(1)
             else:
                 if not result["success"]:
                     error(result["error"])
@@ -368,10 +370,10 @@ class RTCCommand(BaseCommand):
             result = cls.rtc_diff(args.path, args.env, output_json=args.json)
             if args.json:
                 json_print(result)
-            else:
-                if not result["success"]:
-                    error(result["error"])
-                    sys.exit(1)
+            elif not result["success"]:
+                error(result["error"])
+            if not result["success"]:
+                sys.exit(1)
         elif args.rtc_subcommand == "validate":
             result = cls.rtc_validate(args.path, args.env, output_json=args.json)
             if args.json:

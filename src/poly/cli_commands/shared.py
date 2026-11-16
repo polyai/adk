@@ -230,7 +230,10 @@ def compute_diff(
     if not after:
         after = "local"
 
-    return project.diff_remote_named_versions(before_name=before, after_name=after)
+    try:
+        return project.diff_remote_named_versions(before_name=before, after_name=after)
+    except ValueError as e:
+        fail(str(e), output_json)
 
 
 def parse_from_projection_json(

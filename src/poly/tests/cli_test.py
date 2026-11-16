@@ -61,6 +61,7 @@ from poly.cli_commands.sync import (
     PullCommand,
     PushCommand,
     RevertCommand,
+    ValidateCommand,
 )
 from poly.cli_commands.update import (
     UpdateCommand,
@@ -444,6 +445,20 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.pull_project_from_env.assert_not_called()
         self.proj.push_project.assert_not_called()
+
+
+    @patch("poly.output.console.plain")
+    @patch("poly.output.console.error")
+    def test_branch_create_env_exits_1_when_the_push_is_rejected(self, mock_error, mock_plain):
+        """A rejected push of the environment's state is reported and exits 1."""
+        self.proj.push_project.return_value = (False, "Rejected by the platform", [])
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("Failed to push the live state", mock_error.call_args[0][0])
+        mock_plain.assert_called_once_with("Rejected by the platform")
 
 
 class BranchCreateFromSourceBranchTest(unittest.TestCase):
@@ -2557,6 +2572,55 @@ class SyncExitCodeTest(unittest.TestCase):
         )
 
 
+    @patch("poly.cli_commands.sync.json_print")
+    def test_validate_json_with_errors_exits_1(self, mock_json_print):
+        """JSON mode reports validation errors as a failure and exits 1."""
+        self.project.validate_project.return_value = ["topics/a.yaml: name cannot be empty"]
+
+        with self.assertRaises(SystemExit) as ctx:
+            ValidateCommand.validate_project(TEST_DIR, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(
+            mock_json_print.call_args[0][0],
+            {
+                "success": False,
+                "valid": False,
+                "errors": ["topics/a.yaml: name cannot be empty"],
+            },
+        )
+
+    @patch("poly.cli_commands.sync.json_print")
+    def test_validate_json_without_errors_exits_0(self, mock_json_print):
+        """JSON mode reports a valid project as a success."""
+        self.project.validate_project.return_value = []
+
+        ValidateCommand.validate_project(TEST_DIR, output_json=True)
+
+        self.assertEqual(
+            mock_json_print.call_args[0][0], {"success": True, "valid": True, "errors": []}
+        )
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_diff_against_an_unknown_name_exits_1(self, mock_json_print):
+        """A --before name that matches nothing is a failure, not an empty diff."""
+        self.project.diff_remote_named_versions.side_effect = ValueError(
+            "No branch, environment or deployment version named 'typo' was found."
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            DiffCommand.diff(TEST_DIR, before="typo", after="main", output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(
+            mock_json_print.call_args[0][0],
+            {
+                "success": False,
+                "error": "No branch, environment or deployment version named 'typo' was found.",
+            },
+        )
+
+
 class PrintDeploymentsTest(unittest.TestCase):
     """Tests for the print_deployments CLI method."""
 
@@ -3178,6 +3242,23 @@ class DeploymentsPromoteTest(unittest.TestCase):
         )
 
 
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_dry_run_is_a_json_success_without_calling_api(self, mock_json):
+        """A promote dry run reports success and does not promote."""
+        DeploymentsCommand.deployments_promote(
+            TEST_DIR,
+            from_deployment="abc123456",
+            to_env="pre-release",
+            output_json=True,
+            dry_run=True,
+        )
+
+        self.proj.promote_deployment.assert_not_called()
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["dry_run"])
+
+
 class DeploymentsRollbackTest(unittest.TestCase):
     """Tests for AgentStudioCLI.deployments_rollback."""
 
@@ -3391,6 +3472,7 @@ class DeploymentsRollbackTest(unittest.TestCase):
         self.proj.rollback_deployment.assert_not_called()
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["dry_run"])
+        self.assertTrue(payload["success"])
         self.assertEqual(payload["target_hash"], "def789012xyz")
         reverted_ids = [d["id"] for d in payload["reverted_deployments"]]
         self.assertEqual(reverted_ids, ["dep-1"])
@@ -5233,9 +5315,33 @@ class FunctionsCommandTest(unittest.TestCase):
         issues = [{"type": "syntax_error", "function_id": "fn-1"}]
         mock_api.return_value = {"valid": False, "issues": issues}
 
+        with self.assertRaises(SystemExit) as ctx:
+            FunctionsCommand.functions_validate(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_print.assert_called_once_with(False, issues)
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.validate_functions")
+    @patch("poly.cli_commands.functions.json_print")
+    def test_validate_json_with_issues_exits_1(self, mock_json_print, mock_api):
+        """functions validate --json prints the result and exits 1 when it is not valid."""
+        mock_api.return_value = {"valid": False, "issues": [{"type": "syntax_error"}]}
+
+        with self.assertRaises(SystemExit) as ctx:
+            FunctionsCommand.functions_validate(TEST_DIR, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_json_print.assert_called_once_with(mock_api.return_value)
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.validate_functions")
+    @patch("poly.output.console.print_function_validation_issues")
+    def test_validate_without_issues_exits_0(self, mock_print, mock_api):
+        """functions validate returns normally when every function is valid."""
+        mock_api.return_value = {"valid": True, "issues": []}
+
         FunctionsCommand.functions_validate(TEST_DIR)
 
-        mock_print.assert_called_once_with(False, issues)
+        mock_print.assert_called_once_with(True, [])
 
 
 # argparse wraps the usage line to the terminal width, which differs between the
@@ -6399,6 +6505,50 @@ class TestRunNameTest(unittest.TestCase):
         self._run()
 
         self.proj.trigger_tests.assert_called_once_with(["tc-1"], name=None)
+
+
+class TestRunExitCodeTest(unittest.TestCase):
+    """Tests that a polled ``poly test run`` exits 1 unless every test passed."""
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.testing.load_project").start()
+        self.proj = MagicMock()
+        self.proj.resolve_tests.return_value = [MagicMock(resource_id="tc-1")]
+        self.proj.trigger_tests.return_value = {"id": "run-1", "test_case_count": 1}
+        self.mock_load.return_value = self.proj
+        self.poll = patch("poly.output.console.poll_test_run_live").start()
+        patch("poly.output.console.info").start()
+        patch("poly.output.console.success").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _run(self) -> None:
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        testing_cli.TestingCommand.run(cli._create_parser().parse_args(["test", "run"]))
+
+    def test_a_run_where_every_test_passed_exits_0(self):
+        """A finished run with no failures or errors returns normally."""
+        self.poll.return_value = {"status": "completed", "passedCount": 1, "failedCount": 0}
+
+        self._run()
+
+    def test_a_run_that_did_not_fully_pass_exits_1(self):
+        """A failed test, an errored test, or polling that gave up all exit 1."""
+        for result in [
+            {"status": "completed", "failedCount": 1, "errorCount": 0},
+            {"status": "completed", "failedCount": 0, "errorCount": 1},
+            {"status": "running", "failedCount": 0, "errorCount": 0},
+            {},
+        ]:
+            with self.subTest(result=result):
+                self.poll.return_value = result
+
+                with self.assertRaises(SystemExit) as ctx:
+                    self._run()
+
+                self.assertEqual(ctx.exception.code, 1)
 
 
 class TestRunJsonTest(unittest.TestCase):

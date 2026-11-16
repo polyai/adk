@@ -2261,12 +2261,11 @@ class AgentStudioProject:
         before_resources, before_slim_resources = self.get_remote_resources_by_name(before_name)
         after_resources, after_slim_resources = self.get_remote_resources_by_name(after_name)
 
-        if not before_resources or not after_resources:
-            logger.error(
-                "Could not retrieve resources for one or both specified names: "
-                f"before={before_name}, after={after_name}"
-            )
-            return None
+        for name, resources in ((before_name, before_resources), (after_name, after_resources)):
+            if not resources:
+                raise ValueError(
+                    f"No branch, environment or deployment version named '{name}' was found."
+                )
 
         diffs = self.diff_resource_maps(
             before_resources, before_slim_resources, after_resources, after_slim_resources

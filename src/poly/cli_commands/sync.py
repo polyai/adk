@@ -932,10 +932,13 @@ class ValidateCommand(BaseCommand):
 
         if output_json:
             json_output = {
+                "success": bool(not errors),
                 "valid": bool(not errors),
                 "errors": errors,
             }
             json_print(json_output)
+            if errors:
+                sys.exit(1)
             return
 
         if not errors:
