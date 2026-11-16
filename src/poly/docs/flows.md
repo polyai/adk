@@ -123,7 +123,7 @@ prompt: Please read out your card number.
   - **collect_while_agent_speaking** (bool) Allow collection during the agent's speech
   - **is_pii** (bool) Does user input count as PII
 - **asr**: Speech recognition provider override
-  - **provider** (str), **model** (str)
+  - **provider** (str), **model** (str). `poly library asr` lists them
 - **vad**: Voice activity detection override
   - **provider** (str)
   - **vad_start** / **vad_end** (float) Seconds. Must be zero or greater
@@ -131,7 +131,7 @@ prompt: Please read out your card number.
 - **barge_in**: Whether the caller can interrupt the agent
   - **is_enabled** (bool)
 - **llm**: Model override for the turn
-  - **provider_model_id** (str)
+  - **provider_model_id** (str). `poly library llm` lists them
   - **reasoning_effort** (str) One of `unspecified`, `minimal`, `low`, `medium`, `high`, `auto`
 
 #### Removing settings

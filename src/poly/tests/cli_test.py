@@ -44,6 +44,7 @@ from poly.cli_commands.functions import (
     FUNCTIONS_SUBCOMMAND_GROUPS,
     FunctionsCommand,
 )
+from poly.cli_commands.library import LibraryCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import (
     compute_diff,
@@ -63,6 +64,7 @@ from poly.cli_commands.update import (
     display_update_message,
 )
 from poly.cli_commands.utils import CompletionCommand
+from poly.output.console import console
 from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
 
@@ -5018,7 +5020,7 @@ class GroupedHelpOutputTest(unittest.TestCase):
         section = self.help_text.split(f"\n{BUILDER_API_GROUP}:")[1]
         section = section.split(f"\n{OTHER_GROUP}:")[0]
 
-        for command in ["functions", "conversations", "audio-cache", "deployments"]:
+        for command in ["functions", "conversations", "audio-cache", "deployments", "library"]:
             self.assertIn(command, section)
         self.assertNotIn("pull", section)
         # rtc/test/chat operate on local project/branch state, not pure remote
@@ -6429,3 +6431,94 @@ class UpdateCheckStampTest(unittest.TestCase):
         _record_update_check()
 
         self.assertFalse(self.stamp_file.exists())
+
+
+class LibraryCommandTest(unittest.TestCase):
+    """Tests for `poly library asr` and `poly library llm`."""
+
+    LLM_MODELS = [
+        {"name": "GPT-4.1 mini", "providerModelId": "azure-oai-gpt-41-mini", "polyaiModel": False},
+        {"name": "PolyAI Raven 3.5", "providerModelId": "polywhirl-3-5", "polyaiModel": True},
+        {"name": "Anthropic Claude 4.5 Haiku", "providerModelId": "aws-claude-45-haiku"},
+        {"name": "Dialog-RSN-1", "providerModelId": "raven-omni", "polyaiModel": True},
+    ]
+
+    ASR_MODELS = [
+        {"name": "Soniox STT RT v5", "provider": "soniox", "model": "stt-rt-v5"},
+        {"name": "Raven ASR", "provider": "raven", "model": "raven-asr-1"},
+        {"name": "Deepgram Nova 3", "provider": "deepgram", "model": "nova-3"},
+        {"name": "Auto", "provider": "default", "model": "poly-latency"},
+        {"name": "PolyAI ASR", "provider": "Poly", "model": "asr-1"},
+    ]
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.library.load_project").start()
+        self.proj = MagicMock()
+        self.proj.get_llm_models.return_value = list(self.LLM_MODELS)
+        self.proj.get_asr_models.return_value = list(self.ASR_MODELS)
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.cli_commands.library.LibraryCommand.list_llm_models")
+    def test_llm_subcommand_dispatches_with_path_and_json(self, mock_list):
+        """`poly library llm --json --path` reaches list_llm_models with both flags."""
+        AgentStudioCLI().main(["library", "llm", "--json", "--path", TEST_DIR])
+
+        mock_list.assert_called_once_with(TEST_DIR, output_json=True)
+
+    @patch("poly.cli_commands.library.LibraryCommand.list_asr_models")
+    def test_asr_subcommand_dispatches_without_json(self, mock_list):
+        """`poly library asr` reaches list_asr_models with JSON output off."""
+        AgentStudioCLI().main(["library", "asr", "--path", TEST_DIR])
+
+        mock_list.assert_called_once_with(TEST_DIR, output_json=False)
+
+    def test_library_without_subcommand_is_rejected(self):
+        """`poly library` on its own needs asr or llm."""
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI().main(["library"])
+
+    @patch("poly.cli_commands.library.json_print")
+    def test_llm_json_lists_polyai_models_first_then_by_name(self, mock_json):
+        """Models flagged polyaiModel come first, and each group is sorted by name."""
+        LibraryCommand.list_llm_models(TEST_DIR, output_json=True)
+
+        names = [m["name"] for m in mock_json.call_args[0][0]]
+        self.assertEqual(
+            names,
+            ["Dialog-RSN-1", "PolyAI Raven 3.5", "Anthropic Claude 4.5 Haiku", "GPT-4.1 mini"],
+        )
+
+    @patch("poly.cli_commands.library.json_print")
+    def test_asr_json_lists_polyai_models_first_then_by_name(self, mock_json):
+        """ASR models from a PolyAI provider or with a poly- model come first, by name."""
+        LibraryCommand.list_asr_models(TEST_DIR, output_json=True)
+
+        names = [m["name"] for m in mock_json.call_args[0][0]]
+        self.assertEqual(
+            names,
+            ["Auto", "PolyAI ASR", "Raven ASR", "Deepgram Nova 3", "Soniox STT RT v5"],
+        )
+
+    def test_llm_table_tags_polyai_models(self):
+        """The table lists PolyAI's models first, with the PolyAI tag."""
+        with console.capture() as capture:
+            LibraryCommand.list_llm_models(TEST_DIR)
+        rows = [line for line in capture.get().splitlines() if "-" in line]
+
+        self.assertIn("Dialog-RSN-1", rows[0])
+        self.assertIn("PolyAI", rows[0])
+        self.assertNotIn("PolyAI", rows[-1])
+
+    def test_asr_table_tags_polyai_models(self):
+        """The table tags ASR models that Agent Studio counts as PolyAI's."""
+        with console.capture() as capture:
+            LibraryCommand.list_asr_models(TEST_DIR)
+        output = capture.get()
+        auto_row = next(line for line in output.splitlines() if "poly-latency" in line)
+        soniox_row = next(line for line in output.splitlines() if "stt-rt-v5" in line)
+
+        self.assertIn("PolyAI", auto_row)
+        self.assertNotIn("PolyAI", soniox_row)

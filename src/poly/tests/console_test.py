@@ -17,9 +17,11 @@ from poly.output.console import (
     mask_secret,
     paged_output,
     print_archived_branches,
+    print_asr_models,
     print_branch_history,
     print_experiment_detail,
     print_experiments,
+    print_llm_models,
     print_merge_conflict_interactive_header,
     print_releases_branches,
     resolve_parent_branch_label,
@@ -686,3 +688,97 @@ class PrintExperimentDetailTest(unittest.TestCase):
         output = self._render(experiment)
 
         self.assertIn("(— traffic)", output)
+
+
+def _is_poly(model: dict) -> bool:
+    return model["name"].startswith("PolyAI")
+
+
+class PrintLlmModelsTest(unittest.TestCase):
+    """Tests for print_llm_models, the table used by `poly library llm`."""
+
+    def _render(self, models: list) -> str:
+        with console.capture() as capture:
+            print_llm_models(models, is_poly=_is_poly)
+        return capture.get()
+
+    def test_empty_list_prints_no_models_message(self):
+        """No models renders a message instead of a table."""
+        self.assertIn("No language models available", self._render([]))
+
+    def test_row_shows_name_model_id_and_count(self):
+        """Each row shows the name and provider model ID, with a count below the table."""
+        output = self._render([{"name": "GPT-4.1 mini", "providerModelId": "gpt-41-mini"}])
+
+        self.assertIn("GPT-4.1 mini", output)
+        self.assertIn("gpt-41-mini", output)
+        self.assertIn("1 language models", output)
+
+    def test_polyai_model_is_tagged(self):
+        """Only rows the is_poly check accepts carry the PolyAI tag."""
+        output = self._render(
+            [
+                {"name": "PolyAI Raven 3.5", "providerModelId": "polywhirl-3-5"},
+                {"name": "GPT-4.1 mini", "providerModelId": "gpt-41-mini"},
+            ]
+        )
+        poly_row = next(line for line in output.splitlines() if "polywhirl-3-5" in line)
+        other_row = next(line for line in output.splitlines() if "gpt-41-mini" in line)
+
+        self.assertIn("PolyAI  polywhirl-3-5", poly_row)
+        self.assertNotIn("PolyAI", other_row)
+
+    def test_flags_render_as_ticks_and_crosses(self):
+        """Capability flags show a tick when set and a cross when false or missing."""
+        output = self._render(
+            [{"name": "M", "providerModelId": "m-1", "endToEnd": True, "supportsWebchat": False}]
+        )
+        row = next(line for line in output.splitlines() if "m-1" in line)
+
+        self.assertEqual(row.count("✓"), 1)
+        self.assertEqual(row.count("✗"), 2)
+
+
+class PrintAsrModelsTest(unittest.TestCase):
+    """Tests for print_asr_models, the table used by `poly library asr`."""
+
+    def _render(self, models: list) -> str:
+        with console.capture() as capture:
+            print_asr_models(models, is_poly=_is_poly)
+        return capture.get()
+
+    def test_empty_list_prints_no_models_message(self):
+        """No models renders a message instead of a table."""
+        self.assertIn("No ASR models available", self._render([]))
+
+    def test_row_shows_name_provider_and_model(self):
+        """Each row shows the name, provider and model, with a count below the table."""
+        output = self._render(
+            [{"name": "Deepgram Nova 3", "provider": "deepgram", "model": "nova-3"}]
+        )
+
+        self.assertIn("Deepgram Nova 3", output)
+        self.assertIn("deepgram", output)
+        self.assertIn("nova-3", output)
+        self.assertIn("1 ASR models", output)
+
+    def test_missing_fields_show_a_dash(self):
+        """A row missing its provider and model shows dashes rather than failing."""
+        output = self._render([{"name": "Partial"}])
+
+        row = next(line for line in output.splitlines() if "Partial" in line)
+        self.assertEqual(row.count("—"), 2)
+
+    def test_polyai_model_is_tagged(self):
+        """Only rows the is_poly check accepts carry the PolyAI tag."""
+        output = self._render(
+            [
+                {"name": "PolyAI Latency", "provider": "default", "model": "poly-latency"},
+                {"name": "Deepgram Nova 3", "provider": "deepgram", "model": "nova-3"},
+            ]
+        )
+        poly_row = next(line for line in output.splitlines() if "poly-latency" in line)
+        other_row = next(line for line in output.splitlines() if "nova-3" in line)
+
+        self.assertIn("PolyAI  default", poly_row)
+        self.assertNotIn("PolyAI", other_row)

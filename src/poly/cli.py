@@ -76,6 +76,7 @@ COMMANDS = [
     ConversationsCommand,
     AudioCacheCommand,
     FunctionsCommand,
+    LibraryCommand,
     TestingCommand,
     RTCCommand,
     ChatCommand,
@@ -83,7 +84,6 @@ COMMANDS = [
     DocsCommand,
     CompletionCommand,
     UpdateCommand,
-    LibraryCommand,
 ]
 
 

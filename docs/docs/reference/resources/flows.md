@@ -230,6 +230,8 @@ Override the speech recognition provider or model for this step.
 | `provider` | ASR provider to use for this step |
 | `model` | ASR model to use for this step |
 
+[`poly library asr`](../cli/library.md#poly-library-asr) lists the providers and models available in the project's region.
+
 ### VAD
 
 Tune voice activity detection — how the platform decides the caller has started and stopped speaking.
@@ -259,7 +261,7 @@ Override the model or its reasoning effort for a single step.
 
 | Field | Description |
 |---|---|
-| `provider_model_id` | Model to use for this step |
+| `provider_model_id` | Model to use for this step, as listed by [`poly library llm`](../cli/library.md#poly-library-llm) |
 | `reasoning_effort` | One of `unspecified`, `minimal`, `low`, `medium`, `high`, `auto` |
 
 ~~~yaml

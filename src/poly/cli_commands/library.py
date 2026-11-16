@@ -7,7 +7,7 @@ from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParser
 from collections.abc import Callable
 from typing import Any
 
-from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
+from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.output.json_output import json_print
 
@@ -38,7 +38,7 @@ class LibraryCommand(BaseCommand):
 
     command = "library"
 
-    group = PROJECT_SYNC_GROUP
+    group = BUILDER_API_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
