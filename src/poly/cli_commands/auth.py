@@ -18,6 +18,19 @@ from poly.utils import (
 )
 
 
+def add_ref_argument(parser: ArgumentParser) -> None:
+    """Add ``--ref``, the tag a copied setup prompt passes to say where it came from."""
+    parser.add_argument(
+        "--ref",
+        type=str,
+        default=None,
+        help=(
+            "Where you started, e.g. the page you copied the setup prompt from. Only used"
+            " in usage data. Also read from POLY_SIGNUP_REF."
+        ),
+    )
+
+
 def _select_region() -> str:
     """Interactively select a region."""
     import questionary
@@ -65,22 +78,31 @@ def authorise_or_explain(
         raise
 
 
-def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
+def _authenticate_and_save_key(
+    jwt_access_token: str, region: str, *, source: str = "login", ref: str | None = None
+) -> None:
     """Authorise the user, fetch or create a PAT, and save it to the credential file.
 
     Waits for the key to become active before returning, so a command run
     immediately afterwards (e.g. project creation) does not fail against a key
     the platform has not finished activating.
+
+    Args:
+        jwt_access_token: The JWT from the device flow.
+        region: The region signed in to.
+        source: The command signing in, for the sign-up event: login or setup.
+        ref: Where the sign-up started, from ``--ref``.
     """
     import time
 
+    from poly.handlers.posthog import report_signin
     from poly.output.console import console, error, info, mask_api_key, plain, success, warning
 
     api_handler = AgentStudioInterface()
 
     info("Setting up your account...")
     try:
-        authorise_or_explain(
+        auth_response = authorise_or_explain(
             api_handler,
             region,
             jwt_access_token,
@@ -115,10 +137,11 @@ def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
 
     # A newly created PAT can take a few seconds to activate. Wait here so that
     # 'poly login' and 'poly setup' hand back a key that actually works.
+    accounts: dict = {}
     with console.status("[info]Verifying API key is active...[/info]"):
         for _ in range(20):
             try:
-                api_handler.get_accounts(region=region)
+                accounts = api_handler.get_accounts(region=region) or {}
                 break
             except Exception:
                 time.sleep(1)
@@ -127,6 +150,10 @@ def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
                 "API key was saved but is not active yet."
                 " If your next command fails, wait a moment and retry."
             )
+
+    # One account names the account group; with several there is no single answer.
+    account_id = next(iter(accounts)) if len(accounts) == 1 else None
+    report_signin(region, auth_response, source=source, ref=ref, account_id=account_id)
 
 
 def _signin(region: str, auth_details: AuthDetails | None = None) -> str:
@@ -188,14 +215,15 @@ class LoginCommand(BaseCommand):
             default=None,
             help="Region to log in to. If omitted, you will be prompted to select one.",
         )
+        add_ref_argument(login_parser)
 
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the login handler."""
-        cls.login(region=args.region)
+        cls.login(region=args.region, ref=args.ref)
 
     @classmethod
-    def login(cls, region: str | None = None) -> None:
+    def login(cls, region: str | None = None, ref: str | None = None) -> None:
         """Log in to an existing Agent Studio account and save API key credentials."""
         import questionary
 
@@ -212,5 +240,5 @@ class LoginCommand(BaseCommand):
             region = _select_region()
 
         jwt_access_token = _signin(region)
-        _authenticate_and_save_key(jwt_access_token, region=region)
+        _authenticate_and_save_key(jwt_access_token, region=region, source="login", ref=ref)
         success("Logged in successfully!")

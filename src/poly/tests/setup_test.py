@@ -278,7 +278,7 @@ class SetupAuthStepTest(unittest.TestCase):
 
         self.mock_select_region.assert_not_called()
         self.mock_signin.assert_called_once_with("us-1", auth_details=None)
-        self.mock_save_key.assert_called_once_with("jwt-token", region="us-1")
+        self.mock_save_key.assert_called_once_with("jwt-token", region="us-1", source="setup", ref=None)
 
     def test_sign_in_is_kept_for_poly_apikey(self):
         """The sign-in is saved to the apikey session so the account key step can reuse it."""
@@ -302,7 +302,7 @@ class SetupAuthStepTest(unittest.TestCase):
 
         self.mock_select_region.assert_called_once()
         self.mock_signin.assert_called_once_with("uk-1", auth_details=None)
-        self.mock_save_key.assert_called_once_with("jwt-token", region="uk-1")
+        self.mock_save_key.assert_called_once_with("jwt-token", region="uk-1", source="setup", ref=None)
 
 
 class SetupSkillsStepTest(unittest.TestCase):
@@ -558,8 +558,29 @@ class SetupAccountKeyStepTest(unittest.TestCase):
         outcome = SetupCommand._setup_account_key(False, "us-1")
 
         self.assertEqual(outcome, "done")
-        self.mock_apikey.assert_called_once_with(region="us-1")
+        self.mock_apikey.assert_called_once_with(region="us-1", source="setup", ref=None)
         self.assertIn("Optional for the ADK", self.mock_confirm.call_args.args[0])
+
+    def test_failed_apikey_does_not_mark_setup_failed(self):
+        """Setup carries on past a failed `poly apikey`, so its outcome drops that failure."""
+        from poly.handlers.posthog import (
+            add_command_properties,
+            command_properties,
+            reset_command_properties,
+        )
+
+        def failing_apikey(**_kwargs):
+            add_command_properties(failed_step="env", error_type="EnvVarConflict")
+            raise SystemExit(2)
+
+        reset_command_properties()
+        add_command_properties(ref="docs")
+        self.mock_apikey.side_effect = failing_apikey
+
+        outcome = SetupCommand._setup_account_key(False, "us-1")
+
+        self.assertEqual(outcome, "failed")
+        self.assertEqual(command_properties(), {"ref": "docs"})
 
     def test_no_declines_without_running_poly_apikey(self):
         """Declining leaves everything alone and reports it."""
@@ -590,7 +611,7 @@ class SetupAccountKeyStepTest(unittest.TestCase):
         """With credentials already saved setup may hold no region; ask before `poly apikey`."""
         SetupCommand._setup_account_key(False, None)
 
-        self.mock_apikey.assert_called_once_with(region="uk-1")
+        self.mock_apikey.assert_called_once_with(region="uk-1", source="setup", ref=None)
 
     def test_poly_apikey_stopping_does_not_stop_setup(self):
         """`poly apikey` exits on failure; setup reports the step failed and carries on."""
@@ -602,6 +623,8 @@ class SetupAccountKeyStepTest(unittest.TestCase):
 class SetupTelemetryTest(unittest.TestCase):
     """Tests for the usage events of ``poly setup``: started, one per step, completed.
 
+    ``track`` adds the person, groups and base properties; ``posthog_test`` covers those.
+
     Runs the full sequence inside an existing project and under an unrecognised
     shell, so each step skips unless a test makes it do something.
     """
@@ -612,7 +635,7 @@ class SetupTelemetryTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.base_path, True)
         patch.dict(os.environ, {"SHELL": "/bin/unrecognised-shell"}).start()
 
-        self.capture = patch("poly.cli_commands.setup.capture_event", return_value=True).start()
+        self.capture = patch("poly.cli_commands.setup.track", return_value=True).start()
         self.mock_signin = patch("poly.cli_commands.setup._signin", return_value="jwt").start()
         patch("poly.cli_commands.setup._authenticate_and_save_key").start()
         self.mock_credentials = patch(
@@ -632,7 +655,7 @@ class SetupTelemetryTest(unittest.TestCase):
     def _steps(self) -> dict[str, dict]:
         """Properties of each captured ``setup_step`` event, by step name."""
         return {
-            call.args[2]["step"]: call.args[2]
+            call.kwargs["step"]: call.kwargs
             for call in self.capture.call_args_list
             if call.args[1] == "setup_step"
         }
@@ -649,32 +672,26 @@ class SetupTelemetryTest(unittest.TestCase):
         self.assertEqual(
             list(self._steps()), ["auth", "apikey", "completion", "skills", "project"]
         )
-        run_ids = {call.args[3] for call in calls}
+        run_ids = {call.kwargs["run_id"] for call in calls}
         self.assertEqual(len(run_ids), 1)
         self.assertTrue(run_ids.pop().startswith("setup:"))
         self.assertEqual({call.args[0] for call in calls}, {"us-1"})
-        self.assertEqual(calls[-1].args[2], {})
+        self.assertEqual(set(calls[-1].kwargs), {"run_id"})
 
-    def test_started_describes_the_caller_and_nothing_personal(self):
-        """The started event carries the OS, version, invoking agent, TTY and credential state."""
-        with patch.dict(os.environ, {"CLAUDECODE": "1"}):
-            self._run_setup(skip_skills=True)
+    def test_started_carries_credential_state_and_ref(self):
+        """The started event says whether credentials existed and where the run came from."""
+        self._run_setup(skip_skills=True, ref="docs")
 
-        started = self.capture.call_args_list[0].args[2]
-        self.assertEqual(
-            set(started), {"os", "adk_version", "invoking_agent", "interactive", "had_credentials"}
-        )
-        self.assertEqual(started["invoking_agent"], "claude-code")
+        started = self.capture.call_args_list[0].kwargs
+        self.assertEqual(set(started), {"run_id", "had_credentials", "ref"})
         self.assertIs(started["had_credentials"], True)
+        self.assertEqual(started["ref"], "docs")
 
-    def test_no_invoking_agent_is_reported_as_none(self):
-        """Outside a coding agent the invoking agent reads 'none'."""
-        with patch.dict(os.environ, clear=False) as env:
-            for marker in ("CLAUDECODE", "CURSOR_AGENT", "CODEX_SANDBOX"):
-                env.pop(marker, None)
-            self._run_setup(skip_skills=True)
+    def test_invalid_ref_is_dropped(self):
+        """A ref that is not a short tag is not sent."""
+        self._run_setup(skip_skills=True, ref="not a tag; rm -rf")
 
-        self.assertEqual(self.capture.call_args_list[0].args[2]["invoking_agent"], "none")
+        self.assertIsNone(self.capture.call_args_list[0].kwargs["ref"])
 
     def test_nothing_else_is_sent_when_the_first_event_is_not(self):
         """An opt-out or a failed first send silences the rest of the run."""
@@ -928,6 +945,73 @@ class AuthenticateAndSaveKeyTest(unittest.TestCase):
         self.assertIn("not active yet", mock_warning.call_args[0][0])
 
 
+class LoginSignupEventTest(unittest.TestCase):
+    """Tests for the identity and cli_signup sent by poly login and poly setup sign-in."""
+
+    def setUp(self):
+        self.api = patch("poly.cli_commands.auth.AgentStudioInterface").start().return_value
+        self.api.get_pats.return_value = [{"key": "existing-pat"}]
+        self.api.get_accounts.return_value = {"acc-1": "Account"}
+        self.api.authorise.return_value = {"user": {"email": "ada@example.com"}}
+        patch("poly.cli_commands.auth.save_api_key_credential_file").start()
+        patch("time.sleep").start()
+        self.capture = patch("poly.handlers.posthog.capture_event", return_value=True).start()
+        self.addCleanup(patch.stopall)
+
+    def _signups(self) -> list:
+        return [
+            (call.args[2], call.args[3], call.kwargs.get("groups"))
+            for call in self.capture.call_args_list
+            if call.args[1] == "cli_signup"
+        ]
+
+    def test_new_studio_account_sends_cli_signup_for_login(self):
+        """'poly login' creating a studio account counts as a login sign-up."""
+        self.api.authorise.return_value = {
+            "user": {"email": "ada@example.com", "is_first_login": True}
+        }
+
+        _authenticate_and_save_key("jwt", region="studio", source="login", ref="docs")
+
+        [(properties, distinct_id, groups)] = self._signups()
+        self.assertEqual(distinct_id, "ada@example.com")
+        self.assertEqual(groups["company"], "acc-1")
+        self.assertEqual(properties["source"], "login")
+        self.assertEqual(properties["ref"], "docs")
+
+    def test_setup_sign_in_counts_as_setup(self):
+        """The same sign-in from poly setup carries source setup."""
+        self.api.authorise.return_value = {
+            "user": {"email": "ada@example.com", "is_first_login": True}
+        }
+
+        _authenticate_and_save_key("jwt", region="studio", source="setup")
+
+        [(properties, _, _)] = self._signups()
+        self.assertEqual(properties["source"], "setup")
+
+    def test_returning_user_saves_identity_without_a_signup(self):
+        """A returning login sends no sign-up but is attributed from now on."""
+        from poly.handlers.posthog import get_user_identity
+
+        _authenticate_and_save_key("jwt", region="studio")
+
+        self.assertEqual(self._signups(), [])
+        self.assertEqual(get_user_identity(), "ada@example.com")
+
+    def test_several_accounts_leave_the_group_out(self):
+        """With more than one account there is no single account group."""
+        self.api.get_accounts.return_value = {"acc-1": "One", "acc-2": "Two"}
+        self.api.authorise.return_value = {
+            "user": {"email": "ada@example.com", "is_first_login": True}
+        }
+
+        _authenticate_and_save_key("jwt", region="studio")
+
+        [(_, _, groups)] = self._signups()
+        self.assertNotIn("company", groups)
+
+
 class LoginCommandRegionTest(unittest.TestCase):
     """Tests for how ``poly login`` resolves its region."""
 
@@ -946,7 +1030,7 @@ class LoginCommandRegionTest(unittest.TestCase):
 
         self.mock_select_region.assert_not_called()
         self.mock_signin.assert_called_once_with("us-1")
-        self.mock_save_key.assert_called_once_with("jwt-token", region="us-1")
+        self.mock_save_key.assert_called_once_with("jwt-token", region="us-1", source="login", ref=None)
 
     def test_run_forwards_the_parsed_region(self):
         """'poly login --region euw-1' reaches the login handler intact."""
@@ -966,7 +1050,7 @@ class LoginCommandRegionTest(unittest.TestCase):
 
         self.mock_select_region.assert_called_once()
         self.mock_signin.assert_called_once_with("uk-1")
-        self.mock_save_key.assert_called_once_with("jwt-token", region="uk-1")
+        self.mock_save_key.assert_called_once_with("jwt-token", region="uk-1", source="login", ref=None)
 
 
 if __name__ == "__main__":

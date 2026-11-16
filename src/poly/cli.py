@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import logging
 import os
 import sys
+import time
 import traceback
 from argparse import ArgumentParser
 
@@ -85,6 +86,54 @@ COMMANDS = [
     CompletionCommand,
     UpdateCommand,
 ]
+
+
+def _command_outcome(exc: BaseException | None) -> dict:
+    """The outcome properties for a command that ended with `exc` (None: returned)."""
+    if exc is None:
+        return {"outcome": "success"}
+    if isinstance(exc, KeyboardInterrupt):
+        return {"outcome": "interrupted"}
+    if isinstance(exc, SystemExit):
+        if exc.code in (None, 0):
+            return {"outcome": "success"}
+        code = exc.code if isinstance(exc.code, int) else 1
+        return {"outcome": "error", "error_type": "SystemExit", "exit_code": code}
+    # The class name only: messages can carry paths, ids or tokens.
+    outcome: dict = {"outcome": "error", "error_type": type(exc).__name__}
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int):
+        outcome["http_status"] = status
+    return outcome
+
+
+def _run_and_report(command: type[BaseCommand], args) -> None:
+    """Run a command, then send one ``cli_command_completed`` event with its outcome."""
+    from poly.handlers.posthog import command_properties, reset_command_properties, track
+
+    reset_command_properties()
+    subcommand = next(
+        (v for k, v in vars(args).items() if k.endswith("_subcommand") and isinstance(v, str)),
+        None,
+    )
+    start = time.monotonic()
+    ended: BaseException | None = None
+    try:
+        command.run(args)
+    except BaseException as exc:
+        ended = exc
+        raise
+    finally:
+        properties = {
+            "command": args.command,
+            "duration_ms": int((time.monotonic() - start) * 1000),
+            **_command_outcome(ended),
+            **command_properties(),
+        }
+        if subcommand:
+            properties["subcommand"] = subcommand
+        track(getattr(args, "region", None), "cli_command_completed", **properties)
 
 
 class AgentStudioCLI:
@@ -197,7 +246,7 @@ class AgentStudioCLI:
         try:
             for command in self.commands:
                 if args.command == command.command:
-                    command.run(args)
+                    _run_and_report(command, args)
                     return
         except Exception as e:
             if getattr(args, "json", False) or getattr(args, "output_json_commands", False):

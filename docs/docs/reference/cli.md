@@ -201,6 +201,18 @@ poly pull --json --output-json-projection | jq .projection > proj.json
 poly push --json --dry-run --output-json-commands
 ~~~
 
+## Usage data
+
+Every `poly` command sends one usage event when it finishes: the command name, how long it took, and whether it succeeded, failed or was interrupted. A failure names the error's type (for example `HTTPError` and its status code), never its message. `poly login`, `poly setup` and `poly apikey` also report their steps, and whether the sign-in created a new studio account.
+
+Each event carries your OS, Python and ADK versions, how the ADK was installed (`uv tool`, `pipx`, `pip`, ...), whether it runs in a terminal, and which coding agent started it, if any (Claude Code, Cursor or Codex, from the environment variables they set).
+
+Once you sign in, events are tied to your PolyAI email and account, the same as your activity in Agent Studio. Before that they use a random id stored in `~/.poly/telemetry.json`, which is linked to your email the first time you sign in on that machine.
+
+Never sent: API keys or tokens, command arguments, file paths or contents, project or agent data.
+
+To turn it off, set `POLY_NO_TELEMETRY=1` or `DO_NOT_TRACK=1`. Nothing is sent while either is set.
+
 ## Related pages
 
 - [Working locally](../development/working-locally.md) — the edit, push, and test loop these commands fit into

@@ -3,15 +3,14 @@
 Runs the full first-run sequence — authentication, an optional account API
 key, shell completion, AI agent skills, and project setup — skipping any step
 that is already done, so it is
-safe to re-run at any time. Each run reports anonymous usage events unless
-the user has opted out.
+safe to re-run at any time. Each run reports usage events unless the user has
+opted out.
 
 Copyright PolyAI Limited
 """
 
 import logging
 import os
-import platform
 import sys
 import time
 import uuid
@@ -20,13 +19,23 @@ from collections.abc import Callable
 from pathlib import Path
 
 from poly.cli_commands.apikey import ApiKeyCommand
-from poly.cli_commands.auth import _authenticate_and_save_key, _select_region, _signin
+from poly.cli_commands.auth import (
+    _authenticate_and_save_key,
+    _select_region,
+    _signin,
+    add_ref_argument,
+)
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.project import InitCommand, ProjectCommand
-from poly.cli_commands.shared import REGION_CHOICES, get_package_version, region_type
+from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.cli_commands.skills import install_skills, node_gate_reason
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS
-from poly.handlers.posthog import capture_event
+from poly.handlers.posthog import (
+    add_command_properties,
+    drop_command_properties,
+    signup_ref,
+    track,
+)
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE
 from poly.utils import any_credentials_exist, apikey_session
 from poly.utils.env_profile import read_env_var
@@ -42,34 +51,26 @@ _SHELL_RC_FILES = {
 }
 _FISH_COMPLETION_PATH = "~/.config/fish/completions/poly.fish"
 
-# Environment variables a coding agent sets in the processes it spawns.
-_AGENT_ENV_MARKERS = {
-    "CLAUDECODE": "claude-code",
-    "CURSOR_AGENT": "cursor",
-    "CODEX_SANDBOX": "codex",
-}
-
-
-def _invoking_agent() -> str:
-    """Name the coding agent that spawned this process, or ``"none"``."""
-    return next((a for var, a in _AGENT_ENV_MARKERS.items() if os.environ.get(var)), "none")
-
 
 class SetupRun:
-    """Anonymous usage events for one ``poly setup`` run, keyed by a random run id.
+    """Usage events for one ``poly setup`` run, sent for the current person.
 
-    Sends ``setup_started``, one ``setup_step`` per step and ``setup_completed``.
-    If the first event is not sent (opt-out or no network), nothing else is.
+    Sends ``setup_started``, one ``setup_step`` per step and ``setup_completed``,
+    each with the run's random ``run_id``. If the first event is not sent (opt-out
+    or no network), nothing else is.
     """
 
     def __init__(self, region: str | None, **started: object) -> None:
         self.region = region
         self.run_id = f"setup:{uuid.uuid4()}"
-        self.sending = capture_event(region, "setup_started", started, self.run_id)
+        self.sending = self._track("setup_started", **started)
+
+    def _track(self, event: str, **properties: object) -> bool:
+        return track(self.region, event, run_id=self.run_id, **properties)
 
     def _send(self, event: str, **properties: object) -> None:
         if self.sending:
-            capture_event(self.region, event, properties, self.run_id)
+            self._track(event, **properties)
 
     def step(
         self, name: str, run_step: Callable[..., str | tuple[str, str]], *args: object
@@ -81,6 +82,7 @@ class SetupRun:
             result = run_step(*args)
         except BaseException as exc:
             result = ("failed", type(exc).__name__)
+            add_command_properties(failed_step=name)
             raise
         finally:
             outcome, *reason = (result,) if isinstance(result, str) else result
@@ -167,6 +169,7 @@ class SetupCommand(BaseCommand):
             dest="global_install",
             help="Install skills user-level (all projects) instead of into the current project.",
         )
+        add_ref_argument(setup_parser)
 
     @classmethod
     def run(cls, args: Namespace) -> None:
@@ -179,6 +182,7 @@ class SetupCommand(BaseCommand):
             agents=args.agents,
             dev=args.dev,
             global_install=args.global_install,
+            ref=args.ref,
         )
 
     @classmethod
@@ -191,8 +195,10 @@ class SetupCommand(BaseCommand):
         agents: list[str] | None = None,
         dev: bool = False,
         global_install: bool = False,
+        ref: str | None = None,
     ) -> None:
         """Run the full setup sequence, skipping steps that are already done."""
+
         from poly.output.console import plain, print_welcome_message, success
 
         print_welcome_message()
@@ -203,23 +209,18 @@ class SetupCommand(BaseCommand):
         )
         plain("")
 
+        ref = signup_ref(ref)
+        add_command_properties(ref=ref)
         had_credentials = any_credentials_exist()
-        run = SetupRun(
-            region,
-            os=platform.system().lower(),
-            adk_version=get_package_version(),
-            invoking_agent=_invoking_agent(),
-            interactive=sys.stdin.isatty(),
-            had_credentials=had_credentials,
-        )
+        run = SetupRun(region, had_credentials=had_credentials, ref=ref)
 
         # --- 1. Authentication ---
         if not (skip_auth or had_credentials) and region is None:
             region = run.region = _select_region()
-        run.step("auth", cls._authenticate, skip_auth, had_credentials, region)
+        run.step("auth", cls._authenticate, skip_auth, had_credentials, region, ref)
 
         # --- 2. Account API key (optional) ---
-        run.step("apikey", cls._setup_account_key, skip_auth, region)
+        run.step("apikey", cls._setup_account_key, skip_auth, region, ref)
 
         # --- 3. Shell completion ---
         run.step("completion", cls._install_completion)
@@ -234,7 +235,9 @@ class SetupCommand(BaseCommand):
         success("Setup complete.")
 
     @classmethod
-    def _authenticate(cls, skip_auth: bool, had_credentials: bool, region: str | None) -> str:
+    def _authenticate(
+        cls, skip_auth: bool, had_credentials: bool, region: str | None, ref: str | None = None
+    ) -> str:
         """Sign in and save an API key, unless skipped or already done.
 
         Returns:
@@ -254,11 +257,11 @@ class SetupCommand(BaseCommand):
             region, auth_details=APIKEY_AUTH_DETAILS if region == "studio" else None
         )
         apikey_session.save(region, jwt_access_token)
-        _authenticate_and_save_key(jwt_access_token, region=region)
+        _authenticate_and_save_key(jwt_access_token, region=region, source="setup", ref=ref)
         return "done"
 
     @classmethod
-    def _setup_account_key(cls, skip_auth: bool, region: str | None) -> str:
+    def _setup_account_key(cls, skip_auth: bool, region: str | None, ref: str | None = None) -> str:
         """Offer to create an account API key by running ``poly apikey``.
 
         The ADK does not need this key; it is for the PolyAI APIs. Never fatal:
@@ -291,8 +294,10 @@ class SetupCommand(BaseCommand):
             info("Account API key: skipped. Run 'poly apikey' when you want one.")
             return "declined"
         try:
-            ApiKeyCommand.apikey(region=region or _select_region())
+            ApiKeyCommand.apikey(region=region or _select_region(), source="setup", ref=ref)
         except SystemExit:
+            # Setup carries on, so its own outcome must not inherit this failure.
+            drop_command_properties("failed_step", "error_type", "http_status")
             warning("Account API key: not set up. Run 'poly apikey' to try again.")
             return "failed"
         return "done"

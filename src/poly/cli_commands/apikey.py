@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Callable
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
-from poly.cli_commands.auth import authorise_or_explain
+from poly.cli_commands.auth import add_ref_argument, authorise_or_explain
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import REGION_CHOICES, region_type
 from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
@@ -257,6 +257,14 @@ def _pick_account(accounts: list[dict]) -> str:
 
 def _fail(exc: Exception, step: str, exit_code: int, *, output_json: bool, verbose: bool) -> None:
     """Print a clean error (or re-raise under --verbose) and exit."""
+    from poly.handlers.posthog import add_command_properties
+
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    add_command_properties(
+        failed_step=step,
+        error_type=type(exc).__name__,
+        http_status=status if isinstance(status, int) else None,
+    )
     if verbose:
         raise exc
     message = str(exc)
@@ -675,6 +683,7 @@ class ApiKeyCommand(BaseCommand):
                 " you) until it expires, so a re-run does not sign in again."
             ),
         )
+        add_ref_argument(apikey_parser)
 
     @classmethod
     def run(cls, args: Namespace) -> None:
@@ -689,6 +698,7 @@ class ApiKeyCommand(BaseCommand):
             output_json=args.json,
             verbose=args.verbose,
             no_session_cache=args.no_session_cache,
+            ref=args.ref,
         )
 
     @classmethod
@@ -703,19 +713,28 @@ class ApiKeyCommand(BaseCommand):
         no_session_cache: bool = False,
         key_type: str | None = None,
         expires_in: str | None = None,
+        ref: str | None = None,
+        source: str = APIKEY_SOURCE,
     ) -> None:
         """Sign in and provision an account API key for `region`, then export it.
 
         `expires_in` is None when not passed, so a reused key can say it was ignored only
-        when it was asked for.
+        when it was asked for. `source` names the command for the sign-up event
+        (``setup`` when ``poly setup`` runs this), and `ref` where the sign-up started.
         """
         import requests
 
+        from poly.handlers.posthog import add_command_properties, report_signin, signup_ref, track
         from poly.output.console import err_console, info, mask_api_key, plain, success, warning
 
         key_type = key_type or DEFAULT_KEY_TYPE
         is_model_key = key_type == "model"
         key_name = key_name if key_name is not None else _default_key_name(region, key_type)
+        ref = signup_ref(ref)
+        add_command_properties(ref=ref)
+
+        def report_step(name: str, **properties: object) -> None:
+            track(region, "apikey_step", step=name, source=source, ref=ref, **properties)
 
         step = "start"
         try:
@@ -768,6 +787,7 @@ class ApiKeyCommand(BaseCommand):
                 )
             else:
                 jwt_token, session = sign_in()
+            report_step("signed_in", session_reused=token_reused)
 
             api = AgentStudioInterface()
             interactive = not output_json and sys.stdin.isatty()
@@ -810,22 +830,11 @@ class ApiKeyCommand(BaseCommand):
                     step = "signin"
                     jwt_token, session = sign_in()
 
-            # On non-studio regions, `is_first_login` also fires for an existing user
-            # who has no admin role on any account yet (enterprise auto-provisioning),
-            # not just a genuinely new signup - restrict the signup event to studio,
-            # the only region this tracking was asked for.
-            is_signup = region == "studio" and bool(
-                ((auth_response or {}).get("user") or {}).get("is_first_login")
+            # Saves who signed in; sends cli_signup only for a new studio account.
+            report_signin(
+                region, auth_response, source=source, ref=ref, account_id=resolved_account_id
             )
-            if is_signup:
-                from poly.handlers.posthog import capture_event
-
-                capture_event(
-                    region,
-                    "apikey_signup",
-                    {"source": APIKEY_SOURCE},
-                    distinct_id=resolved_account_id,
-                )
+            report_step("account_ready")
 
             step = "key"
             # Also returned in --json, where the printed warnings are suppressed.
@@ -860,6 +869,7 @@ class ApiKeyCommand(BaseCommand):
                 key_details = _key_details(response, key_type, requested_expiry)
                 _say(output_json, success, f"Created API key '{key_name}': {mask_api_key(api_key)}")
             found_type, found_expiry = key_details
+            report_step("key_ready", key_reused=key_reused, key_type=key_type)
 
             step = "credentials"
             if is_model_key:
@@ -880,6 +890,7 @@ class ApiKeyCommand(BaseCommand):
 
             step = "env"
             target, masked_line = write_env_var(env_var, api_key, force=force)
+            report_step("env_written", key_active=key_active)
             _say(output_json, info, f"Wrote to {target.path}:")
             _say(output_json, plain, f"  {masked_line}")
 

@@ -33,14 +33,15 @@ The five steps, in order:
 | `--agent NAME` | Install skills only into this coding agent (repeatable), e.g. `claude-code`, `cursor`, `codex`. |
 | `--dev` | Install skills from the local `./skills` directory instead of the published ADK repo (for skill development). |
 | `--global`, `-g` | Install skills user-level (available in every project) instead of into the current project. |
+| `--ref TAG` | Where you started, such as the page you copied the setup prompt from. Only used in [usage data](../cli.md#usage-data). Letters, digits and `. _ : -`, up to 64 characters; anything else is ignored. Also read from `POLY_SIGNUP_REF`. |
 
 !!! info "The skills step needs Node.js 18+"
 
     Skill installation shells out to `npx`, which requires Node.js 18 or newer. Without it, the step is skipped with a warning and the rest of setup completes normally — install Node and re-run `poly setup` to add the skills later.
 
-!!! info "Anonymous usage telemetry"
+!!! info "Usage data"
 
-    `poly setup` sends anonymous usage telemetry. Set `POLY_NO_TELEMETRY=1` or `DO_NOT_TRACK=1` to turn it off.
+    `poly setup` reports each step's outcome, like every `poly` command, tied to your PolyAI sign-in once you have one. See [Usage data](../cli.md#usage-data) for what is sent. Set `POLY_NO_TELEMETRY=1` or `DO_NOT_TRACK=1` to turn it off.
 
 !!! tip "Re-run after anything changes"
 

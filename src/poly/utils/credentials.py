@@ -49,6 +49,71 @@ def save_api_key_credential_file(api_key: str, region: str) -> None:
     os.chmod(CREDENTIALS_FILE_PATH, 0o600)
 
 
+# Who signed in, kept beside the keys under top-level keys of their own. Region
+# entries stay plain strings, so versions that predate these keys still read the
+# file, and their save keeps the keys it does not know.
+_IDENTITIES_KEY = "identities"
+_LAST_SIGNIN_REGION_KEY = "last_signin_region"
+
+
+def _read_credentials() -> dict:
+    """The credential file as a dict; empty when missing or unreadable."""
+    if not os.path.isfile(CREDENTIALS_FILE_PATH):
+        return {}
+    try:
+        with open(CREDENTIALS_FILE_PATH, "r", encoding="utf-8") as f:
+            credentials = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return credentials if isinstance(credentials, dict) else {}
+
+
+def save_signin_identity(region: str, email: str, account_id: Optional[str] = None) -> None:
+    """Record who signed in on `region`, for attributing usage events.
+
+    The file keeps its ``0600`` mode. Never raises; a failure only loses
+    attribution.
+
+    Args:
+        region: The region signed in to.
+        email: The signed-in email.
+        account_id: The account the sign-in resolved to, when known.
+    """
+    if not email:
+        return
+    try:
+        credentials = _read_credentials()
+        identities = credentials.get(_IDENTITIES_KEY)
+        if not isinstance(identities, dict):
+            identities = {}
+        identity = {"email": email}
+        if account_id:
+            identity["account_id"] = account_id
+        identities[region] = identity
+        credentials[_IDENTITIES_KEY] = identities
+        credentials[_LAST_SIGNIN_REGION_KEY] = region
+
+        os.makedirs(os.path.dirname(CREDENTIALS_FILE_PATH), exist_ok=True)
+        with open(CREDENTIALS_FILE_PATH, "w", encoding="utf-8") as f:
+            json.dump(credentials, f, indent=4)
+        os.chmod(CREDENTIALS_FILE_PATH, 0o600)
+    except OSError as exc:
+        logger.debug("Could not save sign-in identity", exc_info=exc)
+
+
+def load_signin_identity() -> Optional[dict]:
+    """The identity of the last sign-in: ``{"email", "account_id"?, "region"}``, or None."""
+    credentials = _read_credentials()
+    region = credentials.get(_LAST_SIGNIN_REGION_KEY)
+    identities = credentials.get(_IDENTITIES_KEY)
+    if not isinstance(identities, dict) or not isinstance(region, str):
+        return None
+    identity = identities.get(region)
+    if not isinstance(identity, dict) or not isinstance(identity.get("email"), str):
+        return None
+    return {**identity, "region": region}
+
+
 def load_api_key_from_credential_file(region: str) -> Optional[str]:
     """Look up the API key stored for `region` in the credential file, if any.
 
