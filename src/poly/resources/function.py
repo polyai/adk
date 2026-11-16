@@ -757,6 +757,9 @@ class Function(Resource):
             if not isinstance(parameter.description, str) or not parameter.description.strip():
                 raise ValueError(f"Parameter '{parameter.name}' description cannot be empty.")
 
+        for variable_name in sorted(utils.extract_variable_names_from_code(self.code)):
+            utils.validate_python_name(variable_name, "State variable name")
+
         # Check for syntax errors
         try:
             compile(self.code, self.name, "exec")

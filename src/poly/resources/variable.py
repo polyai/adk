@@ -144,8 +144,7 @@ class Variable(Resource):
         return Variable_Delete(id=self.resource_id)
 
     def validate(self, **kwargs) -> None:
-        """Check the name is one the platform accepts for a variable."""
-        utils.validate_python_name(self.name, "Variable name")
+        pass
 
     @staticmethod
     def discover_resources(base_path: str) -> list[str]:

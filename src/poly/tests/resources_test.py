@@ -1081,6 +1081,14 @@ def test_code(conv: Conversation, test_param: int):
             func.validate()
         self.assertIn("Function name 'café' must be a valid Python identifier", str(cm.exception))
 
+    def test_validate_reserved_word_state_variable_raises(self):
+        """A conv.state name is checked wherever it is written, including in a comment."""
+        func = self._global_function()
+        func.code += "    # conv.state.class is set elsewhere\n"
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn("State variable name 'class' is a reserved word in Python", str(cm.exception))
+
     def test_validate_reserved_word_function_name_raises(self):
         """A reserved word is reported as such rather than as a syntax error."""
         func = self._global_function(name="class")
@@ -7673,16 +7681,6 @@ class VariableTest(unittest.TestCase):
         content = "vrbl:customer_name"
         self.assertEqual(Variable.make_pretty(content, []), content)
         self.assertEqual(Variable.from_pretty(content, []), content)
-
-    def test_validate_accepts_an_identifier_name(self):
-        var = Variable(resource_id="VAR-123", name="customer_name")
-        self.assertIsNone(var.validate())
-
-    def test_validate_reserved_word_name_raises(self):
-        var = Variable(resource_id="VAR-123", name="in")
-        with self.assertRaises(ValueError) as cm:
-            var.validate()
-        self.assertIn("Variable name 'in' is a reserved word in Python", str(cm.exception))
 
     def test_discover_resources_from_functions(self):
         """Variables are discovered from conv.state.<name> in function code."""
