@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.81.2 (2026-11-16)
+
+### Bug Fixes
+
+- Stop poly validate rejecting an empty flow description, step prompt or greeting
+  ([#421](https://github.com/polyai/adk/pull/421),
+  [`eec16fd`](https://github.com/polyai/adk/commit/eec16fd2d192a8be0a5f44f0503fcc9ad2c1435f))
+
+
 ## v0.81.1 (2026-11-16)
 
 ### Bug Fixes
