@@ -63,7 +63,7 @@ The directory is optional. Create it only when you have test cases to define.
 | `language` | Yes | BCP 47 language tag (e.g. `en-GB`). Must be a configured language in the project. |
 | `variant` | No | Name of a variant from `config/variant_attributes.yaml`. Defaults to the project default variant. |
 | `simulated_at` | No | Test clock — the point in time the conversation is simulated at, as an ISO 8601 datetime (e.g. `2026-01-15T09:30:00Z`). Defaults to the time the run is triggered. |
-| `tags` | No | List of strings used to group, filter, or schedule tests. Usable with `poly test run --tag`. |
+| `tags` | No | List of strings used to group, filter, or schedule tests. Usable with `poly test run --tag`. Must be unique within the test case. |
 | `caller_number` | No | The number the simulated call arrives from. See [mock call context](#mock-call-context). |
 | `sip_headers` | No | SIP headers a carrier would send with an inbound call. |
 | `integration_attributes` | No | Attributes a channel or connector passes in. |
@@ -218,8 +218,9 @@ Argument assertion fields:
 | Field | Description |
 |---|---|
 | `parameter_name` | Parameter as defined on the function. |
+| `assertion_type` | How the argument is checked. One of `equals` (default) or `any`. |
 | `expected_value` | Expected value, expressed as a string. When set, it must not be blank and must read as its `value_type`. |
-| `value_type` | One of `string`, `integer`, `float`, `boolean`. |
+| `value_type` | One of `string`, `integer`, `float`, or `boolean`. |
 
 ~~~yaml
 function_call_assertions:
@@ -283,6 +284,7 @@ prompt_assertions:
 - `api_mocks`: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `respond.status` must be a valid HTTP status code (100–599); `respond.body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation
 - each `function_call_assertions[*].name` must match a global function under `functions/` or a flow function under `flows/<flow>/functions/`
 - each argument's `value_type` must be one of `string`, `integer`, `float`, `boolean`
+- each argument's `assertion_type` must be `equals` or `any`
 - each argument's `expected_value`, when set, must not be blank and must read as its `value_type`
 - the filename must match the normalized `name`
 
