@@ -1241,6 +1241,51 @@ class ExpiredProfileKey(ApiKeyTestCase):
         self.assertIn("poly apikey --region studio --type model --force", error)
 
 
+class ExpiryAndLookupFallbacks(ApiKeyTestCase):
+    """Odd platform data degrades to less detail, never to a failure."""
+
+    def setUp(self):
+        super().setUp()
+        self.mocks["read_env"].return_value = PROFILE_KEY
+
+    def test_unreadable_expiry_is_shown_as_given_without_a_warning(self):
+        self.mocks["list_keys"].return_value = [_record(PROFILE_KEY, expires_at="soon")]
+
+        stdout, _, code = self.run_apikey(region="studio")
+
+        self.assertIsNone(code)
+        self.assertIn("Expires:   soon", stdout)
+        self.assertNotIn("expires on", stdout)
+
+    def test_expiry_without_a_timezone_is_read_as_utc(self):
+        naive = (datetime.now(UTC) + timedelta(days=3, hours=1)).replace(tzinfo=None)
+        self.mocks["list_keys"].return_value = [
+            _record(PROFILE_KEY, expires_at=naive.isoformat())
+        ]
+
+        stdout, _, _ = self.run_apikey(region="studio")
+
+        self.assertIn("(in 3 days)", " ".join(stdout.split()))
+
+    def test_a_non_list_response_is_ignored(self):
+        self.mocks["list_keys"].return_value = {"unexpected": "shape"}
+
+        stdout, _, code = self.run_apikey(region="studio", output_json=True)
+
+        self.assertIsNone(code)
+        self.assertIsNone(json.loads(stdout)["key_type"])
+
+    def test_powershell_summary_names_the_variable(self):
+        self.mocks["write_env"].return_value = (
+            ProfileTarget(path=Path("HKCU/Environment"), shell="powershell"),
+            "POLY_MODEL_API_KEY=sk-n****7890",
+        )
+
+        stdout, _, _ = self.run_apikey(region="studio", key_type="model")
+
+        self.assertIn("Open a new terminal to pick up POLY_MODEL_API_KEY.", stdout)
+
+
 class JsonWarnings(ApiKeyTestCase):
     """--json suppresses printed warnings, so it carries them in `warnings`."""
 
