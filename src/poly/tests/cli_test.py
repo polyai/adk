@@ -209,6 +209,20 @@ class FormatCommandTest(unittest.TestCase):
         proj.format_files.assert_called_once_with(files=None, check_only=False)
 
 
+class BranchNameCompletionTest(unittest.TestCase):
+    """Tab-completion of branch names reads the saved names through the project."""
+
+    def test_completes_from_the_project_and_leaves_out_main(self):
+        project = MagicMock()
+        project.branch_names_starting_with.return_value = ["my-feature"]
+
+        with patch("poly.cli_commands.branch.read_project_config", return_value=project):
+            names = BranchCommand._branch_name_completer("my", parsed_args=MagicMock(path=TEST_DIR))
+
+        self.assertEqual(names, ["my-feature"])
+        project.branch_names_starting_with.assert_called_once_with("my", exclude=("main",))
+
+
 class BranchCreateFromEnvTest(unittest.TestCase):
     """Tests for branch_create with --env flag.
 

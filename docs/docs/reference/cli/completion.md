@@ -15,6 +15,8 @@ poly completion zsh
 poly completion fish
 ~~~
 
+Branch names complete from the list saved by the last command that listed branches, such as `poly branch list`, so completing one needs no network call. When no saved name matches what you've typed, or the saved list is more than 10 minutes old, the list is fetched again, so a branch created elsewhere completes.
+
 | Argument | Description |
 |---|---|
 | `shell` | Shell type to generate completions for. One of `bash`, `zsh`, `fish`. Required. |
