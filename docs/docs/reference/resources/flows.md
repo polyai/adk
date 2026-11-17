@@ -97,7 +97,7 @@ Each flow includes a `flow_config.yaml` file that defines the flow itself.
 | Field | Required | Description |
 |---|---|---|
 | `name` | No | Human-readable flow name |
-| `description` | Yes | What the flow does |
+| `description` | No | What the flow does. Can be empty. |
 | `start_step` | Yes | The step to enter when the flow starts |
 
 ### Example
@@ -161,9 +161,10 @@ A condition can:
 
 | Field | Description |
 |---|---|
+| `name` | Label for the condition, 1 to 50 characters and unique within the step |
 | `condition_type` | `step_condition` or `exit_flow_condition` |
 | `description` | When this condition applies |
-| `child_step` | Next step, only for `step_condition` |
+| `child_step` | Next step in the same flow, only for `step_condition` |
 | `required_entities` | Entities that must be collected before the condition can trigger |
 
 ### `child_step` rules
@@ -384,6 +385,9 @@ Logic reused across flows is usually better placed in global functions.
 
 ## Validation
 
+- A step `name` must be unique within its flow, across step types.
+- A condition `name` must be 1 to 50 characters and unique within its step.
+- A condition's `child_step` must be a step in the same flow.
 - `inter_digit_timeout` and `max_digits` (DTMF configuration) cannot be negative.
 - `vad_start` and `vad_end` (VAD) must be finite and non-negative — `poly validate` rejects a negative or infinite value.
 

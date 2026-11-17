@@ -676,7 +676,9 @@ class BranchCommand(BaseCommand):
         source_branch: str = None,
     ) -> None:
         """Create a new branch in the Agent Studio project."""
-        from poly.output.console import error, success, warning
+        from rich.markup import escape
+
+        from poly.output.console import error, plain, success, warning
 
         project = load_project(base_path, output_json=output_json)
 
@@ -741,12 +743,16 @@ class BranchCommand(BaseCommand):
         if env in ["pre-release", "live"]:
             project.pull_project_from_env(env=env, format=False)
             success(f"Pulled {project.account_id}/{project.project_id}")
-            project.push_project(
+            push_ok, output, _ = project.push_project(
                 force=True,
                 skip_validation=True,
                 dry_run=False,
                 format=False,
             )
+            if not push_ok:
+                error(f"Failed to push the {env} state to '{branch_name}'.")
+                plain(escape(output))
+                sys.exit(1)
 
     @classmethod
     def branch_switch(
@@ -933,7 +939,7 @@ class BranchCommand(BaseCommand):
                     json_print({"success": False, "message": msg})
                 else:
                     error(msg)
-                return
+                sys.exit(1)
             if not output_json:
                 confirmed = questionary.confirm(
                     f"Delete branch '{branch_name}'?", default=False
@@ -961,6 +967,8 @@ class BranchCommand(BaseCommand):
                         info("Switched to branch 'main'.")
                 else:
                     error(f"Failed to delete branch '{branch_name}'.")
+            if not deleted:
+                sys.exit(1)
             return
 
         if not deletable:
@@ -1019,13 +1027,15 @@ class BranchCommand(BaseCommand):
                     error(str(e))
 
         if output_json:
-            result = {"success": deleted_count > 0, "deleted": deleted_count}
+            result = {"success": deleted_count == len(selected), "deleted": deleted_count}
             if current_branch_deleted:
                 result["switched_to"] = "main"
             json_print(result)
         else:
             if deleted_count:
                 success(f"Deleted {deleted_count} branch(es).")
+        if deleted_count < len(selected):
+            sys.exit(1)
 
     @staticmethod
     def _merge_interactively(
@@ -1466,7 +1476,7 @@ class BranchCommand(BaseCommand):
 
         if not diffs:
             if output_json:
-                json_print({"success": False, "message": "No changes to review."})
+                json_print({"success": True, "message": "No changes to review."})
             else:
                 plain("[muted]No changes detected on this branch.[/muted]")
             return
@@ -1497,11 +1507,13 @@ class BranchCommand(BaseCommand):
                 json_print({"success": False, "message": f"GitHub API error: {e}"})
             else:
                 error(f"GitHub API error: {e}")
+            sys.exit(1)
         except OSError as e:
             if output_json:
                 json_print({"success": False, "message": str(e)})
             else:
                 error(str(e))
+            sys.exit(1)
 
     @classmethod
     def branch_status(
@@ -1756,7 +1768,7 @@ class BranchCommand(BaseCommand):
                 )
             else:
                 warning("No current branch found. Please specify a branch name.")
-            return
+            sys.exit(1)
 
         branch_id = resolve_branch_id(branches, branch_name)
         if not branch_id:
@@ -1764,7 +1776,7 @@ class BranchCommand(BaseCommand):
                 json_print({"success": False, "error": f"Branch '{branch_name}' does not exist."})
             else:
                 warning(f"Branch '{branch_name}' does not exist.")
-            return
+            sys.exit(1)
 
         history = project.get_branch_history(branch_id)
         if limit is not None:
@@ -1802,18 +1814,19 @@ class BranchCommand(BaseCommand):
                 )
             else:
                 warning("Current branch doesn't exist. Create a new branch before renaming.")
-            return
+            sys.exit(1)
 
         if current_branch == "main":
             if output_json:
                 json_print({"success": False, "error": "Cannot rename the main branch."})
             else:
                 error("Cannot rename the main branch.")
-            return
+            sys.exit(1)
 
         if not new_branch_name:
             if output_json:
                 json_print({"success": False, "error": "No new branch name provided."})
+                sys.exit(1)
             else:
                 new_branch_name = input("Enter the new name for the current branch: ").strip()
                 if not new_branch_name:
@@ -1842,6 +1855,8 @@ class BranchCommand(BaseCommand):
                 success(f"Renamed branch '{current_branch}' to '{new_branch_name}'.")
             else:
                 error(f"Failed to rename branch '{current_branch}' to '{new_branch_name}'.")
+        if not renamed:
+            sys.exit(1)
 
     @classmethod
     def branch_restore(
@@ -1912,6 +1927,7 @@ class BranchCommand(BaseCommand):
                 success(f"Branch '{selected_branch.get('name', '—')}' restored.")
             else:
                 error("Failed to restore selected branch.")
+                sys.exit(1)
             return
 
         try:
@@ -1930,6 +1946,8 @@ class BranchCommand(BaseCommand):
                 success(f"Branch '{branch_id}' restored.")
             else:
                 error(f"Failed to restore branch '{branch_id}'.")
+        if not restored:
+            sys.exit(1)
 
     @classmethod
     def branch_tag(
@@ -1955,6 +1973,8 @@ class BranchCommand(BaseCommand):
                 )
             else:
                 error("Failed to tag the current branch.")
+        if not tagged:
+            sys.exit(1)
 
     @classmethod
     def branch_untag(
@@ -1980,3 +2000,5 @@ class BranchCommand(BaseCommand):
                 )
             else:
                 error("Failed to remove tag from the current branch.")
+        if not untagged:
+            sys.exit(1)

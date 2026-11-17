@@ -32,7 +32,14 @@ Documents live in `context/`, at the top level of the project. Only `.md` files 
 The body is plain Markdown, passed through unchanged in both directions. Two consequences:
 
 - **Resource references are not resolved.** `{{fn:}}`, `{{attr:}}`, and the other reference prefixes are inert here — they stay as literal text rather than resolving to a resource.
-- **There is no schema and no validation.** `poly validate` has nothing to check, so a context document cannot fail a push on its own content.
+- **There is no schema.** `poly validate` checks only the limits under [Validation](#validation).
+
+## Validation
+
+- The file name can contain only letters, digits, `_`, `-` and `.`, and cannot contain `..`.
+- A file whose name matches `context.md` in any letter case must be named exactly `CONTEXT.MD`.
+- A document is at most 256 KB.
+- A project has at most 50 context documents.
 
 ## Syncing
 

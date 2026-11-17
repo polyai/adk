@@ -1396,6 +1396,15 @@ _FAILURE_STATUSES = {"failed", "error", "errored", "timed_out"}
 _ERROR_STATUSES = {"error", "errored", "timed_out"}
 
 
+def test_run_passed(result: dict) -> bool:
+    """Whether a test run finished with no failed or errored tests."""
+    return (
+        result.get("status", "pending") not in _PENDING_STATUSES
+        and not result.get("failedCount")
+        and not result.get("errorCount")
+    )
+
+
 def _build_test_table(
     test_results: list[dict],
     test_names: dict[str, str],

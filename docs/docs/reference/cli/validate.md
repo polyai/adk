@@ -20,7 +20,10 @@ Returns a list of validation errors for the whole project. These indicate projec
 
 ~~~json
 {
+  "success": true,
   "valid": true,
   "errors": []
 }
 ~~~
+
+When there are validation errors the command exits non-zero, with or without `--json`.

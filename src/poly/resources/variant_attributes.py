@@ -4,11 +4,9 @@ Copyright PolyAI Limited
 """
 
 import json
-import keyword
 import logging
 import math
 import os
-import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar
@@ -122,24 +120,6 @@ def stringify_attribute_value(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return json.dumps(value, separators=(",", ":"))
     return str(value)
-
-
-# Not str.isidentifier(): that accepts non-ASCII names the platform's regex rejects.
-_PYTHONIC_NAME = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
-
-
-def _validate_attribute_name(name: str) -> None:
-    """Reject a name the platform would reject on push.
-
-    Names are read as `conv.variant.<name>`, so they must be Python identifiers.
-    """
-    if not _PYTHONIC_NAME.fullmatch(name):
-        raise ValueError(
-            f"Attribute name '{name}' must be a valid Python identifier: a letter or "
-            "underscore followed by letters, digits or underscores"
-        )
-    if keyword.iskeyword(name):
-        raise ValueError(f"Attribute name '{name}' is a reserved word in Python")
 
 
 def _build_struct(values: dict[str, Any]) -> Struct:
@@ -632,7 +612,7 @@ class VariantAttribute(MultiResourceYamlResource):
     def validate(self, resource_mappings: list[ResourceMapping], **kwargs):
         if not self.name:
             raise ValueError("Name is required")
-        _validate_attribute_name(self.name)
+        utils.validate_python_name(self.name, "Attribute name")
         if not self.mappings:
             raise ValueError("Mappings are required")
 

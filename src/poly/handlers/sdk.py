@@ -760,16 +760,7 @@ class SourcererSDK:
             return self.fetch_projection(force_refresh=True)
 
         except requests.exceptions.RequestException as e:
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
-            else:
-                error_msg = f"Request failed: {str(e)}"
-
-            raise SourcererAPIError(error_msg) from e
+            raise SourcererAPIError(self._rejection_message(e)) from e
 
     def get_project_data(self) -> dict[str, Any]:
         """Get the cached projection data
@@ -1102,6 +1093,29 @@ class SourcererSDK:
             return result.get("projection", result)
         except requests.exceptions.RequestException as e:
             raise SourcererAPIError(self._format_request_error(e)) from e
+
+    @staticmethod
+    def _rejection_message(e: requests.exceptions.RequestException) -> str:
+        """Describe why the platform refused a command batch, one reason per line."""
+        response = getattr(e, "response", None)
+        if response is None:
+            return f"Request failed: {e}"
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            body = {}
+
+        lines = [body.get("error_message") or f"API Error {response.status_code}: {response.text}"]
+        for issue in (body.get("data") or {}).get("issues") or []:
+            path = ".".join(str(part) for part in issue.get("path") or [])
+            lines.append(
+                f"- {path}: {issue.get('message')}" if path else f"- {issue.get('message')}"
+            )
+        if response.status_code == 413:
+            lines.append("The push is too large to send in one request. Push it in smaller parts.")
+        return "\n".join(lines)
 
     @staticmethod
     def _format_request_error(e: requests.exceptions.RequestException) -> str:
