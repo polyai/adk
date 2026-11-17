@@ -9857,7 +9857,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         self.assertTrue(success, message)
         success, message, commands = self.project.push_project(dry_run=True)
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.assertEqual(commands, [])
 
