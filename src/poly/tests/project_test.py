@@ -76,7 +76,13 @@ from poly.resources.function import FunctionParameters, FunctionType
 from poly.resources.outbound_campaign import NODE_FIELDS
 from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
 from poly.resources.test_suite import TestCaseApiOperationMock
-from poly.tests.testing_utils import campaign_projection, mock_read_from_file
+from poly.tests.testing_utils import (
+    campaign_entity,
+    campaign_function,
+    campaign_projection,
+    campaigns_projection,
+    mock_read_from_file,
+)
 from poly.utils import merge_strings
 
 DIR = os.path.dirname(os.path.abspath(__file__))
@@ -8999,7 +9005,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                 os.path.join("outbound_campaigns", "reminders", "functions", "trigger.py"),
             ],
         )
-        self.assertEqual(list(data), ["name", "description", "settings", "nodes"])
+        self.assertEqual(list(data), ["name", "settings", "nodes"])
         self.assertEqual([node["name"] for node in data["nodes"]], ["Trigger", "First call", "End"])
         self.assertEqual(self._node(data, "Trigger")["routes"], [{"next": "First call"}])
         self.assertEqual(self._node(data, "First call")["default_route"], "End")
@@ -9016,6 +9022,97 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertFalse(success)
         self.assertEqual(message, "No changes detected")
         self.assertEqual(commands, [])
+
+    def test_pull_of_a_studio_project_leaves_only_renamed_nodes_changed(self):
+        unset_limits = {"maxConcurrent": None, "perHour": None, "perDay": None}
+        unset = {
+            "startDate": None,
+            "endDate": None,
+            "fromNumber": None,
+            "smsFromNumber": None,
+            "sipTrunkId": None,
+            "defaultVariantId": None,
+            "country": None,
+            "useCase": None,
+            "dailyContactLimit": 3,
+            "voiceDispatchLimits": unset_limits,
+            "smsDispatchLimits": unset_limits,
+            "defaultTimezone": None,
+            "contactWindow": None,
+        }
+        wait = {"type": "wait", "amount": 1, "unit": "days"}
+        nodes = [
+            {
+                "id": "trigger-1",
+                "position": {"x": 0, "y": 0},
+                "label": "Trigger",
+                "data": {
+                    "type": "trigger",
+                    "function": campaign_function("map_contacts", self.TRIGGER_CODE),
+                    "routes": [{"targetNodeId": "wait-1"}],
+                    "sourceType": "csv",
+                    "ingestInterval": "daily",
+                },
+            },
+            {
+                "id": "wait-1",
+                "position": {"x": 0, "y": 200},
+                "label": "Wait",
+                "data": {**wait, "targetNodeId": "wait-2"},
+            },
+            {
+                "id": "wait-2",
+                "position": {"x": 0, "y": 400},
+                "label": "Wait",
+                "data": {**wait, "targetNodeId": "end-1"},
+            },
+            {
+                "id": "end-1",
+                "position": {"x": 0, "y": 600},
+                "label": None,
+                "data": {"type": "end", "exitReason": "done", "writebackEnabled": False},
+            },
+        ]
+        self._pull_into_new_project(
+            campaigns_projection(
+                campaign_entity("CMPGN-EMPTY", "Appointment Management", nodes=[], settings=unset),
+                campaign_entity(
+                    "CMPGN-DISPATCH",
+                    "Test Dispatch",
+                    nodes=nodes,
+                    settings={**unset, "country": "GB", "useCase": "transactional"},
+                ),
+            )
+        )
+
+        empty = self._yaml(os.path.join(self.root, "outbound_campaigns", "appointment_management"))
+        self.assertEqual(
+            empty,
+            {"name": "Appointment Management", "settings": {"daily_contact_limit": 3}},
+        )
+        dispatch_folder = os.path.join(self.root, "outbound_campaigns", "test_dispatch")
+        dispatch = self._yaml(dispatch_folder)
+        self.assertEqual(
+            dispatch["settings"],
+            {"country": "GB", "use_case": "transactional", "daily_contact_limit": 3},
+        )
+        self.assertEqual(
+            [node["name"] for node in dispatch["nodes"]], ["Trigger", "Wait", "Wait 2", "End"]
+        )
+
+        conflicts, modified, new, deleted = self.project.project_status()
+
+        self.assertEqual((conflicts, new, deleted), ([], [], []))
+        campaign_file = os.path.join(dispatch_folder, "campaign.yaml")
+        self.assertEqual(
+            sorted(modified),
+            sorted(
+                [
+                    os.path.join(campaign_file, "nodes", "End"),
+                    os.path.join(campaign_file, "nodes", "Wait_2"),
+                ]
+            ),
+        )
 
     def test_reordering_nodes_is_not_a_change(self):
         data = self._yaml()
