@@ -174,7 +174,7 @@ class LibraryCommand(BaseCommand):
             )
 
     @classmethod
-    def _load_library(cls, region: str, base_path: str, output_json: bool = False) -> Library:
+    def _load_library(cls, base_path: str, region: str, output_json: bool = False) -> Library:
         try:
             if region is None:
                 project = load_project(base_path, output_json=output_json)
@@ -198,11 +198,11 @@ class LibraryCommand(BaseCommand):
         from poly.output.console import paged_output, print_asr_models, success
 
         if refresh:
-            cls._refresh_library(base_path, region, output_json=output_json)
+            library = cls._refresh_library(base_path, region, output_json=output_json)
             if not output_json:
                 success("Library refreshed successfully.")
-
-        library = cls._load_library(region, base_path, output_json=output_json)
+        else:
+            library = cls._load_library(base_path, region, output_json=output_json)
 
         asr_models_json = [asr_model.to_dict() for asr_model in library.asr_models]
 
@@ -226,8 +226,8 @@ class LibraryCommand(BaseCommand):
             library = cls._refresh_library(base_path, region, output_json=output_json)
             if not output_json:
                 success("Library refreshed successfully.")
-
-        library = cls._load_library(region, base_path, output_json=output_json)
+        else:
+            library = cls._load_library(base_path, region, output_json=output_json)
 
         llm_models = [llm_model.to_dict() for llm_model in library.llm_models]
 
