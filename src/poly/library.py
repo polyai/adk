@@ -1,6 +1,7 @@
 """Library module for PolyAI models."""
 
 from dataclasses import dataclass
+from datetime import datetime
 
 
 @dataclass
@@ -49,6 +50,7 @@ class LLMModel:
 class Library:
     """Library model for PolyAI models."""
 
+    last_refreshed: datetime
     region: str
     asr_models: list[ASRModel]
     llm_models: list[LLMModel]
@@ -59,6 +61,7 @@ class Library:
     ) -> "Library":
         # Load a library object from API responses
         return cls(
+            last_refreshed=datetime.now(),
             region=region,
             asr_models=[ASRModel.from_api_response(asr) for asr in asr_models],
             llm_models=[LLMModel.from_api_response(llm) for llm in llm_models],
@@ -78,7 +81,12 @@ class Library:
                     data = json.load(f)
                     asr_models = [ASRModel(**asr) for asr in data.get("asr_models", [])]
                     llm_models = [LLMModel(**llm) for llm in data.get("llm_models", [])]
-                    return cls(region=region, asr_models=asr_models, llm_models=llm_models)
+                    return cls(
+                        last_refreshed=datetime.fromisoformat(data.get("last_refreshed")),
+                        region=region,
+                        asr_models=asr_models,
+                        llm_models=llm_models,
+                    )
             except Exception as e:
                 raise ValueError(f"Error loading library file: {library_path}") from e
         raise FileNotFoundError(f"Library for region '{region}' not found.")
@@ -94,6 +102,7 @@ class Library:
         with open(library_path, "w") as f:
             json.dump(
                 {
+                    "last_refreshed": self.last_refreshed.isoformat(),
                     "region": self.region,
                     "asr_models": [asr_model.__dict__ for asr_model in self.asr_models],
                     "llm_models": [llm_model.__dict__ for llm_model in self.llm_models],

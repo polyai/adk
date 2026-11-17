@@ -11,6 +11,7 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -5255,11 +5256,32 @@ class AgentStudioProject:
         """
         return self.api_handler.get_asr_models(self.region)
 
-    def refresh_library(self) -> Library:
-        """Load the library for the current region."""
-        asr_models = self.get_asr_models()
-        llm_models = self.get_llm_models()
-        library = Library.build_library(self.region, asr_models, llm_models)
-        library.save_library()
-        self.library = library
-        return library
+    def refresh_library(self, force_refresh: bool = False) -> Library:
+        """Load the library for the current region.
+
+        The library will be refreshed if:
+        - No library has been loaded
+        - The force_refresh flag is set to True
+        - The library was last refreshed more than a day ago
+
+        Args:
+            force_refresh (bool): Whether to force a refresh of the library.
+
+        Returns:
+            Library: The refreshed library object.
+        """
+        if (
+            not self.library
+            or force_refresh
+            or datetime.now() - self.library.last_refreshed > timedelta(days=1)
+        ):
+            # Load the latest ASR and LLM async models and build the library
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                asr_future = executor.submit(self.get_asr_models)
+                llm_future = executor.submit(self.get_llm_models)
+                asr_models = asr_future.result()
+                llm_models = llm_future.result()
+            library = Library.build_library(self.region, asr_models, llm_models)
+            library.save_library()
+            self.library = library
+        return self.library
