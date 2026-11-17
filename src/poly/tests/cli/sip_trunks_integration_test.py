@@ -152,6 +152,38 @@ def test_manage_creates_shared_trunk_and_persists_metadata(
     assert result["trunks"][0]["extensions_created"] == 2
 
 
+@pytest.mark.parametrize("extension", ["1000", "+441234567890", "1.5"])
+def test_manage_rejects_numeric_extensions_before_remote_calls(tmp_path, extension):
+    (tmp_path / "project.yaml").write_text(
+        "project_id: agent-1\naccount_id: acct-123\nregion: uk-1\n", encoding="utf-8"
+    )
+    config_path = tmp_path / "sip-trunks.yaml"
+    source = (
+        "- name: Example carrier\n"
+        "  default_route: null\n"
+        "  outbound: null\n"
+        "  sip_cidr: [203.0.113.0/24]\n"
+        "  rtp_cidr: [198.51.100.0/24]\n"
+        "  extensions:\n"
+        f"    - extension: {extension}\n"
+        "      agent_id: agent-1\n"
+        "      client_env: live\n"
+    )
+    config_path.write_text(source, encoding="utf-8")
+    with (
+        patch.object(PlatformAPIHandler, "make_request") as request,
+        patch("getpass.getpass") as secret,
+        patch("questionary.confirm") as confirm,
+    ):
+        with pytest.raises(ValueError, match="non-empty 'extension' string"):
+            SIPTrunksCommand.run(sip_args(tmp_path, "manage"))
+
+    request.assert_not_called()
+    secret.assert_not_called()
+    confirm.assert_not_called()
+    assert config_path.read_text(encoding="utf-8") == source
+
+
 @pytest.mark.parametrize(
     ("inbound", "expected_default_route"),
     [

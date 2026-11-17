@@ -449,7 +449,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                             "agent_id": "agent-1",
                             "client_env": "live",
                         }
-                        for extension in ("0010", "1000", "+44/2000", "*123", "true")
+                        for extension in ("0010", "1000", "+441234567890", "+44/2000", "*123", "true")
                     ],
                 }
             ],

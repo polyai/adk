@@ -149,7 +149,7 @@ Set `default_route: null` to remove the current default route or create a trunk 
 
 ### Extension bindings
 
-Each extension specifies an `extension`, `agent_id`, and `client_env`, as shown in the configuration example. Quote extension values to preserve leading zeros and `+` prefixes. Use the same environment names as the default route. Set `variant_id` to route to a named variant, or to an empty string to select the default variant.
+Each extension specifies an `extension`, `agent_id`, and `client_env`, as shown in the configuration example. Extension values must be non-empty strings. Quote numeric values to preserve leading zeros and `+` prefixes. Use the same environment names as the default route. Set `variant_id` to route to a named variant, or to an empty string to select the default variant.
 
 A trunk can route calls to several projects. When managing its `extensions` list, include every binding that should remain on the trunk, including bindings for other projects:
 

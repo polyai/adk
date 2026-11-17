@@ -272,14 +272,11 @@ def normalized_extensions(desired_extensions: Any) -> list[dict[str, Any]] | Non
     for extension_config in desired_extensions:
         if "extension" not in extension_config:
             raise ValueError("Each extension needs an 'extension' value.")
-        raw_extension = extension_config["extension"]
-        if (
-            raw_extension is None
-            or isinstance(raw_extension, bool)
-            or (isinstance(raw_extension, str) and not raw_extension.strip())
-        ):
-            raise ValueError("Each extension needs a non-empty 'extension' value.")
-        extension = str(raw_extension)
+        extension = extension_config["extension"]
+        if not isinstance(extension, str) or not extension.strip():
+            raise ValueError(
+                "Each extension needs a non-empty 'extension' string. Quote numeric values in YAML."
+            )
         if extension in seen:
             raise ValueError(f"Extension '{extension}' is declared more than once.")
         seen.add(extension)

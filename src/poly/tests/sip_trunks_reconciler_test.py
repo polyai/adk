@@ -308,8 +308,8 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
         )
         self.assertEqual(plan.trunks[0].extensions_total, 0)
 
-    def test_extension_number_must_not_be_null_blank_or_boolean(self):
-        for extension in (None, "", "  ", False, True):
+    def test_extension_must_be_a_non_empty_string(self):
+        for extension in (None, "", "  ", False, True, 1000, 1.5, ["1000"], {"value": "1000"}):
             with self.subTest(extension=extension):
                 with self.assertRaisesRegex(ValueError, "non-empty 'extension'"):
                     normalized_extensions(
