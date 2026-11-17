@@ -290,6 +290,7 @@ To create a trunk, add an entry such as:
 
 `manage` previews the changes and asks for confirmation. It prompts securely for any
 required credentials and saves generated trunk IDs and hostnames back to the YAML.
+Changes take effect immediately and may affect live calls.
 Use `--force` to apply without confirmation; `--json` also skips confirmation.
 The required `default_route` and `outbound` fields use `null` to disable those features.
 

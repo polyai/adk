@@ -61,10 +61,11 @@ class SIPTrunksCommand(BaseCommand):
         manage_parser = actions.add_parser(
             "manage",
             parents=leaf_parents,
-            help="Create or update SIP trunks from an account-level YAML file.",
+            help="Create or update SIP trunks immediately; may affect live calls.",
             description=(
                 "Create or update SIP trunks declared in sip-trunks.yaml.\n"
-                "Resources omitted from the file are left unchanged."
+                "Changes take effect immediately and may affect live calls.\n"
+                "Trunks omitted from the file are left unchanged."
             ),
         )
         manage_parser.add_argument(
@@ -95,7 +96,13 @@ class SIPTrunksCommand(BaseCommand):
         get_parser.add_argument("trunk_id", help="SIP trunk ID.")
 
         delete_parser = actions.add_parser(
-            "delete", parents=leaf_parents, help="Delete a SIP trunk."
+            "delete",
+            parents=leaf_parents,
+            help="Delete a SIP trunk immediately; may affect live calls.",
+            description=(
+                "Delete a SIP trunk from the selected account. "
+                "This takes effect immediately and may affect live calls."
+            ),
         )
         delete_parser.add_argument("trunk_id", help="SIP trunk ID.")
         delete_parser.add_argument(
@@ -176,7 +183,10 @@ class SIPTrunksCommand(BaseCommand):
             import questionary
 
             confirmed = questionary.confirm(
-                "Apply these SIP trunk changes?", default=False, auto_enter=False
+                "Apply these SIP trunk changes? "
+                "They take effect immediately and may affect live calls.",
+                default=False,
+                auto_enter=False,
             ).ask()
             if not confirmed:
                 from poly.output.console import info
@@ -242,7 +252,8 @@ class SIPTrunksCommand(BaseCommand):
             import questionary
 
             confirmed = questionary.confirm(
-                f"Delete SIP trunk {args.trunk_id}?",
+                f"Delete SIP trunk {args.trunk_id}? "
+                "This takes effect immediately and may affect live calls.",
                 default=False,
                 auto_enter=False,
             ).ask()

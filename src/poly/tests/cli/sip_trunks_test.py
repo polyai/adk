@@ -109,7 +109,10 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         print_diff.assert_called_once_with(changes)
         confirm.assert_called_once_with(
-            "Apply these SIP trunk changes?", default=False, auto_enter=False
+            "Apply these SIP trunk changes? "
+            "They take effect immediately and may affect live calls.",
+            default=False,
+            auto_enter=False,
         )
         apply_plan.assert_not_called()
 
@@ -251,7 +254,12 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         SIPTrunksCommand.run(args)
 
-        confirm.assert_called_once_with("Delete SIP trunk tr-123?", default=False, auto_enter=False)
+        confirm.assert_called_once_with(
+            "Delete SIP trunk tr-123? "
+            "This takes effect immediately and may affect live calls.",
+            default=False,
+            auto_enter=False,
+        )
         delete_trunk.assert_not_called()
 
     @patch("poly.output.console.success")

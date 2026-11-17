@@ -200,6 +200,10 @@ Passwords and tokens are entered through secure prompts. Do not put credentials 
 | `--rotate-auth TRUNK_ID` | Prompt for a new credential for a trunk declared in the file with digest or token authentication. |
 | `-f`, `--force` | Apply changes without confirmation. |
 
+!!! warning "Changes take effect immediately"
+
+    `manage` updates the account's active SIP trunks directly and may affect live calls. The changes do not wait for a project deployment.
+
 !!! info "JSON mode skips confirmation"
 
     `manage --json` applies changes without asking for confirmation. Required credential prompts still appear.
@@ -290,6 +294,10 @@ poly sip-trunks delete <trunk_id> --json
 | Flag | Description |
 |---|---|
 | `-f`, `--force` | Delete without confirmation. |
+
+!!! warning "Deletion takes effect immediately"
+
+    Deleting a trunk immediately removes its configuration and extension bindings and may affect live calls for every project using it.
 
 !!! info "JSON mode skips confirmation"
 
