@@ -73,7 +73,10 @@ from poly.resources import (
     TestCase,
     Topic,
 )
-from poly.resources.outbound_campaign import campaign_folder_of
+from poly.resources.outbound_campaign import (
+    campaign_folder_of,
+    route_targets,
+)
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
     RESOURCE_NAME_TO_CLASS,
@@ -1594,6 +1597,7 @@ class AgentStudioProject:
             updated_resources,
             new_state,
         )
+        self._assign_campaign_positions(new_state, new_resources, post_changes.new)
 
         # Queue new/updated/deleted resources
         commands = self.api_handler.get_queued_commands()
@@ -1801,7 +1805,10 @@ class AgentStudioProject:
         # 4. Validate all resources with new state
         if not skip_validation:
             validation_errors = self.validate_resources(
-                resources_dict=new_state, resource_mappings=resource_mappings
+                resources_dict=new_state,
+                resource_mappings=resource_mappings,
+                new_resources=new_resources,
+                deleted_resources=deleted_resources,
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
@@ -1829,6 +1836,22 @@ class AgentStudioProject:
             self.save_config()
 
         return True, "Resources pushed successfully.", commands
+
+    @staticmethod
+    def _assign_campaign_positions(new_state: ResourceMap, *new_resources: ResourceMap) -> None:
+        """Lay out the new nodes of each campaign around the nodes it already has."""
+        campaign_ids = {
+            node.campaign_id
+            for changes in new_resources
+            for node in changes.get(OutboundCampaignNode, {}).values()
+        }
+        for campaign_id in campaign_ids:
+            nodes = [
+                node
+                for node in new_state.get(OutboundCampaignNode, {}).values()
+                if node.campaign_id == campaign_id
+            ]
+            resource_utils.assign_campaign_positions(nodes, lambda node: route_targets(node.data))
 
     @staticmethod
     def _assign_flow_positions(
@@ -1997,6 +2020,14 @@ class AgentStudioProject:
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
         prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
+        prepush.group_outbound_campaign_changes(
+            state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            pre_push_updated_resources,
+            pre_push_deleted_resources,
+        )
         prepush.fix_orphaned_variables(
             state,
             new_resources,
@@ -2656,12 +2687,34 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == OutboundCampaign:
+            saved_campaign = (
+                original_resource if isinstance(original_resource, OutboundCampaign) else None
+            )
+            additional_kwargs["known_identity"] = (
+                saved_campaign.identity if saved_campaign else None
+            )
+            additional_kwargs["known_status"] = saved_campaign.status if saved_campaign else None
+            additional_kwargs["known_settings"] = (
+                saved_campaign.settings if saved_campaign else None
+            )
+            additional_kwargs["had_trigger"] = any(
+                node.campaign_id == resource.resource_id and node.data.get("type") == "trigger"
+                for node in self.resources.get(OutboundCampaignNode, {}).values()
+            )
+
         if resource_class == OutboundCampaignNode:
             saved_node = (
                 original_resource if isinstance(original_resource, OutboundCampaignNode) else None
             )
             additional_kwargs["known_position"] = saved_node.position if saved_node else None
+            additional_kwargs["known_type"] = saved_node.data.get("type") if saved_node else None
+            additional_kwargs["known_label"] = saved_node.platform_name if saved_node else None
             additional_kwargs["known_data"] = saved_node.data if saved_node else None
+            additional_kwargs["known_code"] = saved_node.code if saved_node else None
+            additional_kwargs["known_published"] = bool(
+                saved_node and saved_node.campaign_published
+            )
 
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):
@@ -3456,8 +3509,8 @@ class AgentStudioProject:
             list[str]: A list of validation error messages.
         """
         # Read local resources
-        new_resource_mappings, kept_resource_mappings, _ = self.find_new_kept_deleted(
-            self.discover_local_resources()
+        new_resource_mappings, kept_resource_mappings, deleted_resource_mappings = (
+            self.find_new_kept_deleted(self.discover_local_resources())
         )
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
 
@@ -3473,22 +3526,50 @@ class AgentStudioProject:
                 resource_mapping.resource_id
             ] = local_resource
 
+        new_resources: ResourceMap = {}
+        for mapping in new_resource_mappings:
+            new_resources.setdefault(mapping.resource_type, {})[mapping.resource_id] = resources[
+                mapping.resource_type
+            ][mapping.resource_id]
+        deleted_resources: ResourceMap = {}
+        for mapping in deleted_resource_mappings:
+            saved = self.resources.get(mapping.resource_type, {}).get(mapping.resource_id)
+            if saved is not None:
+                deleted_resources.setdefault(mapping.resource_type, {})[mapping.resource_id] = saved
+
         return self.validate_resources(
             resources_dict=resources,
             resource_mappings=resource_mappings,
+            new_resources=new_resources,
+            deleted_resources=deleted_resources,
         )
 
     @staticmethod
     def validate_resources(
         resources_dict: ResourceMap,
         resource_mappings: list[ResourceMapping],
+        new_resources: Optional[ResourceMap] = None,
+        deleted_resources: Optional[ResourceMap] = None,
     ) -> list[str]:
         """Validate all resources in the project.
+
+        Args:
+            resources_dict: Every local resource, by type and id.
+            resource_mappings: The mappings to resolve references with.
+            new_resources: The resources the push would create, to check deletes against.
+            deleted_resources: The saved resources the push would delete.
 
         Returns:
             list[str]: A list of validation error messages.
         """
-        validation_errors = []
+        validation_errors = [
+            f"Validation error: {error}"
+            for resource_type in {**(new_resources or {}), **(deleted_resources or {})}
+            if issubclass(resource_type, Resource)
+            for error in resource_type.validate_creates_and_deletes(
+                new_resources or {}, deleted_resources or {}
+            )
+        ]
         seen_paths: set[str] = set()
         for mapping in resource_mappings:
             if mapping.file_path in seen_paths:
