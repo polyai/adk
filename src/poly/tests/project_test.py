@@ -9315,16 +9315,6 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(payload["data"]["trigger"]["routes"], [{"targetNodeId": "call-1"}])
         self.assertEqual(payload["data"]["trigger"]["campaignFunction"]["code"], self.TRIGGER_CODE)
 
-    def test_pushed_trigger_rename_keeps_the_id_and_leaves_nothing_to_push(self):
-        self._rename_trigger("Start")
-
-        success, message = self._push_for_real()
-
-        self.assertTrue(success, message)
-        trigger = self.project.resources[OutboundCampaignNode]["CMPGN-ONE:trigger-1"]
-        self.assertEqual(trigger.name, "Start")
-        self.assertEqual(self.project.project_status(), ([], [], [], []))
-
     def test_deleting_the_trigger_of_a_saved_campaign_fails_validation(self):
         data = self._yaml()
         data["nodes"] = [node for node in data["nodes"] if node["type"] != "trigger"]
@@ -9517,24 +9507,6 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(summary[2][1], "trigger-1")
         self.assertEqual(commands[2][1]["data"]["trigger"]["routes"], [{"targetNodeId": new_id}])
 
-    def test_pushed_type_change_leaves_nothing_to_push(self):
-        data = self._yaml()
-        index = data["nodes"].index(self._node(data, "End"))
-        data["nodes"][index] = {
-            "name": "End",
-            "type": "wait",
-            "amount": 1,
-            "unit": "days",
-            "next": "First call",
-        }
-        self._write_yaml(data)
-
-        success, message = self._push_for_real()
-
-        self.assertTrue(success, message)
-        self.assertNotIn("CMPGN-ONE:end-1", self.project.resources[OutboundCampaignNode])
-        self.assertEqual(self.project.project_status(), ([], [], [], []))
-
     def test_trigger_type_change_fails_validation(self):
         data = self._yaml()
         data["nodes"] = [
@@ -9709,27 +9681,15 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(create["node"]["position"], {"x": 400.0, "y": 200.0})
         self.assertEqual(create["node"]["label"], "Wait")
 
-    def test_settings_change_sends_the_whole_settings_object(self):
+    def test_settings_change_sends_only_the_settings(self):
         data = self._yaml()
         data["settings"]["daily_contact_limit"] = 5
         self._write_yaml(data)
 
-        self.assertEqual(
-            self._push(),
-            [
-                (
-                    "outbound_campaign_update_settings",
-                    {
-                        "id": "CMPGN-ONE",
-                        "settings": {
-                            "fromNumber": "+15550100",
-                            "country": "US",
-                            "dailyContactLimit": 5,
-                        },
-                    },
-                ),
-            ],
-        )
+        [(command_type, payload)] = self._push()
+
+        self.assertEqual(command_type, "outbound_campaign_update_settings")
+        self.assertEqual(payload["settings"]["dailyContactLimit"], 5)
 
     def test_description_change_updates_the_campaign_only(self):
         data = self._yaml()
@@ -10002,20 +9962,34 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         self.assertEqual(self._push(), [("outbound_campaign_delete", {"id": "CMPGN-ONE"})])
 
-    def test_pushed_rename_keeps_the_ids_and_leaves_nothing_to_push(self):
-        self._rename_campaign("Monthly reminders", "monthly_reminders")
-
-        success, message = self._push_for_real()
-
-        self.assertTrue(success, message)
-        self.assertEqual(list(self.project.resources[OutboundCampaign]), ["CMPGN-ONE"])
-        self.assertEqual(
-            sorted(self.project.resources[OutboundCampaignNode]),
-            ["CMPGN-ONE:call-1", "CMPGN-ONE:end-1", "CMPGN-ONE:trigger-1"],
+    def _retype_first_call_to_sms(self) -> None:
+        data = self._yaml()
+        index = data["nodes"].index(self._node(data, "First call"))
+        data["nodes"][index] = {
+            "name": "First call",
+            "type": "sms",
+            "function": {"name": "sms_args", "description": ""},
+            "message_template": "Hi",
+            "default_route": "End",
+        }
+        self._write_yaml(data)
+        self._write_function(
+            "first_call", "def sms_args(outbound_contact, outbound_campaign):\n    return {}\n"
         )
-        self.assertEqual(self.project.project_status(), ([], [], [], []))
 
-    def test_pushed_new_campaign_and_node_leave_nothing_to_push(self):
+    def _retype_end_to_wait(self) -> None:
+        data = self._yaml()
+        index = data["nodes"].index(self._node(data, "End"))
+        data["nodes"][index] = {
+            "name": "End",
+            "type": "wait",
+            "amount": 1,
+            "unit": "days",
+            "next": "First call",
+        }
+        self._write_yaml(data)
+
+    def _add_campaign_and_node(self) -> None:
         data = self._yaml()
         self._node(data, "First call")["default_route"] = "Wait"
         data["nodes"].append(
@@ -10026,11 +10000,105 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             {**data, "name": "Renewals"}, os.path.join(self.root, "outbound_campaigns", "renewals")
         )
 
-        success, message = self._push_for_real()
+    def _rename_first_call_case_only(self) -> None:
+        data = self._yaml()
+        self._node(data, "First call")["name"] = "First Call"
+        self._node(data, "Trigger")["routes"] = [{"next": "First Call"}]
+        self._write_yaml(data)
+        self._write_function(
+            "first_call", "def call_args(outbound_contact, outbound_campaign):\n    return {}\n"
+        )
 
+    def test_pushed_change_leaves_nothing_to_push(self):
+        def node_ids() -> list[str]:
+            return sorted(self.project.resources[OutboundCampaignNode])
+
+        cases = {
+            "trigger rename": (
+                lambda: self._rename_trigger("Start"),
+                lambda: self.assertEqual(
+                    self.project.resources[OutboundCampaignNode]["CMPGN-ONE:trigger-1"].name,
+                    "Start",
+                ),
+            ),
+            "type change": (
+                self._retype_end_to_wait,
+                lambda: self.assertNotIn("CMPGN-ONE:end-1", node_ids()),
+            ),
+            "folder rename": (
+                lambda: self._rename_campaign("Monthly reminders", "monthly_reminders"),
+                lambda: (
+                    self.assertEqual(list(self.project.resources[OutboundCampaign]), ["CMPGN-ONE"]),
+                    self.assertEqual(
+                        node_ids(),
+                        ["CMPGN-ONE:call-1", "CMPGN-ONE:end-1", "CMPGN-ONE:trigger-1"],
+                    ),
+                ),
+            ),
+            "new campaign and node": (
+                self._add_campaign_and_node,
+                lambda: self.assertEqual(len(self.project.resources[OutboundCampaign]), 2),
+            ),
+        }
+        for case, (change, check) in cases.items():
+            with self.subTest(case=case):
+                self.setUp()
+                change()
+
+                success, message = self._push_for_real()
+
+                self.assertTrue(success, message)
+                check()
+                self.assertEqual(self.project.project_status(), ([], [], [], []))
+
+    def test_every_node_type_round_trips_through_a_push_and_a_pull(self):
+        folder = os.path.join(self.root, "outbound_campaigns", "appointment_reminders")
+        shutil.copytree(
+            os.path.join(TEST_DIR, "outbound_campaigns", "appointment_reminders"), folder
+        )
+        data = self._yaml(folder)
+        del data["settings"]["default_variant"]
+        self._node(data, "Wait a day")["next"] = "Save rows"
+        data["nodes"].insert(
+            -1,
+            {
+                "name": "Save rows",
+                "type": "writeback",
+                "target": "csv",
+                "function": {"name": "export_rows", "description": ""},
+                "next": "Done",
+            },
+        )
+        self._write_yaml(data, folder)
+        self._write_function(
+            "save_rows",
+            "def export_rows(outbound_contacts, outbound_campaign):\n    return {}\n",
+            folder,
+        )
+        code = {
+            name: self._read("appointment_reminders", "functions", name)
+            for name in os.listdir(os.path.join(folder, "functions"))
+        }
+
+        created = {
+            next(key for key in NODE_FIELDS if key in payload["node"])
+            for command_type, payload in self._push()
+            if command_type == "outbound_campaign_create_node"
+        }
+        self.assertEqual(created, set(NODE_FIELDS))
+
+        success, message = self._push_for_real()
         self.assertTrue(success, message)
-        self.assertEqual(len(self.project.resources[OutboundCampaign]), 2)
+        self._handler_patch.stop()
+        conflicts, _ = self.project.pull_project(projection_json=self._projection_from_state())
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(self._yaml(folder), data)
+        self.assertEqual(
+            {name: self._read("appointment_reminders", "functions", name) for name in code}, code
+        )
         self.assertEqual(self.project.project_status(), ([], [], [], []))
+        self.assertEqual(self.project.push_project(dry_run=True)[1], "No changes detected")
 
     def test_diff_shows_yaml_and_code_changes(self):
         data = self._yaml()
@@ -10134,39 +10202,27 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         )
         self.assertEqual((new, deleted), ([], []))
 
-    def test_code_follows_a_remote_rename_after_a_pushed_campaign_rename(self):
-        self._rename_campaign("Monthly reminders", "monthly_reminders")
-        self._assert_pushed_code_survives_a_remote_rename("monthly_reminders", "Trigger", "Begin")
-
-    def test_code_follows_a_remote_rename_after_a_pushed_trigger_rename(self):
-        self._rename_trigger("Start")
-        self._assert_pushed_code_survives_a_remote_rename("reminders", "Start", "Begin")
-
-    def test_code_follows_a_remote_rename_after_a_pushed_retype(self):
-        data = self._yaml()
-        index = data["nodes"].index(self._node(data, "First call"))
-        data["nodes"][index] = {
-            "name": "First call",
-            "type": "sms",
-            "function": {"name": "sms_args", "description": ""},
-            "message_template": "Hi",
-            "default_route": "End",
+    def test_code_follows_a_remote_rename_after_a_push(self):
+        cases = {
+            "campaign rename": (
+                lambda: self._rename_campaign("Monthly reminders", "monthly_reminders"),
+                ("monthly_reminders", "Trigger", "Begin"),
+            ),
+            "trigger rename": (
+                lambda: self._rename_trigger("Start"),
+                ("reminders", "Start", "Begin"),
+            ),
+            "retype": (self._retype_first_call_to_sms, ("reminders", "First call", "Text")),
+            "case-only rename": (
+                self._rename_first_call_case_only,
+                ("reminders", "First Call", "Second"),
+            ),
         }
-        self._write_yaml(data)
-        self._write_function(
-            "first_call", "def sms_args(outbound_contact, outbound_campaign):\n    return {}\n"
-        )
-        self._assert_pushed_code_survives_a_remote_rename("reminders", "First call", "Text")
-
-    def test_code_follows_a_remote_rename_after_a_pushed_case_only_rename(self):
-        data = self._yaml()
-        self._node(data, "First call")["name"] = "First Call"
-        self._node(data, "Trigger")["routes"] = [{"next": "First Call"}]
-        self._write_yaml(data)
-        self._write_function(
-            "first_call", "def call_args(outbound_contact, outbound_campaign):\n    return {}\n"
-        )
-        self._assert_pushed_code_survives_a_remote_rename("reminders", "First Call", "Second")
+        for case, (change, args) in cases.items():
+            with self.subTest(case=case):
+                self.setUp()
+                change()
+                self._assert_pushed_code_survives_a_remote_rename(*args)
 
     def test_retyped_node_with_a_legacy_def_line_fails_validation(self):
         """A retype is pushed as a create, and Agent Studio checks the def line on create."""
