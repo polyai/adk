@@ -38,7 +38,7 @@ A campaign that has been published can't be deleted. Pause it, then archive it, 
 | Field | Required | Description |
 |---|---|---|
 | `name` | Yes | The campaign's name, under 256 characters. |
-| `description` | No | Text under 1024 characters, or empty for none. |
+| `description` | No | Text under 1024 characters. A pull leaves it out when there is none. |
 | `settings` | No | The campaign's settings (below). Fields left out take their defaults, and a pull leaves out settings that aren't set. |
 | `nodes` | No | The campaign's nodes (below), in any order you like. |
 
@@ -48,11 +48,12 @@ A campaign that has been published can't be deleted. Pause it, then archive it, 
 |---|---|
 | `start_date`, `end_date` | ISO dates the campaign runs between. |
 | `from_number`, `sms_from_number` | Numbers calls and texts come from. |
+| `sip_trunk_id` | The SIP trunk calls go out through. |
 | `default_variant` | Name of the variant the campaign's calls use. |
 | `country` | ISO 3166-1 alpha-2 code in capitals, e.g. `US`. Required to publish. |
 | `use_case` | `transactional` or `marketing`. Required to publish. |
 | `daily_contact_limit` | Most times a contact is reached per day. Defaults to `3`. |
-| `voice_dispatch_limits`, `sms_dispatch_limits` | `max_concurrent`, `per_hour` and `per_day` caps. |
+| `voice_dispatch_limits`, `sms_dispatch_limits` | `max_concurrent`, `per_hour` and `per_day` caps. Left out when no cap is set. |
 | `default_timezone` | IANA time zone, used for a contact with none. |
 | `contact_window` | `days_of_week` (`monday` to `sunday`), and `start_time` and `end_time` as `"HH:mm"` in the contact's time zone. |
 

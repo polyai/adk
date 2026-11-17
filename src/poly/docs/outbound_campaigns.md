@@ -21,15 +21,16 @@ Renaming a campaign means changing `name` and renaming the folder to match. The 
 ## campaign.yaml
 
 - **name**: Required, under 256 characters.
-- **description**: Optional text, or empty for none.
+- **description**: Optional text. A pull leaves it out when there is none.
 - **settings**: The whole settings object. Fields left out take their default (`daily_contact_limit: 3`, everything else empty), and a pull leaves out settings that aren't set.
   - **start_date**, **end_date**: ISO dates; the end can't be before the start.
   - **from_number**, **sms_from_number**: Numbers calls and texts come from.
+  - **sip_trunk_id**: The SIP trunk calls go out through.
   - **default_variant**: Name of the variant the campaign's calls use.
   - **country**: ISO 3166-1 alpha-2 code in capitals (e.g. `US`). Required to publish.
   - **use_case**: `transactional` or `marketing`. Required to publish.
   - **daily_contact_limit**: Most times a contact is reached per day.
-  - **voice_dispatch_limits**, **sms_dispatch_limits**: `max_concurrent`, `per_hour`, `per_day`.
+  - **voice_dispatch_limits**, **sms_dispatch_limits**: `max_concurrent`, `per_hour`, `per_day`. Left out when no cap is set.
   - **default_timezone**: IANA time zone, used when a contact has none.
   - **contact_window**: `days_of_week` (at least one of `monday` .. `sunday`), `start_time` and `end_time` as `"HH:mm"` in the contact's time zone, ending after it starts.
   - Settings the ADK doesn't know yet are kept as pulled, but can't be sent. A settings change replaces them all, so a push that changes the settings of a campaign that has any, or creates a campaign with any, fails validation: change those settings in Agent Studio, or update the ADK.
