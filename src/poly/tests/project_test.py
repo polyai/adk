@@ -12,7 +12,7 @@ import shutil
 import tempfile
 import unittest
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
@@ -4411,7 +4411,7 @@ class RefreshLibraryTest(unittest.TestCase):
 
     def _set_library_age(self, age: timedelta) -> None:
         library = make_library(self.project.region)
-        library.last_refreshed = datetime.now() - age
+        library.last_refreshed = datetime.now(UTC) - age
         self.project.library = library
 
     def test_missing_library_is_fetched_and_saved(self):
@@ -4439,7 +4439,7 @@ class RefreshLibraryTest(unittest.TestCase):
         library = self.project.refresh_library()
 
         self.mock_api_handler.get_asr_models.assert_called_once_with(self.project.region)
-        self.assertGreater(library.last_refreshed, datetime.now() - timedelta(minutes=1))
+        self.assertGreater(library.last_refreshed, datetime.now(UTC) - timedelta(minutes=1))
 
     def test_force_refresh_refetches_a_recent_library(self):
         """force_refresh fetches the lists even when the library is fresh."""

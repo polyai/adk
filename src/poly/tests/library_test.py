@@ -5,7 +5,7 @@ Copyright PolyAI Limited
 
 import os
 import unittest
-from datetime import datetime
+from datetime import UTC, datetime
 
 import poly.library
 from poly.library import ASRModel, Library, LLMModel
@@ -66,7 +66,7 @@ class BuildLibraryTest(unittest.TestCase):
 
     def test_region_and_refresh_time_are_recorded(self):
         """The library remembers its region and when it was built."""
-        before = datetime.now()
+        before = datetime.now(UTC)
         library = make_library("euw-1")
 
         self.assertEqual(library.region, "euw-1")
@@ -150,6 +150,17 @@ class LibraryLookupTest(unittest.TestCase):
 
 class LLMModelTest(unittest.TestCase):
     """Tests for LLMModel on its own."""
+
+    def test_to_dict_returns_the_route_shape(self):
+        """to_dict gives back the route's camelCase record, including polyaiModel."""
+        self.assertEqual(
+            LLMModel.from_api_response(LLM_RESPONSE[0]).to_dict(),
+            {key: value for key, value in LLM_RESPONSE[0].items()},
+        )
+
+    def test_asr_to_dict_returns_the_route_shape(self):
+        """ASRModel.to_dict gives back the route's record."""
+        self.assertEqual(ASRModel.from_api_response(ASR_RESPONSE[0]).to_dict(), ASR_RESPONSE[0])
 
     def test_from_api_response_ignores_unknown_fields(self):
         """Fields the ADK doesn't use, such as polyaiModel, don't break parsing."""
