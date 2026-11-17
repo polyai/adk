@@ -60,6 +60,11 @@ class AgentStudioInterface:
         return PlatformAPIHandler.set_secret(region, account_id, data, create)
 
     @staticmethod
+    def patch_secret(region: str, account_id: str, data: dict) -> dict:
+        """Change selected key-value entries without reading stored values."""
+        return PlatformAPIHandler.patch_secret(region, account_id, data)
+
+    @staticmethod
     def delete_secrets(region: str, account_id: str, names: list[str]) -> None:
         """Delete one or more secrets from an account."""
         PlatformAPIHandler.delete_secrets(region, account_id, names)

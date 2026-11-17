@@ -279,6 +279,18 @@ class PlatformAPIHandler:
         return PlatformAPIHandler._secret_metadata(record)
 
     @staticmethod
+    def patch_secret(region: str, account_id: str, data: dict) -> dict:
+        """Patch selected key-value entries and accept metadata only in the reply."""
+        record = PlatformAPIHandler.make_request(
+            region,
+            SECRETS_URL.format(account_id=account_id),
+            method="PATCH",
+            data=data,
+            sensitive=True,
+        )
+        return PlatformAPIHandler._secret_metadata(record)
+
+    @staticmethod
     def delete_secrets(region: str, account_id: str, names: list[str]) -> None:
         """Delete account secrets without retaining their response payload."""
         PlatformAPIHandler.make_request(

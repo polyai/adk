@@ -4549,7 +4549,7 @@ class AgentStudioProject:
     def set_secret(
         self,
         name: str,
-        value: Optional[str | dict[str, str]] = None,
+        value: Optional[str | dict[str, Optional[str]]] = None,
         *,
         description: Optional[str] = None,
         key_value: bool = False,
@@ -4557,11 +4557,12 @@ class AgentStudioProject:
         no_projects: bool = False,
         grant: Optional[list[str]] = None,
         revoke: Optional[list[str]] = None,
+        delete_keys: Optional[list[str]] = None,
     ) -> dict:
         """Save an account secret immediately, preserving omitted value and metadata.
 
-        A key-value replacement supplies the complete map. Values stay in memory
-        and are never written to the local project projection.
+        Existing key-value secrets use PATCH: omitted keys stay unchanged and
+        None deletes a key. Values never enter the local project projection.
         """
         for project_ids in (projects, grant, revoke):
             if project_ids is not None and (
@@ -4580,12 +4581,19 @@ class AgentStudioProject:
             raise ValueError("The same project cannot be both granted and revoked.")
         if not existing and (grant or revoke):
             raise ValueError("--grant and --revoke require an existing secret.")
+        if delete_keys is not None and (
+            not isinstance(delete_keys, list)
+            or not all(isinstance(key, str) and key for key in delete_keys)
+        ):
+            raise ValueError("Keys to delete must be a list of nonempty strings.")
 
         value_type = (
             existing["value_type"] if existing else ("key-value" if key_value else "single")
         )
         if existing and key_value and value_type != "key-value":
             raise ValueError("An existing secret's type cannot be changed.")
+        if delete_keys and (not existing or value_type != "key-value"):
+            raise ValueError("--delete-key requires an existing key-value secret.")
         if not existing and value is None:
             raise ValueError("A value is required to create a secret.")
         if value is not None:
@@ -4594,12 +4602,15 @@ class AgentStudioProject:
                     not isinstance(value, dict)
                     or not value
                     or not all(
-                        isinstance(key, str) and key and isinstance(item, str)
+                        isinstance(key, str)
+                        and key
+                        and (isinstance(item, str) or (existing is not None and item is None))
                         for key, item in value.items()
                     )
                 ):
                     raise ValueError(
-                        "A key-value secret requires a nonempty object of string keys and values."
+                        "Key-value input requires a nonempty object with string keys and values; "
+                        "null may delete keys from an existing secret."
                     )
             elif not isinstance(value, str) or not value:
                 raise ValueError("A single-value secret requires a nonempty string.")
@@ -4614,6 +4625,27 @@ class AgentStudioProject:
             access.extend(grant or [])
         if not all(isinstance(project, str) and project.strip() for project in access):
             raise ValueError("Project IDs must be nonempty strings.")
+        if existing and value_type == "key-value" and (value is not None or delete_keys):
+            changes = dict(value or {})
+            if set(changes) & set(delete_keys or []):
+                raise ValueError("A key cannot be supplied in both the value and --delete-key.")
+            changes.update(dict.fromkeys(delete_keys or []))
+            if isinstance(existing.get("keys"), list):
+                remaining = set(existing["keys"])
+                for key, item in changes.items():
+                    if item is None:
+                        remaining.discard(key)
+                    else:
+                        remaining.add(key)
+                if not remaining:
+                    raise ValueError("A key-value secret must retain at least one key.")
+            body = {"display_name": name, "secret_value": changes}
+            if description is not None:
+                body["description"] = description
+            if projects is not None or no_projects or grant or revoke:
+                body["access_config"] = list(dict.fromkeys(access))
+            return AgentStudioInterface.patch_secret(self.region, self.account_id, body)
+
         body = {
             "display_name": name,
             "description": description

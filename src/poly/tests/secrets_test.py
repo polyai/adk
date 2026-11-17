@@ -77,6 +77,9 @@ class SecretsCommandTest(unittest.TestCase):
         if method == "GET":
             # Deliberately echo values and an unknown field to test the client boundary.
             records = [dict(record, server_debug=SENTINEL) for record in self.state.values()]
+            for record in records:
+                if record["value_type"] == "key-value":
+                    record["keys"] = list(record["secret_value"])
             return make_mock_response(json_body=deepcopy(records))
         if method == "DELETE":
             for name in body["display_name"]:
@@ -86,6 +89,18 @@ class SecretsCommandTest(unittest.TestCase):
         if method == "POST":
             self.assertNotIn(name, self.state)
             self.state[name] = deepcopy(body)
+        elif method == "PATCH":
+            self.assertNotIn("value_type", body)
+            values = deepcopy(self.state[name]["secret_value"])
+            for key, value in body["secret_value"].items():
+                if value is None:
+                    values.pop(key, None)
+                else:
+                    values[key] = value
+            if not values:
+                return make_mock_response(400, {"message": "Empty key-value map"})
+            self.state[name].update({k: v for k, v in body.items() if k != "secret_value"})
+            self.state[name]["secret_value"] = values
         else:
             self.assertEqual(method, "PUT")
             self.state[name].update(deepcopy(body))
@@ -168,12 +183,108 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertEqual(self.state["new"]["access_config"], [])
 
-    def test_key_value_input_is_a_complete_replacement(self):
+    def test_key_value_update_preserves_omitted_keys_and_sends_only_changes(self):
         code, output, _ = self.run_cli(
             "set", "credentials", "--json", stdin='{"password":"replacement"}'
         )
         self.assertEqual(code, 0, output)
-        self.assertEqual(self.state["credentials"]["secret_value"], {"password": "replacement"})
+        self.assertEqual(
+            self.state["credentials"]["secret_value"],
+            {"username": "old", "password": "replacement"},
+        )
+        self.assertEqual(
+            [body for method, body in self.calls if method == "PATCH"],
+            [{"display_name": "credentials", "secret_value": {"password": "replacement"}}],
+        )
+        self.assertNotIn(SENTINEL, output)
+
+    def test_key_value_update_adds_and_deletes_keys_from_stdin(self):
+        code, output, errors = self.run_cli(
+            "set", "credentials", "--json", stdin='{"username":null,"new":"value"}'
+        )
+        self.assertEqual(code, 0, output + errors)
+        self.assertEqual(
+            self.state["credentials"]["secret_value"], {"password": SENTINEL, "new": "value"}
+        )
+        self.assertNotIn(SENTINEL, output + errors)
+
+    def test_delete_key_skips_value_prompt_and_preserves_other_keys(self):
+        with patch("getpass.getpass") as prompt:
+            code, output, errors = self.run_cli(
+                "set",
+                "credentials",
+                "--delete-key",
+                "username",
+                "--delete-key",
+                "missing",
+                "--json",
+                tty=True,
+            )
+        self.assertEqual(code, 0, output + errors)
+        prompt.assert_not_called()
+        self.assertEqual(self.state["credentials"]["secret_value"], {"password": SENTINEL})
+        self.assertEqual(
+            self.calls[-1],
+            (
+                "PATCH",
+                {
+                    "display_name": "credentials",
+                    "secret_value": {"username": None, "missing": None},
+                },
+            ),
+        )
+
+    def test_key_updates_can_include_explicit_metadata_and_access_changes(self):
+        original = deepcopy(self.state["credentials"]["secret_value"])
+        metadata = self.project.set_secret(
+            "credentials", {"new": "value"}, description="", no_projects=True
+        )
+        self.assertEqual(self.state["credentials"]["secret_value"], {**original, "new": "value"})
+        self.assertEqual(metadata["description"], "")
+        self.assertEqual(metadata["access_config"], [])
+        self.assertEqual(
+            self.calls[-1],
+            (
+                "PATCH",
+                {
+                    "display_name": "credentials",
+                    "secret_value": {"new": "value"},
+                    "description": "",
+                    "access_config": [],
+                },
+            ),
+        )
+        self.assertNotIn("secret_value", metadata)
+
+    def test_deleting_all_known_keys_fails_without_writing(self):
+        code, output, _ = self.run_cli(
+            "set", "credentials", "--json", stdin='{"username":null,"password":null}'
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("retain at least one key", output)
+        self.assertFalse(any(method != "GET" for method, _ in self.calls))
+
+    def test_patch_errors_are_redacted_and_are_not_retried_as_put(self):
+        def reject_patch(**kwargs):
+            if kwargs["method"] == "PATCH":
+                return make_mock_response(400, {"message": SENTINEL}, content=SENTINEL.encode())
+            return self.request(**kwargs)
+
+        self.http.side_effect = reject_patch
+        with self.assertLogs("poly.handlers.platform_api", level="DEBUG") as logs:
+            code, output, errors = self.run_cli(
+                "set", "credentials", "--json", stdin=json.dumps({"password": SENTINEL})
+            )
+        self.assertEqual(code, 1)
+        self.assertNotIn(SENTINEL, output + errors + "\n".join(logs.output))
+        self.assertEqual(
+            [
+                call.kwargs["method"]
+                for call in self.http.call_args_list
+                if call.kwargs["method"] != "GET"
+            ],
+            ["PATCH"],
+        )
 
     def test_json_value_input_refuses_a_terminal_without_prompting(self):
         with patch("getpass.getpass") as prompt:
@@ -204,6 +315,22 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertEqual(hidden.call_count, 2)
         self.assertEqual(
             self.state["new"]["secret_value"], {"username": "user", "password": SENTINEL}
+        )
+        self.assertNotIn(SENTINEL, output + errors)
+
+    def test_existing_key_value_prompt_updates_only_the_supplied_key(self):
+        prompts = [Mock(), Mock()]
+        for prompt, key in zip(prompts, ["username", ""]):
+            prompt.ask.return_value = key
+        with (
+            patch("questionary.text", side_effect=prompts),
+            patch("getpass.getpass", return_value="new-user"),
+        ):
+            code, output, errors = self.run_cli("set", "credentials", tty=True)
+        self.assertEqual(code, 0, output + errors)
+        self.assertEqual(
+            self.state["credentials"]["secret_value"],
+            {"username": "new-user", "password": SENTINEL},
         )
         self.assertNotIn(SENTINEL, output + errors)
 
@@ -261,13 +388,24 @@ class SecretsCommandTest(unittest.TestCase):
         for kwargs in (
             {"projects": ["a"], "grant": ["b"]},
             {"grant": ["a"], "revoke": ["a"]},
-            {"value": {"token": None}},
+            {"value": {"token": 123}},
+            {"value": {"token": {"nested": SENTINEL}}},
+            {"delete_keys": "username"},
+            {"delete_keys": [""]},
+            {"delete_keys": ["username"], "value": {"username": "replacement"}},
             {"projects": [""]},
             {"projects": "project-a"},
         ):
             with self.subTest(options=list(kwargs)):
                 with self.assertRaises(ValueError):
                     self.project.set_secret("credentials", **kwargs)
+        self.assertFalse(any(method != "GET" for method, _ in self.calls))
+
+    def test_key_deletion_requires_an_existing_key_value_secret(self):
+        for name in ("single", "new"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, "existing key-value secret"):
+                    self.project.set_secret(name, delete_keys=["username"])
         self.assertFalse(any(method != "GET" for method, _ in self.calls))
 
 

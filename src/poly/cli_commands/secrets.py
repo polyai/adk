@@ -52,7 +52,7 @@ class SecretsCommand(BaseCommand):
             description=(
                 "Create or update an account secret immediately for all projects with access, including live. "
                 "Values come from a hidden prompt or stdin, never command arguments. "
-                "Key-value replacements replace the complete map, including removal of omitted keys."
+                "Key-value updates preserve omitted keys; null deletes a key from an existing secret."
             ),
         )
         set_parser.add_argument("name", help="Secret display name.")
@@ -83,7 +83,14 @@ class SecretsCommand(BaseCommand):
         set_parser.add_argument(
             "--replace-value",
             action="store_true",
-            help="Also prompt for a replacement value when changing metadata.",
+            help="Also prompt for a value or key updates when changing metadata.",
+        )
+        set_parser.add_argument(
+            "--delete-key",
+            dest="delete_keys",
+            action="append",
+            metavar="KEY",
+            help="Delete a key from an existing key-value secret; repeat for multiple keys.",
         )
         delete_parser = actions.add_parser(
             "delete",
@@ -129,7 +136,9 @@ class SecretsCommand(BaseCommand):
             or args.grant
             or args.revoke
         )
-        needs_value = existing is None or args.replace_value or not metadata_change
+        needs_value = (
+            existing is None or args.replace_value or not (metadata_change or args.delete_keys)
+        )
         value = cls._read_value(key_value, needs_value, args.json)
         metadata = project.set_secret(
             args.name,
@@ -140,6 +149,7 @@ class SecretsCommand(BaseCommand):
             no_projects=args.no_projects,
             grant=args.grant,
             revoke=args.revoke,
+            delete_keys=args.delete_keys,
         )
         if args.json:
             json_print({"success": True, "secret": metadata})
@@ -162,12 +172,10 @@ class SecretsCommand(BaseCommand):
             try:
                 value = json.loads(raw)
                 if value is None:
-                    raise ValueError("Key-value input must be a JSON object of string values.")
+                    raise ValueError("Key-value input must be a JSON object.")
                 return value
             except ValueError:
-                raise ValueError(
-                    "Key-value input must be a JSON object of string values."
-                ) from None
+                raise ValueError("Key-value input must be a JSON object.") from None
         if not required:
             return None
         if output_json:
@@ -183,7 +191,7 @@ class SecretsCommand(BaseCommand):
 
             from poly.output.console import info
 
-            info("Enter the complete key-value map. Omitted keys will be removed on replacement.")
+            info("Enter keys to create or update. Omitted keys in existing secrets stay unchanged.")
             result = {}
             while True:
                 key = questionary.text("Key (leave empty to finish):").ask()

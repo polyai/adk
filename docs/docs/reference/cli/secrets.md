@@ -59,6 +59,7 @@ Examples:
 ```bash
 poly secrets set service-token
 poly secrets set credentials --key-value
+poly secrets set credentials --delete-key obsolete
 poly secrets set service-token --description 'Service authentication'
 poly secrets set service-token --grant project-b --revoke project-a
 poly secrets set service-token --no-projects
@@ -67,9 +68,11 @@ poly secrets set service-token --json < /secure/path/token
 poly secrets set credentials --key-value --json < /secure/path/credentials.json
 ```
 
-Values come from hidden prompts or stdin, never a command argument. Interactive key-value input prompts separately for each key and hides each value. A single value read from stdin is used verbatim, including any trailing newline. Key-value stdin must contain a nonempty JSON object whose values are strings.
+Values come from hidden prompts or stdin, never a command argument. Interactive key-value input prompts separately for each key and hides each value. A single value read from stdin is used verbatim, including any trailing newline. Key-value stdin must contain a nonempty JSON object: strings add or update keys, and `null` deletes a key from an existing secret. New secrets require string values for every key.
 
-When changing only description or project access, the stored value is preserved without requesting it. Use `--replace-value` to also enter a replacement interactively, or pipe the replacement on stdin. An existing secret's type cannot be changed.
+Updates to an existing key-value secret change only the supplied keys. Omitted keys keep their stored values without being read. For example, input `{"password":"new-value"}` updates only `password`; `{"obsolete":null}` removes only `obsolete`. Alternatively, use repeatable `--delete-key` to remove keys without supplying a value. A secret must retain at least one key.
+
+When changing only description or project access, the stored value is preserved without requesting it. Use `--replace-value` to also enter a single value or key updates interactively, or pipe them on stdin. An existing secret's type cannot be changed.
 
 | Argument | Description |
 |---|---|
@@ -83,13 +86,14 @@ When changing only description or project access, the stored value is preserved 
 | `--no-projects` | Give no projects access. Mutually exclusive with `--project`. |
 | `--grant ID` | Add a project to an existing secret's access; repeat as needed. |
 | `--revoke ID` | Remove a project from an existing secret's access; repeat as needed. |
-| `--replace-value` | Also prompt for a replacement value when changing metadata. |
+| `--replace-value` | Also prompt for a value or key updates when changing metadata. |
+| `--delete-key KEY` | Delete a key from an existing key-value secret; repeat for multiple keys. |
 
 !!! warning "Account changes include live"
-    Changes affect every environment for projects with access to the secret. Replacing a key-value secret replaces the **complete map**: omitted keys are removed. Enter every key you want to keep.
+    Changes affect every environment for projects with access to the secret, including key updates and deletions.
 
 !!! info "JSON mode does not prompt"
-    When setting a value with `--json`, provide it on stdin; a terminal input is rejected. Metadata-only updates need no value. Project replacement (`--project` or `--no-projects`) cannot be combined with `--grant` or `--revoke`.
+    When setting a value with `--json`, provide it on stdin; a terminal input is rejected. Metadata-only updates and `--delete-key` need no value. Project replacement (`--project` or `--no-projects`) cannot be combined with `--grant` or `--revoke`. A key supplied on stdin cannot also be named with `--delete-key`.
 
 `--json` output shape:
 
