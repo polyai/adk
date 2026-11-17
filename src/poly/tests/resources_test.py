@@ -105,6 +105,7 @@ from poly.resources.outbound_campaign import (
     normalise_node_data,
     normalise_settings,
     route_targets,
+    settings_proto,
     timezones,
 )
 from poly.resources.phrase_filter import PhraseFilter
@@ -6348,9 +6349,7 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
             self._read_disk(self.variants_file)["variants"],
             [{"name": "Site-A"}, {"name": "other"}],
         )
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("Site_A")), {"name": "Site-A"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("Site_A")), {"name": "Site-A"})
 
     def test_delete_then_append_keeps_every_lookup_pointing_at_its_entry(self):
         """Deleting shifts later entries down; a following append lands at the end."""
@@ -6432,17 +6431,13 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
     def test_external_edit_is_seen_after_the_file_changes_on_disk(self):
         """A rewritten file is reloaded, and lookups follow its new entries."""
         self._write(self.variants_file, "variants:\n  - name: alpha\n  - name: beta\n")
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("alpha")), {"name": "alpha"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("alpha")), {"name": "alpha"})
 
         self._write(self.variants_file, "variants:\n  - name: gamma\n  - name: beta\n")
         mtime = os.path.getmtime(self.variants_file) + 10
         os.utime(self.variants_file, (mtime, mtime))
 
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("gamma")), {"name": "gamma"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("gamma")), {"name": "gamma"})
         with self.assertRaises(FileNotFoundError):
             Variant._read_yaml_dict(self._variant_path("alpha"))
 
@@ -6474,12 +6469,8 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
         Variant(resource_id="v3", name="third").save(self.base_path)
         VariantAttribute.delete_resource(self._attribute_path("shared"))
 
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("second")), {"name": "second"}
-        )
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("third")), {"name": "third"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("second")), {"name": "second"})
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("third")), {"name": "third"})
         self.assertEqual(
             VariantAttribute._read_yaml_dict(self._attribute_path("colour"))["name"], "colour"
         )
@@ -6489,9 +6480,7 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             VariantAttribute._read_yaml_dict(self._attribute_path("shared"))
         on_disk = self._read_disk(self.variants_file)
-        self.assertEqual(
-            [v["name"] for v in on_disk["variants"]], ["shared", "second", "third"]
-        )
+        self.assertEqual([v["name"] for v in on_disk["variants"]], ["shared", "second", "third"])
         self.assertEqual([a["name"] for a in on_disk["attributes"]], ["colour", "size"])
 
 
@@ -7135,11 +7124,15 @@ class ApiIntegrationTest(unittest.TestCase):
     def test_subresources_detect_header_only_and_description_only_changes(self):
         """A change to just the headers or just the description is an update; no change is nothing."""
         old = ApiIntegration(
-            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(headers={"Accept": "text/plain"})],
         )
 
         same = ApiIntegration(
-            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(headers={"Accept": "text/plain"})],
         )
         self.assertEqual(same.get_new_updated_deleted_subresources(old), ([], [], []))
 
@@ -7344,7 +7337,9 @@ class ApiIntegrationTest(unittest.TestCase):
             request_body_schema=BODY_SCHEMA,
             response_schemas={"200": OK_SCHEMA},
         ).build_create_proto()
-        self.assertEqual(create.request_query_schema, json.dumps(QUERY_SCHEMA, separators=(",", ":")))
+        self.assertEqual(
+            create.request_query_schema, json.dumps(QUERY_SCHEMA, separators=(",", ":"))
+        )
         self.assertEqual(json.loads(create.request_body_schema), BODY_SCHEMA)
         self.assertEqual(json.loads(create.response_schemas["200"]), OK_SCHEMA)
         self.assertEqual(create.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
@@ -7405,7 +7400,9 @@ class ApiIntegrationTest(unittest.TestCase):
         _, updated, _ = edited.get_new_updated_deleted_subresources(old)
         self.assertEqual([op.request_body_schema for op in updated], [{"type": "object"}])
 
-        relabelled = _integration_with(_operation(request_body_schema=body, schema_source="openapi"))
+        relabelled = _integration_with(
+            _operation(request_body_schema=body, schema_source="openapi")
+        )
         _, updated, _ = relabelled.get_new_updated_deleted_subresources(old)
         self.assertEqual([op.schema_source for op in updated], ["openapi"])
 
@@ -13075,7 +13072,9 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         """Type hints are worked out once per class, while values are checked on every call."""
         resource_utils._field_type_hints.cache_clear()
         good = Topic(resource_id="T-1", name="a", actions="x", content="y", example_queries=[])
-        bad = Topic(resource_id="T-2", name="b", actions={"k": "v"}, content="y", example_queries=[])
+        bad = Topic(
+            resource_id="T-2", name="b", actions={"k": "v"}, content="y", example_queries=[]
+        )
 
         with unittest.mock.patch(
             "typing.get_type_hints", wraps=typing.get_type_hints
@@ -15685,6 +15684,7 @@ class OutboundCampaignTests(unittest.TestCase):
             'as "HH:mm"': {"contactWindow": {**window, "startTime": "9am"}},
             "must end after it starts": {"contactWindow": {**window, "endTime": "08:00"}},
             "'use_case' must be one of": {"useCase": "spam"},
+            "'sip_trunk_id' must be text or null": {"sipTrunkId": 5},
         }
         for message, settings in cases.items():
             with self.subTest(message=message):
@@ -15842,7 +15842,9 @@ class OutboundCampaignTests(unittest.TestCase):
                 file.write("x = 1\n")
             read = OutboundCampaignFunction.read_local_resource(path, "FUNCTION-1", "gone")
 
-        self.assertEqual((read.campaign_folder, read.name, read.code), ("reminders", "gone", "x = 1\n"))
+        self.assertEqual(
+            (read.campaign_folder, read.name, read.code), ("reminders", "gone", "x = 1\n")
+        )
         with self.assertRaisesRegex(ValueError, "functions/gone.py has no node of that name"):
             read.validate(resource_mappings=mappings)
 
@@ -15977,6 +15979,59 @@ class OutboundCampaignTests(unittest.TestCase):
             campaign.settings,
         )
 
+    def test_dispatch_limits_with_nothing_set_stay_out_of_the_file(self):
+        campaign = _campaign()
+        unset = {"maxConcurrent": None, "perHour": None, "perDay": None}
+        campaign.settings = normalise_settings(
+            {**campaign.settings, "voiceDispatchLimits": unset, "smsDispatchLimits": {}}
+        )
+
+        pretty = OutboundCampaign.to_pretty_dict(campaign.to_yaml_dict())
+
+        self.assertNotIn("voice_dispatch_limits", pretty["settings"])
+        self.assertNotIn("sms_dispatch_limits", pretty["settings"])
+        read_back = OutboundCampaign.from_yaml_dict(
+            OutboundCampaign.from_pretty_dict(pretty), resource_id=campaign.resource_id
+        )
+        self.assertEqual(read_back.compute_hash(), campaign.compute_hash())
+
+    def test_sip_trunk_is_written_when_set_and_left_out_when_not(self):
+        campaign = _campaign()
+        self.assertNotIn(
+            "sip_trunk_id", OutboundCampaign.to_pretty_dict(campaign.to_yaml_dict())["settings"]
+        )
+
+        campaign.settings = normalise_settings({**campaign.settings, "sipTrunkId": "TRUNK-1"})
+        pretty = OutboundCampaign.to_pretty_dict(campaign.to_yaml_dict())
+
+        self.assertEqual(pretty["settings"]["sip_trunk_id"], "TRUNK-1")
+        self.assertEqual(
+            OutboundCampaign.from_pretty_dict(pretty)["settings"]["sipTrunkId"], "TRUNK-1"
+        )
+
+    def test_empty_description_stays_out_of_the_file(self):
+        for description in (None, ""):
+            with self.subTest(description=description):
+                campaign = _campaign()
+                campaign.description = description
+
+                pretty = OutboundCampaign.to_pretty_dict(campaign.to_yaml_dict())
+
+                self.assertNotIn("description", pretty)
+                read_back = OutboundCampaign.from_yaml_dict(
+                    OutboundCampaign.from_pretty_dict(pretty), resource_id=campaign.resource_id
+                )
+                self.assertEqual(read_back.compute_hash(), campaign.compute_hash())
+
+    def test_saved_settings_from_before_the_sip_trunk_hash_the_same(self):
+        campaign = _campaign()
+        older = _campaign()
+        older.settings = {
+            key: value for key, value in campaign.settings.items() if key != "sipTrunkId"
+        }
+
+        self.assertEqual(older.compute_hash(), campaign.compute_hash())
+
     def test_an_unset_setting_with_a_default_stays_in_the_file(self):
         campaign = _campaign()
         campaign.settings = {**campaign.settings, "dailyContactLimit": None}
@@ -16029,6 +16084,14 @@ class OutboundCampaignTests(unittest.TestCase):
         self.assertEqual(campaign.get_new_updated_deleted_subresources(saved), ([], [], []))
         campaign.settings = {**campaign.settings, "dailyContactLimit": 5}
         self.assertEqual(len(campaign.get_new_updated_deleted_subresources(saved)[1]), 1)
+
+    def test_settings_proto_sends_the_sip_trunk_when_set(self):
+        campaign = _campaign()
+        self.assertFalse(settings_proto(campaign.settings).HasField("sip_trunk_id"))
+
+        campaign.settings = {**campaign.settings, "sipTrunkId": "TRUNK-1"}
+
+        self.assertEqual(settings_proto(campaign.settings).sip_trunk_id, "TRUNK-1")
 
     def test_node_protos_carry_the_name_as_label_and_ids_split_from_the_resource_id(self):
         call = _campaign_nodes()["CMPGN-ONE:call-1"]

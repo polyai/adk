@@ -75,7 +75,7 @@ class ContactWindow(_message.Message):
     def __init__(self, days_of_week: _Optional[_Iterable[str]] = ..., start_time: _Optional[str] = ..., end_time: _Optional[str] = ...) -> None: ...
 
 class OutboundCampaignSettings(_message.Message):
-    __slots__ = ("start_date", "end_date", "from_number", "sms_from_number", "default_variant_id", "daily_contact_limit", "default_timezone", "voice_dispatch_limits", "sms_dispatch_limits", "contact_window", "country", "use_case")
+    __slots__ = ("start_date", "end_date", "from_number", "sms_from_number", "default_variant_id", "daily_contact_limit", "default_timezone", "voice_dispatch_limits", "sms_dispatch_limits", "contact_window", "country", "use_case", "sip_trunk_id")
     START_DATE_FIELD_NUMBER: _ClassVar[int]
     END_DATE_FIELD_NUMBER: _ClassVar[int]
     FROM_NUMBER_FIELD_NUMBER: _ClassVar[int]
@@ -88,6 +88,7 @@ class OutboundCampaignSettings(_message.Message):
     CONTACT_WINDOW_FIELD_NUMBER: _ClassVar[int]
     COUNTRY_FIELD_NUMBER: _ClassVar[int]
     USE_CASE_FIELD_NUMBER: _ClassVar[int]
+    SIP_TRUNK_ID_FIELD_NUMBER: _ClassVar[int]
     start_date: str
     end_date: str
     from_number: str
@@ -100,7 +101,8 @@ class OutboundCampaignSettings(_message.Message):
     contact_window: ContactWindow
     country: str
     use_case: str
-    def __init__(self, start_date: _Optional[str] = ..., end_date: _Optional[str] = ..., from_number: _Optional[str] = ..., sms_from_number: _Optional[str] = ..., default_variant_id: _Optional[str] = ..., daily_contact_limit: _Optional[int] = ..., default_timezone: _Optional[str] = ..., voice_dispatch_limits: _Optional[_Union[DispatchLimits, _Mapping]] = ..., sms_dispatch_limits: _Optional[_Union[DispatchLimits, _Mapping]] = ..., contact_window: _Optional[_Union[ContactWindow, _Mapping]] = ..., country: _Optional[str] = ..., use_case: _Optional[str] = ...) -> None: ...
+    sip_trunk_id: str
+    def __init__(self, start_date: _Optional[str] = ..., end_date: _Optional[str] = ..., from_number: _Optional[str] = ..., sms_from_number: _Optional[str] = ..., default_variant_id: _Optional[str] = ..., daily_contact_limit: _Optional[int] = ..., default_timezone: _Optional[str] = ..., voice_dispatch_limits: _Optional[_Union[DispatchLimits, _Mapping]] = ..., sms_dispatch_limits: _Optional[_Union[DispatchLimits, _Mapping]] = ..., contact_window: _Optional[_Union[ContactWindow, _Mapping]] = ..., country: _Optional[str] = ..., use_case: _Optional[str] = ..., sip_trunk_id: _Optional[str] = ...) -> None: ...
 
 class OutboundCampaignNode(_message.Message):
     __slots__ = ("id", "position", "label", "trigger", "call", "sms", "conditional", "wait", "writeback", "end")
