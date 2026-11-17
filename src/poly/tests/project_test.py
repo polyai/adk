@@ -9065,7 +9065,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         success, message, commands = self.project.push_project(dry_run=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.assertEqual(commands, [])
 
@@ -9167,7 +9167,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         success, message, _ = self.project.push_project(dry_run=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
 
     def test_pull_keeps_the_local_order_and_edits_and_takes_remote_code(self):
@@ -9530,7 +9530,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(conflicts, [])
         self.assertEqual(self._read("reminders", "functions", "dial.py"), self.CALL_CODE)
         success, message, _ = self.project.push_project(dry_run=True)
-        self.assertEqual((success, message), (False, "No changes detected"))
+        self.assertEqual((success, message), (True, "No changes detected"))
 
     def test_node_renamed_alike_with_different_code_on_both_sides_conflicts(self):
         self._pull_with_call_code()
