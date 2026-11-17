@@ -36,6 +36,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "endDate": None,
     "fromNumber": None,
     "smsFromNumber": None,
+    "sipTrunkId": None,
     "defaultVariantId": None,
     "country": None,
     "useCase": None,
@@ -157,6 +158,8 @@ def _drop_unset_settings(settings: Any) -> Any:
                 for limit, value in limits.items()
                 if not (limit in DISPATCH_LIMIT_KEYS and value is None)
             }
+            if not settings[key]:
+                del settings[key]
     return settings
 
 
@@ -261,9 +264,9 @@ def normalise_settings(settings: Any) -> Any:
     for key in ("voiceDispatchLimits", "smsDispatchLimits"):
         limits = settings.get(key)
         if isinstance(limits, dict):
-            settings[key] = _ordered(
-                {**dict.fromkeys(DISPATCH_LIMIT_KEYS), **limits}, DISPATCH_LIMIT_KEYS
-            )
+            limits = {**dict.fromkeys(DISPATCH_LIMIT_KEYS), **limits}
+            unset = all(value is None for value in limits.values())
+            settings[key] = None if unset else _ordered(limits, DISPATCH_LIMIT_KEYS)
     window = settings.get("contactWindow")
     if isinstance(window, dict):
         settings["contactWindow"] = _ordered(window, CONTACT_WINDOW_KEYS)
@@ -481,6 +484,8 @@ class OutboundCampaign(MultiResourceYamlResource):
 
     def compute_hash(self) -> str:
         campaign = self.to_yaml_dict()
+        campaign["description"] = campaign["description"] or None
+        campaign["settings"] = normalise_settings(campaign["settings"])
         if self.platform_label is not None:
             campaign["name"] = self.platform_label
         return utils.compute_hash_from_dict(utils.strip_strings(campaign))
@@ -506,7 +511,7 @@ class OutboundCampaign(MultiResourceYamlResource):
         campaign = cls(
             resource_id=resource_id,
             name=yaml_dict.get("name") or "",
-            description=yaml_dict.get("description"),
+            description=yaml_dict.get("description") or None,
             settings=normalise_settings(yaml_dict.get("settings")),
         )
         return campaign
@@ -607,7 +612,7 @@ class OutboundCampaign(MultiResourceYamlResource):
             resources[campaign["id"]] = cls(
                 resource_id=campaign["id"],
                 name=name,
-                description=utils.strip_strings(campaign.get("description")),
+                description=utils.strip_strings(campaign.get("description")) or None,
                 settings=utils.strip_strings(normalise_settings(campaign.get("settings"))),
                 folder_name=utils.clean_name(name),
                 platform_label=None if label == name else label,
@@ -618,11 +623,13 @@ class OutboundCampaign(MultiResourceYamlResource):
     def to_pretty_dict(
         cls, d: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
-        """Write keys in snake_case, leave unset settings out, and name the default variant.
+        """Write keys in snake_case, leave unset values out, and name the default variant.
 
         The default variant goes under `default_variant`, by name.
         """
         d = dict(d)
+        if not d.get("description"):
+            d.pop("description", None)
         settings = _drop_unset_settings(d.get("settings"))
         if isinstance(settings, dict) and VARIANT_ID_KEY in settings:
             variant_id = settings[VARIANT_ID_KEY]
