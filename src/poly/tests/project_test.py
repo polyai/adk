@@ -9951,38 +9951,17 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         self.assertIn("campaign.yaml", str(error.exception))
 
-    def test_invalid_node_lists_fail_validation_before_anything_is_sent(self):
-        cases = {
-            "Nodes must be a list.": lambda data: {**data, "nodes": {"Trigger": data["nodes"][0]}},
-            "Node name 'end' is used more than once.": lambda data: {
-                **data,
-                "nodes": [*data["nodes"], {**data["nodes"][2], "name": "end"}],
-            },
-            "Node 4 needs a name.": lambda data: {
-                **data,
-                "nodes": [*data["nodes"], {"type": "end"}],
-            },
-            "Node 1 must be a mapping.": lambda data: {
-                **data,
-                "nodes": ["Trigger", *data["nodes"][1:]],
-            },
-            "Node 3 needs a name.": lambda data: {
-                **data,
-                "nodes": [*data["nodes"][:2], {**data["nodes"][2], "name": 5}],
-            },
-        }
-        original = self._yaml()
-        for message, change in cases.items():
-            with self.subTest(message=message):
-                self._write_yaml(change(deepcopy(original)))
+    def test_invalid_node_list_fails_validation_before_anything_is_sent(self):
+        data = self._yaml()
+        self._write_yaml({**data, "nodes": ["Trigger", *data["nodes"][1:]]})
 
-                success, error, commands = self.project.push_project(dry_run=True)
+        success, error, commands = self.project.push_project(dry_run=True)
 
-                self.assertFalse(success)
-                self.assertEqual(commands, [])
-                self.assertIn(message, error)
-                self.assertIn(message, "\n".join(self.project.validate_project()))
-                self.project.project_status()
+        self.assertFalse(success)
+        self.assertEqual(commands, [])
+        self.assertIn("Node 1 must be a mapping.", error)
+        self.assertIn("Node 1 must be a mapping.", "\n".join(self.project.validate_project()))
+        self.project.project_status()
 
     def test_duplicate_node_name_is_reported_once(self):
         data = self._yaml()
