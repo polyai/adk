@@ -9307,6 +9307,16 @@ class OutboundCampaignSyncTest(unittest.TestCase):
                     "replaces them all."
                 )
 
+    def test_settings_change_on_a_campaign_pulled_with_a_sip_trunk_passes(self):
+        projection = campaign_projection()
+        self._entity(projection)["settings"]["sipTrunkId"] = None
+        self._pull_into_new_project(projection)
+        data = self._yaml()
+        data["settings"]["country"] = "GB"
+        self._write_yaml(data)
+
+        self.assertEqual(self.project.validate_project(), [])
+
     def test_new_campaign_with_settings_the_adk_does_not_know_is_refused(self):
         data = self._pull_with_unknown_setting()
         self._write_yaml(

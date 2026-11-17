@@ -15679,6 +15679,7 @@ class OutboundCampaignTests(unittest.TestCase):
             'as "HH:mm"': {"contactWindow": {**window, "startTime": "9am"}},
             "must end after it starts": {"contactWindow": {**window, "endTime": "08:00"}},
             "'use_case' must be one of": {"useCase": "spam"},
+            "'sip_trunk_id' must be text or null": {"sipTrunkId": 5},
         }
         for message, settings in cases.items():
             with self.subTest(message=message):

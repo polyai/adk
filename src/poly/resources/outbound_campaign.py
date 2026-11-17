@@ -1004,6 +1004,7 @@ def _settings_errors(settings: Any) -> list[str]:
         "endDate",
         "fromNumber",
         "smsFromNumber",
+        "sipTrunkId",
         "defaultVariantId",
         "defaultTimezone",
     ):
