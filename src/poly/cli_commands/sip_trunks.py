@@ -116,27 +116,14 @@ class SIPTrunksCommand(BaseCommand):
         """Prompt and add a secret only when the planned operation requires one."""
         from getpass import getpass
 
-        desired_inbound = desired.get("inbound")
-        if not desired_inbound:
-            if rotate:
-                raise ValueError(
-                    f"SIP trunk '{local_name}' must declare digest or token authentication "
-                    "to rotate credentials."
-                )
+        from poly.sip_trunks.reconciler import credential_required
+
+        if not credential_required(current, desired, rotate=rotate):
             return False
 
-        current_inbound = (current or {}).get("inbound") or {}
+        desired_inbound = desired["inbound"]
         if "sip_auth" in desired_inbound:
             desired_auth = desired_inbound["sip_auth"]
-            current_auth = current_inbound.get("sip_auth") or {}
-            required = (
-                current is None
-                or rotate
-                or not current_auth.get("enabled")
-                or current_auth.get("username") != desired_auth.get("username")
-            )
-            if not required:
-                return False
             secret = getpass(f"SIP password for {local_name}: ")
             if not secret:
                 raise ValueError(f"A SIP password is required for trunk '{local_name}'.")
@@ -144,21 +131,12 @@ class SIPTrunksCommand(BaseCommand):
             return True
 
         if "sip_token_auth" in desired_inbound:
-            current_auth = current_inbound.get("sip_token_auth") or {}
-            required = current is None or rotate or not current_auth.get("enabled")
-            if not required:
-                return False
             secret = getpass(f"SIP token for {local_name}: ")
             if not secret:
                 raise ValueError(f"A SIP token is required for trunk '{local_name}'.")
             desired_inbound["sip_token_auth"]["token"] = secret
             return True
 
-        if rotate:
-            raise ValueError(
-                f"SIP trunk '{local_name}' must declare digest or token authentication "
-                "to rotate credentials."
-            )
         return False
 
     @classmethod
