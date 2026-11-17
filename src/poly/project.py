@@ -11,9 +11,8 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, fields
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from functools import cached_property
 from pathlib import PurePath
@@ -5271,18 +5270,7 @@ class AgentStudioProject:
         Returns:
             Library: The refreshed library object.
         """
-        if (
-            not self.library
-            or force_refresh
-            or datetime.now(timezone.utc) - self.library.last_refreshed > timedelta(days=1)
-        ):
-            # Load the latest ASR and LLM async models and build the library
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                asr_future = executor.submit(self.get_asr_models)
-                llm_future = executor.submit(self.get_llm_models)
-                asr_models = asr_future.result()
-                llm_models = llm_future.result()
-            library = Library.build_library(self.region, asr_models, llm_models)
-            library.save_library()
+        if not self.library or force_refresh or self.library.is_stale:
+            library = Library.load_library_from_api(self.region, self.api_handler)
             self.library = library
         return self.library

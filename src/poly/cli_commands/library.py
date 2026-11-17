@@ -5,11 +5,10 @@ Copyright PolyAI Limited
 
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Optional
 
-from poly.cli_commands.auth import REGION_CHOICES, region_type
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
-from poly.cli_commands.shared import load_project
+from poly.cli_commands.shared import REGION_CHOICES, load_project, region_type
 from poly.library import Library
 from poly.output.json_output import json_print
 
@@ -101,9 +100,9 @@ class LibraryCommand(BaseCommand):
         library_llm_subparser = library_subparsers.add_parser(
             "llm",
             parents=[parents.path, parents.json, parents.verbose, parents.debug],
-            help="List the Language models available in the project's region.",
+            help="List the language models available in the project's region.",
             description=(
-                "List the Language models available in the project's region.\n\n"
+                "List the language models available in the project's region.\n\n"
                 "Examples:\n  poly library llm\n  poly library llm --json\n"
             ),
             formatter_class=RawTextHelpFormatter,
@@ -112,12 +111,12 @@ class LibraryCommand(BaseCommand):
             "--region",
             type=region_type,
             choices=REGION_CHOICES,
-            help="Specify the region to list Language models for. Without this option, will read from the project's configuration.",
+            help="Specify the region to list language models for. Without this option, will read from the project's configuration.",
         )
         library_llm_subparser.add_argument(
             "--refresh",
             action="store_true",
-            help="Refresh the Language models before listing them.",
+            help="Refresh the language models before listing them.",
         )
 
     @classmethod
@@ -132,19 +131,21 @@ class LibraryCommand(BaseCommand):
 
     @classmethod
     def _refresh_library(cls, base_path: str, region: str, output_json: bool = False) -> Library:
-        """Internal method to refresh the library and return it."""
-        from poly.handlers.interface import AgentStudioInterface
+        """Internal method to refresh the library and return it.
 
+        Args:
+            base_path (str): The base path of the project.
+            region (str): The region to refresh the library for.
+            output_json (bool, optional): Whether to output the result in JSON format. Defaults to False.
+
+        Returns:
+            Library: The refreshed library of models.
+        """
         if region is None:
             project = load_project(base_path, output_json=output_json)
-            library = project.refresh_library(force_refresh=True)
-        else:
-            asr_models = AgentStudioInterface.get_asr_models(region)
-            llm_models = AgentStudioInterface.get_llm_models(region)
-            library = Library.build_library(region, asr_models, llm_models)
-            library.save_library()
+            region = project.region
 
-        return library
+        return Library.load_library_from_api(region)
 
     @classmethod
     def refresh_library(
@@ -153,7 +154,16 @@ class LibraryCommand(BaseCommand):
         region: str,
         output_json: bool = False,
     ) -> None:
-        """Refresh the library of models available in the project's region."""
+        """Refresh the library of models available in the project's region.
+
+        Args:
+            base_path (str): The base path of the project.
+            region (str): The region to refresh the library for.
+            output_json (bool, optional): Whether to output the result in JSON format. Defaults to False.
+
+        Returns:
+            None
+        """
         library = cls._refresh_library(base_path, region, output_json=output_json)
 
         n_asr_models = len(library.asr_models)
@@ -170,31 +180,51 @@ class LibraryCommand(BaseCommand):
             from poly.output.console import success
 
             success(
-                f"Library refreshed successfully. {n_asr_models} ASR models and {n_llm_models} LLM models available."
+                f"Library refreshed successfully. {n_asr_models} ASR models and {n_llm_models} language models available."
             )
 
     @classmethod
-    def _load_library(cls, base_path: str, region: str, output_json: bool = False) -> Library:
+    def _load_library(
+        cls, base_path: str, region: Optional[str], output_json: bool = False
+    ) -> Library:
+        """Load the library of models for the project's region, refreshing if necessary.
+
+        Args:
+            base_path (str): The base path of the project.
+            region (Optional[str]): The region to load the library for. If None, the project's region is used.
+            output_json (bool, optional): Whether to output the result in JSON format. Defaults to False.
+
+        Returns:
+            Library: The loaded library of models.
+        """
         try:
             if region is None:
                 project = load_project(base_path, output_json=output_json)
                 library = project.library
             else:
-                from poly.library import Library
-
                 library = Library.load_library_from_file(region)
         except Exception:
             library = None
 
-        if library is None:
+        if library is None or library.is_stale:
             library = cls._refresh_library(base_path, region, output_json=output_json)
         return library
 
     @classmethod
     def list_asr_models(
-        cls, base_path: str, region: str, refresh: bool = False, output_json: bool = False
+        cls, base_path: str, region: Optional[str], refresh: bool = False, output_json: bool = False
     ) -> None:
-        """List the ASR models available in the project's region."""
+        """List the ASR models available in the project's region.
+
+        Args:
+            base_path (str): The base path of the project.
+            region (Optional[str]): The region to list the ASR models for. If None, the project's region is used.
+            refresh (bool, optional): Whether to refresh the library before listing. Defaults to False.
+            output_json (bool, optional): Whether to output the result in JSON format. Defaults to False.
+
+        Returns:
+            None
+        """
         from poly.output.console import paged_output, print_asr_models, success
 
         if refresh:
@@ -217,9 +247,19 @@ class LibraryCommand(BaseCommand):
 
     @classmethod
     def list_llm_models(
-        cls, base_path: str, region: str, refresh: bool = False, output_json: bool = False
+        cls, base_path: str, region: Optional[str], refresh: bool = False, output_json: bool = False
     ) -> None:
-        """List the language models available in the project's region."""
+        """List the language models available in the project's region.
+
+        Args:
+            base_path (str): The base path of the project.
+            region (Optional[str]): The region to list the language models for. If None, the project's region is used.
+            refresh (bool, optional): Whether to refresh the library before listing. Defaults to False.
+            output_json (bool, optional): Whether to output the result in JSON format. Defaults to False.
+
+        Returns:
+            None
+        """
         from poly.output.console import paged_output, print_llm_models, success
 
         if refresh:

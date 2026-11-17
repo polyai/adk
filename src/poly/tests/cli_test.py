@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from argparse import ArgumentParser, _SubParsersAction
+from datetime import UTC, datetime, timedelta
 from importlib.metadata import PackageNotFoundError
 from io import StringIO
 from pathlib import Path
@@ -6706,11 +6707,12 @@ class LibraryCommandTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             AgentStudioCLI().main(["library"])
 
-    def test_refresh_forces_the_project_to_refetch(self):
+    def test_refresh_refetches_the_project_region_even_when_recent(self):
         """`poly library refresh` refetches the project's region even when it's recent."""
         output = self._json_output(LibraryCommand.refresh_library, None)
 
-        self.proj.refresh_library.assert_called_once_with(force_refresh=True)
+        self.mock_get_asr.assert_called_once_with("us-1")
+        self.mock_get_llm.assert_called_once_with("us-1")
         self.assertEqual(
             output,
             {"success": True, "number_of_asr_models": 5, "number_of_llm_models": 4},
@@ -6730,7 +6732,7 @@ class LibraryCommandTest(unittest.TestCase):
         with console.capture() as capture:
             LibraryCommand.refresh_library(TEST_DIR, None)
 
-        self.assertIn("5 ASR models and 4 LLM models", capture.get())
+        self.assertIn("5 asr models and 4 language models", capture.get().lower())
 
     def test_llm_json_lists_polyai_models_first_then_by_name(self):
         """Models flagged polyaiModel come first, and each group is sorted by name."""
@@ -6763,7 +6765,26 @@ class LibraryCommandTest(unittest.TestCase):
 
         output = self._json_output(LibraryCommand.list_asr_models, None)
 
-        self.proj.refresh_library.assert_called_once_with(force_refresh=True)
+        self.mock_get_asr.assert_called_once_with("us-1")
+        self.assertEqual(len(output), len(self.ASR_MODELS))
+
+    def test_list_refetches_a_stale_project_library(self):
+        """A project library past the refresh interval is refetched before listing."""
+        self.library.last_refreshed = datetime.now(UTC) - timedelta(days=2)
+
+        self._json_output(LibraryCommand.list_llm_models, None)
+
+        self.mock_get_llm.assert_called_once_with("us-1")
+
+    def test_list_refetches_a_stale_saved_region(self):
+        """A saved --region library past the refresh interval is refetched before listing."""
+        stale = Library.build_library("uk-1", [], [])
+        stale.last_refreshed = datetime.now(UTC) - timedelta(days=2)
+        stale.save_library()
+
+        output = self._json_output(LibraryCommand.list_asr_models, "uk-1")
+
+        self.mock_get_asr.assert_called_once_with("uk-1")
         self.assertEqual(len(output), len(self.ASR_MODELS))
 
     def test_list_with_new_region_fetches_and_saves_it(self):

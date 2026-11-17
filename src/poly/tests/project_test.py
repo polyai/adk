@@ -21,7 +21,6 @@ from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
-from poly.library import Library
 from poly.project import STATUS_FILE, AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
@@ -4395,7 +4394,7 @@ class ResolveTestsTest(unittest.TestCase):
 
 
 class RefreshLibraryTest(unittest.TestCase):
-    """Tests for refresh_library, which keeps the region's model lists up to date."""
+    """Tests for AgentStudioProject.refresh_library: when the project refetches its library."""
 
     def setUp(self):
         self.mock_api_handler = patch.object(
@@ -4403,6 +4402,8 @@ class RefreshLibraryTest(unittest.TestCase):
         ).start()
         self.mock_api_handler.get_asr_models.return_value = ASR_RESPONSE
         self.mock_api_handler.get_llm_models.return_value = LLM_RESPONSE
+        self.mock_asr = self.mock_api_handler.get_asr_models
+        self.mock_llm = self.mock_api_handler.get_llm_models
         self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.project.library = None
 
@@ -4414,14 +4415,13 @@ class RefreshLibraryTest(unittest.TestCase):
         library.last_refreshed = datetime.now(UTC) - age
         self.project.library = library
 
-    def test_missing_library_is_fetched_and_saved(self):
-        """With no library loaded, both lists are fetched and saved for the region."""
+    def test_missing_library_is_fetched_for_the_project_region(self):
+        """With no library loaded, the project fetches its region's lists through its handler."""
         library = self.project.refresh_library()
 
         self.assertIs(self.project.library, library)
+        self.mock_asr.assert_called_once_with(self.project.region)
         self.assertEqual(len(library.asr_models), len(ASR_RESPONSE))
-        self.assertEqual(len(library.llm_models), len(LLM_RESPONSE))
-        self.assertEqual(Library.load_library_from_file(self.project.region), library)
 
     def test_recent_library_is_not_refetched(self):
         """A library refreshed less than a day ago is reused without calling the API."""
@@ -4429,8 +4429,8 @@ class RefreshLibraryTest(unittest.TestCase):
         current = self.project.library
 
         self.assertIs(self.project.refresh_library(), current)
-        self.mock_api_handler.get_asr_models.assert_not_called()
-        self.mock_api_handler.get_llm_models.assert_not_called()
+        self.mock_asr.assert_not_called()
+        self.mock_llm.assert_not_called()
 
     def test_day_old_library_is_refetched(self):
         """A library older than a day is replaced with fresh lists."""
@@ -4438,8 +4438,8 @@ class RefreshLibraryTest(unittest.TestCase):
 
         library = self.project.refresh_library()
 
-        self.mock_api_handler.get_asr_models.assert_called_once_with(self.project.region)
-        self.assertGreater(library.last_refreshed, datetime.now(UTC) - timedelta(minutes=1))
+        self.mock_asr.assert_called_once_with(self.project.region)
+        self.assertFalse(library.is_stale)
 
     def test_force_refresh_refetches_a_recent_library(self):
         """force_refresh fetches the lists even when the library is fresh."""
@@ -4447,8 +4447,8 @@ class RefreshLibraryTest(unittest.TestCase):
 
         self.project.refresh_library(force_refresh=True)
 
-        self.mock_api_handler.get_asr_models.assert_called_once()
-        self.mock_api_handler.get_llm_models.assert_called_once()
+        self.mock_asr.assert_called_once()
+        self.mock_llm.assert_called_once()
 
     def test_saved_library_is_loaded_with_the_project(self):
         """A project loaded after a refresh picks up the saved library for its region."""
@@ -4457,6 +4457,7 @@ class RefreshLibraryTest(unittest.TestCase):
         reloaded = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
         self.assertEqual(reloaded.library, self.project.library)
+
 
 class FetchProjectTest(unittest.TestCase):
     """Tests for the fetch_project method."""

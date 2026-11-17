@@ -1,12 +1,19 @@
 """Library module for PolyAI models."""
 
+import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Optional
 
 from poly.constants import POLY_HOME_DIR
 
+if TYPE_CHECKING:
+    from poly.handlers.interface import AgentStudioInterface
+
 LIBRARY_DIR = os.path.join(POLY_HOME_DIR, "library")
+REFRESH_INTERVAL = timedelta(days=1)
 
 
 @dataclass
@@ -43,7 +50,7 @@ class LLMModel:
     model_id: str
     name: str
     provider_model_id: str
-    poly_ai_model: str
+    poly_ai_model: bool
     speech_native: bool
     supports_webchat: bool
     supports_temperature: bool
@@ -81,6 +88,41 @@ class Library:
     asr_models: list[ASRModel]
     llm_models: list[LLMModel]
 
+    @property
+    def is_stale(self) -> bool:
+        """Whether the library is stale and needs to be refreshed."""
+        return datetime.now(timezone.utc) - self.last_refreshed > REFRESH_INTERVAL
+
+    @classmethod
+    def load_library_from_api(
+        cls, region: str, api_handler: Optional["AgentStudioInterface"] = None
+    ) -> "Library":
+        """Load the library of models for the specified region from the API
+
+        Args:
+            region (str): The region to refresh the library for.
+            api_handler (optional): The API handler to use for fetching models.
+            Defaults to None, which uses AgentStudioInterface.
+
+        Returns:
+            Library: The refreshed library object.
+        """
+        if api_handler is None:
+            from poly.handlers.interface import AgentStudioInterface
+
+            api_handler = AgentStudioInterface
+
+        # Load the latest ASR and LLM async models and build the library
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            asr_future = executor.submit(api_handler.get_asr_models, region)
+            llm_future = executor.submit(api_handler.get_llm_models, region)
+            asr_models = asr_future.result()
+            llm_models = llm_future.result()
+
+        library = cls.build_library(region, asr_models, llm_models)
+        library.save_library()
+        return library
+
     @classmethod
     def build_library(
         cls, region: str, asr_models: list[dict], llm_models: list[dict]
@@ -96,8 +138,6 @@ class Library:
     @classmethod
     def load_library_from_file(cls, region: str) -> "Library":
         # Load library in ~/.poly/library/{region}.json
-        import json
-        import os
 
         library_path = os.path.join(LIBRARY_DIR, f"{region}.json")
         if os.path.exists(library_path):

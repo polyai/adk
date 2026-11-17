@@ -5,10 +5,11 @@ Copyright PolyAI Limited
 
 import os
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 import poly.library
-from poly.library import ASRModel, Library, LLMModel
+from poly.library import REFRESH_INTERVAL, ASRModel, Library, LLMModel
 
 ASR_RESPONSE = [
     {"id": "ASR-1", "name": "Deepgram Nova 3", "provider": "deepgram", "model": "nova-3"},
@@ -27,6 +28,23 @@ LLM_RESPONSE = [
     },
     {"id": "MODEL-2", "name": "Dialog-RSN-1", "providerModelId": "raven-omni", "endToEnd": True},
 ]
+
+
+def patch_model_lists(asr_models=None, llm_models=None):
+    """Patch the two list routes at the API boundary.
+
+    Returns the ASR and language model patchers, already started; stop them with
+    patch.stopall().
+    """
+    asr = patch(
+        "poly.handlers.interface.AgentStudioInterface.get_asr_models",
+        return_value=ASR_RESPONSE if asr_models is None else asr_models,
+    ).start()
+    llm = patch(
+        "poly.handlers.interface.AgentStudioInterface.get_llm_models",
+        return_value=LLM_RESPONSE if llm_models is None else llm_models,
+    ).start()
+    return asr, llm
 
 
 def make_library(region: str = "us-1") -> Library:
@@ -146,6 +164,72 @@ class LibraryLookupTest(unittest.TestCase):
     def test_asr_provider_and_model_must_both_match(self):
         """A model ID under a different provider isn't a match."""
         self.assertIsNone(self.library.get_asr_model_by_provider_and_model("openai", "nova-3"))
+
+
+class LibraryStalenessTest(unittest.TestCase):
+    """Tests for when a saved library counts as out of date."""
+
+    def _library_aged(self, age: timedelta) -> Library:
+        library = make_library()
+        library.last_refreshed = datetime.now(UTC) - age
+        return library
+
+    def test_library_within_the_interval_is_fresh(self):
+        """A library younger than REFRESH_INTERVAL isn't stale."""
+        self.assertFalse(self._library_aged(REFRESH_INTERVAL - timedelta(minutes=1)).is_stale)
+
+    def test_library_past_the_interval_is_stale(self):
+        """A library older than REFRESH_INTERVAL is stale."""
+        self.assertTrue(self._library_aged(REFRESH_INTERVAL + timedelta(minutes=1)).is_stale)
+
+    def test_new_library_is_fresh(self):
+        """A library built just now isn't stale."""
+        self.assertFalse(make_library().is_stale)
+
+
+class RefreshLibraryTest(unittest.TestCase):
+    """Tests for Library.load_library_from_api, which fetches both lists and saves them."""
+
+    def setUp(self):
+        self.mock_asr, self.mock_llm = patch_model_lists()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_fetches_both_lists_for_the_region(self):
+        """Both list routes are called once, for the given region."""
+        Library.load_library_from_api("euw-1")
+
+        self.mock_asr.assert_called_once_with("euw-1")
+        self.mock_llm.assert_called_once_with("euw-1")
+
+    def test_returns_and_saves_the_new_library(self):
+        """The fetched library is returned and saved for its region."""
+        library = Library.load_library_from_api("euw-1")
+
+        self.assertEqual(len(library.asr_models), len(ASR_RESPONSE))
+        self.assertEqual(len(library.llm_models), len(LLM_RESPONSE))
+        self.assertEqual(Library.load_library_from_file("euw-1"), library)
+
+    def test_given_api_handler_is_used_instead_of_the_default(self):
+        """A caller's own handler fetches the lists, and the default isn't touched."""
+        handler = MagicMock()
+        handler.get_asr_models.return_value = ASR_RESPONSE[:1]
+        handler.get_llm_models.return_value = []
+
+        library = Library.load_library_from_api("euw-1", handler)
+
+        handler.get_asr_models.assert_called_once_with("euw-1")
+        self.mock_asr.assert_not_called()
+        self.assertEqual(len(library.asr_models), 1)
+
+    def test_overwrites_an_older_saved_library(self):
+        """Refreshing replaces what was saved before for that region."""
+        Library.build_library("euw-1", [], []).save_library()
+
+        Library.load_library_from_api("euw-1")
+
+        self.assertEqual(len(Library.load_library_from_file("euw-1").asr_models), len(ASR_RESPONSE))
 
 
 class LLMModelTest(unittest.TestCase):
