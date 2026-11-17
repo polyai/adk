@@ -16724,6 +16724,7 @@ class OutboundCampaignTests(unittest.TestCase):
             "Nodes must be a list.": {"Trigger": {}},
             "Node 1 must be a mapping.": ["Trigger"],
             "Node 1 needs a name.": [{"type": "end"}],
+            "Node 2 needs a name.": [{"name": "Start"}, {"name": 5}],
             "Node name 'first call' is used more than once.": [
                 {"name": "First call"},
                 {"name": "first call"},
