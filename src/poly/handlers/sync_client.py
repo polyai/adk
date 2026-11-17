@@ -164,7 +164,10 @@ class SyncClientHandler:
         """Send all queued commands as a batch and clear the queue.
 
         Returns:
-            bool: True if the commands were sent successfully, False otherwise
+            bool: True once the commands are sent, or when there was nothing to send
+
+        Raises:
+            SourcererAPIError: If the batch could not be sent or the platform rejected it
         """
         if self.sdk.get_queue_size() == 0:
             logger.info("No commands to send")
@@ -176,13 +179,9 @@ class SyncClientHandler:
         if self.sdk.branch_id == "main":
             self.create_branch()
 
-        try:
-            logger.info(f"Sending {len(self.sdk._command_queue)} commands to {self.sdk.branch_id}")
-            self.sdk.send_command_batch()
-            return True
-        except SourcererAPIError as e:
-            logger.error(f"Failed to send commands: {e}")
-            return False
+        logger.info(f"Sending {len(self.sdk._command_queue)} commands to {self.sdk.branch_id}")
+        self.sdk.send_command_batch()
+        return True
 
     def clear_command_queue(self) -> None:
         """Clear all queued commands without sending."""
@@ -314,7 +313,10 @@ class SyncClientHandler:
         return True
 
     def merge_branch(
-        self, message: Optional[str], conflict_resolutions: Optional[list[dict[str, Any]]] = None
+        self,
+        message: Optional[str],
+        conflict_resolutions: Optional[list[dict[str, Any]]] = None,
+        acknowledge_active_experiment: bool = False,
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into its parent branch.
 
@@ -324,6 +326,8 @@ class SyncClientHandler:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value (only used with custom strategy)
+            acknowledge_active_experiment (bool): Allow a merge into main while an
+                experiment is running.
 
         Returns:
             success (bool): True if the merge was successful, False otherwise
@@ -342,6 +346,7 @@ class SyncClientHandler:
             result = self.sdk.merge_branch(
                 deployment_message=message,
                 conflict_resolutions=conflict_resolutions,
+                acknowledge_active_experiment=acknowledge_active_experiment,
             )
         except SourcererAPIError as e:
             logger.error(

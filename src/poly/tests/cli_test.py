@@ -16,6 +16,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import argcomplete
 import requests
 from rich.console import Console
 
@@ -54,7 +55,14 @@ from poly.cli_commands.shared import (
     require_experiments_enabled,
     resolve_project_scope,
 )
-from poly.cli_commands.sync import FormatCommand, PushCommand, RevertCommand
+from poly.cli_commands.sync import (
+    DiffCommand,
+    FormatCommand,
+    PullCommand,
+    PushCommand,
+    RevertCommand,
+    ValidateCommand,
+)
 from poly.cli_commands.update import (
     UpdateCommand,
     _record_update_check,
@@ -439,6 +447,20 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.push_project.assert_not_called()
 
 
+    @patch("poly.output.console.plain")
+    @patch("poly.output.console.error")
+    def test_branch_create_env_exits_1_when_the_push_is_rejected(self, mock_error, mock_plain):
+        """A rejected push of the environment's state is reported and exits 1."""
+        self.proj.push_project.return_value = (False, "Rejected by the platform", [])
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("Failed to push the live state", mock_error.call_args[0][0])
+        mock_plain.assert_called_once_with("Rejected by the platform")
+
+
 class BranchCreateFromSourceBranchTest(unittest.TestCase):
     """Tests for ``poly branch create --from <branch>``."""
 
@@ -553,7 +575,8 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("poly.output.console.error")
     def test_direct_delete_nonexistent_branch_shows_error(self, mock_error):
         """Attempting to delete a branch that doesn't exist shows an error."""
-        BranchCommand.branch_delete(TEST_DIR, branch_name="no-such-branch")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="no-such-branch")
 
         self.proj.delete_branch.assert_not_called()
         mock_error.assert_called_once()
@@ -562,7 +585,8 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("poly.cli_commands.branch.json_print")
     def test_direct_delete_nonexistent_branch_json_mode(self, mock_json):
         """Non-existent branch with output_json=True prints JSON with success=False."""
-        BranchCommand.branch_delete(TEST_DIR, branch_name="no-such-branch", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="no-such-branch", output_json=True)
 
         self.proj.delete_branch.assert_not_called()
         mock_json.assert_called_once()
@@ -573,7 +597,8 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("poly.output.console.error")
     def test_direct_delete_main_branch_shows_error(self, mock_error):
         """Attempting to delete 'main' shows an error because main is not deletable."""
-        BranchCommand.branch_delete(TEST_DIR, branch_name="main")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="main")
 
         self.proj.delete_branch.assert_not_called()
         mock_error.assert_called_once()
@@ -612,7 +637,8 @@ class BranchDeleteTest(unittest.TestCase):
         mock_confirm.return_value.ask.return_value = True
         self.proj.delete_branch.return_value = False
 
-        BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
 
         mock_error.assert_called_once()
         self.assertIn("Failed to delete", mock_error.call_args[0][0])
@@ -726,7 +752,8 @@ class BranchDeleteTest(unittest.TestCase):
         mock_checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
         mock_confirm.return_value.ask.return_value = True
 
-        BranchCommand.branch_delete(TEST_DIR)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR)
 
         self.assertEqual(self.proj.delete_branch.call_count, 2)
         mock_error.assert_called_once()
@@ -999,6 +1026,8 @@ class BranchMergeTest(unittest.TestCase):
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
         self.proj.using_simplified_deployments = True
+        self.proj.experiments_enabled = True
+        self.proj.get_active_experiment.return_value = {}
         self.proj.merge_branch.return_value = (True, [], [])
         self._set_current_branch("feature-a")
         self.mock_load.return_value = self.proj
@@ -1019,7 +1048,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it")
 
         mock_confirm.assert_called_once()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("now live", mock_success.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1040,7 +1071,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it", force=True)
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("now live", mock_success.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1052,7 +1085,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it")
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("main", mock_info.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1066,7 +1101,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it")
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertIn("Release 1", mock_info.call_args[0][0])
 
     @patch("questionary.confirm")
@@ -1076,7 +1113,9 @@ class BranchMergeTest(unittest.TestCase):
         BranchCommand.branch_merge(TEST_DIR, message="ship it", output_json=True)
 
         mock_confirm.assert_not_called()
-        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=False
+        )
         self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
 
     @patch("questionary.select")
@@ -1096,6 +1135,96 @@ class BranchMergeTest(unittest.TestCase):
 
                 choices = [c["name"] for c in mock_select.call_args.kwargs["choices"]]
                 self.assertIn(f"Use parent — {parent}", choices)
+
+    def _start_experiment(self) -> None:
+        """Make the project report a running experiment."""
+        self.proj.get_active_experiment.return_value = {"id": "exp-1", "name": "Greeting test"}
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.warning")
+    def test_running_experiment_is_named_and_confirming_acknowledges_it(
+        self, mock_warning, mock_confirm
+    ):
+        """With an experiment running, the prompt names it and a yes acknowledges it."""
+        self._start_experiment()
+        mock_confirm.return_value.ask.return_value = True
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        self.assertIn("Greeting test", mock_warning.call_args_list[0][0][0])
+        self.assertIn("experiment", mock_confirm.call_args[0][0])
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=True
+        )
+
+    @patch("questionary.confirm")
+    def test_declining_while_experiment_runs_aborts_without_merging(self, mock_confirm):
+        """Answering no while an experiment runs leaves the branch unmerged."""
+        self._start_experiment()
+        mock_confirm.return_value.ask.return_value = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.proj.merge_branch.assert_not_called()
+
+    @patch("questionary.confirm")
+    def test_acknowledge_flag_skips_the_experiment_lookup(self, mock_confirm):
+        """--acknowledge-experiment keeps the deploy prompt but needs no experiment lookup."""
+        mock_confirm.return_value.ask.return_value = True
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it", acknowledge_experiment=True)
+
+        self.proj.get_active_experiment.assert_not_called()
+        self.assertEqual(mock_confirm.call_args[0][0], "Confirm Deployment?")
+        self.proj.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None, acknowledge_active_experiment=True
+        )
+
+    @patch("questionary.confirm")
+    @patch("poly.cli_commands.branch.json_print")
+    def test_non_interactive_merges_acknowledge_only_with_the_flag(
+        self, mock_json_print, mock_confirm
+    ):
+        """--force and --json never prompt, so only the flag acknowledges the experiment."""
+        self._start_experiment()
+        modes = [{"force": True}, {"output_json": True}]
+        for mode in modes:
+            for acknowledge in (False, True):
+                with self.subTest(mode=mode, acknowledge=acknowledge):
+                    self.proj.merge_branch.reset_mock()
+
+                    BranchCommand.branch_merge(
+                        TEST_DIR, message="ship it", acknowledge_experiment=acknowledge, **mode
+                    )
+
+                    self.proj.merge_branch.assert_called_once_with(
+                        message="ship it",
+                        conflict_resolutions=None,
+                        acknowledge_active_experiment=acknowledge,
+                    )
+        mock_confirm.assert_not_called()
+
+    @patch("poly.output.console.success")
+    def test_conflict_retry_keeps_the_acknowledgement(self, mock_success):
+        """The merge re-sent after resolving conflicts still acknowledges the experiment."""
+        resolutions = [{"path": _GREETING_CONFLICT["path"], "strategy": "theirs"}]
+        self.proj.merge_branch.side_effect = [(False, [_GREETING_CONFLICT], []), (True, [], [])]
+
+        with patch.object(BranchCommand, "_merge_interactively", return_value=resolutions):
+            BranchCommand.branch_merge(
+                TEST_DIR,
+                message="ship it",
+                interactive=True,
+                force=True,
+                acknowledge_experiment=True,
+            )
+
+        retry = self.proj.merge_branch.call_args_list[1].kwargs
+        self.assertEqual(retry["conflict_resolutions"], resolutions)
+        self.assertTrue(retry["acknowledge_active_experiment"])
+        mock_success.assert_called_once()
 
 
 class BranchSyncTest(unittest.TestCase):
@@ -1979,6 +2108,13 @@ class ChatCommandTest(unittest.TestCase):
         self.assertIn("error", payload["push"])
 
 
+class _InProcessCompletionFinder(argcomplete.CompletionFinder):
+    """argcomplete's finder without its debug stream on fd 9, which pytest's capture uses."""
+
+    def _init_debug_stream(self):
+        pass
+
+
 class CompletionCommandTest(unittest.TestCase):
     """Tests for the completion command."""
 
@@ -2014,6 +2150,36 @@ class CompletionCommandTest(unittest.TestCase):
         """Parser rejects shell choices outside bash/zsh/fish."""
         with self.assertRaises(SystemExit):
             AgentStudioCLI().main(sys_args=["completion", "powershell"])
+
+    def _complete(self, line: str) -> list[str]:
+        """Return what the shell would offer for `line`, as argcomplete computes it."""
+        completion_env = {
+            "_ARGCOMPLETE": "1",
+            "COMP_LINE": line,
+            "COMP_POINT": str(len(line)),
+            "_ARGCOMPLETE_IFS": "\013",
+        }
+        with patch.dict(os.environ, completion_env):
+            cli = AgentStudioCLI()
+            cli.register_commands()
+            parser = cli._create_parser()
+            output = StringIO()
+            _InProcessCompletionFinder()(
+                parser,
+                output_stream=output,
+                exit_method=lambda code: None,
+                always_complete_options=False,
+            )
+        return [completion.strip() for completion in output.getvalue().split("\013")]
+
+    def test_completes_command_names(self):
+        """The grouped --help sections must not break completion of command names."""
+        self.assertEqual(self._complete("poly sta"), ["status"])
+
+    def test_completes_grouped_subcommand_names(self):
+        """branch and functions group their subcommands in --help too."""
+        self.assertIn("create", self._complete("poly branch "))
+        self.assertIn("execute", self._complete("poly functions "))
 
 
 class ResolveProjectScopeTest(unittest.TestCase):
@@ -2129,37 +2295,37 @@ class ComputeDiffTest(unittest.TestCase):
         self.assertEqual(call_kwargs["before_name"], "def789012")
 
     @patch("poly.output.console.error")
-    def test_only_after_version_not_found_returns_none(self, mock_error):
-        """With only after and hash not in versions, calls error and returns None."""
+    def test_only_after_version_not_found_exits(self, mock_error):
+        """With only after and hash not in versions, reports the error and exits 1."""
         versions = [{"version_hash": "abc123456xyz"}]
         self.proj.get_deployments.return_value = (versions, {})
 
-        result = compute_diff(TEST_DIR, after="zzz999999")
+        with self.assertRaises(SystemExit):
+            compute_diff(TEST_DIR, after="zzz999999")
 
-        self.assertIsNone(result)
         mock_error.assert_called_once()
         self.assertIn("not found", mock_error.call_args[0][0])
 
     @patch("poly.output.console.error")
-    def test_only_after_no_previous_version_returns_none(self, mock_error):
-        """With only after matching the last version, returns None (no previous)."""
+    def test_only_after_no_previous_version_exits(self, mock_error):
+        """With only after matching the last version, reports the error and exits 1."""
         versions = [{"version_hash": "abc123456xyz"}]
         self.proj.get_deployments.return_value = (versions, {})
 
-        result = compute_diff(TEST_DIR, after="abc123456")
+        with self.assertRaises(SystemExit):
+            compute_diff(TEST_DIR, after="abc123456")
 
-        self.assertIsNone(result)
         mock_error.assert_called_once()
         self.assertIn("No previous version", mock_error.call_args[0][0])
 
     @patch("poly.output.console.error")
-    def test_only_after_no_versions_returns_none(self, mock_error):
-        """With only after but no versions at all, calls error and returns None."""
+    def test_only_after_no_versions_exits(self, mock_error):
+        """With only after but no versions at all, reports the error and exits 1."""
         self.proj.get_deployments.return_value = ([], {})
 
-        result = compute_diff(TEST_DIR, after="abc123456")
+        with self.assertRaises(SystemExit):
+            compute_diff(TEST_DIR, after="abc123456")
 
-        self.assertIsNone(result)
         mock_error.assert_called_once()
         self.assertIn("No versions found", mock_error.call_args[0][0])
 
@@ -2339,6 +2505,122 @@ class PushStdinProjectionGuardTest(unittest.TestCase):
         )
 
 
+class SyncExitCodeTest(unittest.TestCase):
+    """Tests that push, pull and diff exit 1 on failure and 0 when there is nothing to do."""
+
+    def setUp(self):
+        self.project = MagicMock()
+        self.project.account_id = "test_account"
+        self.project.project_id = "test_project"
+        self.project.branch_id = "BRANCH-1"
+        patch("poly.cli_commands.sync.load_project", return_value=self.project).start()
+        patch("poly.cli_commands.shared.load_project", return_value=self.project).start()
+        self.addCleanup(patch.stopall)
+
+    @patch("poly.output.console.plain")
+    @patch("poly.output.console.error")
+    def test_failed_push_exits_1(self, mock_error, mock_plain):
+        """A push the platform or validation refuses exits 1 without --json."""
+        self.project.push_project.return_value = (False, "Validation errors detected", [])
+
+        with self.assertRaises(SystemExit) as ctx:
+            PushCommand.push(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("Failed to push", mock_error.call_args[0][0])
+
+    @patch("poly.output.console.plain")
+    @patch("poly.output.console.error")
+    def test_push_with_no_changes_exits_0(self, mock_error, mock_plain):
+        """A push with nothing to send says so and is not a failure."""
+        self.project.push_project.return_value = (True, "No changes detected", [])
+
+        PushCommand.push(TEST_DIR)
+
+        mock_error.assert_not_called()
+        self.assertIn("No changes detected", mock_plain.call_args[0][0])
+
+    @patch("poly.cli_commands.sync.json_print")
+    def test_push_with_no_changes_is_a_json_success(self, mock_json_print):
+        """JSON mode reports a push with nothing to send as a success."""
+        self.project.push_project.return_value = (True, "No changes detected", [])
+
+        PushCommand.push(TEST_DIR, output_json=True)
+
+        self.assertTrue(mock_json_print.call_args[0][0]["success"])
+
+    @patch("poly.output.console.print_file_list")
+    def test_pull_with_conflicts_exits_1(self, mock_print_file_list):
+        """A pull that leaves merge conflicts lists them and exits 1."""
+        self.project.pull_project.return_value = (["topics/a.yaml"], {})
+
+        with self.assertRaises(SystemExit) as ctx:
+            PullCommand.pull(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_print_file_list.assert_called_once()
+
+    @patch("poly.cli_commands.sync.json_print")
+    def test_diff_with_no_changes_is_a_json_success(self, mock_json_print):
+        """JSON mode reports an empty diff as a success."""
+        self.project.get_diffs.return_value = {}
+
+        DiffCommand.diff(TEST_DIR, output_json=True)
+
+        self.assertEqual(
+            mock_json_print.call_args[0][0], {"success": True, "message": "No changes detected"}
+        )
+
+
+    @patch("poly.cli_commands.sync.json_print")
+    def test_validate_json_with_errors_exits_1(self, mock_json_print):
+        """JSON mode reports validation errors as a failure and exits 1."""
+        self.project.validate_project.return_value = ["topics/a.yaml: name cannot be empty"]
+
+        with self.assertRaises(SystemExit) as ctx:
+            ValidateCommand.validate_project(TEST_DIR, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(
+            mock_json_print.call_args[0][0],
+            {
+                "success": False,
+                "valid": False,
+                "errors": ["topics/a.yaml: name cannot be empty"],
+            },
+        )
+
+    @patch("poly.cli_commands.sync.json_print")
+    def test_validate_json_without_errors_exits_0(self, mock_json_print):
+        """JSON mode reports a valid project as a success."""
+        self.project.validate_project.return_value = []
+
+        ValidateCommand.validate_project(TEST_DIR, output_json=True)
+
+        self.assertEqual(
+            mock_json_print.call_args[0][0], {"success": True, "valid": True, "errors": []}
+        )
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_diff_against_an_unknown_name_exits_1(self, mock_json_print):
+        """A --before name that matches nothing is a failure, not an empty diff."""
+        self.project.diff_remote_named_versions.side_effect = ValueError(
+            "No branch, environment or deployment version named 'typo' was found."
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            DiffCommand.diff(TEST_DIR, before="typo", after="main", output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(
+            mock_json_print.call_args[0][0],
+            {
+                "success": False,
+                "error": "No branch, environment or deployment version named 'typo' was found.",
+            },
+        )
+
+
 class PrintDeploymentsTest(unittest.TestCase):
     """Tests for the print_deployments CLI method."""
 
@@ -2354,15 +2636,23 @@ class PrintDeploymentsTest(unittest.TestCase):
     def tearDown(self):
         patch.stopall()
 
-    @patch("poly.output.console.error")
-    def test_no_versions_calls_error(self, mock_error):
-        """print_deployments with no versions calls error('No versions found.')."""
+    @patch("poly.output.console.plain")
+    def test_no_versions_is_not_an_error(self, mock_plain):
+        """Listing an environment with no versions says so and exits 0."""
         self.proj.get_deployments.return_value = ([], {})
 
         DeploymentsCommand.deployments_list(TEST_DIR)
 
-        mock_error.assert_called_once()
-        self.assertIn("No versions found", mock_error.call_args[0][0])
+        self.assertIn("No versions found", mock_plain.call_args[0][0])
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_no_versions_json_is_an_empty_list(self, mock_json):
+        """JSON mode with no versions prints an empty list."""
+        self.proj.get_deployments.return_value = ([], {})
+
+        DeploymentsCommand.deployments_list(TEST_DIR, output_json=True)
+
+        self.assertEqual(mock_json.call_args[0][0]["versions"], [])
 
     @patch("poly.output.console.print_deployments")
     def test_default_call_shows_all(self, mock_print_dep):
@@ -2415,7 +2705,8 @@ class PrintDeploymentsTest(unittest.TestCase):
         """print_deployments with unknown hash calls error."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
 
-        DeploymentsCommand.deployments_list(TEST_DIR, version_hash="zzz999999")
+        with self.assertRaises(SystemExit):
+            DeploymentsCommand.deployments_list(TEST_DIR, version_hash="zzz999999")
 
         mock_error.assert_called_once()
         self.assertIn("not found", mock_error.call_args[0][0])
@@ -2485,7 +2776,8 @@ class DeploymentsShowTest(unittest.TestCase):
         """When the project has no versions, error is called."""
         self.proj.get_deployments.return_value = ([], {})
 
-        DeploymentsCommand.deployments_show(TEST_DIR, version_hash="hash00000")
+        with self.assertRaises(SystemExit):
+            DeploymentsCommand.deployments_show(TEST_DIR, version_hash="hash00000")
 
         mock_error.assert_called_once()
         self.assertIn("No versions found", mock_error.call_args[0][0])
@@ -2495,7 +2787,8 @@ class DeploymentsShowTest(unittest.TestCase):
         """When the version hash doesn't match any version, error is called."""
         self.proj.get_deployments.return_value = (self.sandbox_versions, self.active_hashes)
 
-        DeploymentsCommand.deployments_show(TEST_DIR, version_hash="zzz999999")
+        with self.assertRaises(SystemExit):
+            DeploymentsCommand.deployments_show(TEST_DIR, version_hash="zzz999999")
 
         mock_error.assert_called_once()
         self.assertIn("not found", mock_error.call_args[0][0])
@@ -2949,6 +3242,23 @@ class DeploymentsPromoteTest(unittest.TestCase):
         )
 
 
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_dry_run_is_a_json_success_without_calling_api(self, mock_json):
+        """A promote dry run reports success and does not promote."""
+        DeploymentsCommand.deployments_promote(
+            TEST_DIR,
+            from_deployment="abc123456",
+            to_env="pre-release",
+            output_json=True,
+            dry_run=True,
+        )
+
+        self.proj.promote_deployment.assert_not_called()
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["dry_run"])
+
+
 class DeploymentsRollbackTest(unittest.TestCase):
     """Tests for AgentStudioCLI.deployments_rollback."""
 
@@ -3162,6 +3472,7 @@ class DeploymentsRollbackTest(unittest.TestCase):
         self.proj.rollback_deployment.assert_not_called()
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["dry_run"])
+        self.assertTrue(payload["success"])
         self.assertEqual(payload["target_hash"], "def789012xyz")
         reverted_ids = [d["id"] for d in payload["reverted_deployments"]]
         self.assertEqual(reverted_ids, ["dep-1"])
@@ -3239,6 +3550,39 @@ class InitProjectTest(unittest.TestCase):
 
         mock_create.assert_called_once_with(
             TEST_DIR, region="eu-west-1", account_id="acc_1", output_json=False
+        )
+
+
+class ListProjectsTest(unittest.TestCase):
+    """Tests for the list project command."""
+
+    @patch("poly.cli_commands.project.json_print")
+    @patch("poly.cli_commands.project.AgentStudioInterface")
+    def test_json_rows_carry_the_agent_id_as_project_id(self, mock_iface_cls, mock_json_print):
+        """The API names the id agentId; the row must not come out with a null project_id."""
+        mock_iface_cls.return_value.list_agents.return_value = [
+            {
+                "agentId": "AGENT-1",
+                "agentName": "My First Agent",
+                "updatedAt": "2026-11-03T19:06:16Z",
+                "branchCount": 2,
+            }
+        ]
+
+        ProjectCommand.list_projects(region="us-1", account_id="acc-456", output_json=True)
+
+        mock_json_print.assert_called_once_with(
+            {
+                "success": True,
+                "agents": [
+                    {
+                        "project_id": "AGENT-1",
+                        "agent_name": "My First Agent",
+                        "updated_at": "2026-11-03T19:06:16Z",
+                        "branch_count": 2,
+                    }
+                ],
+            }
         )
 
 
@@ -4129,7 +4473,8 @@ class BranchHistoryTest(unittest.TestCase):
     @patch("poly.output.console.warning")
     def test_nonexistent_branch_shows_warning(self, mock_warning):
         """A branch name not in the branches dict shows a warning."""
-        BranchCommand.branch_history(TEST_DIR, branch_name="no-such-branch")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_history(TEST_DIR, branch_name="no-such-branch")
 
         self.proj.get_branch_history.assert_not_called()
         mock_warning.assert_called_once()
@@ -4216,7 +4561,8 @@ class BranchRenameTest(unittest.TestCase):
         """When rename_branch returns False, a failure message is shown."""
         self.proj.rename_branch.return_value = False
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
 
         mock_error.assert_called_once()
         self.assertIn("Failed to rename", mock_error.call_args[0][0])
@@ -4226,7 +4572,8 @@ class BranchRenameTest(unittest.TestCase):
         """When current branch is None, a warning is shown."""
         self.proj.get_current_branch.return_value = None
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
 
         self.proj.rename_branch.assert_not_called()
         mock_warning.assert_called_once()
@@ -4237,7 +4584,8 @@ class BranchRenameTest(unittest.TestCase):
         """JSON mode outputs error when no current branch exists."""
         self.proj.get_current_branch.return_value = None
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
@@ -4249,7 +4597,8 @@ class BranchRenameTest(unittest.TestCase):
         """Renaming main branch shows an error."""
         self.proj.get_current_branch.return_value = "main"
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
 
         self.proj.rename_branch.assert_not_called()
         mock_error.assert_called_once()
@@ -4260,7 +4609,8 @@ class BranchRenameTest(unittest.TestCase):
         """JSON mode outputs error when trying to rename main."""
         self.proj.get_current_branch.return_value = "main"
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
@@ -4269,17 +4619,14 @@ class BranchRenameTest(unittest.TestCase):
 
     @patch("poly.cli_commands.branch.json_print")
     def test_no_name_json_mode(self, mock_json):
-        """JSON mode outputs error when no name is provided."""
-        self.proj.rename_branch.side_effect = ValueError("New branch name must be provided.")
-
+        """JSON mode with no name reports the error and does not rename."""
         with self.assertRaises(SystemExit):
             BranchCommand.branch_rename(TEST_DIR, new_branch_name=None, output_json=True)
 
-        calls = mock_json.call_args_list
-        self.assertEqual(len(calls), 2)
-        self.assertFalse(calls[0][0][0]["success"])
-        self.assertIn("No new branch name provided", calls[0][0][0]["error"])
-        self.assertFalse(calls[1][0][0]["success"])
+        mock_json.assert_called_once()
+        self.assertFalse(mock_json.call_args[0][0]["success"])
+        self.assertIn("No new branch name provided", mock_json.call_args[0][0]["error"])
+        self.proj.rename_branch.assert_not_called()
 
     @patch("poly.output.console.error")
     def test_rename_exception_shows_error(self, mock_error):
@@ -4407,7 +4754,8 @@ class BranchRestoreTest(unittest.TestCase):
         """When restore_branch returns False, a failure message is shown."""
         self.proj.restore_branch.return_value = False
 
-        BranchCommand.branch_restore(TEST_DIR, branch_id="old-branch")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_restore(TEST_DIR, branch_id="old-branch")
 
         mock_error.assert_called_once()
         self.assertIn("Failed to restore", mock_error.call_args[0][0])
@@ -4502,7 +4850,8 @@ class BranchRestoreTest(unittest.TestCase):
         mock_select.return_value.ask.return_value = "old-branch (BRANCH-1) — parent: main"
         self.proj.restore_branch.return_value = False
 
-        BranchCommand.branch_restore(TEST_DIR, branch_id=None)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_restore(TEST_DIR, branch_id=None)
 
         mock_error.assert_called_once()
         self.assertIn("Failed to restore", mock_error.call_args[0][0])
@@ -4635,7 +4984,8 @@ class BranchTagTest(unittest.TestCase):
         """A False from the project layer surfaces as an error."""
         self.proj.tag_branch.return_value = False
 
-        BranchCommand.branch_tag(TEST_DIR)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_tag(TEST_DIR)
 
         self.assertIn("Failed to tag", mock_error.call_args[0][0])
 
@@ -4644,7 +4994,8 @@ class BranchTagTest(unittest.TestCase):
         """A False from the project layer surfaces as an error."""
         self.proj.untag_branch.return_value = False
 
-        BranchCommand.branch_untag(TEST_DIR)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_untag(TEST_DIR)
 
         self.assertIn("Failed to remove tag", mock_error.call_args[0][0])
 
@@ -4655,7 +5006,8 @@ class BranchTagTest(unittest.TestCase):
         self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
 
         self.proj.untag_branch.return_value = False
-        BranchCommand.branch_untag(TEST_DIR, output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_untag(TEST_DIR, output_json=True)
         self.assertEqual(mock_json_print.call_args[0][0], {"success": False})
 
     @patch("poly.output.console.error")
@@ -4854,7 +5206,8 @@ class AudioCacheCommandTest(unittest.TestCase):
         """audio-cache bulk-delete reports IDs that failed to delete."""
         mock_api.return_value = {"deleted": [], "failed": ["9"]}
 
-        AudioCacheCommand.audio_cache_bulk_delete(TEST_DIR, "9")
+        with self.assertRaises(SystemExit):
+            AudioCacheCommand.audio_cache_bulk_delete(TEST_DIR, "9")
 
         mock_error.assert_called_once()
 
@@ -4962,9 +5315,33 @@ class FunctionsCommandTest(unittest.TestCase):
         issues = [{"type": "syntax_error", "function_id": "fn-1"}]
         mock_api.return_value = {"valid": False, "issues": issues}
 
+        with self.assertRaises(SystemExit) as ctx:
+            FunctionsCommand.functions_validate(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_print.assert_called_once_with(False, issues)
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.validate_functions")
+    @patch("poly.cli_commands.functions.json_print")
+    def test_validate_json_with_issues_exits_1(self, mock_json_print, mock_api):
+        """functions validate --json prints the result and exits 1 when it is not valid."""
+        mock_api.return_value = {"valid": False, "issues": [{"type": "syntax_error"}]}
+
+        with self.assertRaises(SystemExit) as ctx:
+            FunctionsCommand.functions_validate(TEST_DIR, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_json_print.assert_called_once_with(mock_api.return_value)
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.validate_functions")
+    @patch("poly.output.console.print_function_validation_issues")
+    def test_validate_without_issues_exits_0(self, mock_print, mock_api):
+        """functions validate returns normally when every function is valid."""
+        mock_api.return_value = {"valid": True, "issues": []}
+
         FunctionsCommand.functions_validate(TEST_DIR)
 
-        mock_print.assert_called_once_with(False, issues)
+        mock_print.assert_called_once_with(True, [])
 
 
 # argparse wraps the usage line to the terminal width, which differs between the
@@ -4982,6 +5359,28 @@ def _help_body(help_text: str) -> str:
     """Return the help text after the usage block, which may wrap over lines."""
     _usage, _, body = help_text.partition("\n\n")
     return body
+
+
+class StartupImportsTest(unittest.TestCase):
+    """Tests for what building the CLI imports before any command runs."""
+
+    # Heavy modules that only some commands need. Each command imports them where it
+    # uses them, so every other command, --help and shell completion skip the cost.
+    DEFERRED_MODULES = ["requests", "rich", "asyncio", "webbrowser", "dateutil"]
+
+    def test_heavy_modules_are_not_imported_at_startup(self):
+        script = (
+            "import sys\n"
+            "from poly.cli import AgentStudioCLI\n"
+            "cli = AgentStudioCLI()\n"
+            "cli.register_commands()\n"
+            "cli._create_parser()\n"
+            f"print(' '.join(m for m in {self.DEFERRED_MODULES!r} if m in sys.modules))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, check=True
+        )
+        self.assertEqual(result.stdout.strip(), "", msg="imported at startup")
 
 
 class GroupedHelpOutputTest(unittest.TestCase):
@@ -6272,6 +6671,50 @@ class TestRunNameTest(unittest.TestCase):
         self._run()
 
         self.proj.trigger_tests.assert_called_once_with(["tc-1"], name=None)
+
+
+class TestRunExitCodeTest(unittest.TestCase):
+    """Tests that a polled ``poly test run`` exits 1 unless every test passed."""
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.testing.load_project").start()
+        self.proj = MagicMock()
+        self.proj.resolve_tests.return_value = [MagicMock(resource_id="tc-1")]
+        self.proj.trigger_tests.return_value = {"id": "run-1", "test_case_count": 1}
+        self.mock_load.return_value = self.proj
+        self.poll = patch("poly.output.console.poll_test_run_live").start()
+        patch("poly.output.console.info").start()
+        patch("poly.output.console.success").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _run(self) -> None:
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        testing_cli.TestingCommand.run(cli._create_parser().parse_args(["test", "run"]))
+
+    def test_a_run_where_every_test_passed_exits_0(self):
+        """A finished run with no failures or errors returns normally."""
+        self.poll.return_value = {"status": "completed", "passedCount": 1, "failedCount": 0}
+
+        self._run()
+
+    def test_a_run_that_did_not_fully_pass_exits_1(self):
+        """A failed test, an errored test, or polling that gave up all exit 1."""
+        for result in [
+            {"status": "completed", "failedCount": 1, "errorCount": 0},
+            {"status": "completed", "failedCount": 0, "errorCount": 1},
+            {"status": "running", "failedCount": 0, "errorCount": 0},
+            {},
+        ]:
+            with self.subTest(result=result):
+                self.poll.return_value = result
+
+                with self.assertRaises(SystemExit) as ctx:
+                    self._run()
+
+                self.assertEqual(ctx.exception.code, 1)
 
 
 class TestRunJsonTest(unittest.TestCase):

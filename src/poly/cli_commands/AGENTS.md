@@ -22,7 +22,8 @@ Rules for `src/poly/cli_commands/`. The repo-wide rules in the root `AGENTS.md` 
   `info`, `paged_output` for long lists).
 - Failures exit non-zero in both modes. Unexpected exceptions reach `handle_exception` in
   `cli.py`; don't catch and swallow them here.
-- Import heavy modules (console rendering, call/WebRTC, YAML dumpers) inside the method that
-  needs them, so `poly --help` and completion stay fast.
+- Import heavy modules (console rendering, `requests`, call/WebRTC, YAML dumpers) inside the
+  method that needs them, so every command, `poly --help` and completion stay fast.
+  `StartupImportsTest.DEFERRED_MODULES` in `tests/cli_test.py` fails if one loads at startup.
 - A new command or flag also needs a page in `docs/docs/reference/cli/` and, if a user skill
   covers the area, an update in `skills/`.

@@ -3,7 +3,6 @@
 Copyright PolyAI Limited
 """
 
-import asyncio
 import os
 import sys
 import uuid
@@ -127,6 +126,8 @@ class CallCommand(BaseCommand):
         aec: bool = True,
     ) -> None:
         """Start an interactive voice call with the agent's draft build."""
+        import asyncio
+
         from rich.markup import escape
 
         from poly.output.console import error, info, success, warning
@@ -150,7 +151,7 @@ class CallCommand(BaseCommand):
             push_success, output, _ = project.push_project(
                 force=False, skip_validation=False, dry_run=False, format=False
             )
-            if not push_success and output != "No changes detected":
+            if not push_success:
                 error(f"Failed to push before calling: {output}")
                 sys.exit(1)
             success("Project pushed.")

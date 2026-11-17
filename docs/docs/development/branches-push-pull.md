@@ -124,6 +124,8 @@ Merging uses the same conflict detection as `poly pull`, so `poly branch status`
 
 Merging into `main` also deploys the result to the `sandbox` environment. See [deploying your changes](./working-locally.md#deploying-your-changes) for promoting from there to `pre-release` and `live`.
 
+If the merge deploys straight to `live` while an experiment is running, [`poly branch merge`](../reference/cli/branch.md#poly-branch-merge) asks you to acknowledge it first.
+
 ## Habits that avoid trouble
 
 Most collaboration problems come from process rather than tooling:

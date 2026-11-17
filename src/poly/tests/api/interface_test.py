@@ -446,7 +446,7 @@ class SetDeploymentModeInterface(unittest.TestCase):
     """Tests for AgentStudioInterface.set_deployment_mode."""
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
+    @patch("requests.request")
     def test_patches_only_the_deployment_mode_in_the_project_config(self, mock_request, _mock_key):
         """The mode is sent nested under config, so no other project fields are touched."""
         mock_request.return_value = make_mock_response(200, json_body={"id": "proj1"})

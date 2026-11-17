@@ -8,8 +8,6 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-import requests
-
 logger = logging.getLogger(__name__)
 
 
@@ -66,6 +64,8 @@ class Auth0Handler:
         params: Optional[dict] = None,
     ) -> dict:
         """Make a request to the Auth0 API."""
+        import requests
+
         url = base_url + endpoint
 
         headers = {"Content-Type": "application/json"}

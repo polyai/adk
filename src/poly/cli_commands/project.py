@@ -500,7 +500,7 @@ class ProjectCommand(BaseCommand):
                     "success": True,
                     "agents": [
                         {
-                            "project_id": a.get("project_id"),
+                            "project_id": a.get("agentId"),
                             "agent_name": a.get("agentName"),
                             "updated_at": a.get("updatedAt"),
                             "branch_count": a.get("branchCount"),

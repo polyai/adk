@@ -14,6 +14,6 @@ def send_sms_via_janus(
     from_number: str,
     to_number: str,
     body: str,
-    base_url: str = "https://api.internal.polyai.app",
+    base_url: str = ...,
     timeout: int = 8,
 ) -> str: ...

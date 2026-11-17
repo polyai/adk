@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import os
 import tempfile
 import unittest
+from argparse import Namespace
 from unittest.mock import MagicMock, patch
 
 from poly.cli_commands.rtc import (
@@ -655,7 +656,7 @@ class TestRTCEdit(unittest.TestCase):
 
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_happy_path(self, mock_load_project, mock_editor):
         """Verify edit pulls, opens editor, and pushes data."""
@@ -675,7 +676,7 @@ class TestRTCEdit(unittest.TestCase):
         call_kwargs = mock_project.rtc_push_to_api.call_args[1]
         self.assertEqual(call_kwargs["variables"]["flag"], True)
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_schema_flag(self, mock_load_project, mock_editor):
         """Verify --schema edits and pushes schema instead of data."""
@@ -695,7 +696,7 @@ class TestRTCEdit(unittest.TestCase):
         call_kwargs = mock_project.rtc_push_to_api.call_args[1]
         self.assertEqual(call_kwargs["schema"]["title"], "Config")
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_no_changes(self, mock_load_project, mock_editor):
         """Verify no push when editor reports no changes."""
@@ -712,7 +713,7 @@ class TestRTCEdit(unittest.TestCase):
 
         mock_project.rtc_push_to_api.assert_not_called()
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_invalid_json(self, mock_load_project, mock_editor):
         """Verify no push when editor returns invalid JSON."""
@@ -730,7 +731,7 @@ class TestRTCEdit(unittest.TestCase):
         self.assertIn("Invalid JSON", result["error"])
         mock_project.rtc_push_to_api.assert_not_called()
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_race_detected(self, mock_load_project, mock_editor):
         """Verify push aborted when remote changed during editing."""
@@ -748,7 +749,7 @@ class TestRTCEdit(unittest.TestCase):
         mock_project.rtc_push_to_api.assert_not_called()
 
     @patch("questionary.confirm")
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_live_declined(self, mock_load_project, mock_editor, mock_confirm):
         """Verify live edit cancelled when user declines confirmation."""
@@ -766,7 +767,7 @@ class TestRTCEdit(unittest.TestCase):
 
         mock_project.rtc_push_to_api.assert_not_called()
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_updates_via_rtc_push_to_api(self, mock_load_project, mock_editor):
         """Verify edit delegates push to project.rtc_push_to_api."""
@@ -786,7 +787,7 @@ class TestRTCEdit(unittest.TestCase):
         call_kwargs = mock_project.rtc_push_to_api.call_args[1]
         self.assertTrue(call_kwargs["variables"]["flag"])
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_validates_data_against_schema(self, mock_load_project, mock_editor):
         """Verify edit validates edited data against schema before pushing."""
@@ -804,7 +805,7 @@ class TestRTCEdit(unittest.TestCase):
         self.assertIn("validation failed", result["error"])
         mock_project.rtc_push_to_api.assert_not_called()
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_null_variables_opens_empty_object_in_editor(self, mock_load_project, mock_editor):
         """The editor gets {} when the API returns null variables, not literal null.
@@ -827,7 +828,7 @@ class TestRTCEdit(unittest.TestCase):
         editor_content = mock_editor.call_args[0][0]
         self.assertEqual(editor_content, "{}\n")
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_schema_null_opens_empty_object_in_editor(self, mock_load_project, mock_editor):
         """--schema gets {} in the editor when the API returns null schema."""
@@ -846,7 +847,7 @@ class TestRTCEdit(unittest.TestCase):
         editor_content = mock_editor.call_args[0][0]
         self.assertEqual(editor_content, "{}\n")
 
-    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.output.console.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
     def test_edit_null_schema_skips_data_validation(self, mock_load_project, mock_editor):
         """With a null schema there is nothing to validate against, so the edit pushes."""
@@ -929,6 +930,23 @@ class TestRTCDiff(unittest.TestCase):
         data_changes = result["diffs"][0]["data"]
         self.assertEqual(len(data_changes), 1)
         self.assertEqual(data_changes[0]["path"], "flag")
+
+    @patch("poly.cli_commands.rtc.json_print")
+    def test_pull_and_diff_json_failures_exit_1(self, mock_json_print):
+        """rtc pull --json and rtc diff --json print the failure and exit 1."""
+        failure = {"success": False, "error": "No RTC config found."}
+        for subcommand, method in [("pull", "rtc_pull"), ("diff", "rtc_diff")]:
+            with self.subTest(subcommand=subcommand):
+                args = Namespace(
+                    rtc_subcommand=subcommand, path=self.temp_dir, env="sandbox", json=True
+                )
+
+                with patch.object(RTCCommand, method, return_value=failure):
+                    with self.assertRaises(SystemExit) as ctx:
+                        RTCCommand.run(args)
+
+                self.assertEqual(ctx.exception.code, 1)
+                mock_json_print.assert_called_with(failure)
 
     def setUp(self):
         """Set up test fixtures."""

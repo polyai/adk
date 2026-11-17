@@ -28,7 +28,7 @@ Information about the flow.
 
 Fields:
 - **name**: Human-readable flow name
-- **description** (required): What this flow does
+- **description**: What this flow does. Can be empty.
 - **start_step** (required): Name of the step to enter when the flow is triggered. Must match a real step name.
 
 Example:
@@ -40,6 +40,8 @@ start_step: Collect Details
 
 ## Flow Steps
 A step represents the agent's current position in the flow. There are 3 types of steps: default steps (no code), advanced steps, and function steps.
+
+A step name must be unique within its flow, across step types.
 
 ### Default Steps (`steps/*.yaml`)
 These steps use only LLM logic to process data and transition to other steps. They can define conditions for how to do this.
@@ -59,9 +61,10 @@ Fields:
 These define how the agent can transition out of one default node. They can transition to any other node and also be made to exit the flow.
 
 Example:
+- **name**: Label for the condition; 1 to 50 characters, unique within the step
 - **condition_type**: `step_condition` (go to another step) or `exit_flow_condition` (exit flow)
 - **description**: When this condition applies
-- **child_step**: Next step - **only for step_condition**; omit for exit_flow_condition
+- **child_step**: Next step in the same flow - **only for step_condition**; omit for exit_flow_condition
 - **required_entities**: Entities that must be collected before this condition can trigger
 
 **child_step rules:**

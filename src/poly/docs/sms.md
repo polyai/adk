@@ -11,7 +11,7 @@ SMS templates define text messages the agent can send during a conversation (e.g
 ## Structure
 
 Each template has:
-- **name**: Identifier. Referenced in prompts as `{{twilio_sms:template_name}}`.
+- **name**: Identifier, unique within the file. Referenced in prompts as `{{twilio_sms:template_name}}`.
 - **text**: Message body. Use `{{vrbl:variable_name}}` for dynamic values from `conv.state`.
 - **env_phone_numbers** (optional): Per-environment sender phone numbers:
   - **sandbox**: Phone number for sandbox environment
