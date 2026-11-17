@@ -1,7 +1,12 @@
 """Library module for PolyAI models."""
 
+import os
 from dataclasses import dataclass
 from datetime import datetime
+
+from poly.constants import POLY_HOME_DIR
+
+LIBRARY_DIR = os.path.join(POLY_HOME_DIR, "library")
 
 
 @dataclass
@@ -73,8 +78,7 @@ class Library:
         import json
         import os
 
-        library_dir = os.path.expanduser("~/.poly/library")
-        library_path = os.path.join(library_dir, f"{region}.json")
+        library_path = os.path.join(LIBRARY_DIR, f"{region}.json")
         if os.path.exists(library_path):
             try:
                 with open(library_path, "r") as f:
@@ -96,9 +100,8 @@ class Library:
         import json
         import os
 
-        library_dir = os.path.expanduser("~/.poly/library")
-        os.makedirs(library_dir, exist_ok=True)
-        library_path = os.path.join(library_dir, f"{self.region}.json")
+        os.makedirs(LIBRARY_DIR, exist_ok=True)
+        library_path = os.path.join(LIBRARY_DIR, f"{self.region}.json")
         with open(library_path, "w") as f:
             json.dump(
                 {

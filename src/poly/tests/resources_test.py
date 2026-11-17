@@ -130,6 +130,7 @@ from poly.resources.variant_attributes import (
     VariantAttribute,
     _read_attribute_type,
 )
+from poly.tests.library_test import make_library
 from poly.tests.testing_utils import mock_read_from_file, mock_variant_attributes_file
 
 TEST_CODE = """import random
@@ -3771,9 +3772,7 @@ conditions:
                     prompt=prompt,
                     position={"x": 0.0, "y": 0.0},
                 )
-                self.assertIsNone(
-                    empty_prompt_step.validate(resource_mappings=resource_mappings)
-                )
+                self.assertIsNone(empty_prompt_step.validate(resource_mappings=resource_mappings))
 
         # Test with missing flow config
         invalid_step = FlowStep(
@@ -4122,9 +4121,7 @@ conditions:
         """A condition pointing at a step in its own flow validates."""
         condition = self._step_condition_to("step-2")
 
-        self.assertIsNone(
-            condition.validate(resource_mappings=self._step_mappings_in_two_flows())
-        )
+        self.assertIsNone(condition.validate(resource_mappings=self._step_mappings_in_two_flows()))
 
     def test_validate_condition_child_step_in_other_flow_raises(self):
         """A condition pointing at another flow's step is rejected."""
@@ -4795,6 +4792,120 @@ prompt: This is a default step
         result = step.to_yaml_dict()
 
         self.assertEqual(result["extracted_entities"], ["apple", "mango", "zebra"])
+
+
+class FlowStepModelNamesTest(unittest.TestCase):
+    """Step ASR and LLM overrides are written by model name when the library knows them."""
+
+    FILE_PATH = os.path.join("flows", "test_flow", "steps", "test_step.yaml")
+
+    def setUp(self):
+        self.library = make_library()
+
+    def _step(self, asr: ASRConfig = None, llm: LLMConfig = None) -> FlowStep:
+        return FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="test_flow",
+            step_type=StepType.ADVANCED_STEP,
+            settings=FlowSettings(flow_id="flow-123", step_id="step-1", asr=asr, llm=llm),
+            conditions=[],
+            prompt="Hello",
+            position={"x": 0.0, "y": 0.0},
+        )
+
+    def _pretty(self, step: FlowStep, library=None) -> dict:
+        return yaml.safe_load(step.to_pretty(resource_mappings=[], library=library))
+
+    def _read(self, raw: str, library=None) -> FlowStep:
+        with mock_read_from_file(raw):
+            return FlowStep.read_local_resource(
+                file_path=self.FILE_PATH,
+                resource_id="flow-123_step-1",
+                resource_name="Test Step",
+                resource_mappings=[],
+                library=library,
+            )
+
+    def test_asr_override_is_written_by_name(self):
+        """A known provider and model pair is written as the model's name alone."""
+        step = self._step(asr=ASRConfig(provider="deepgram", model="nova-3"))
+
+        self.assertEqual(self._pretty(step, self.library)["asr"], {"model": "Deepgram Nova 3"})
+
+    def test_llm_override_is_written_by_name(self):
+        """A known provider model ID is written as `model`, keeping reasoning effort."""
+        step = self._step(
+            llm=LLMConfig(provider_model_id="polywhirl-3-5", reasoning_effort=ReasoningEffort.HIGH)
+        )
+
+        self.assertEqual(
+            self._pretty(step, self.library)["llm"],
+            {"model": "PolyAI Raven 3.5", "reasoning_effort": "high"},
+        )
+
+    def test_unknown_models_are_written_as_stored(self):
+        """Values missing from the library keep their raw IDs."""
+        step = self._step(
+            asr=ASRConfig(provider="deepgram", model="nova-9"),
+            llm=LLMConfig(provider_model_id="custom-model"),
+        )
+        pretty = self._pretty(step, self.library)
+
+        self.assertEqual(pretty["asr"], {"provider": "deepgram", "model": "nova-9"})
+        self.assertEqual(pretty["llm"]["provider_model_id"], "custom-model")
+
+    def test_without_a_library_ids_are_written(self):
+        """With no library, overrides are written exactly as before."""
+        step = self._step(
+            asr=ASRConfig(provider="deepgram", model="nova-3"),
+            llm=LLMConfig(provider_model_id="polywhirl-3-5"),
+        )
+        pretty = self._pretty(step)
+
+        self.assertEqual(pretty["asr"], {"provider": "deepgram", "model": "nova-3"})
+        self.assertEqual(pretty["llm"]["provider_model_id"], "polywhirl-3-5")
+
+    def test_names_are_read_back_as_ids(self):
+        """Reading a file written by name resolves each name to the platform's IDs."""
+        step = self._read(
+            "step_type: advanced_step\nname: Test Step\nprompt: Hello\n"
+            "asr:\n  model: Deepgram Nova 3\n"
+            "llm:\n  model: PolyAI Raven 3.5\n  reasoning_effort: high\n",
+            library=self.library,
+        )
+
+        self.assertEqual(step.settings.asr, ASRConfig(provider="deepgram", model="nova-3"))
+        self.assertEqual(step.settings.llm.provider_model_id, "polywhirl-3-5")
+        self.assertEqual(step.settings.llm.reasoning_effort, ReasoningEffort.HIGH)
+
+    def test_ids_are_still_read(self):
+        """A file that still holds raw IDs reads the same with a library loaded."""
+        step = self._read(
+            "step_type: advanced_step\nname: Test Step\nprompt: Hello\n"
+            "asr:\n  provider: deepgram\n  model: nova-3\n"
+            "llm:\n  provider_model_id: polywhirl-3-5\n",
+            library=self.library,
+        )
+
+        self.assertEqual(step.settings.asr, ASRConfig(provider="deepgram", model="nova-3"))
+        self.assertEqual(step.settings.llm.provider_model_id, "polywhirl-3-5")
+
+    def test_named_overrides_round_trip(self):
+        """Writing by name then reading back gives the same step settings."""
+        step = self._step(
+            asr=ASRConfig(provider="deepgram", model="nova-3"),
+            llm=LLMConfig(provider_model_id="polywhirl-3-5", reasoning_effort=ReasoningEffort.LOW),
+        )
+
+        read_back = self._read(
+            step.to_pretty(resource_mappings=[], library=self.library), self.library
+        )
+
+        self.assertEqual(read_back.settings.asr, step.settings.asr)
+        self.assertEqual(read_back.settings.llm, step.settings.llm)
 
 
 class EntityTests(unittest.TestCase):
@@ -6759,9 +6870,7 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
             self._read_disk(self.variants_file)["variants"],
             [{"name": "Site-A"}, {"name": "other"}],
         )
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("Site_A")), {"name": "Site-A"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("Site_A")), {"name": "Site-A"})
 
     def test_delete_then_append_keeps_every_lookup_pointing_at_its_entry(self):
         """Deleting shifts later entries down; a following append lands at the end."""
@@ -6843,17 +6952,13 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
     def test_external_edit_is_seen_after_the_file_changes_on_disk(self):
         """A rewritten file is reloaded, and lookups follow its new entries."""
         self._write(self.variants_file, "variants:\n  - name: alpha\n  - name: beta\n")
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("alpha")), {"name": "alpha"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("alpha")), {"name": "alpha"})
 
         self._write(self.variants_file, "variants:\n  - name: gamma\n  - name: beta\n")
         mtime = os.path.getmtime(self.variants_file) + 10
         os.utime(self.variants_file, (mtime, mtime))
 
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("gamma")), {"name": "gamma"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("gamma")), {"name": "gamma"})
         with self.assertRaises(FileNotFoundError):
             Variant._read_yaml_dict(self._variant_path("alpha"))
 
@@ -6885,12 +6990,8 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
         Variant(resource_id="v3", name="third").save(self.base_path)
         VariantAttribute.delete_resource(self._attribute_path("shared"))
 
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("second")), {"name": "second"}
-        )
-        self.assertEqual(
-            Variant._read_yaml_dict(self._variant_path("third")), {"name": "third"}
-        )
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("second")), {"name": "second"})
+        self.assertEqual(Variant._read_yaml_dict(self._variant_path("third")), {"name": "third"})
         self.assertEqual(
             VariantAttribute._read_yaml_dict(self._attribute_path("colour"))["name"], "colour"
         )
@@ -6900,9 +7001,7 @@ class MultiResourceYamlResourceIndexTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             VariantAttribute._read_yaml_dict(self._attribute_path("shared"))
         on_disk = self._read_disk(self.variants_file)
-        self.assertEqual(
-            [v["name"] for v in on_disk["variants"]], ["shared", "second", "third"]
-        )
+        self.assertEqual([v["name"] for v in on_disk["variants"]], ["shared", "second", "third"])
         self.assertEqual([a["name"] for a in on_disk["attributes"]], ["colour", "size"])
 
 
@@ -7642,11 +7741,15 @@ class ApiIntegrationTest(unittest.TestCase):
     def test_subresources_detect_header_only_and_description_only_changes(self):
         """A change to just the headers or just the description is an update; no change is nothing."""
         old = ApiIntegration(
-            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(headers={"Accept": "text/plain"})],
         )
 
         same = ApiIntegration(
-            resource_id="int-1", name="API", operations=[_operation(headers={"Accept": "text/plain"})]
+            resource_id="int-1",
+            name="API",
+            operations=[_operation(headers={"Accept": "text/plain"})],
         )
         self.assertEqual(same.get_new_updated_deleted_subresources(old), ([], [], []))
 
@@ -7851,7 +7954,9 @@ class ApiIntegrationTest(unittest.TestCase):
             request_body_schema=BODY_SCHEMA,
             response_schemas={"200": OK_SCHEMA},
         ).build_create_proto()
-        self.assertEqual(create.request_query_schema, json.dumps(QUERY_SCHEMA, separators=(",", ":")))
+        self.assertEqual(
+            create.request_query_schema, json.dumps(QUERY_SCHEMA, separators=(",", ":"))
+        )
         self.assertEqual(json.loads(create.request_body_schema), BODY_SCHEMA)
         self.assertEqual(json.loads(create.response_schemas["200"]), OK_SCHEMA)
         self.assertEqual(create.schema_source, HAND_WRITTEN_SCHEMA_SOURCE)
@@ -7912,7 +8017,9 @@ class ApiIntegrationTest(unittest.TestCase):
         _, updated, _ = edited.get_new_updated_deleted_subresources(old)
         self.assertEqual([op.request_body_schema for op in updated], [{"type": "object"}])
 
-        relabelled = _integration_with(_operation(request_body_schema=body, schema_source="openapi"))
+        relabelled = _integration_with(
+            _operation(request_body_schema=body, schema_source="openapi")
+        )
         _, updated, _ = relabelled.get_new_updated_deleted_subresources(old)
         self.assertEqual([op.schema_source for op in updated], ["openapi"])
 
@@ -8476,7 +8583,9 @@ class AsrSettingsTests(unittest.TestCase):
     }
 
     def _from_yaml(self, yaml_dict: dict) -> AsrSettings:
-        return AsrSettings.from_yaml_dict(yaml_dict, resource_id="asr_settings", name="asr_settings")
+        return AsrSettings.from_yaml_dict(
+            yaml_dict, resource_id="asr_settings", name="asr_settings"
+        )
 
     def _changes(self, new: dict, old: Optional[dict]):
         old_resource = self._from_yaml(old) if old is not None else None
@@ -13846,7 +13955,9 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         """Type hints are worked out once per class, while values are checked on every call."""
         resource_utils._field_type_hints.cache_clear()
         good = Topic(resource_id="T-1", name="a", actions="x", content="y", example_queries=[])
-        bad = Topic(resource_id="T-2", name="b", actions={"k": "v"}, content="y", example_queries=[])
+        bad = Topic(
+            resource_id="T-2", name="b", actions={"k": "v"}, content="y", example_queries=[]
+        )
 
         with unittest.mock.patch(
             "typing.get_type_hints", wraps=typing.get_type_hints

@@ -6670,6 +6670,19 @@ class LibraryCommandTest(unittest.TestCase):
 
         mock_list.assert_called_once_with(TEST_DIR, output_json=False)
 
+    @patch("poly.cli_commands.library.LibraryCommand.refresh_library")
+    def test_refresh_subcommand_dispatches_with_path_and_json(self, mock_refresh):
+        """`poly library refresh --json --path` reaches refresh_library with both flags."""
+        AgentStudioCLI().main(["library", "refresh", "--json", "--path", TEST_DIR])
+
+        mock_refresh.assert_called_once_with(TEST_DIR, output_json=True)
+
+    def test_refresh_forces_the_project_to_refetch(self):
+        """`poly library refresh` refetches even when the saved library is recent."""
+        LibraryCommand.refresh_library(TEST_DIR)
+
+        self.proj.refresh_library.assert_called_once_with(force_refresh=True)
+
     def test_library_without_subcommand_is_rejected(self):
         """`poly library` on its own needs asr or llm."""
         with self.assertRaises(SystemExit):
