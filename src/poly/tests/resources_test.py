@@ -1068,6 +1068,260 @@ def test_code(conv: Conversation, test_param: int):
         func.code = 'def trans_func(conv: Conversation, flow: Flow):\n    # conv.goto_flow("Missing Flow")\n    conv.goto_flow("Other Flow")\n'
         self.assertIsNone(func.validate(resource_mappings=resource_mappings))
 
+    @staticmethod
+    def _global_function(
+        name: str = "my_func",
+        parameters: list[FunctionParameters] | None = None,
+        latency_control: FunctionLatencyControl | None = None,
+        function_type: FunctionType = FunctionType.GLOBAL,
+    ) -> Function:
+        """Build a function whose code matches its name, type and parameters."""
+        signature = ["conv: Conversation"]
+        if function_type == FunctionType.TRANSITION:
+            signature.append("flow: Flow")
+        signature.extend(Function._param_def_string(p) for p in parameters or [])
+        return Function(
+            resource_id="fn-1",
+            name=name,
+            description="desc",
+            code=f"def {name}({', '.join(signature)}):\n    pass\n",
+            parameters=parameters or [],
+            latency_control=latency_control or FunctionLatencyControl(),
+            function_type=function_type,
+            flow_id="flow-1" if function_type == FunctionType.TRANSITION else None,
+            flow_name="Test Flow" if function_type == FunctionType.TRANSITION else None,
+        )
+
+    def test_validate_ascii_function_and_parameter_names_pass(self):
+        """ASCII identifiers are accepted for the function and its parameters."""
+        func = self._global_function(
+            name="_lookup_booking2",
+            parameters=[FunctionParameters(name="booking_ref", description="Ref", type="string")],
+        )
+        self.assertIsNone(func.validate())
+
+    def test_validate_non_ascii_function_name_raises(self):
+        """Python compiles a non-ASCII function name, but the platform rejects it."""
+        func = self._global_function(name="café")
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn("Function name 'café' must be a valid Python identifier", str(cm.exception))
+
+    def test_validate_reserved_word_state_variable_raises(self):
+        """A conv.state name is checked wherever it is written, including in a comment."""
+        func = self._global_function()
+        func.code += "    # conv.state.class is set elsewhere\n"
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn("State variable name 'class' is a reserved word in Python", str(cm.exception))
+
+    def test_validate_reserved_word_function_name_raises(self):
+        """A reserved word is reported as such rather than as a syntax error."""
+        func = self._global_function(name="class")
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn("Function name 'class' is a reserved word in Python", str(cm.exception))
+
+    def test_validate_non_ascii_parameter_name_raises(self):
+        """Parameter names follow the same rule as function names."""
+        func = self._global_function(
+            parameters=[FunctionParameters(name="número", description="Ref", type="string")]
+        )
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn(
+            "Parameter name 'número' must be a valid Python identifier", str(cm.exception)
+        )
+
+    def test_validate_blank_parameter_description_raises(self):
+        """A parameter description needs at least one visible character."""
+        for description in ("", "   ", None):
+            with self.subTest(description=description):
+                func = self._global_function(
+                    parameters=[
+                        FunctionParameters(
+                            name="booking_ref", description=description, type="string"
+                        )
+                    ]
+                )
+                with self.assertRaises(ValueError) as cm:
+                    func.validate()
+                self.assertIn(
+                    "Parameter 'booking_ref' description cannot be empty", str(cm.exception)
+                )
+
+    def test_validate_integer_latency_control_passes(self):
+        """Whole-number delays and durations, including zero, are accepted."""
+        func = self._global_function(
+            latency_control=FunctionLatencyControl(
+                enabled=True,
+                initial_delay=0,
+                interval=10,
+                delay_responses=[
+                    FunctionDelayResponse(message="One moment.", duration=0),
+                    FunctionDelayResponse(message="Still checking.", duration=3),
+                ],
+            )
+        )
+        self.assertIsNone(func.validate())
+
+    def test_validate_non_integer_latency_control_delays_raise(self):
+        """delay_before_responses_start and silence_after_each_response must be integers."""
+        for field_name, argument, value in [
+            ("initial_delay", "delay_before_responses_start", 1.5),
+            ("interval", "silence_after_each_response", 2.0),
+            ("initial_delay", "delay_before_responses_start", "2"),
+            ("interval", "silence_after_each_response", True),
+        ]:
+            with self.subTest(argument=argument, value=value):
+                latency_control = FunctionLatencyControl(
+                    enabled=True,
+                    delay_responses=[FunctionDelayResponse(message="One moment.", duration=1)],
+                )
+                setattr(latency_control, field_name, value)
+                func = self._global_function(latency_control=latency_control)
+                with self.assertRaises(ValueError) as cm:
+                    func.validate()
+                self.assertIn(f"{argument} must be an integer, got {value!r}", str(cm.exception))
+
+    def test_validate_out_of_range_latency_control_delay_still_raises(self):
+        """The 0-10 range applies to integer delays."""
+        func = self._global_function(
+            latency_control=FunctionLatencyControl(
+                enabled=True,
+                initial_delay=11,
+                delay_responses=[FunctionDelayResponse(message="One moment.", duration=1)],
+            )
+        )
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn(
+            "delay_before_responses_start must be between 0 and 10, got 11", str(cm.exception)
+        )
+
+    def test_validate_bad_delay_response_duration_raises(self):
+        """A delay response duration must be an integer of 0 or more."""
+        for duration in (-1, 1.5, "2", True):
+            with self.subTest(duration=duration):
+                func = self._global_function(
+                    latency_control=FunctionLatencyControl(
+                        enabled=True,
+                        delay_responses=[
+                            FunctionDelayResponse(message="One moment.", duration=duration)
+                        ],
+                    )
+                )
+                with self.assertRaises(ValueError) as cm:
+                    func.validate()
+                self.assertIn(
+                    "Delay response duration must be an integer of 0 or more, "
+                    f"got {duration!r} for 'One moment.'",
+                    str(cm.exception),
+                )
+
+    def test_validate_plain_start_and_end_functions_pass(self):
+        """Start and end functions take only conv and need no decorators."""
+        for name, function_type in [
+            ("start_function", FunctionType.START),
+            ("end_function", FunctionType.END),
+        ]:
+            with self.subTest(name=name):
+                func = self._global_function(name=name, function_type=function_type)
+                self.assertIsNone(func.validate())
+
+    def test_validate_start_and_end_functions_with_parameters_raise(self):
+        """The platform has no parameters on a start or end function update."""
+        for name, function_type in [
+            ("start_function", FunctionType.START),
+            ("end_function", FunctionType.END),
+        ]:
+            with self.subTest(name=name):
+                func = self._global_function(
+                    name=name,
+                    function_type=function_type,
+                    parameters=[
+                        FunctionParameters(name="caller", description="Caller", type="string")
+                    ],
+                )
+                with self.assertRaises(ValueError) as cm:
+                    func.validate()
+                self.assertIn(
+                    "Start and end functions do not support @func_parameter", str(cm.exception)
+                )
+
+    def test_validate_start_and_end_functions_with_latency_control_raise(self):
+        """The platform only finds global functions when updating latency control."""
+        for name, function_type in [
+            ("start_function", FunctionType.START),
+            ("end_function", FunctionType.END),
+        ]:
+            with self.subTest(name=name):
+                func = self._global_function(
+                    name=name,
+                    function_type=function_type,
+                    latency_control=FunctionLatencyControl(
+                        enabled=True,
+                        delay_responses=[FunctionDelayResponse(message="One moment.", duration=1)],
+                    ),
+                )
+                with self.assertRaises(ValueError) as cm:
+                    func.validate()
+                self.assertIn(
+                    "Start and end functions do not support @func_latency_control",
+                    str(cm.exception),
+                )
+
+    def test_validate_start_function_read_from_a_decorated_file_raises(self):
+        """Decorators in a start function file are parsed on read and rejected by validate."""
+        content = (
+            FUNCTION_HEADER
+            + "\n\n@func_parameter('caller', 'The caller')\n"
+            + "def start_function(conv: Conversation, caller: str):\n    pass\n"
+        )
+        with mock_read_from_file(content):
+            func = Function.read_local_resource(
+                file_path=os.path.join("functions", "start_function.py"),
+                resource_id="fn-start",
+                resource_name="start_function",
+                resource_mappings=[],
+                known_parameters=[],
+            )
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn("Start and end functions do not support @func_parameter", str(cm.exception))
+
+    def test_extract_decorators_reads_negative_latency_values(self):
+        """A negative number is read as written, so validation can reject it."""
+        code = (
+            "@func_latency_control(delay_before_responses_start=-1, "
+            "silence_after_each_response=1, delay_responses=[('One moment', -1)])\n"
+            "def lookup(conv: Conversation):\n    pass\n"
+        )
+
+        _, _, _, latency_control = Function._extract_decorators(code, "lookup", [], None)
+
+        self.assertEqual(latency_control.initial_delay, -1)
+        self.assertEqual(latency_control.delay_responses[0].duration, -1)
+
+    def test_validate_latency_value_that_is_not_a_literal_raises(self):
+        """A name or expression is not read as 0, so validation can reject it."""
+        code = (
+            "@func_latency_control(delay_before_responses_start=DELAY, "
+            "silence_after_each_response=1, delay_responses=[('One moment', WAIT * 2)])\n"
+            "def lookup(conv: Conversation):\n    pass\n"
+        )
+
+        _, _, _, latency_control = Function._extract_decorators(code, "lookup", [], None)
+
+        self.assertEqual(latency_control.initial_delay, "DELAY")
+        self.assertEqual(latency_control.delay_responses[0].duration, "WAIT * 2")
+        func = self._global_function(latency_control=latency_control)
+        with self.assertRaises(ValueError) as cm:
+            func.validate()
+        self.assertIn(
+            "delay_before_responses_start must be an integer, got 'DELAY'", str(cm.exception)
+        )
+
     def test_extract_decorators_untyped_parameter_raises_value_error(self):
         """A parameter without a type annotation raises ValueError."""
         code = """@func_description('Book a table')
@@ -1796,6 +2050,50 @@ class TopicTests(unittest.TestCase):
             topic_with_too_many_example_queries.validate(resource_mappings=[])
         self.assertIn("Example queries must be less than 20", str(cm.exception))
 
+    def _topic(self, name: str = "Opening hours", example_queries: list[str] = None) -> Topic:
+        return Topic(
+            resource_id="TOPIC-1",
+            name=name,
+            actions="",
+            content="We open at 9.",
+            example_queries=example_queries or [],
+        )
+
+    def test_validate_accepts_name_that_only_mentions_guardrail(self):
+        """Only the reserved prefix is rejected, not the word itself."""
+        for name in ("Guardrail questions", "About Guardrail - policies", "Guardrail -"):
+            with self.subTest(name=name):
+                self._topic(name=name).validate(resource_mappings=[])
+
+    def test_validate_rejects_guardrail_name_prefix_in_any_case(self):
+        """Agent Studio reserves the `Guardrail - ` prefix for guardrails."""
+        for name in ("Guardrail - Refunds", "guardrail - refunds", "  GUARDRAIL - Refunds"):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError) as cm:
+                    self._topic(name=name).validate(resource_mappings=[])
+                self.assertIn("cannot start with 'Guardrail - '", str(cm.exception))
+
+    def test_validate_accepts_plain_example_queries(self):
+        self._topic(example_queries=["When do you open?", "Are you open on Sunday?"]).validate(
+            resource_mappings=[]
+        )
+
+    def test_validate_rejects_blank_example_query(self):
+        for query in ("", "   "):
+            with self.subTest(query=query):
+                with self.assertRaises(ValueError) as cm:
+                    self._topic(example_queries=["When do you open?", query]).validate(
+                        resource_mappings=[]
+                    )
+                self.assertIn("Example queries must not be empty", str(cm.exception))
+
+    def test_validate_rejects_pipe_in_example_query(self):
+        with self.assertRaises(ValueError) as cm:
+            self._topic(example_queries=["open | closed"]).validate(resource_mappings=[])
+        self.assertIn(
+            "Example query 'open | closed' must not contain the '|' character", str(cm.exception)
+        )
+
     def test_read_local_resource(self):
         """Test reading a topic from a YAML file."""
         test_file_pretty_content = """actions: Run function {{fn:test_function}}
@@ -2298,6 +2596,29 @@ example_queries:
 
         self.assertIn("Example queries must be less than 20", str(cm.exception))
 
+    def test_topic_name_and_example_query_rules_apply_to_child_topics(self):
+        """A child topic is held to the same name and example query rules as a base topic."""
+        cases = {
+            "cannot start with 'Guardrail - '": {"name": "Guardrail - Horario"},
+            "Example queries must not be empty": {"example_queries": ["  "]},
+            "must not contain the '|' character": {"example_queries": ["abren | cierran"]},
+        }
+        for message, overrides in cases.items():
+            with self.subTest(message=message):
+                fields = {
+                    "resource_id": "TOPIC-es-1",
+                    "name": "Opening Hours",
+                    "variant_id": "VARIANT-es",
+                    "variant_name": "Spanish",
+                    "actions": "",
+                    "content": "",
+                    "example_queries": ["¿a qué hora abren?"],
+                }
+                fields.update(overrides)
+                with self.assertRaises(ValueError) as cm:
+                    ChildTopic(**fields).validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
+                self.assertIn(message, str(cm.exception))
+
     def test_unknown_reference_raises(self):
         """References in actions/content must resolve, as they do for a base topic."""
         child_topic = ChildTopic(
@@ -2544,16 +2865,14 @@ class VoiceGreetingTests(unittest.TestCase):
         """Test validation of greeting message."""
         self.assertIsNone(TEST_GREETING.validate(resource_mappings=[]))
 
-        # Test with empty message
+        # An empty message is valid
         empty_greeting = VoiceGreeting(
             resource_id="greeting_123",
             name="greeting",
             welcome_message="",
             language_code="en-GB",
         )
-        with self.assertRaises(ValueError) as cm:
-            empty_greeting.validate(resource_mappings=[])
-        self.assertIn("Welcome message cannot be empty.", str(cm.exception))
+        self.assertIsNone(empty_greeting.validate(resource_mappings=[]))
 
         # Test with invalid function reference
         invalid_greeting = VoiceGreeting(
@@ -2593,6 +2912,38 @@ class VoiceGreetingTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             empty_lang_greeting.validate()
         self.assertIn("Language code cannot be empty.", str(cm.exception))
+
+    def test_empty_welcome_message_round_trips(self):
+        """A greeting pulled with an empty welcome message reads back from YAML unchanged."""
+        pulled = VoiceGreeting.from_projection(
+            {
+                "channels": {
+                    "voice": {
+                        "config": {"greeting": {"welcomeMessage": "", "languageCode": "en-GB"}}
+                    }
+                }
+            }
+        )["voice_greeting"]
+
+        yaml_dict = resource_utils.load_yaml(resource_utils.dump_yaml(pulled.to_yaml_dict()))
+        read_back = VoiceGreeting.from_yaml_dict(
+            yaml_dict, resource_id="voice_greeting", name="voice_greeting"
+        )
+
+        self.assertEqual(yaml_dict["welcome_message"], "")
+        self.assertEqual(read_back, pulled)
+        self.assertIsNone(read_back.validate(resource_mappings=[]))
+
+    def test_welcome_message_key_without_value_reads_as_empty(self):
+        """`welcome_message:` with nothing after it reads as an empty message."""
+        greeting = VoiceGreeting.from_yaml_dict(
+            {"welcome_message": None, "language_code": "en-GB"},
+            resource_id="voice_greeting",
+            name="voice_greeting",
+        )
+
+        self.assertEqual(greeting.welcome_message, "")
+        self.assertIsNone(greeting.validate(resource_mappings=[]))
 
     def test_read_local_resource(self):
         """Test reading a greeting from a YAML file."""
@@ -3120,16 +3471,14 @@ class FlowConfigTests(unittest.TestCase):
             invalid_config.validate(resource_mappings=resource_mappings)
         self.assertIn("Start step 'missing-step' not found.", str(cm.exception))
 
-        # Test with empty description
-        invalid_config = FlowConfig(
+        # An empty description is valid
+        empty_description_config = FlowConfig(
             resource_id="flow-123",
             name="Test Flow",
             description="",
             start_step="step-1",
         )
-        with self.assertRaises(ValueError) as cm:
-            invalid_config.validate(resource_mappings=resource_mappings)
-        self.assertIn("Description cannot be empty.", str(cm.exception))
+        self.assertIsNone(empty_description_config.validate(resource_mappings=resource_mappings))
 
         # Test with invalid description
         invalid_config = FlowConfig(
@@ -3143,6 +3492,73 @@ class FlowConfigTests(unittest.TestCase):
         self.assertIn(
             "Description cannot contain leading or trailing whitespace.", str(cm.exception)
         )
+
+    @staticmethod
+    def _step_mapping(
+        resource_type: type, step_id: str, name: str, folder: str, flow_id: str = "flow-123"
+    ) -> ResourceMapping:
+        """Build a mapping for a step file in the given flow."""
+        extension = "py" if resource_type is FunctionStep else "yaml"
+        return ResourceMapping(
+            resource_id=f"{flow_id}_{step_id}",
+            resource_name=name,
+            resource_type=resource_type,
+            file_path=f"flows/test_flow/{folder}/{name}.{extension}",
+            resource_prefix=None,
+            flow_name="Test Flow" if flow_id == "flow-123" else "Other Flow",
+            flow_id=flow_id,
+        )
+
+    def test_validate_distinct_step_names_across_types_passes(self):
+        """Steps of different types with different names validate."""
+        resource_mappings = [
+            self._step_mapping(FlowStep, "step-1", "lookup", "steps"),
+            self._step_mapping(FunctionStep, "step-2", "process", "function_steps"),
+            # The same name in another flow is not a clash.
+            self._step_mapping(FunctionStep, "step-9", "lookup", "function_steps", "flow-456"),
+        ]
+
+        self.assertIsNone(TEST_FLOW_CONFIG.validate(resource_mappings=resource_mappings))
+
+    def test_validate_step_name_shared_across_types_raises(self):
+        """A function step named like a YAML step in the same flow is reported once."""
+        resource_mappings = [
+            self._step_mapping(FlowStep, "step-1", "lookup", "steps"),
+            self._step_mapping(FunctionStep, "step-2", "lookup", "function_steps"),
+        ]
+
+        with self.assertRaises(ValueError) as cm:
+            TEST_FLOW_CONFIG.validate(resource_mappings=resource_mappings)
+
+        self.assertEqual(
+            str(cm.exception),
+            "Step names must be unique within a flow. Duplicates: ['lookup']",
+        )
+
+    def test_empty_description_round_trips(self):
+        """A flow pulled with an empty description reads back from YAML unchanged."""
+        pulled = FlowConfig.from_projection(
+            {
+                "flows": {
+                    "flows": {
+                        "entities": {
+                            "FLOW-1": {
+                                "name": "Booking",
+                                "description": "",
+                                "startStepId": "STEP-A",
+                                "steps": {"entities": {}},
+                            }
+                        }
+                    }
+                }
+            }
+        )["FLOW-1"]
+
+        yaml_dict = resource_utils.load_yaml(resource_utils.dump_yaml(pulled.to_yaml_dict()))
+        read_back = FlowConfig.from_yaml_dict(yaml_dict, resource_id="FLOW-1", name="Booking")
+
+        self.assertEqual(yaml_dict["description"], "")
+        self.assertEqual(read_back, pulled)
 
     def test_read_local_resource(self):
         """Test reading a flow config from a YAML file."""
@@ -3621,21 +4037,23 @@ conditions:
         ]
         self.assertIsNone(TEST_FLOW_STEP.validate(resource_mappings=resource_mappings))
 
-        # Test with empty prompt
-        invalid_step = FlowStep(
-            resource_id="flow-123_step-1",
-            step_id="step-1",
-            name="Test Step",
-            flow_id="flow-123",
-            flow_name="Test Flow",
-            step_type=StepType.ADVANCED_STEP,
-            conditions=[],
-            prompt=None,
-            position={"x": 0.0, "y": 0.0},
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_step.validate(resource_mappings=resource_mappings)
-        self.assertIn("Prompt cannot be empty.", str(cm.exception))
+        # An empty prompt is valid
+        for prompt in (None, "", "   "):
+            with self.subTest(prompt=prompt):
+                empty_prompt_step = FlowStep(
+                    resource_id="flow-123_step-1",
+                    step_id="step-1",
+                    name="Test Step",
+                    flow_id="flow-123",
+                    flow_name="Test Flow",
+                    step_type=StepType.ADVANCED_STEP,
+                    conditions=[],
+                    prompt=prompt,
+                    position={"x": 0.0, "y": 0.0},
+                )
+                self.assertIsNone(
+                    empty_prompt_step.validate(resource_mappings=resource_mappings)
+                )
 
         # Test with missing flow config
         invalid_step = FlowStep(
@@ -3881,6 +4299,121 @@ conditions:
                 resource_mappings=resource_mappings_with_all_entities
             )
         )
+
+    FLOW_CONFIG_MAPPING = ResourceMapping(
+        resource_id="flow-123",
+        resource_name="Test Flow",
+        resource_type=FlowConfig,
+        file_path="flows/test_flow/flow_config.yaml",
+        resource_prefix=None,
+        flow_name="Test Flow",
+        flow_id="flow-123",
+    )
+
+    @staticmethod
+    def _default_step_with_conditions(*condition_names: str) -> FlowStep:
+        """Build a default step with one exit-flow condition per name."""
+        return FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.DEFAULT_STEP,
+            conditions=[
+                Condition(
+                    resource_id=f"cond-{index}",
+                    name=condition_name,
+                    condition_type=ConditionType.EXIT_FLOW,
+                    step_id="step-1",
+                    flow_id="flow-123",
+                )
+                for index, condition_name in enumerate(condition_names)
+            ],
+            prompt="Hello, how can I help you?",
+        )
+
+    def test_validate_condition_name_at_length_limit_passes(self):
+        """A 50-character condition name validates, ignoring surrounding whitespace."""
+        step = self._default_step_with_conditions(f"  {'a' * 50}  ")
+
+        self.assertIsNone(step.validate(resource_mappings=[self.FLOW_CONFIG_MAPPING]))
+
+    def test_validate_condition_name_outside_length_limit_raises(self):
+        """Whitespace-only names and names over 50 characters are rejected."""
+        cases = {
+            "   ": "Condition name cannot be empty.",
+            "a" * 51: "Condition name cannot be longer than 50 characters.",
+        }
+        for condition_name, expected_error in cases.items():
+            with self.subTest(condition_name=condition_name):
+                step = self._default_step_with_conditions(condition_name)
+
+                with self.assertRaises(ValueError) as cm:
+                    step.validate(resource_mappings=[self.FLOW_CONFIG_MAPPING])
+
+                self.assertIn(expected_error, str(cm.exception))
+
+    def test_validate_distinct_condition_names_passes(self):
+        """Condition names that differ, even only by case, validate."""
+        step = self._default_step_with_conditions("yes", "Yes", "no")
+
+        self.assertIsNone(step.validate(resource_mappings=[self.FLOW_CONFIG_MAPPING]))
+
+    def test_validate_duplicate_condition_names_raises(self):
+        """Two conditions in a step with the same trimmed name are rejected."""
+        step = self._default_step_with_conditions("yes", " yes ", "no")
+
+        with self.assertRaises(ValueError) as cm:
+            step.validate(resource_mappings=[self.FLOW_CONFIG_MAPPING])
+
+        self.assertEqual(
+            str(cm.exception),
+            "Condition names must be unique within a step. Duplicates: ['yes']",
+        )
+
+    def _step_condition_to(self, child_step: str) -> Condition:
+        """Build a step condition in flow-123 pointing at the given step id."""
+        return Condition(
+            resource_id="cond-1",
+            name="Next",
+            condition_type=ConditionType.STEP,
+            child_step=child_step,
+            step_id="step-1",
+            flow_id="flow-123",
+        )
+
+    def _step_mappings_in_two_flows(self) -> list[ResourceMapping]:
+        """Mappings for step-2 in flow-123 and step-9 in flow-456."""
+        return [
+            ResourceMapping(
+                resource_id=f"{flow_id}_{step_id}",
+                resource_name=step_id,
+                resource_type=FlowStep,
+                file_path=f"flows/{flow_id}/steps/{step_id}.yaml",
+                resource_prefix=None,
+                flow_name=flow_id,
+                flow_id=flow_id,
+            )
+            for flow_id, step_id in (("flow-123", "step-2"), ("flow-456", "step-9"))
+        ]
+
+    def test_validate_condition_child_step_in_same_flow_passes(self):
+        """A condition pointing at a step in its own flow validates."""
+        condition = self._step_condition_to("step-2")
+
+        self.assertIsNone(
+            condition.validate(resource_mappings=self._step_mappings_in_two_flows())
+        )
+
+    def test_validate_condition_child_step_in_other_flow_raises(self):
+        """A condition pointing at another flow's step is rejected."""
+        condition = self._step_condition_to("step-9")
+
+        with self.assertRaises(ValueError) as cm:
+            condition.validate(resource_mappings=self._step_mappings_in_two_flows())
+
+        self.assertEqual(str(cm.exception), "Step 'step-9' not found in this flow")
 
     def test_get_new_updated_deleted_subresources(self):
         """Test get_new_updated_deleted_subresources for flow step.
@@ -4180,6 +4713,49 @@ conditions:
         self.assertEqual(updated[0].name, "Updated Condition 1")
         self.assertEqual(len(deleted), 1)  # condition_3 is deleted
         self.assertEqual(deleted[0].resource_id, "cond-3")
+
+    def test_empty_prompt_round_trips(self):
+        """A step pulled with an empty prompt reads back from YAML unchanged."""
+        for step_type in ("advanced_step", "default_step"):
+            with self.subTest(step_type=step_type):
+                pulled = FlowStep.from_projection(
+                    {
+                        "flows": {
+                            "flows": {
+                                "entities": {
+                                    "FLOW-1": {
+                                        "name": "Booking",
+                                        "steps": {
+                                            "entities": {
+                                                "STEP-A": {
+                                                    "name": "greet",
+                                                    "type": step_type,
+                                                    "prompt": "",
+                                                    "conditions": [],
+                                                }
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                )["FLOW-1_STEP-A"]
+
+                yaml_dict = resource_utils.load_yaml(
+                    resource_utils.dump_yaml(pulled.to_yaml_dict())
+                )
+                read_back = FlowStep.from_yaml_dict(
+                    yaml_dict,
+                    resource_id="FLOW-1_STEP-A",
+                    file_name="greet",
+                    flow_id="FLOW-1",
+                    flow_name="Booking",
+                )
+
+                self.assertEqual(yaml_dict["prompt"], "")
+                self.assertEqual(read_back.prompt, "")
+                self.assertEqual(read_back.to_yaml_dict(), pulled.to_yaml_dict())
 
     def test_read_local_resource_advanced_step(self):
         """Test reading a flow step from a YAML file with ASR and DTMF."""
@@ -4606,6 +5182,120 @@ class EntityTests(unittest.TestCase):
             config={},  # FREE_TEXT has no required config fields
         )
         self.assertIsNone(entity_without_config.validate())
+
+    @staticmethod
+    def _entity(entity_type: EntityType, config: dict, description: str = "A test entity"):
+        return Entity(
+            resource_id="entity-1",
+            name="test_entity",
+            description=description,
+            entity_type=entity_type,
+            config=config,
+        )
+
+    def test_validate_entity_with_description_passes(self):
+        """An entity with a description is valid."""
+        self.assertIsNone(self._entity(EntityType.FREE_TEXT, {}).validate())
+
+    def test_validate_entity_with_empty_or_blank_description_raises_value_error(self):
+        """The platform requires a description, so an empty or blank one fails locally."""
+        for description in ("", "   "):
+            with self.subTest(description=description):
+                entity = self._entity(EntityType.FREE_TEXT, {}, description=description)
+                with self.assertRaises(ValueError) as cm:
+                    entity.validate()
+                self.assertEqual("Description cannot be empty.", str(cm.exception))
+
+    def test_validate_numeric_bounds_at_the_limits_pass(self):
+        """A min of 0 and a max of 1,000,000 are the widest bounds allowed."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": True, "min": 0, "max": 1_000_000})
+        self.assertIsNone(entity.validate())
+
+    def test_validate_numeric_min_below_zero_raises_value_error(self):
+        """min cannot be negative, whether or not the range is on."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": False, "min": -1, "max": 10})
+        with self.assertRaises(ValueError) as cm:
+            entity.validate()
+        self.assertIn("'min' must be at least 0", str(cm.exception))
+
+    def test_validate_numeric_max_above_limit_raises_value_error(self):
+        """max cannot exceed 1,000,000, whether or not the range is on."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": False, "max": 1_000_000.5})
+        with self.assertRaises(ValueError) as cm:
+            entity.validate()
+        self.assertIn("'max' must be at most 1,000,000", str(cm.exception))
+
+    def test_validate_numeric_range_with_max_equal_to_min_passes(self):
+        """With the range on, max may equal min."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": True, "min": 5, "max": 5})
+        self.assertIsNone(entity.validate())
+
+    def test_validate_numeric_range_with_max_below_min_raises_value_error(self):
+        """With the range on, max cannot be less than min."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": True, "min": 5, "max": 4})
+        with self.assertRaises(ValueError) as cm:
+            entity.validate()
+        self.assertIn("'max' cannot be less than 'min'", str(cm.exception))
+
+    def test_validate_numeric_max_below_min_without_range_passes(self):
+        """The order of the bounds is only checked when the range is on."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": False, "min": 5, "max": 4})
+        self.assertIsNone(entity.validate())
+
+    def test_validate_numeric_range_with_min_but_no_max_raises_value_error(self):
+        """A missing max is pushed as 0, so a range with only a positive min says to set max."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": True, "min": 5})
+        with self.assertRaises(ValueError) as cm:
+            entity.validate()
+        self.assertIn("'max' cannot be less than 'min'", str(cm.exception))
+
+    def test_validate_numeric_range_with_max_but_no_min_passes(self):
+        """A missing min is pushed as 0, which any allowed max is at or above."""
+        entity = self._entity(EntityType.NUMERIC, {"has_range": True, "max": 20})
+        self.assertIsNone(entity.validate())
+
+    def test_validate_alphanumeric_regular_expression_that_compiles_passes(self):
+        """A regular expression that compiles is valid; so is an empty one."""
+        for pattern in (r"^[A-Z]{2}\d{6}$", ""):
+            with self.subTest(pattern=pattern):
+                entity = self._entity(
+                    EntityType.ALPHANUMERIC,
+                    {"enabled": True, "validation_type": "regex", "regular_expression": pattern},
+                )
+                self.assertIsNone(entity.validate())
+
+    def test_validate_alphanumeric_regular_expression_that_fails_to_compile_raises(self):
+        """A regular expression that does not compile fails locally."""
+        entity = self._entity(
+            EntityType.ALPHANUMERIC,
+            {"enabled": True, "validation_type": "regex", "regular_expression": "[a-z"},
+        )
+        with self.assertRaises(ValueError) as cm:
+            entity.validate()
+        self.assertIn("'regular_expression' is not a valid regular expression", str(cm.exception))
+
+    def test_validate_text_list_config_with_strings_passes(self):
+        """Enum options and phone number country codes that are all text are valid."""
+        for entity_type, config in (
+            (EntityType.ENUM, {"options": ["1", "2"]}),
+            (EntityType.PHONE_NUMBER, {"enabled": True, "country_codes": ["US", "44"]}),
+        ):
+            with self.subTest(entity_type=entity_type):
+                self.assertIsNone(self._entity(entity_type, config).validate())
+
+    def test_validate_text_list_config_with_non_string_item_raises_value_error(self):
+        """An unquoted number among enum options or country codes fails in validate."""
+        for entity_type, config, config_field in (
+            (EntityType.ENUM, {"options": ["one", 2]}, "options"),
+            (EntityType.PHONE_NUMBER, {"country_codes": ["US", 44]}, "country_codes"),
+        ):
+            with self.subTest(entity_type=entity_type):
+                with self.assertRaises(ValueError) as cm:
+                    self._entity(entity_type, config).validate()
+                self.assertIn(
+                    f"Config field '{config_field}' must be a list of text values",
+                    str(cm.exception),
+                )
 
 
 TEST_FUNCTION_STEP_CODE = """def process_data(conv: Conversation, flow: Flow):
@@ -6718,6 +7408,102 @@ class HandoffTests(unittest.TestCase):
             }
         )
 
+    @staticmethod
+    def _handoff(**kwargs) -> Handoff:
+        defaults = {"resource_id": "ho-1", "name": "H", "sip_config": {"method": "bye"}}
+        defaults.update(kwargs)
+        return Handoff(**defaults)
+
+    def test_validate_fields_at_their_length_limits_pass(self):
+        """Name, description, phone number and outbound endpoint at their limits are valid."""
+        self._handoff(
+            name="n" * 100,
+            description="d" * 300,
+            sip_config={
+                "method": "invite",
+                "phone_number": "1" * 100,
+                "outbound_endpoint": "e" * 100,
+                "outbound_encryption": "TLS/SRTP",
+            },
+        ).validate()
+        self._handoff(sip_config={"method": "refer", "phone_number": "1" * 100}).validate()
+
+    def test_validate_field_over_its_length_limit_raises_value_error(self):
+        """Each length-limited field fails one character over its limit, naming the limit."""
+        invite = {"method": "invite", "outbound_encryption": "TLS/SRTP"}
+        cases = [
+            ({"name": "n" * 101}, "name is longer than 100 characters"),
+            ({"description": "d" * 301}, "description is longer than 300 characters"),
+            (
+                {"sip_config": {**invite, "phone_number": "1" * 101}},
+                "phone_number is longer than 100 characters",
+            ),
+            (
+                {"sip_config": {"method": "refer", "phone_number": "1" * 101}},
+                "phone_number is longer than 100 characters",
+            ),
+            (
+                {"sip_config": {**invite, "outbound_endpoint": "e" * 101}},
+                "outbound_endpoint is longer than 100 characters",
+            ),
+        ]
+        for kwargs, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as cm:
+                    self._handoff(**kwargs).validate()
+                self.assertIn(message, str(cm.exception))
+
+    def test_validate_sip_headers_within_the_limits_pass(self):
+        """Header names of allowed characters and printable ASCII values are valid."""
+        self._handoff(
+            sip_headers=[
+                {"key": "X-Reason", "value": "escalation"},
+                {"key": "k" * 100, "value": "v" * 1000},
+                {"key": "A!#$%&'*+-.^_~9", "value": ' ~ printable: {"a": 1}'},
+            ]
+        ).validate()
+
+    def test_validate_sip_header_with_empty_key_is_ignored(self):
+        """A header with an empty key is left out of the push, so it is not checked."""
+        handoff = self._handoff(
+            sip_headers=[{"key": "", "value": 5}, {"key": "X-Kept", "value": "v"}]
+        )
+        handoff.validate()
+        self.assertEqual(
+            [h.key for h in handoff.build_create_proto().sip_headers.headers], ["X-Kept"]
+        )
+
+    def test_validate_malformed_sip_header_raises_value_error(self):
+        """A header that is not a text key and a text value fails in validate."""
+        cases = [
+            ([{"key": "X-Count", "value": 5}], "needs a text 'key' and 'value'"),
+            ([{"key": 5, "value": "v"}], "needs a text 'key' and 'value'"),
+            ([{"key": "X-No-Value"}], "needs a text 'key' and 'value'"),
+        ]
+        for sip_headers, message in cases:
+            with self.subTest(sip_headers=sip_headers):
+                with self.assertRaises(ValueError) as cm:
+                    self._handoff(sip_headers=sip_headers).validate()
+                self.assertIn(message, str(cm.exception))
+
+    def test_validate_sip_header_outside_the_limits_raises_value_error(self):
+        """A header name or value that is too long or has disallowed characters fails."""
+        cases = [
+            ("k" * 101, "v", "must be at most 100 letters, digits"),
+            ("X Reason", "v", "must be at most 100 letters, digits"),
+            ("X:Reason", "v", "must be at most 100 letters, digits"),
+            ("X-Reason\n", "v", "must be at most 100 letters, digits"),
+            ("X-Reason", "v" * 1001, "must be at most 1000 printable ASCII"),
+            ("X-Reason", "caf\u00e9", "must be at most 1000 printable ASCII"),
+            ("X-Reason", "a\tb", "must be at most 1000 printable ASCII"),
+            ("X-Reason", "line\n", "must be at most 1000 printable ASCII"),
+        ]
+        for key, value, message in cases:
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(ValueError) as cm:
+                    self._handoff(sip_headers=[{"key": key, "value": value}]).validate()
+                self.assertIn(message, str(cm.exception))
+
     def test_make_pretty_from_pretty_discover(self):
         """make_pretty/from_pretty pass through to utils; discover_resources returns [] when no file, paths when file exists."""
         content = "name: Test\nsip_config:\n  method: bye\n"
@@ -7587,6 +8373,28 @@ class PhraseFilterTests(unittest.TestCase):
             pf.validate(resource_mappings=[])
         self.assertIn("regular expression", str(cm.exception).lower())
 
+    def test_validate_accepts_empty_or_valid_language_code(self):
+        """An empty language code applies the filter to every language."""
+        for language_code in ("", "en-GB"):
+            with self.subTest(language_code=language_code):
+                PhraseFilter(
+                    resource_id="sk-1",
+                    name="Filter",
+                    regular_expressions=[r"x"],
+                    language_code=language_code,
+                ).validate(resource_mappings=[])
+
+    def test_validate_invalid_language_code_raises(self):
+        pf = PhraseFilter(
+            resource_id="sk-1",
+            name="Filter",
+            regular_expressions=[r"x"],
+            language_code="not a language",
+        )
+        with self.assertRaises(ValueError) as cm:
+            pf.validate(resource_mappings=[])
+        self.assertIn("Invalid language code: not a language", str(cm.exception))
+
     def test_build_protos(self):
         """build_create_proto, build_update_proto, build_delete_proto set fields correctly."""
         pf = PhraseFilter(
@@ -7712,6 +8520,29 @@ class PronunciationTests(unittest.TestCase):
         """validate succeeds when regex is provided."""
         p = Pronunciation(resource_id="pr-1", regex=r"\bword\b", replacement="x")
         p.validate()
+
+    def test_validate_whitespace_only_regex_raises(self):
+        """A regex of only whitespace counts as missing."""
+        p = Pronunciation(resource_id="pr-1", regex="   ", replacement="x")
+        with self.assertRaises(ValueError) as cm:
+            p.validate()
+        self.assertIn("Regex pattern is required", str(cm.exception))
+
+    def test_validate_accepts_empty_or_valid_language_code(self):
+        """An empty language code applies the rule to every language."""
+        for language_code in ("", "en-GB"):
+            with self.subTest(language_code=language_code):
+                Pronunciation(
+                    resource_id="pr-1", regex=r"x", replacement="y", language_code=language_code
+                ).validate()
+
+    def test_validate_invalid_language_code_raises(self):
+        p = Pronunciation(
+            resource_id="pr-1", regex=r"x", replacement="y", language_code="not a language"
+        )
+        with self.assertRaises(ValueError) as cm:
+            p.validate()
+        self.assertIn("Invalid language code: not a language", str(cm.exception))
 
     def test_build_protos(self):
         """build_create_proto, build_update_proto, build_delete_proto set fields correctly."""
@@ -8538,6 +9369,24 @@ class TranscriptCorrectionTests(unittest.TestCase):
             tc.validate()
         self.assertIn("Correction name is required", str(cm.exception))
 
+    def test_validate_whitespace_only_name_raises(self):
+        """A name of only whitespace counts as missing."""
+        tc = TranscriptCorrection(
+            resource_id="tc-1",
+            name="   ",
+            description="desc",
+            regular_expressions=[
+                RegularExpressionRule(
+                    regular_expression="x",
+                    replacement="y",
+                    replacement_type="full",
+                ),
+            ],
+        )
+        with self.assertRaises(ValueError) as cm:
+            tc.validate()
+        self.assertIn("Correction name is required", str(cm.exception))
+
     def test_validate_empty_regular_expressions_raises(self):
         """validate raises ValueError when regular_expressions is empty."""
         tc = TranscriptCorrection(
@@ -8753,6 +9602,45 @@ class TestApiIntegrationValidate(unittest.TestCase):
         )
         with self.assertRaises(ValueError, msg="Operation name cannot be empty."):
             integration.validate()
+
+    def test_operation_id_in_yaml_is_not_read(self):
+        """Operation ids are not written to the file, so one written there is ignored."""
+        integration = ApiIntegration.from_yaml_dict(
+            {
+                "description": "CRM",
+                "operations": [
+                    {"id": "op-1", "name": "list_users", "method": "GET", "resource": "/users"}
+                ],
+            },
+            resource_id="API-INTEGRATION-12345678",
+            name="crm",
+        )
+
+        self.assertEqual(integration.operations[0].resource_id, "")
+
+    def test_two_character_name_is_valid(self):
+        """An integration name of two characters is the shortest allowed."""
+        self._make_integration(name="ab").validate()
+
+    def test_one_character_name_raises_value_error(self):
+        """Validation rejects an integration name shorter than two characters."""
+        with self.assertRaises(ValueError) as ctx:
+            self._make_integration(name="a").validate()
+        self.assertIn("must be at least 2 characters", str(ctx.exception))
+
+    def test_operation_name_as_lowercase_identifier_is_valid(self):
+        """Operation names of lowercase letters, digits and underscores are valid."""
+        for name in ("get_user_2", "_private", "g"):
+            with self.subTest(name=name):
+                self._make_integration(operations=[_operation(name=name)]).validate()
+
+    def test_operation_name_that_is_not_a_lowercase_identifier_raises_value_error(self):
+        """Validation rejects an operation name the platform would not accept."""
+        for name in ("getUser", "get-user", "get user", "2nd_user", "get_user\n"):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError) as ctx:
+                    self._make_integration(operations=[_operation(name=name)]).validate()
+                self.assertIn("must follow Python function naming convention", str(ctx.exception))
 
     def test_operation_method_is_normalised_to_uppercase(self):
         """Lowercase method in YAML is normalised to uppercase and accepted."""
@@ -10432,6 +11320,146 @@ class TestCaseTests(unittest.TestCase):
             )
         self.assertIn("Unknown function in assertion: register_phone_numbr", str(cm.exception))
 
+    def _test_case_with_argument(self, **argument) -> TestCase:
+        """A test case asserting one function call argument, read from its YAML shape."""
+        return TestCase.from_yaml_dict(
+            {
+                "name": "Argument assertion",
+                "scenario": "Book a table.",
+                "channel": "voice",
+                "language": "en-GB",
+                "function_call_assertions": [
+                    {
+                        "name": "test_function",
+                        "arguments": [{"parameter_name": "amount", **argument}],
+                    }
+                ],
+            },
+            resource_id="TEST-argument_assertion",
+            name="Argument assertion",
+        )
+
+    def test_validate_accepts_float_value_type(self):
+        """`float` is the decimal value type Agent Studio stores."""
+        self._test_case_with_argument(expected_value="1.5", value_type="float").validate()
+
+    def test_number_value_type_is_read_as_float(self):
+        """`number` in a file is sent to Agent Studio, and written back, as `float`."""
+        test_case = self._test_case_with_argument(expected_value="1.5", value_type="number")
+        test_case.validate()
+
+        call = test_case.assertions.function_calls[0]
+        self.assertEqual(call.arguments[0].value_type, "float")
+        self.assertEqual(call.to_proto().arguments["amount"].value_type, "float")
+        written = test_case.to_yaml_dict()["function_call_assertions"][0]["arguments"][0]
+        self.assertEqual(written["value_type"], "float")
+
+    def test_validate_rejects_unknown_value_type(self):
+        with self.assertRaises(ValueError) as cm:
+            self._test_case_with_argument(expected_value="1.5", value_type="decimal").validate()
+        self.assertIn(
+            "Invalid value type for function call assertion argument: decimal", str(cm.exception)
+        )
+
+    def test_float_assertion_round_trips(self):
+        """A `float` assertion read from YAML is written back unchanged."""
+        test_case = self._test_case_with_argument(expected_value="1.5", value_type="float")
+        yaml_dict = test_case.to_yaml_dict()
+        self.assertEqual(
+            yaml_dict["function_call_assertions"][0]["arguments"],
+            [{"parameter_name": "amount", "expected_value": "1.5", "value_type": "float"}],
+        )
+
+        restored = TestCase.from_yaml_dict(
+            yaml_dict, resource_id="TEST-argument_assertion", name="Argument assertion"
+        )
+        self.assertEqual(restored.to_yaml_dict(), yaml_dict)
+        self.assertEqual(restored.assertions, test_case.assertions)
+
+    def test_validate_accepts_equals_and_any_assertion_types(self):
+        for assertion_type in ("equals", "any"):
+            with self.subTest(assertion_type=assertion_type):
+                self._test_case_with_argument(
+                    expected_value="hello", value_type="string", assertion_type=assertion_type
+                ).validate()
+
+    def test_validate_rejects_unknown_assertion_type(self):
+        with self.assertRaises(ValueError) as cm:
+            self._test_case_with_argument(
+                expected_value="hello", value_type="string", assertion_type="contains"
+            ).validate()
+        self.assertIn(
+            "Invalid assertion type for function call assertion argument: contains",
+            str(cm.exception),
+        )
+
+    def test_validate_accepts_unset_expected_value(self):
+        self._test_case_with_argument(value_type="integer", expected_value=None).validate()
+
+    def test_validate_rejects_blank_expected_value(self):
+        for argument in (
+            {"value_type": "string", "expected_value": ""},
+            {"value_type": "string", "expected_value": "   "},
+            {"value_type": "integer", "expected_value": "  "},
+        ):
+            with self.subTest(argument=argument):
+                with self.assertRaises(ValueError) as cm:
+                    self._test_case_with_argument(**argument).validate()
+                self.assertIn(
+                    "Expected value cannot be blank for function call assertion argument: amount",
+                    str(cm.exception),
+                )
+
+    def test_validate_accepts_expected_values_that_read_as_their_type(self):
+        """Unquoted YAML values count too: they are sent as the text they print as."""
+        cases = {
+            "string": ["hello", "12abc", "true"],
+            "integer": ["4", "-4", " 4 ", "007", 4],
+            "float": ["1.5", "-1.5", "+1.5", ".5", "5.", "4", "1e3", 1.5],
+            "boolean": ["true", "false", " true ", True, False],
+        }
+        for value_type, values in cases.items():
+            for expected_value in values:
+                with self.subTest(value_type=value_type, expected_value=expected_value):
+                    self._test_case_with_argument(
+                        expected_value=expected_value, value_type=value_type
+                    ).validate()
+
+    def test_validate_rejects_expected_values_that_do_not_read_as_their_type(self):
+        cases = {
+            "integer": ["4.0", "12abc", "+4", "1e3", "four", "1_000", "٤"],
+            "float": ["1.5abc", "1,5", "nan", "inf", "Infinity", "1e999", "."],
+            "boolean": ["True", "FALSE", "yes", "1", "0"],
+        }
+        for value_type, values in cases.items():
+            for expected_value in values:
+                with self.subTest(value_type=value_type, expected_value=expected_value):
+                    with self.assertRaises(ValueError) as cm:
+                        self._test_case_with_argument(
+                            expected_value=expected_value, value_type=value_type
+                        ).validate()
+                    self.assertIn(
+                        f"Expected value '{expected_value}' for function call assertion "
+                        f"argument 'amount' is not a valid {value_type}",
+                        str(cm.exception),
+                    )
+
+    def test_validate_rejects_duplicate_tags(self):
+        test_case = self._sample_test_case()
+        test_case.validate()
+
+        test_case.tags.tags = ["booking", "smoke", "booking"]
+        with self.assertRaises(ValueError) as cm:
+            test_case.validate()
+        self.assertIn("Duplicate tags: ['booking']", str(cm.exception))
+
+    def test_validate_rejects_whitespace_only_scenario(self):
+        test_case = self._sample_test_case()
+        test_case.scenario = "   "
+        with self.assertRaises(ValueError) as cm:
+            test_case.validate()
+        self.assertIn("Scenario is required", str(cm.exception))
+
     def test_get_new_updated_deleted_subresources(self):
         test_case = self._sample_test_case()
         new, updated, deleted = test_case.get_new_updated_deleted_subresources()
@@ -11317,6 +12345,17 @@ class TestCaseApiMocksTests(unittest.TestCase):
             test_case.validate()
         self.assertIn("empty operation name", str(ctx.exception))
 
+    def test_validate_rejects_whitespace_only_integration_and_operation_names(self):
+        cases = {
+            "integration name cannot be empty": {"  ": {"get_customer": [ApiResponseRule()]}},
+            "empty operation name": {"crm": {"  ": [ApiResponseRule()]}},
+        }
+        for message, mocks in cases.items():
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as ctx:
+                    self._test_case(api_mocks=self._api_mocks(mocks)).validate()
+                self.assertIn(message, str(ctx.exception))
+
     def test_validate_rejects_an_operation_with_no_response_rules(self):
         test_case = self._test_case(api_mocks=self._api_mocks({"crm": {"get_customer": []}}))
 
@@ -11923,6 +12962,19 @@ class TranslationTests(unittest.TestCase):
             translations={"en-GB": "hello"},
         )
         t.validate()
+
+    def test_validate_blank_language_raises_without_configured_languages(self):
+        """A blank language key is rejected even when the project's languages aren't known."""
+        for language in ("", "   "):
+            with self.subTest(language=language):
+                t = Translation(
+                    resource_id="tn-1",
+                    name="greeting",
+                    translations={"en-GB": "hello", language: "hola"},
+                )
+                with self.assertRaises(ValueError) as cm:
+                    t.validate()
+                self.assertIn("Translation language code cannot be empty", str(cm.exception))
 
 
 class DefaultLanguageTests(unittest.TestCase):
@@ -13245,6 +14297,49 @@ class DocumentTests(unittest.TestCase):
         content = "# Title\nSome markdown content"
         self.assertEqual(Document.make_pretty(content), content)
         self.assertEqual(Document.from_pretty(content), content)
+
+    def _document(self, path: str = "notes.md", contents: str = "hello") -> Document:
+        return Document(resource_id=path, name="notes", path=path, contents=contents)
+
+    def test_validate_accepts_allowed_file_names(self):
+        for path in ("notes.md", "CONTEXT.MD", "_draft-2.v1.md", ".hidden.md", "flows/FLOW_1.MD"):
+            with self.subTest(path=path):
+                self._document(path=path).validate()
+
+    def test_validate_rejects_file_names_agent_studio_does_not_allow(self):
+        cases = {
+            "my notes.md": "contains invalid characters",
+            "café.md": "contains invalid characters",
+            "/notes.md": "contains invalid characters",
+            "notes..md": "must not contain '..'",
+        }
+        for path, message in cases.items():
+            with self.subTest(path=path):
+                with self.assertRaises(ValueError) as cm:
+                    self._document(path=path).validate()
+                self.assertIn(message, str(cm.exception))
+
+    def test_validate_accepts_content_at_the_size_limit(self):
+        self._document(contents="a" * 262_144).validate()
+
+    def test_validate_rejects_content_over_the_size_limit(self):
+        """The limit is on UTF-8 bytes, so fewer characters can still be too many bytes."""
+        for contents in ("a" * 262_145, "é" * 131_073):
+            with self.subTest(characters=len(contents)):
+                with self.assertRaises(ValueError) as cm:
+                    self._document(contents=contents).validate()
+                self.assertIn("over the limit of 262144 bytes", str(cm.exception))
+
+    def _documents(self, count: int) -> dict[str, Document]:
+        return {f"doc_{i}.md": self._document(path=f"doc_{i}.md") for i in range(count)}
+
+    def test_validate_collection_accepts_fifty_documents(self):
+        Document.validate_collection(self._documents(50))
+
+    def test_validate_collection_rejects_more_than_fifty_documents(self):
+        with self.assertRaises(ValueError) as cm:
+            Document.validate_collection(self._documents(51))
+        self.assertIn("at most 50 context documents, found 51", str(cm.exception))
 
     def test_read_local_resource(self):
         import tempfile
@@ -15066,6 +16161,9 @@ class MCPServerTests(unittest.TestCase):
             with self.subTest(auth=auth):
                 _mcp_server(auth=auth).validate()
 
+    def test_validate_accepts_text_enabled_functions(self):
+        _mcp_server(enabled_functions=["search_tickets", "create_ticket"]).validate()
+
     def test_validate_rejects_invalid_config(self):
         cases = {
             "provider_id is required": {"name": ""},
@@ -15074,6 +16172,7 @@ class MCPServerTests(unittest.TestCase):
             "timeout must be between 1 and 30": {"timeout": 31},
             "Duplicate enabled_functions": {"enabled_functions": ["a", "a"]},
             "enabled_functions entries cannot be empty": {"enabled_functions": [""]},
+            "enabled_functions entries must be text": {"enabled_functions": ["a", 1]},
             "only one of header, query_param or oauth": {
                 "auth": MCPAuth(
                     header="Authorization",

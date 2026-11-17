@@ -87,3 +87,5 @@ poly functions validate
   "issues": []
 }
 ~~~
+
+When a function is not valid the command exits non-zero, with or without `--json`.

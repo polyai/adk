@@ -8,6 +8,7 @@ import functools
 import hashlib
 import inspect
 import json
+import keyword
 import logging
 import os
 import re
@@ -298,6 +299,30 @@ CONV_STATE_DOT_NAME = re.compile(r"(?<![\w.])conv\.state\.([a-zA-Z_][a-zA-Z0-9_]
 
 # Detects the header-ending colon on a def line, ignoring trailing comments
 HEADER_END_COLON_RE = re.compile(r":\s*(#.*)?\s*$")
+
+
+# Not str.isidentifier(): that accepts non-ASCII names the platform's regex rejects.
+PYTHON_NAME = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
+
+
+def validate_python_name(name: str, label: str) -> None:
+    """Reject a name the platform would not accept as a Python name.
+
+    Args:
+        name: The name to check.
+        label: What the name belongs to, used to start the error message
+            (e.g. "Function name").
+
+    Raises:
+        ValueError: If the name is not an ASCII Python identifier, or is a reserved word.
+    """
+    if not PYTHON_NAME.fullmatch(name):
+        raise ValueError(
+            f"{label} '{name}' must be a valid Python identifier: a letter or "
+            "underscore followed by letters, digits or underscores"
+        )
+    if keyword.iskeyword(name):
+        raise ValueError(f"{label} '{name}' is a reserved word in Python")
 
 
 def remove_comments_from_code(code: str) -> str:
@@ -836,6 +861,13 @@ def to_snake_case(s: str) -> str:
 def convert_keys_to_snake_case(dict_obj: dict) -> dict:
     """Convert config keys to snake_case for consistency."""
     return {to_snake_case(k): v for k, v in dict_obj.items()}
+
+
+def is_blank(value: object) -> bool:
+    """Check if a value is empty, counting a whitespace-only string as empty."""
+    if isinstance(value, str):
+        return not value.strip()
+    return not value
 
 
 def is_valid_language_code(code: str) -> bool:

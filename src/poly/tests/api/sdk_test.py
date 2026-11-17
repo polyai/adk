@@ -231,6 +231,45 @@ class SendCommandBatch(unittest.TestCase):
             sdk.send_command_batch()
 
 
+    def _rejected_batch_message(self, status, json_body):
+        """Send one command with the platform answering as given, and return the error text."""
+        with (
+            patch("poly.handlers.sdk.retrieve_api_key", return_value="secret-key"),
+            patch("requests.post", return_value=make_mock_response(status, json_body=json_body)),
+        ):
+            sdk = build_sdk()
+            sdk._last_known_sequence = 1
+            sdk.add_command_to_queue(self._queued_command())
+            with self.assertRaises(SourcererAPIError) as raised:
+                sdk.send_command_batch()
+        return str(raised.exception)
+
+    def test_rejection_reports_the_platforms_message_and_issues(self):
+        """A rejected batch is described by the platform's message, then one line per issue."""
+        message = self._rejected_batch_message(
+            422,
+            {
+                "error_code": "VALIDATION_FAILED",
+                "error_message": '[command 1: entityCreate "city"] Validation error',
+                "data": {"issues": [{"path": ["config", "min"], "message": "Too small"}]},
+            },
+        )
+
+        self.assertEqual(
+            message, '[command 1: entityCreate "city"] Validation error\n- config.min: Too small'
+        )
+
+    def test_request_too_large_adds_advice(self):
+        """A batch the platform refuses as too large says to push in smaller parts."""
+        message = self._rejected_batch_message(413, {"error_message": "Request body is too large"})
+
+        self.assertEqual(
+            message,
+            "Request body is too large\n"
+            "The push is too large to send in one request. Push it in smaller parts.",
+        )
+
+
 class MergeBranch(unittest.TestCase):
     """Tests for SourcererSDK.merge_branch sequence handling."""
 

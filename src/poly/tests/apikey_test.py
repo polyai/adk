@@ -7,8 +7,9 @@ import contextlib
 import io
 import json
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import requests
 
@@ -69,6 +70,10 @@ class ApiKeyTestCase(unittest.TestCase):
             "create_key": patch(
                 "poly.cli_commands.apikey.AgentStudioInterface.create_account_api_key_internal",
                 return_value={"key": FAKE_KEY},
+            ),
+            "list_keys": patch(
+                "poly.cli_commands.apikey.AgentStudioInterface.list_account_api_keys_internal",
+                return_value=[],
             ),
             "load_cred": patch(
                 "poly.cli_commands.apikey.load_api_key_from_credential_file",
@@ -142,6 +147,8 @@ class HappyPath(ApiKeyTestCase):
             account_id="acc-given",
             name="cli-generated-key",
             source="apikey",
+            api_groups=None,
+            expires_at=ANY,
         )
 
     def test_key_value_never_appears_in_stdout(self):
@@ -181,7 +188,7 @@ class HappyPath(ApiKeyTestCase):
         with contextlib.redirect_stdout(buffer):
             ApiKeyCommand.apikey(region="studio", output_json=True)
 
-        self.assertNotIn("[", buffer.getvalue())
+        self.assertNotRegex(buffer.getvalue(), r"\[/?[a-z ]+\]")  # no Rich tags
 
     def test_json_mode_prints_verification_url_to_stderr(self):
         """--json still surfaces the sign-in URL/code - on stderr, since stdout is JSON-only."""
@@ -230,6 +237,8 @@ class RegionSelection(ApiKeyTestCase):
             account_id=FAKE_ACCOUNT,
             name="cli-generated-key",
             source="apikey",
+            api_groups=None,
+            expires_at=ANY,
         )
 
     def test_default_key_name_for_other_region_is_suffixed(self):
@@ -242,6 +251,8 @@ class RegionSelection(ApiKeyTestCase):
             account_id=FAKE_ACCOUNT,
             name="cli-generated-key-us-1",
             source="apikey",
+            api_groups=None,
+            expires_at=ANY,
         )
 
     def test_explicit_key_name_overrides_the_region_default(self):
@@ -254,6 +265,8 @@ class RegionSelection(ApiKeyTestCase):
             account_id=FAKE_ACCOUNT,
             name="my-key",
             source="apikey",
+            api_groups=None,
+            expires_at=ANY,
         )
 
     def test_region_is_threaded_into_account_and_credentials_calls(self):
@@ -490,6 +503,8 @@ class MultipleAccounts(ApiKeyTestCase):
             account_id="acc-solo",
             name="cli-generated-key-us-1",
             source="apikey",
+            api_groups=None,
+            expires_at=ANY,
         )
 
 
@@ -827,6 +842,509 @@ class ProfileKeyReuse(ApiKeyTestCase):
         self.mocks["write_env"].assert_called_once_with("POLY_API_KEY", FAKE_KEY, force=True)
 
 
+class KeyTypeAndExpiry(ApiKeyTestCase):
+    """`--type` and `--expires-in`: what is asked for, and how it is reported."""
+
+    def _create_kwargs(self) -> dict:
+        self.mocks["create_key"].assert_called_once()
+        return self.mocks["create_key"].call_args.kwargs
+
+    def test_default_is_an_agent_key_expiring_in_90_days(self):
+        """No flags: every API (api_groups left out) and a 90-day expiry."""
+        before = datetime.now(UTC)
+
+        self.run_apikey(region="studio")
+
+        kwargs = self._create_kwargs()
+        self.assertIsNone(kwargs["api_groups"])
+        self.assertEqual(kwargs["name"], "cli-generated-key")
+        delta = kwargs["expires_at"] - before
+        self.assertTrue(timedelta(days=90) <= delta < timedelta(days=90, minutes=1))
+        self.assertEqual(kwargs["expires_at"].utcoffset(), timedelta(0))
+
+    def test_model_type_asks_for_the_models_group(self):
+        """--type model sends api_groups ["models"]."""
+        self.run_apikey(region="studio", key_type="model")
+
+        self.assertEqual(self._create_kwargs()["api_groups"], ["models"])
+
+    def test_explicit_agent_type_leaves_api_groups_out(self):
+        """--type agent is the same request as the default."""
+        self.run_apikey(region="studio", key_type="agent")
+
+        self.assertIsNone(self._create_kwargs()["api_groups"])
+
+    def test_each_expires_in_value(self):
+        """30d / 90d / 365d become an absolute UTC expiry; never leaves it out."""
+        for value, days in (("30d", 30), ("90d", 90), ("365d", 365), ("never", None)):
+            with self.subTest(expires_in=value):
+                self.setUp()
+                before = datetime.now(UTC)
+
+                self.run_apikey(region="studio", expires_in=value)
+
+                expires_at = self._create_kwargs()["expires_at"]
+                if days is None:
+                    self.assertIsNone(expires_at)
+                else:
+                    delta = expires_at - before
+                    self.assertTrue(timedelta(days=days) <= delta < timedelta(days=days, minutes=1))
+
+    def test_model_key_gets_its_own_default_name(self):
+        """A model key never collides with the agent key's default name."""
+        for region, name in (
+            ("studio", "cli-generated-key-model"),
+            ("us-1", "cli-generated-key-us-1-model"),
+        ):
+            with self.subTest(region=region):
+                self.setUp()
+                self.run_apikey(region=region, key_type="model")
+
+                self.assertEqual(self._create_kwargs()["name"], name)
+
+    def test_key_name_overrides_the_model_default(self):
+        """--key-name still wins for a model key."""
+        self.run_apikey(region="studio", key_type="model", key_name="my-model-key")
+
+        self.assertEqual(self._create_kwargs()["name"], "my-model-key")
+
+    def test_human_output_shows_type_and_expiry(self):
+        """The summary names the type, its Studio label and the expiry date."""
+        self.mocks["create_key"].return_value = {
+            "key": FAKE_KEY,
+            "api_groups": None,
+            "never_expires": False,
+            "expires_at": "2027-02-13T10:00:00+00:00",
+        }
+
+        stdout, _, _ = self.run_apikey(region="studio")
+
+        self.assertIn("agent (All APIs)", stdout)
+        self.assertIn("Expires:   2027-02-13", stdout)
+
+    def test_human_output_says_never_for_a_never_expiring_key(self):
+        self.mocks["create_key"].return_value = {"key": FAKE_KEY, "never_expires": True}
+
+        stdout, _, _ = self.run_apikey(region="studio", expires_in="never")
+
+        self.assertIn("Expires:   never", stdout)
+
+    def test_json_type_and_expiry_come_from_the_response(self):
+        """key_type / expires_at are read from what the platform says it created."""
+        self.mocks["create_key"].return_value = {
+            "key": FAKE_KEY,
+            "api_groups": ["models"],
+            "never_expires": False,
+            "expires_at": "2027-02-13T10:00:00+00:00",
+        }
+
+        stdout, _, _ = self.run_apikey(region="studio", key_type="model", output_json=True)
+
+        payload = json.loads(stdout)
+        self.assertEqual(payload["key_type"], "model")
+        self.assertEqual(payload["expires_at"], "2027-02-13T10:00:00+00:00")
+
+    def test_json_falls_back_to_what_was_asked_for(self):
+        """With a bare response, key_type / expires_at are the requested values."""
+        stdout, _, _ = self.run_apikey(region="studio", expires_in="30d", output_json=True)
+
+        payload = json.loads(stdout)
+        self.assertEqual(payload["key_type"], "agent")
+        requested = self.mocks["create_key"].call_args.kwargs["expires_at"]
+        self.assertEqual(payload["expires_at"], requested.isoformat())
+
+    def test_json_never_expiring_key_has_null_expiry(self):
+        self.mocks["create_key"].return_value = {"key": FAKE_KEY, "never_expires": True}
+
+        stdout, _, _ = self.run_apikey(region="studio", expires_in="never", output_json=True)
+
+        self.assertIsNone(json.loads(stdout)["expires_at"])
+
+    def test_json_reused_key_has_null_type_and_expiry(self):
+        """A reused key not in the account's key list has null type and expiry, not a guess."""
+        self.mocks["read_env"].return_value = PROFILE_KEY
+
+        stdout, _, _ = self.run_apikey(region="studio", output_json=True)
+
+        payload = json.loads(stdout)
+        self.assertIsNone(payload["key_type"])
+        self.assertIsNone(payload["expires_at"])
+
+
+def _record(key: str, groups: list[str] | None = None, **fields) -> dict:
+    """A key-list entry for `key`: no secret, only its prefix and suffix."""
+    return {
+        "key_prefix": key[:4],
+        "key_suffix": key[-4:],
+        "api_groups": groups,
+        "never_expires": False,
+        **fields,
+    }
+
+
+class ModelKeyHasItsOwnVariable(ApiKeyTestCase):
+    """A model key lives in POLY_MODEL_API_KEY and never touches the agent key."""
+
+    def test_model_key_is_written_to_its_own_variable_only(self):
+        stdout, _, code = self.run_apikey(region="studio", key_type="model")
+
+        self.assertIsNone(code)
+        self.mocks["write_env"].assert_called_once_with(
+            "POLY_MODEL_API_KEY", FAKE_KEY, force=False
+        )
+        self.mocks["save_cred"].assert_not_called()
+        self.mocks["load_cred"].assert_not_called()
+        self.assertNotIn(FAKE_KEY, stdout)
+
+    def test_model_key_reads_and_reuses_only_its_own_variable(self):
+        self.mocks["read_env"].side_effect = {
+            "POLY_API_KEY": PROFILE_KEY,
+            "POLY_MODEL_API_KEY": "sk-model-in-profile-1",
+        }.get
+
+        _, _, code = self.run_apikey(region="studio", key_type="model")
+
+        self.assertIsNone(code)
+        self.mocks["read_env"].assert_called_once_with("POLY_MODEL_API_KEY")
+        self.mocks["create_key"].assert_not_called()
+        self.mocks["write_env"].assert_called_once_with(
+            "POLY_MODEL_API_KEY", "sk-model-in-profile-1", force=False
+        )
+
+    def test_agent_key_reads_only_poly_api_key(self):
+        self.run_apikey(region="studio")
+
+        self.mocks["read_env"].assert_called_once_with("POLY_API_KEY")
+
+    def test_refused_model_key_names_its_variable_and_rerun(self):
+        self.mocks["read_env"].return_value = PROFILE_KEY
+        self.mocks["get_accounts_with_key"].side_effect = _http_error(401)
+
+        stdout, _, code = self.run_apikey(region="studio", key_type="model", output_json=True)
+
+        self.assertEqual(code, 2)
+        error = json.loads(stdout)["error"]
+        self.assertIn("POLY_MODEL_API_KEY in", error)
+        self.assertIn("poly apikey --region studio --type model --force", error)
+        self.mocks["create_key"].assert_not_called()
+
+    def test_model_key_force_replaces_only_its_own_variable(self):
+        self.run_apikey(region="studio", key_type="model", force=True)
+
+        self.mocks["read_env"].assert_not_called()
+        self.mocks["write_env"].assert_called_once_with("POLY_MODEL_API_KEY", FAKE_KEY, force=True)
+        self.mocks["save_cred"].assert_not_called()
+
+    def test_model_key_json_is_masked_and_names_the_variable(self):
+        stdout, _, _ = self.run_apikey(region="studio", key_type="model", output_json=True)
+
+        payload = json.loads(stdout)
+        self.assertTrue(payload["success"])
+        self.assertNotIn(FAKE_KEY, stdout)
+        self.assertNotIn("api_key", payload)
+        self.assertEqual(payload["env_var"], "POLY_MODEL_API_KEY")
+        self.assertEqual(payload["key_type"], "model")
+        self.assertIsNone(payload["credentials_file"])
+        self.assertEqual(payload["profile_path"], str(Path("/home/user/.zshrc")))
+        self.assertIs(payload["key_active"], True)
+
+    def test_model_key_summary_points_at_its_variable(self):
+        stdout, _, _ = self.run_apikey(region="studio", key_type="model")
+
+        text = " ".join(stdout.split())  # Rich wraps long lines
+        self.assertIn("to pick up POLY_MODEL_API_KEY", text)
+        self.assertIn("reading the key from POLY_MODEL_API_KEY", text)
+        self.assertIn("a model key can't run the ADK", text)
+
+    def test_model_key_waits_for_activation_with_the_model_key(self):
+        self.run_apikey(region="studio", key_type="model")
+
+        self.mocks["get_accounts_with_key"].assert_called_with(region="studio", api_key=FAKE_KEY)
+
+    def test_agent_json_names_poly_api_key(self):
+        stdout, _, _ = self.run_apikey(region="studio", output_json=True)
+
+        self.assertEqual(json.loads(stdout)["env_var"], "POLY_API_KEY")
+
+
+class ReusedKeyDetails(ApiKeyTestCase):
+    """A reused key's type and expiry come from the account's key list."""
+
+    def setUp(self):
+        super().setUp()
+        self.mocks["read_env"].return_value = PROFILE_KEY
+
+    def _in(self, days: float) -> str:
+        return (datetime.now(UTC) + timedelta(days=days)).isoformat()
+
+    def test_matched_record_fills_type_and_expiry(self):
+        expiry = self._in(60)
+        self.mocks["list_keys"].return_value = [
+            _record("sk-otherkey00000000"),
+            _record(PROFILE_KEY, expires_at=expiry),
+        ]
+
+        stdout, _, _ = self.run_apikey(region="studio", output_json=True)
+
+        payload = json.loads(stdout)
+        self.assertEqual(payload["key_type"], "agent")
+        self.assertEqual(payload["expires_at"], expiry)
+        self.mocks["list_keys"].assert_called_once_with(
+            region="studio", jwt_token=FAKE_JWT, account_id=FAKE_ACCOUNT, source="apikey"
+        )
+
+    def test_matched_record_shows_in_the_summary(self):
+        self.mocks["list_keys"].return_value = [_record(PROFILE_KEY, never_expires=True)]
+
+        stdout, _, _ = self.run_apikey(region="studio")
+
+        self.assertIn("agent (All APIs)", stdout)
+        self.assertIn("Expires:   never", stdout)
+
+    def test_no_match_or_several_matches_leave_them_null(self):
+        for records in ([], [_record(PROFILE_KEY), _record(PROFILE_KEY)]):
+            with self.subTest(matches=len(records)):
+                self.setUp()
+                self.mocks["list_keys"].return_value = records
+
+                stdout, _, code = self.run_apikey(region="studio", output_json=True)
+
+                self.assertIsNone(code)
+                payload = json.loads(stdout)
+                self.assertIsNone(payload["key_type"])
+                self.assertIsNone(payload["expires_at"])
+
+    def test_failed_lookup_does_not_fail_the_command(self):
+        for failure in (_http_error(500), requests.ConnectionError("down")):
+            with self.subTest(failure=type(failure).__name__):
+                self.setUp()
+                self.mocks["list_keys"].side_effect = failure
+
+                stdout, _, code = self.run_apikey(region="studio", output_json=True)
+
+                self.assertIsNone(code)
+                self.assertTrue(json.loads(stdout)["success"])
+
+    def test_a_created_key_skips_the_lookup(self):
+        self.mocks["read_env"].return_value = None
+
+        self.run_apikey(region="studio")
+
+        self.mocks["list_keys"].assert_not_called()
+
+    def test_warns_when_the_reused_key_expires_soon(self):
+        self.mocks["list_keys"].return_value = [_record(PROFILE_KEY, expires_at=self._in(9.5))]
+
+        stdout, _, code = self.run_apikey(region="studio")
+
+        self.assertIsNone(code)
+        text = " ".join(stdout.split())  # Rich wraps long lines
+        self.assertIn("(in 9 days)", text)
+        self.assertIn("Re-run with --force to replace it", text)
+
+    def test_no_expiry_warning_with_time_left(self):
+        self.mocks["list_keys"].return_value = [_record(PROFILE_KEY, expires_at=self._in(30))]
+
+        stdout, _, _ = self.run_apikey(region="studio")
+
+        self.assertNotIn("expires on", stdout)
+
+    def test_warns_when_the_reused_key_is_the_other_type(self):
+        self.mocks["list_keys"].return_value = [_record(PROFILE_KEY, groups=["models"])]
+
+        stdout, _, code = self.run_apikey(region="studio")
+
+        self.assertIsNone(code)
+        self.mocks["create_key"].assert_not_called()
+        text = " ".join(stdout.split())  # Rich wraps long lines
+        self.assertIn("The key in POLY_API_KEY is a model key, not agent", text)
+        self.assertIn("replace it with an agent key", text)
+
+    def test_expires_in_with_a_reused_key_says_it_did_not_apply(self):
+        stdout, _, code = self.run_apikey(region="studio", expires_in="30d")
+
+        self.assertIsNone(code)
+        self.mocks["create_key"].assert_not_called()
+        self.assertIn("--expires-in didn't apply", stdout)
+        self.assertIn("--force", stdout)
+
+    def test_no_notice_without_expires_in(self):
+        for kwargs in ({}, {"key_type": "agent"}):
+            with self.subTest(kwargs=kwargs):
+                self.setUp()
+                stdout, _, _ = self.run_apikey(region="studio", **kwargs)
+
+                self.assertNotIn("didn't apply", stdout)
+
+    def test_force_mints_with_the_flags(self):
+        self.run_apikey(region="studio", expires_in="30d", force=True)
+
+        self.mocks["create_key"].assert_called_once()
+        self.assertIsNotNone(self.mocks["create_key"].call_args.kwargs["expires_at"])
+
+
+class ExpiredProfileKey(ApiKeyTestCase):
+    """The refusal says why the profile key was refused when the key list shows it."""
+
+    def setUp(self):
+        super().setUp()
+        self.mocks["read_env"].return_value = PROFILE_KEY
+        self.mocks["get_accounts_with_key"].side_effect = _http_error(401)
+
+    def _error(self, **kwargs) -> str:
+        stdout, _, code = self.run_apikey(region="studio", output_json=True, **kwargs)
+        self.assertEqual(code, 2)
+        self.mocks["create_key"].assert_not_called()
+        return json.loads(stdout)["error"]
+
+    def test_expired_key_says_when_it_expired(self):
+        self.mocks["list_keys"].return_value = [
+            _record(PROFILE_KEY, expires_at="2026-11-01T10:00:00+00:00")
+        ]
+
+        error = self._error()
+
+        self.assertIn("POLY_API_KEY in", error)
+        self.assertIn("expired on 2026-11-01", error)
+        self.assertIn("poly apikey --region studio --force", error)
+        self.assertEqual(error.count("--force"), 1)
+
+    def test_key_missing_from_the_list_was_revoked_or_is_another_accounts(self):
+        error = self._error()
+
+        self.assertIn("revoked or belongs to another account", error)
+        self.assertIn("poly apikey --region studio --force", error)
+
+    def test_failed_lookup_keeps_the_general_message(self):
+        self.mocks["list_keys"].side_effect = _http_error(500)
+
+        error = self._error()
+
+        self.assertIn("may have expired or been revoked", error)
+        self.assertIn("poly apikey --region studio --force", error)
+
+    def test_listed_unexpired_key_keeps_the_general_message(self):
+        future = (datetime.now(UTC) + timedelta(days=30)).isoformat()
+        self.mocks["list_keys"].return_value = [_record(PROFILE_KEY, expires_at=future)]
+
+        self.assertIn("may have expired or been revoked", self._error())
+
+    def test_expired_model_key_names_its_variable_and_type_flag(self):
+        self.mocks["list_keys"].return_value = [
+            _record(PROFILE_KEY, groups=["models"], expires_at="2026-11-01T10:00:00+00:00")
+        ]
+
+        error = self._error(key_type="model")
+
+        self.assertIn("POLY_MODEL_API_KEY in", error)
+        self.assertIn("expired on 2026-11-01", error)
+        self.assertIn("poly apikey --region studio --type model --force", error)
+
+
+class ExpiryAndLookupFallbacks(ApiKeyTestCase):
+    """Odd platform data degrades to less detail, never to a failure."""
+
+    def setUp(self):
+        super().setUp()
+        self.mocks["read_env"].return_value = PROFILE_KEY
+
+    def test_unreadable_expiry_is_shown_as_given_without_a_warning(self):
+        self.mocks["list_keys"].return_value = [_record(PROFILE_KEY, expires_at="soon")]
+
+        stdout, _, code = self.run_apikey(region="studio")
+
+        self.assertIsNone(code)
+        self.assertIn("Expires:   soon", stdout)
+        self.assertNotIn("expires on", stdout)
+
+    def test_expiry_without_a_timezone_is_read_as_utc(self):
+        naive = (datetime.now(UTC) + timedelta(days=3, hours=1)).replace(tzinfo=None)
+        self.mocks["list_keys"].return_value = [
+            _record(PROFILE_KEY, expires_at=naive.isoformat())
+        ]
+
+        stdout, _, _ = self.run_apikey(region="studio")
+
+        self.assertIn("(in 3 days)", " ".join(stdout.split()))
+
+    def test_a_non_list_response_is_ignored(self):
+        self.mocks["list_keys"].return_value = {"unexpected": "shape"}
+
+        stdout, _, code = self.run_apikey(region="studio", output_json=True)
+
+        self.assertIsNone(code)
+        self.assertIsNone(json.loads(stdout)["key_type"])
+
+    def test_powershell_summary_names_the_variable(self):
+        self.mocks["write_env"].return_value = (
+            ProfileTarget(path=Path("HKCU/Environment"), shell="powershell"),
+            "POLY_MODEL_API_KEY=sk-n****7890",
+        )
+
+        stdout, _, _ = self.run_apikey(region="studio", key_type="model")
+
+        self.assertIn("Open a new terminal to pick up POLY_MODEL_API_KEY.", stdout)
+
+
+class JsonWarnings(ApiKeyTestCase):
+    """--json suppresses printed warnings, so it carries them in `warnings`."""
+
+    def _payload(self, **kwargs) -> dict:
+        stdout, _, code = self.run_apikey(region="studio", output_json=True, **kwargs)
+        self.assertIsNone(code)
+        return json.loads(stdout)
+
+    def test_no_warnings_is_an_empty_list(self):
+        self.assertEqual(self._payload()["warnings"], [])
+
+    def test_reused_key_warnings_are_listed(self):
+        self.mocks["read_env"].return_value = PROFILE_KEY
+        soon = (datetime.now(UTC) + timedelta(days=5, hours=1)).isoformat()
+        self.mocks["list_keys"].return_value = [
+            _record(PROFILE_KEY, groups=["models"], expires_at=soon)
+        ]
+
+        warnings = self._payload(expires_in="30d")["warnings"]
+
+        self.assertEqual(len(warnings), 3)
+        self.assertIn("--expires-in didn't apply", warnings[0])
+        self.assertIn("is a model key, not agent", warnings[1])
+        self.assertIn("(in 5 days)", warnings[2])
+
+    def test_not_active_warning_is_listed(self):
+        self.mocks["get_accounts_with_key"].side_effect = Exception("not active")
+
+        payload = self._payload()
+
+        self.assertIs(payload["key_active"], False)
+        self.assertEqual(
+            payload["warnings"],
+            [
+                "API key was saved but is not active yet."
+                " If your next command fails, wait a moment and retry."
+            ],
+        )
+
+
+class OriginalWording(ApiKeyTestCase):
+    """Messages an agent key user already knows stay as they were."""
+
+    def test_reused_agent_key_line(self):
+        self.mocks["read_env"].return_value = PROFILE_KEY
+
+        stdout, _, _ = self.run_apikey(region="studio")
+
+        self.assertIn("Reusing the key already in your profile: ", stdout)
+
+    def test_reused_model_key_line_names_its_variable(self):
+        self.mocks["read_env"].return_value = PROFILE_KEY
+
+        stdout, _, _ = self.run_apikey(region="studio", key_type="model")
+
+        text = " ".join(stdout.split())  # Rich wraps long lines
+        self.assertIn("Reusing the key already in your profile (POLY_MODEL_API_KEY): ", text)
+
+
 class EnvConflict(ApiKeyTestCase):
     """Tests for the POLY_API_KEY conflict path."""
 
@@ -919,6 +1437,47 @@ class ArgParsing(unittest.TestCase):
         args = cli._create_parser().parse_args(["apikey", "--region", "us-1"])
 
         self.assertEqual(args.region, "us-1")
+
+
+class TypeAndExpiryArgs(unittest.TestCase):
+    """argparse wiring for --type and --expires-in."""
+
+    def _parse(self, *argv: str):
+        from poly.cli import AgentStudioCLI
+
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        return cli._create_parser().parse_args(["apikey", "--region", "studio", *argv])
+
+    def test_unset_flags_parse_as_none(self):
+        """None, not the default, so a reused key can tell whether they were asked for."""
+        args = self._parse()
+
+        self.assertIsNone(args.key_type)
+        self.assertIsNone(args.expires_in)
+
+    def test_flags_parse(self):
+        args = self._parse("--type", "model", "--expires-in", "365d")
+
+        self.assertEqual(args.key_type, "model")
+        self.assertEqual(args.expires_in, "365d")
+
+    def test_invalid_values_are_rejected(self):
+        for argv in (("--type", "data"), ("--expires-in", "7d")):
+            with self.subTest(argv=argv):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as ctx:
+                        self._parse(*argv)
+                self.assertEqual(ctx.exception.code, 2)
+
+    def test_run_passes_the_flags_through(self):
+        args = self._parse("--type", "model", "--expires-in", "never")
+
+        with patch.object(ApiKeyCommand, "apikey") as apikey:
+            ApiKeyCommand.run(args)
+
+        self.assertEqual(apikey.call_args.kwargs["key_type"], "model")
+        self.assertEqual(apikey.call_args.kwargs["expires_in"], "never")
 
 
 class CommandRegistration(unittest.TestCase):

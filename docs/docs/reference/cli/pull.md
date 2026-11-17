@@ -35,4 +35,6 @@ When a file, flow or campaign was renamed in Agent Studio to a name that is alre
 }
 ~~~
 
+If the pull leaves merge conflicts, `"success"` is `false` and the command exits non-zero.
+
 `"new_branch_name"` and `"new_branch_id"` are added if the current branch no longer existed and the CLI switched to `main`. `"rtc"` is added when `--include-rtc` is passed, containing the result of the RTC pull.
