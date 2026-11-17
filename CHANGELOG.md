@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.85.0 (2026-11-17)
+
+### Features
+
+- Validate function names, parameters and latency control before push
+  ([#414](https://github.com/polyai/adk/pull/414),
+  [`6b0df68`](https://github.com/polyai/adk/commit/6b0df682d933f753a95110c9fd553c26b6dbbe36))
+
+
 ## v0.84.0 (2026-11-16)
 
 ### Features
