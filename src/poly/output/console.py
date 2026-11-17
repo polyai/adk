@@ -100,8 +100,8 @@ def error(message: str) -> None:
     err_console.print(f"[error]Error:[/error] {message}")
 
 
-def warning(message: str) -> None:
-    console.print(f"[warning]Warning:[/warning] {message}")
+def warning(message: str, soft_wrap: bool = False) -> None:
+    console.print(f"[warning]Warning:[/warning] {message}", soft_wrap=soft_wrap)
 
 
 def info(message: str) -> None:
