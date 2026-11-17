@@ -130,7 +130,6 @@ from poly.resources.variant_attributes import (
     VariantAttribute,
     _read_attribute_type,
 )
-from poly.tests.library_test import make_library
 from poly.tests.testing_utils import mock_read_from_file, mock_variant_attributes_file
 
 TEST_CODE = """import random
@@ -4792,120 +4791,6 @@ prompt: This is a default step
         result = step.to_yaml_dict()
 
         self.assertEqual(result["extracted_entities"], ["apple", "mango", "zebra"])
-
-
-class FlowStepModelNamesTest(unittest.TestCase):
-    """Step ASR and LLM overrides are written by model name when the library knows them."""
-
-    FILE_PATH = os.path.join("flows", "test_flow", "steps", "test_step.yaml")
-
-    def setUp(self):
-        self.library = make_library()
-
-    def _step(self, asr: ASRConfig = None, llm: LLMConfig = None) -> FlowStep:
-        return FlowStep(
-            resource_id="flow-123_step-1",
-            step_id="step-1",
-            name="Test Step",
-            flow_id="flow-123",
-            flow_name="test_flow",
-            step_type=StepType.ADVANCED_STEP,
-            settings=FlowSettings(flow_id="flow-123", step_id="step-1", asr=asr, llm=llm),
-            conditions=[],
-            prompt="Hello",
-            position={"x": 0.0, "y": 0.0},
-        )
-
-    def _pretty(self, step: FlowStep, library=None) -> dict:
-        return yaml.safe_load(step.to_pretty(resource_mappings=[], library=library))
-
-    def _read(self, raw: str, library=None) -> FlowStep:
-        with mock_read_from_file(raw):
-            return FlowStep.read_local_resource(
-                file_path=self.FILE_PATH,
-                resource_id="flow-123_step-1",
-                resource_name="Test Step",
-                resource_mappings=[],
-                library=library,
-            )
-
-    def test_asr_override_is_written_by_name(self):
-        """A known provider and model pair is written as the model's name alone."""
-        step = self._step(asr=ASRConfig(provider="deepgram", model="nova-3"))
-
-        self.assertEqual(self._pretty(step, self.library)["asr"], {"model": "Deepgram Nova 3"})
-
-    def test_llm_override_is_written_by_name(self):
-        """A known provider model ID is written as `model`, keeping reasoning effort."""
-        step = self._step(
-            llm=LLMConfig(provider_model_id="polywhirl-3-5", reasoning_effort=ReasoningEffort.HIGH)
-        )
-
-        self.assertEqual(
-            self._pretty(step, self.library)["llm"],
-            {"model": "PolyAI Raven 3.5", "reasoning_effort": "high"},
-        )
-
-    def test_unknown_models_are_written_as_stored(self):
-        """Values missing from the library keep their raw IDs."""
-        step = self._step(
-            asr=ASRConfig(provider="deepgram", model="nova-9"),
-            llm=LLMConfig(provider_model_id="custom-model"),
-        )
-        pretty = self._pretty(step, self.library)
-
-        self.assertEqual(pretty["asr"], {"provider": "deepgram", "model": "nova-9"})
-        self.assertEqual(pretty["llm"]["provider_model_id"], "custom-model")
-
-    def test_without_a_library_ids_are_written(self):
-        """With no library, overrides are written exactly as before."""
-        step = self._step(
-            asr=ASRConfig(provider="deepgram", model="nova-3"),
-            llm=LLMConfig(provider_model_id="polywhirl-3-5"),
-        )
-        pretty = self._pretty(step)
-
-        self.assertEqual(pretty["asr"], {"provider": "deepgram", "model": "nova-3"})
-        self.assertEqual(pretty["llm"]["provider_model_id"], "polywhirl-3-5")
-
-    def test_names_are_read_back_as_ids(self):
-        """Reading a file written by name resolves each name to the platform's IDs."""
-        step = self._read(
-            "step_type: advanced_step\nname: Test Step\nprompt: Hello\n"
-            "asr:\n  model: Deepgram Nova 3\n"
-            "llm:\n  model: PolyAI Raven 3.5\n  reasoning_effort: high\n",
-            library=self.library,
-        )
-
-        self.assertEqual(step.settings.asr, ASRConfig(provider="deepgram", model="nova-3"))
-        self.assertEqual(step.settings.llm.provider_model_id, "polywhirl-3-5")
-        self.assertEqual(step.settings.llm.reasoning_effort, ReasoningEffort.HIGH)
-
-    def test_ids_are_still_read(self):
-        """A file that still holds raw IDs reads the same with a library loaded."""
-        step = self._read(
-            "step_type: advanced_step\nname: Test Step\nprompt: Hello\n"
-            "asr:\n  provider: deepgram\n  model: nova-3\n"
-            "llm:\n  provider_model_id: polywhirl-3-5\n",
-            library=self.library,
-        )
-
-        self.assertEqual(step.settings.asr, ASRConfig(provider="deepgram", model="nova-3"))
-        self.assertEqual(step.settings.llm.provider_model_id, "polywhirl-3-5")
-
-    def test_named_overrides_round_trip(self):
-        """Writing by name then reading back gives the same step settings."""
-        step = self._step(
-            asr=ASRConfig(provider="deepgram", model="nova-3"),
-            llm=LLMConfig(provider_model_id="polywhirl-3-5", reasoning_effort=ReasoningEffort.LOW),
-        )
-
-        read_back = self._read(
-            step.to_pretty(resource_mappings=[], library=self.library), self.library
-        )
-
-        self.assertEqual(read_back.settings.asr, step.settings.asr)
-        self.assertEqual(read_back.settings.llm, step.settings.llm)
 
 
 class EntityTests(unittest.TestCase):

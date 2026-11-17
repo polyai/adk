@@ -52,7 +52,6 @@ from poly.handlers.protobuf.flows_pb2 import (
     UpdateNoCodeStep,
     UpdateStep,
 )
-from poly.library import Library
 from poly.resources.entities import Entity
 from poly.resources.function import Function, FunctionType, parse_latency_control
 from poly.resources.resource import (
@@ -574,7 +573,6 @@ class FlowStep(BaseFlowStep, YamlResource):
         d: dict,
         file_path: str = None,
         resource_mappings: list[ResourceMapping] = None,
-        library: Library = None,
         **kwargs,
     ) -> dict:
         """Return dict with resource IDs replaced by names."""
@@ -620,25 +618,6 @@ class FlowStep(BaseFlowStep, YamlResource):
                     condition["required_entities"] = [
                         entity_mappings.get(entity_id, entity_id) for entity_id in required_entities
                     ]
-
-        # Replace library resource IDs with names
-        if library:
-            if asr_settings := d.get("asr"):
-                asr_model_name = library.get_asr_model_by_provider_and_model(
-                    asr_settings.get("provider"), asr_settings.get("model")
-                )
-                if asr_model_name:
-                    d["asr"]["model"] = asr_model_name.name
-                    del d["asr"]["provider"]
-
-            if llm_settings := d.get("llm"):
-                llm_model_name = library.get_llm_model_by_provider_model_id(
-                    llm_settings.get("provider_model_id")
-                )
-                if llm_model_name:
-                    d["llm"]["model"] = llm_model_name.name
-                    del d["llm"]["provider_model_id"]
-
         return d
 
     @classmethod
@@ -647,7 +626,6 @@ class FlowStep(BaseFlowStep, YamlResource):
         yaml_dict: dict,
         resource_mappings: list[ResourceMapping] = None,
         file_path: str = None,
-        library: Library = None,
         **kwargs,
     ) -> dict:
         """Replace resource names with IDs in a parsed YAML dict."""
@@ -695,17 +673,6 @@ class FlowStep(BaseFlowStep, YamlResource):
                         for entity_name in required_entities
                     ]
                     condition["required_entities"] = new_required_entities
-
-        if library:
-            if asr_settings := yaml_dict.get("asr"):
-                if asr_model := library.get_asr_model_by_name(asr_settings.get("model")):
-                    yaml_dict["asr"]["model"] = asr_model.model
-                    yaml_dict["asr"]["provider"] = asr_model.provider
-
-            if llm_settings := yaml_dict.get("llm"):
-                if llm_model := library.get_llm_model_by_name(llm_settings.get("model")):
-                    yaml_dict["llm"]["provider_model_id"] = llm_model.provider_model_id
-                    del yaml_dict["llm"]["model"]
 
         return yaml_dict
 
@@ -760,7 +727,7 @@ class FlowStep(BaseFlowStep, YamlResource):
             raise ValueError(f"Error loading YAML file: {file_path}") from e
 
         yaml_dict = cls.from_pretty_dict(
-            yaml_dict, resource_mappings=resource_mappings, file_path=file_path, **kwargs
+            yaml_dict, resource_mappings=resource_mappings, file_path=file_path
         )
 
         # Get file name from file_path
