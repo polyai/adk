@@ -297,7 +297,7 @@ class GetAccessibleRegions(unittest.TestCase):
             PlatformAPIHandler.get_accessible_regions(["studio"])
 
         self.assertIn("No ADK key found.", str(ctx.exception))
-        self.assertIn("Run `poly login` to sign in.", str(ctx.exception))
+        self.assertIn("Run `poly login` to sign in, or export", str(ctx.exception))
         self.assertNotIn("'studio'", str(ctx.exception))
         mock_get_accounts.assert_not_called()
 

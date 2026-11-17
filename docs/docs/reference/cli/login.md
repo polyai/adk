@@ -37,4 +37,4 @@ poly login --region studio
 
 ADK commands authenticate with the ADK key that `poly login` saves to `~/.poly/credentials.json` for each region. CI or scripts can set `POLY_ADK_KEY`, or `POLY_ADK_KEY_<REGION>` (`POLY_ADK_KEY_US`, `POLY_ADK_KEY_EUW`, `POLY_ADK_KEY_UK`, `POLY_ADK_KEY_STUDIO`) instead.
 
-The account API key in `POLY_API_KEY`, made by [`poly apikey`](./apikey.md) or the developer home, is for the PolyAI APIs. The ADK does not read it, so exporting it does not log the CLI in. When no ADK key is found for a region, the command says so, names any other regions you already hold a key for, and points out when `POLY_API_KEY` is the only key set.
+The account API key in `POLY_API_KEY`, made by [`poly apikey`](./apikey.md) or the developer home, is for the PolyAI APIs. The ADK also uses it, last, when none of the above is set, so a developer with that key can run `poly init` and `poly pull` without `poly login`. It reaches only the one workspace it belongs to; `poly login` signs in as you, so it reaches every workspace you belong to. When no key is found for a region, the command says so and names any other regions you already hold a key for.

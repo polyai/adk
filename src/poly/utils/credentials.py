@@ -108,7 +108,7 @@ def _missing_key_message(region: Optional[str] = None) -> str:
 
     Plain text, no markup: it is also returned verbatim as ``error`` under
     ``--json``. Sentence order: what is missing, how to get it, what the user
-    already has, what they have that does not count, the CI alternative.
+    already has, the CI alternative.
     With ``region`` None the message covers any region and points at the bare
     ``poly login`` picker.
     """
@@ -118,7 +118,8 @@ def _missing_key_message(region: Optional[str] = None) -> str:
             f"No ADK key found for region '{shown}'.",
             f"ADK commands need an ADK key, which `poly login` creates and saves to"
             f" {_CREDENTIALS_FILE_DISPLAY_PATH}.",
-            f"Run `poly login --region {shown}` to sign in to that region.",
+            f"Run `poly login --region {shown}` to sign in to that region, or export"
+            f" an account API key for that region as {_ACCOUNT_API_KEY_ENV_VAR}.",
         ]
         others = [region_display_name(r) for r in _regions_with_stored_keys() if r != region]
         if others:
@@ -134,13 +135,9 @@ def _missing_key_message(region: Optional[str] = None) -> str:
             "No ADK key found.",
             f"ADK commands need an ADK key, which `poly login` creates and saves to"
             f" {_CREDENTIALS_FILE_DISPLAY_PATH}.",
-            "Run `poly login` to sign in.",
+            "Run `poly login` to sign in, or export an account API key as"
+            f" {_ACCOUNT_API_KEY_ENV_VAR}.",
         ]
-    if os.getenv(_ACCOUNT_API_KEY_ENV_VAR):
-        sentences.append(
-            f"{_ACCOUNT_API_KEY_ENV_VAR} is set, but that is an account API key for the PolyAI"
-            " APIs and the ADK does not use it."
-        )
     suffix = _REGION_TO_KEY_SUFFIX.get(region) if region else None
     per_region = f"{_API_KEY_ENV_VAR}_{suffix}" if suffix else f"{_API_KEY_ENV_VAR}_<REGION>"
     sentences.append(f"(CI or scripts: set {_API_KEY_ENV_VAR} or {per_region} instead.)")
@@ -165,6 +162,8 @@ def retrieve_api_key(region: str) -> str:
       1. The credential file entry for *region* (written by ``poly login``)
       2. ``POLY_ADK_KEY_{REGION}`` (e.g. ``POLY_ADK_KEY_US``)
       3. ``POLY_ADK_KEY``
+      4. ``POLY_API_KEY``, the account API key from developer home or
+         ``poly apikey``. Last, so a key set for the ADK on purpose wins.
 
     Raises ``ValueError`` with a helpful message when no key is found.
     """
@@ -178,7 +177,7 @@ def retrieve_api_key(region: str) -> str:
         if per_region_key:
             return per_region_key
 
-    api_key = os.getenv(_API_KEY_ENV_VAR)
+    api_key = os.getenv(_API_KEY_ENV_VAR) or os.getenv(_ACCOUNT_API_KEY_ENV_VAR)
     if not api_key:
         raise ValueError(_missing_key_message(region))
     return api_key
@@ -186,7 +185,7 @@ def retrieve_api_key(region: str) -> str:
 
 def any_credentials_exist() -> bool:
     """Check if any API key credentials are available via environment variables or credential file."""
-    if os.getenv(_API_KEY_ENV_VAR):
+    if os.getenv(_API_KEY_ENV_VAR) or os.getenv(_ACCOUNT_API_KEY_ENV_VAR):
         return True
     for region in _REGION_TO_KEY_SUFFIX.keys():
         if os.getenv(f"{_API_KEY_ENV_VAR}_{_REGION_TO_KEY_SUFFIX[region]}"):

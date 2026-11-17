@@ -90,7 +90,7 @@ To sign in to more than one region from the same machine, re-run `poly login` fo
 
 ### Need an API key for the PolyAI APIs or Dialog RSN? — `poly apikey`
 
-`poly apikey --region studio` signs you in, creates an account-scoped API key, and exports `POLY_API_KEY` into your shell profile for use in your own code. An AI coding assistant can run it for you with `--json`; at a terminal, if you belong to more than one workspace, it asks which one to use. For setting up the ADK itself, `poly setup`/`poly login` above is the path — the ADK doesn't need `POLY_API_KEY`.
+`poly apikey --region studio` signs you in, creates an account-scoped API key, and exports `POLY_API_KEY` into your shell profile for use in your own code. An AI coding assistant can run it for you with `--json`; at a terminal, if you belong to more than one workspace, it asks which one to use. The ADK uses the same key when no ADK key is set, so `poly init` and `poly pull` work for that workspace without `poly login`. Use `poly setup`/`poly login` above to reach every workspace you belong to.
 
 ```bash
 poly apikey --region studio
@@ -115,7 +115,7 @@ To make it permanent, add the export line to your shell profile (`~/.zshrc` or `
 
 ### Per-region API keys
 
-If you work across multiple regions, you can set region-scoped environment variables. The ADK checks the credential file first, then region-scoped env vars, then `POLY_ADK_KEY`.
+If you work across multiple regions, you can set region-scoped environment variables. The ADK checks the credential file first, then region-scoped env vars, then `POLY_ADK_KEY`, then `POLY_API_KEY`.
 
 | Region | Environment variable |
 |---|---|
@@ -135,6 +135,7 @@ export POLY_ADK_KEY=<your-fallback-api-key>   # used for any other region
     1. **Credential file** — `~/.poly/credentials.json` (written by `poly setup` or `poly login`)
     2. **Region-specific env var** — e.g. `POLY_ADK_KEY_US`
     3. **General env var** — `POLY_ADK_KEY`
+    4. **Account API key** — `POLY_API_KEY`, from the developer home or `poly apikey`
 
     The first match wins. If nothing is found, the CLI raises an error.
 

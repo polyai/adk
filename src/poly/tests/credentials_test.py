@@ -51,7 +51,8 @@ class MissingKeyMessageTest(_CredentialsTestCase):
             message,
             "No ADK key found for region 'uk'. ADK commands need an ADK key, which "
             "`poly login` creates and saves to ~/.poly/credentials.json. Run "
-            "`poly login --region uk` to sign in to that region. "
+            "`poly login --region uk` to sign in to that region, or export an account API "
+            "key for that region as POLY_API_KEY. "
             "(CI or scripts: set POLY_ADK_KEY or POLY_ADK_KEY_UK instead.)",
         )
         self.assertNotIn("PAT", message)
@@ -117,24 +118,6 @@ class MissingKeyMessageTest(_CredentialsTestCase):
 
         self.assertNotIn("You already have", str(ctx.exception))
 
-    def test_missing_key_message_mentions_poly_api_key_only_when_set(self):
-        """POLY_API_KEY is called out as an account API key only when it is exported."""
-        with self.assertRaises(ValueError) as ctx:
-            retrieve_api_key("uk-1")
-        self.assertNotIn("POLY_API_KEY", str(ctx.exception))
-
-        os.environ["POLY_API_KEY"] = "account-key"
-        with self.assertRaises(ValueError) as ctx:
-            retrieve_api_key("uk-1")
-
-        message = str(ctx.exception)
-        self.assertIn(
-            "POLY_API_KEY is set, but that is an account API key for the PolyAI APIs and "
-            "the ADK does not use it.",
-            message,
-        )
-        self.assertLess(message.index("POLY_API_KEY is set"), message.index("(CI or scripts"))
-
     def test_missing_key_message_uses_generic_env_var_for_unknown_region(self):
         """A region with no suffix mapping falls back to a placeholder in the CI clause."""
         message = _missing_key_message("nowhere-9")
@@ -143,7 +126,7 @@ class MissingKeyMessageTest(_CredentialsTestCase):
 
 
 class ResolutionOrderTest(_CredentialsTestCase):
-    """The lookup order is unchanged: file, per-region env var, generic env var."""
+    """The lookup order: file, per-region env var, generic env var, account API key."""
 
     def test_credentials_file_still_wins(self):
         self.write_credentials({"uk-1": "stored-key"})
@@ -158,16 +141,25 @@ class ResolutionOrderTest(_CredentialsTestCase):
 
         self.assertEqual(retrieve_api_key("uk-1"), "per-region-env-key")
 
-    def test_generic_env_var_is_the_last_fallback(self):
+    def test_generic_env_var_wins_over_account_api_key(self):
         os.environ["POLY_ADK_KEY"] = "generic-env-key"
+        os.environ["POLY_API_KEY"] = "account-key"
 
         self.assertEqual(retrieve_api_key("uk-1"), "generic-env-key")
 
-    def test_poly_api_key_is_not_read_as_a_credential(self):
+    def test_account_api_key_is_the_last_fallback(self):
+        """A developer with only the account API key can run ADK commands."""
         os.environ["POLY_API_KEY"] = "account-key"
 
-        with self.assertRaises(ValueError):
-            retrieve_api_key("uk-1")
+        self.assertEqual(retrieve_api_key("uk-1"), "account-key")
+
+    def test_file_and_per_region_env_var_win_over_account_api_key(self):
+        os.environ["POLY_API_KEY"] = "account-key"
+        os.environ["POLY_ADK_KEY_UK"] = "per-region-env-key"
+        self.assertEqual(retrieve_api_key("uk-1"), "per-region-env-key")
+
+        self.write_credentials({"uk-1": "stored-key"})
+        self.assertEqual(retrieve_api_key("uk-1"), "stored-key")
 
     def test_missing_key_is_still_a_value_error(self):
         with self.assertRaises(ValueError):
@@ -183,17 +175,15 @@ class RaiseIfNoCredentialsTest(_CredentialsTestCase):
 
         message = str(ctx.exception)
         self.assertTrue(message.startswith("No ADK key found. ADK commands need an ADK key"))
-        self.assertIn("Run `poly login` to sign in.", message)
+        self.assertIn(
+            "Run `poly login` to sign in, or export an account API key as POLY_API_KEY.", message
+        )
         self.assertNotIn("--region", message)
         self.assertIn("set POLY_ADK_KEY or POLY_ADK_KEY_<REGION> instead", message)
 
-    def test_raise_if_no_credentials_mentions_poly_api_key_when_set(self):
+    def test_raise_if_no_credentials_is_silent_with_only_account_api_key(self):
         os.environ["POLY_API_KEY"] = "account-key"
-
-        with self.assertRaises(ValueError) as ctx:
-            raise_if_no_credentials()
-
-        self.assertIn("POLY_API_KEY is set, but that is an account API key", str(ctx.exception))
+        raise_if_no_credentials()
 
     def test_raise_if_no_credentials_is_silent_when_any_key_exists(self):
         self.write_credentials({"studio": "stored-key"})
