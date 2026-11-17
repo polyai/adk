@@ -56,6 +56,17 @@ class LibraryCommand(BaseCommand):
         library_subparsers = library_parser.add_subparsers(dest="library_subcommand", required=True)
 
         library_subparsers.add_parser(
+            "refresh",
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
+            help="Refresh the library of models available in the project's region.",
+            description=(
+                "Refresh the library of models available in the project's region.\n\n"
+                "Examples:\n  poly library refresh\n  poly library refresh --json\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+
+        library_subparsers.add_parser(
             "asr",
             parents=[parents.path, parents.json, parents.verbose, parents.debug],
             help="List the ASR models available in the project's region.",
@@ -80,10 +91,18 @@ class LibraryCommand(BaseCommand):
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Execute the ``library`` command."""
-        if args.library_subcommand == "asr":
+        if args.library_subcommand == "refresh":
+            cls.refresh_library(args.path, output_json=args.json)
+        elif args.library_subcommand == "asr":
             cls.list_asr_models(args.path, output_json=args.json)
         elif args.library_subcommand == "llm":
             cls.list_llm_models(args.path, output_json=args.json)
+
+    @classmethod
+    def refresh_library(cls, base_path: str, output_json: bool = False) -> None:
+        """Refresh the library of models available in the project's region."""
+        project = load_project(base_path, output_json=output_json)
+        project.refresh_library(force_refresh=True)
 
     @classmethod
     def list_asr_models(cls, base_path: str, output_json: bool = False) -> None:
