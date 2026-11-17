@@ -11,7 +11,7 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from functools import cached_property
@@ -63,7 +63,6 @@ from poly.resources import (
     MCPServer,
     MultiResourceYamlResource,
     OutboundCampaign,
-    OutboundCampaignFunction,
     OutboundCampaignNode,
     Pronunciation,
     Resource,
@@ -76,7 +75,6 @@ from poly.resources import (
 )
 from poly.resources.outbound_campaign import (
     campaign_folder_of,
-    function_file_stem,
     route_targets,
 )
 from poly.resources.resource import (
@@ -2817,7 +2815,6 @@ class AgentStudioProject:
                     parent_flow.resource_id if parent_flow else self.generate_uuid(FlowConfig)
                 )
 
-        node_types: dict[str, Optional[str]] = {}
         campaign_folders_to_ids = {
             campaign.folder: campaign_id
             for campaign_id, campaign in self.resources.get(OutboundCampaign, {}).items()
@@ -2890,8 +2887,6 @@ class AgentStudioProject:
                         resource_mappings=[],
                     )
                     resource_name = resource.name
-                    if isinstance(resource, OutboundCampaignNode):
-                        node_types[file_path] = resource.data.get("type")
 
                 if file_path in known_files:
                     resource_info = self.file_structure_info.get(
@@ -2997,120 +2992,7 @@ class AgentStudioProject:
             )
             deleted_resource_mappings.append(resource_mapping)
 
-        self._keep_campaign_trigger_ids(
-            node_types, new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
-        )
-        self._key_campaign_functions(
-            new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
-        )
         return new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
-
-    def _keep_campaign_trigger_ids(
-        self,
-        node_types: dict[str, Optional[str]],
-        new_resource_mappings: list[ResourceMapping],
-        kept_resource_mappings: list[ResourceMapping],
-        deleted_resource_mappings: list[ResourceMapping],
-    ) -> None:
-        """Give a campaign's trigger the saved trigger's id, whatever its name.
-
-        A campaign has at most one trigger, so a new trigger in place of the saved one is the
-        same node, renamed or replaced. A node that becomes the trigger hands its own id to a
-        delete, and a node left at the old trigger's name is created anew.
-        """
-        saved = self.resources.get(OutboundCampaignNode, {})
-
-        def campaign_of(mapping: ResourceMapping) -> str:
-            return mapping.resource_id.split(":", 1)[0]
-
-        def saved_trigger(mapping: ResourceMapping) -> bool:
-            node = saved.get(mapping.resource_id)
-            return mapping.resource_type is OutboundCampaignNode and bool(node and node.is_trigger)
-
-        sources: dict[str, list[ResourceMapping]] = {}
-        candidates: dict[str, list[ResourceMapping]] = {}
-        for mapping in deleted_resource_mappings:
-            if saved_trigger(mapping):
-                sources.setdefault(campaign_of(mapping), []).append(mapping)
-        for mapping in new_resource_mappings + kept_resource_mappings:
-            is_trigger = node_types.get(mapping.file_path, "") == "trigger"
-            if is_trigger and not saved_trigger(mapping):
-                candidates.setdefault(campaign_of(mapping), []).append(mapping)
-            elif not is_trigger and mapping.file_path in node_types and saved_trigger(mapping):
-                sources.setdefault(campaign_of(mapping), []).append(mapping)
-        for campaign_id, mappings in candidates.items():
-            triggers = sources.get(campaign_id, [])
-            if len(mappings) != 1 or not triggers:
-                continue
-            [mapping] = mappings
-            source = next(
-                (m for m in triggers if saved[m.resource_id].name == mapping.resource_name),
-                triggers[0],
-            )
-            trigger_id = source.resource_id
-            if source in deleted_resource_mappings:
-                deleted_resource_mappings.remove(source)
-            else:
-                kept_resource_mappings.remove(source)
-                node_type = node_types[source.file_path] or "node"
-                source.resource_id = f"{campaign_id}:{node_type}-{uuid.uuid4()}"
-                new_resource_mappings.append(source)
-            if mapping in new_resource_mappings:
-                new_resource_mappings.remove(mapping)
-                kept_resource_mappings.append(mapping)
-            else:
-                deleted_resource_mappings.append(replace(mapping))
-            mapping.resource_id = trigger_id
-
-    def _key_campaign_functions(
-        self,
-        new_resource_mappings: list[ResourceMapping],
-        kept_resource_mappings: list[ResourceMapping],
-        deleted_resource_mappings: list[ResourceMapping],
-    ) -> None:
-        """Give each campaign function file its node's id, as pull does.
-
-        A file keyed by its node can change id when its node does, as when a new node takes
-        a renamed trigger's old name, so each file is sorted again into new, kept or deleted.
-        """
-        node_ids = {
-            (campaign_folder_of(mapping.file_path), function_file_stem(mapping.resource_name)): (
-                mapping.resource_id
-            )
-            for mapping in new_resource_mappings + kept_resource_mappings
-            if mapping.resource_type is OutboundCampaignNode
-        }
-        saved = self.resources.get(OutboundCampaignFunction, {})
-        functions = [
-            mapping
-            for mapping in new_resource_mappings + kept_resource_mappings
-            if mapping.resource_type is OutboundCampaignFunction
-        ]
-        before = {mapping.resource_id: replace(mapping) for mapping in functions}
-        for mapping in functions:
-            for mappings in (new_resource_mappings, kept_resource_mappings):
-                if mapping in mappings:
-                    mappings.remove(mapping)
-            mapping.resource_id = node_ids.get(
-                (campaign_folder_of(mapping.file_path), mapping.resource_name),
-                mapping.resource_id,
-            )
-            (
-                kept_resource_mappings if mapping.resource_id in saved else new_resource_mappings
-            ).append(mapping)
-        taken = {mapping.resource_id for mapping in functions}
-        deleted_resource_mappings[:] = [
-            mapping
-            for mapping in deleted_resource_mappings
-            if mapping.resource_type is not OutboundCampaignFunction
-            or mapping.resource_id not in taken
-        ]
-        deleted = {mapping.resource_id for mapping in deleted_resource_mappings}
-        deleted_resource_mappings.extend(
-            mapping
-            for resource_id, mapping in before.items()
-            if resource_id in saved and resource_id not in taken | deleted
-        )
 
     @staticmethod
     def generate_uuid(resource_type: type[Resource]) -> str:

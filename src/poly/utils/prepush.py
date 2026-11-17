@@ -306,6 +306,7 @@ def group_outbound_campaign_changes(
     before any create, since Agent Studio refuses a label another node still has.
     """
     pair_renamed_campaigns(state, new_resources, updated_resources, deleted_resources)
+    pair_renamed_triggers(state, new_resources, updated_resources, deleted_resources)
     replace_retyped_campaign_nodes(state, new_resources, updated_resources, deleted_resources)
     push_campaign_code_with_nodes(state, new_resources, updated_resources, deleted_resources)
     prune_cascade_deleted_campaign_nodes(deleted_resources)
@@ -344,6 +345,31 @@ def pair_renamed_campaigns(
         (new_resources, updated_resources, deleted_resources),
         (OutboundCampaign, OutboundCampaignSettings, OutboundCampaignNode),
     )
+
+
+def pair_renamed_triggers(
+    state: ResourceMap,
+    new_resources: ResourceMap,
+    updated_resources: ResourceMap,
+    deleted_resources: ResourceMap,
+) -> None:
+    """Push a renamed trigger as an update of the saved one.
+
+    Agent Studio refuses deleting a campaign's last trigger and creating a second, so a
+    campaign whose one saved trigger is deleted and one new trigger created keeps its id.
+    """
+    for campaign_id in {
+        node.campaign_id
+        for node in deleted_resources.get(OutboundCampaignNode, {}).values()
+        if isinstance(node, OutboundCampaignNode) and node.is_trigger
+    }:
+        saved = [n for n in campaign_nodes(deleted_resources, campaign_id).values() if n.is_trigger]
+        local = [n for n in campaign_nodes(new_resources, campaign_id).values() if n.is_trigger]
+        if len(saved) == 1 and len(local) == 1:
+            _carry_node_id(
+                state, new_resources, updated_resources, deleted_resources, local[0], saved[0]
+            )
+    _prune_empty((new_resources, deleted_resources), (OutboundCampaignNode,))
 
 
 def _carry_campaign_ids(

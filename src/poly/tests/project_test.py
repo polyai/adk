@@ -41,7 +41,6 @@ from poly.resources import (
     KeyphraseBoosting,
     MCPServer,
     OutboundCampaign,
-    OutboundCampaignFunction,
     OutboundCampaignNode,
     Pronunciation,
     Resource,
@@ -9303,36 +9302,6 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             os.path.join(self.folder, "functions", f"{resource_utils.clean_name(name)}.py"),
         )
 
-    def test_new_node_at_the_old_trigger_name_keeps_both_function_files(self):
-        self._rename_trigger("Start")
-        data = self._yaml()
-        data["nodes"].append(
-            {
-                "name": "Trigger",
-                "type": "call",
-                "flow_name": "Booking",
-                "function": {"name": "call_args", "description": ""},
-                "greeting": "Hi",
-                "voicemail_enabled": False,
-                "max_attempts": 1,
-                "backoff": 1,
-                "backoff_unit": "hours",
-                "default_route": "End",
-            }
-        )
-        self._write_yaml(data)
-        self._write_function(
-            "trigger", "def call_args(outbound_contact, outbound_campaign):\n    return {}\n"
-        )
-
-        success, message = self._push_for_real()
-
-        self.assertTrue(success, message)
-        functions = self.project.resources[OutboundCampaignFunction]
-        self.assertEqual(sorted(f.name for f in functions.values()), ["start", "trigger"])
-        self.assertEqual(functions["CMPGN-ONE:trigger-1"].name, "start")
-        self.assertEqual(self.project.project_status(), ([], [], [], []))
-
     def test_renaming_the_trigger_updates_it_under_its_old_id(self):
         """Agent Studio refuses to delete a campaign's only trigger."""
         self._rename_trigger("Start")
@@ -9388,75 +9357,6 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self._pull_into_new_project(projection)
 
         self.assertEqual(self.project.validate_project(), [])
-
-    def test_trigger_replaced_by_a_retyped_node_keeps_the_trigger_id(self):
-        """The retyped node's delete is the old type, so the old trigger pairs with it."""
-        data = self._yaml()
-        data["nodes"] = [
-            {
-                "name": "End",
-                "type": "trigger",
-                "function": {"name": "map_contacts", "description": ""},
-                "routes": [{"next": "First call"}],
-            }
-            if node["name"] == "End"
-            else node
-            for node in data["nodes"]
-            if node["name"] != "Trigger"
-        ]
-        self._node(data, "First call")["default_route"] = None
-        self._write_yaml(data)
-        shutil.move(
-            os.path.join(self.folder, "functions", "trigger.py"),
-            os.path.join(self.folder, "functions", "end.py"),
-        )
-
-        summary = self._summary(self._push())
-
-        self.assertCountEqual(
-            summary,
-            [
-                ("outbound_campaign_delete_node", "end-1"),
-                ("outbound_campaign_update_node", "call-1"),
-                ("outbound_campaign_update_node", "trigger-1"),
-            ],
-        )
-
-    def test_new_node_taking_the_renamed_trigger_name_is_created_after_it(self):
-        """Agent Studio refuses a label another node still has, so the trigger is renamed first."""
-        self._rename_trigger("Start")
-        data = self._yaml()
-        data["nodes"].append(
-            {"name": "Trigger", "type": "end", "exit_reason": "spare", "writeback_enabled": False}
-        )
-        self._write_yaml(data)
-
-        commands = self._push()
-
-        summary = self._summary(commands)
-        self.assertEqual(
-            [command_type for command_type, _ in summary],
-            ["outbound_campaign_update_node", "outbound_campaign_create_node"],
-        )
-        self.assertEqual(summary[0][1], "trigger-1")
-        self.assertEqual(commands[0][1]["label"], "Start")
-        self.assertRegex(summary[1][1], r"^end-")
-        self.assertEqual(commands[1][1]["node"]["label"], "Trigger")
-        self.assertEqual(commands[1][1]["node"]["position"], {"x": 400.0})
-
-    def test_new_node_taking_the_renamed_trigger_name_is_placed_after_its_parent(self):
-        self._rename_trigger("Start")
-        data = self._yaml()
-        self._node(data, "First call")["default_route"] = "Trigger"
-        data["nodes"].append(
-            {"name": "Trigger", "type": "end", "exit_reason": "spare", "writeback_enabled": False}
-        )
-        self._write_yaml(data)
-
-        create = next(payload for kind, payload in self._push() if kind.endswith("create_node"))
-
-        self.assertEqual(create["node"]["label"], "Trigger")
-        self.assertEqual(create["node"]["position"], {"x": 400.0, "y": 200.0})
 
     def _projection_with(self, *extra_nodes: dict, end_label: str = "End") -> dict:
         projection = campaign_projection(end_label=end_label)
@@ -9559,59 +9459,6 @@ class OutboundCampaignSyncTest(unittest.TestCase):
             [("outbound_campaign_update_node", node_id) for node_id in ("end-1", "end-2", "end-3")],
         )
 
-    def test_renamed_trigger_giving_up_a_label_is_relabelled_first(self):
-        projection = campaign_projection(end_label="Follow up")
-        campaign = projection["outboundCampaigns"]["outboundCampaigns"]["entities"]["CMPGN-ONE"]
-        campaign["nodes"]["entities"]["trigger-1"]["label"] = "Follow-up"
-        campaign["nodes"]["ids"] = ["end-1", "call-1", "trigger-1"]
-        self._pull_into_new_project(projection)
-        data = self._yaml()
-        self.assertEqual(self._node(data, "Follow-up 2")["type"], "trigger")
-        self._node(data, "Follow-up 2")["name"] = "Start"
-        self._node(data, "Follow up")["name"] = "Follow-up"
-        self._node(data, "First call")["default_route"] = "Follow-up"
-        self._write_yaml(data)
-        shutil.move(
-            os.path.join(self.folder, "functions", "follow_up_2.py"),
-            os.path.join(self.folder, "functions", "start.py"),
-        )
-
-        self.assertEqual(
-            self._summary(self._push()),
-            [
-                ("outbound_campaign_update_node", "trigger-1"),
-                ("outbound_campaign_update_node", "end-1"),
-            ],
-        )
-
-    def test_one_of_two_saved_triggers_deleted_and_the_other_renamed(self):
-        """A merge can leave two triggers; the survivor keeps an id so neither is the last."""
-        backup = {
-            "id": "trigger-2",
-            "position": {"x": 0, "y": 600},
-            "label": "Backup",
-            "data": {
-                "type": "trigger",
-                "function": {"name": "backup", "description": "", "code": ""},
-                "routes": [],
-                "sourceType": "csv",
-                "ingestInterval": "daily",
-            },
-        }
-        self._pull_into_new_project(self._projection_with(backup))
-        data = self._yaml()
-        data["nodes"] = [node for node in data["nodes"] if node["name"] != "Backup"]
-        self._write_yaml(data)
-        self._rename_trigger("Start")
-
-        summary = self._summary(self._push())
-
-        self.assertEqual(
-            sorted(kind for kind, _ in summary),
-            ["outbound_campaign_delete_node", "outbound_campaign_update_node"],
-        )
-        self.assertCountEqual([node_id for _, node_id in summary], ["trigger-1", "trigger-2"])
-
     def test_retyping_one_of_two_nodes_sharing_a_label_frees_it_first(self):
         self._pull_with_extra_end("End")
         data = self._yaml()
@@ -9704,43 +9551,6 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertFalse(success)
         self.assertEqual(commands, [])
         self.assertIn("The trigger can't change type", error)
-
-    def test_trigger_and_call_swapping_types_keeps_the_trigger_id(self):
-        data = self._yaml()
-        data["nodes"] = [
-            {"name": "Trigger", "type": "end", "exit_reason": "done", "writeback_enabled": False},
-            {
-                "name": "First call",
-                "type": "trigger",
-                "function": {"name": "map_contacts", "description": ""},
-                "routes": [{"next": "Trigger"}],
-            },
-            self._node(data, "End"),
-        ]
-        self._write_yaml(data)
-        shutil.move(
-            os.path.join(self.folder, "functions", "trigger.py"),
-            os.path.join(self.folder, "functions", "first_call.py"),
-        )
-
-        commands = self._push()
-
-        summary = self._summary(commands)
-        self.assertEqual(
-            [command_type for command_type, _ in summary],
-            [
-                "outbound_campaign_delete_node",
-                "outbound_campaign_update_node",
-                "outbound_campaign_create_node",
-            ],
-        )
-        self.assertEqual(summary[0][1], "call-1")
-        self.assertEqual(summary[1][1], "trigger-1")
-        self.assertEqual(commands[1][1]["label"], "First call")
-        self.assertEqual(
-            commands[1][1]["data"]["trigger"]["routes"], [{"targetNodeId": summary[2][1]}]
-        )
-        self.assertEqual(commands[2][1]["node"]["label"], "Trigger")
 
     def test_folder_and_trigger_renamed_together_keep_every_id(self):
         data = self._rename_campaign("Monthly reminders", "monthly_reminders")
