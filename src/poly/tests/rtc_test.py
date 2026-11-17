@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import os
 import tempfile
 import unittest
+from argparse import Namespace
 from unittest.mock import MagicMock, patch
 
 from poly.cli_commands.rtc import (
@@ -929,6 +930,23 @@ class TestRTCDiff(unittest.TestCase):
         data_changes = result["diffs"][0]["data"]
         self.assertEqual(len(data_changes), 1)
         self.assertEqual(data_changes[0]["path"], "flag")
+
+    @patch("poly.cli_commands.rtc.json_print")
+    def test_pull_and_diff_json_failures_exit_1(self, mock_json_print):
+        """rtc pull --json and rtc diff --json print the failure and exit 1."""
+        failure = {"success": False, "error": "No RTC config found."}
+        for subcommand, method in [("pull", "rtc_pull"), ("diff", "rtc_diff")]:
+            with self.subTest(subcommand=subcommand):
+                args = Namespace(
+                    rtc_subcommand=subcommand, path=self.temp_dir, env="sandbox", json=True
+                )
+
+                with patch.object(RTCCommand, method, return_value=failure):
+                    with self.assertRaises(SystemExit) as ctx:
+                        RTCCommand.run(args)
+
+                self.assertEqual(ctx.exception.code, 1)
+                mock_json_print.assert_called_with(failure)
 
     def setUp(self):
         """Set up test fixtures."""

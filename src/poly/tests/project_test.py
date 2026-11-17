@@ -2221,7 +2221,7 @@ class PushProjectTest(unittest.TestCase):
 
         success, message, commands = project.push_project(force=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
@@ -2241,7 +2241,7 @@ class PushProjectTest(unittest.TestCase):
 
         success, message, _ = project.push_project(force=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
@@ -2429,7 +2429,7 @@ class PushProjectTest(unittest.TestCase):
 
         success, message, _ = project.push_project(force=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
 
     def test_push_project_ambiguous_rename_stays_delete_and_create(self):
@@ -4177,6 +4177,20 @@ class GetRemoteResourcesByNameLocalTest(unittest.TestCase):
     def tearDown(self):
         patch.stopall()
 
+    def test_diff_against_a_name_that_matches_nothing_raises(self):
+        """A name that resolves to no resources is an error, not an empty diff."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        with patch.object(
+            AgentStudioProject,
+            "get_remote_resources_by_name",
+            side_effect=[({}, []), (project.resources, [])],
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                project.diff_remote_named_versions(before_name="typo", after_name="local")
+
+        self.assertIn("named 'typo' was found", str(ctx.exception))
+
     def test_local_returns_local_resources(self):
         """'local' should resolve to the current local filesystem state."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
@@ -5049,7 +5063,7 @@ class TopicTagsSyncTest(unittest.TestCase):
         success, message, _ = project.push_project(force=True)
 
         self.assertEqual(project.resources[Topic]["TOPIC-Topic 2"].tags, ["email", "validation"])
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
 
     def test_force_push_clears_tags_when_file_has_no_tags_key(self):
@@ -5068,7 +5082,7 @@ class TopicTagsSyncTest(unittest.TestCase):
 
         success, message, _ = project.push_project()
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.assertIn("enabled: true\ntags:\n- billing\nactions:", self._read_topic_file())
 
@@ -9019,7 +9033,7 @@ class ApiIntegrationSyncTest(unittest.TestCase):
 
         success, message, commands = self.project.push_project(dry_run=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.assertEqual(commands, [])
 
@@ -9189,7 +9203,7 @@ class ApiIntegrationSyncTest(unittest.TestCase):
 
         self.assertEqual(self.project.project_status(), ([], [], [], []))
         success, message, _ = self.project.push_project(dry_run=True)
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
 
     def test_body_schema_on_get_fails_push_validation(self):
