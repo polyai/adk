@@ -42,6 +42,7 @@ Available resource names:
 | `functions` | Global and flow functions, decorators, state, metrics |
 | `languages` | Default and additional language configuration |
 | `mcp` | MCP servers the agent connects to |
+| `outbound_campaigns` | Outbound campaign settings, node graph and node functions |
 | `tests` | Simulated conversation test cases |
 | `safety_filters` | Content moderation settings |
 | `sms` | Text message templates |
