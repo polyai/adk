@@ -1,13 +1,19 @@
-"""Tests for the PostHog feature-flag handler.
+"""Tests for the PostHog handler: feature flags and event capture.
 
 Copyright PolyAI Limited
 """
 
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 
 from poly.handlers import posthog as posthog_module
-from poly.handlers.posthog import PosthogHandler, get_posthog_client, get_user_identity
+from poly.handlers.posthog import (
+    TELEMETRY_OPT_OUT_ENV_VARS,
+    PosthogHandler,
+    get_posthog_client,
+    get_user_identity,
+)
 
 
 class IsFeatureEnabledTest(unittest.TestCase):
@@ -296,6 +302,9 @@ class CaptureEventTest(unittest.TestCase):
             "poly.handlers.posthog.get_posthog_client", return_value=self.client
         )
         self.client_patcher.start()
+        # The developer running the suite may have opted out themselves.
+        env = {k: v for k, v in os.environ.items() if k not in TELEMETRY_OPT_OUT_ENV_VARS}
+        patch.dict(os.environ, env, clear=True).start()
 
     def tearDown(self):
         patch.stopall()
@@ -304,22 +313,48 @@ class CaptureEventTest(unittest.TestCase):
         """A capture call is forwarded to the region's client with the given fields."""
         from poly.handlers.posthog import capture_event
 
-        capture_event("studio", "apikey_signup", {"source": "apikey"}, "acc-1")
+        sent = capture_event("studio", "apikey_signup", {"source": "apikey"}, "acc-1")
 
+        self.assertTrue(sent)
         self.client.capture.assert_called_once_with(
             event="apikey_signup",
             distinct_id="acc-1",
             properties={"source": "apikey"},
         )
 
-    def test_client_failure_is_swallowed(self):
+    def test_unknown_region_lands_in_the_production_project(self):
+        """Before a region is chosen, events go to the production PostHog project."""
+        from poly.handlers.posthog import capture_event
+
+        with patch("poly.handlers.posthog.get_posthog_client") as mock_get_client:
+            capture_event(None, "setup_started", {}, "anon:1")
+
+        mock_get_client.assert_called_once_with("")
+
+    def test_client_failure_is_swallowed_and_reported(self):
         """A slow or unreachable PostHog must never fail the caller."""
         from poly.handlers.posthog import capture_event
 
         self.client.capture.side_effect = RuntimeError("connection reset")
 
-        capture_event("studio", "apikey_signup", {"source": "apikey"}, "acc-1")
+        sent = capture_event("studio", "apikey_signup", {"source": "apikey"}, "acc-1")
 
+        self.assertFalse(sent)
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_opt_out_variables_suppress_the_event(self):
+        """POLY_NO_TELEMETRY or DO_NOT_TRACK set to anything sends nothing."""
+        from poly.handlers.posthog import capture_event
+
+        for name in TELEMETRY_OPT_OUT_ENV_VARS:
+            with self.subTest(variable=name), patch.dict(os.environ, {name: "1"}):
+                sent = capture_event("studio", "apikey_signup", {"source": "apikey"}, "acc-1")
+
+                self.assertFalse(sent)
+                self.client.capture.assert_not_called()
+
+    def test_opt_out_variable_set_to_empty_does_not_opt_out(self):
+        """An empty variable is treated as unset, matching the DO_NOT_TRACK convention."""
+        from poly.handlers.posthog import capture_event
+
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}):
+            self.assertTrue(capture_event("studio", "e", {}, "acc-1"))

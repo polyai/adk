@@ -2,6 +2,92 @@
 
 <!-- version list -->
 
+## v0.86.0 (2026-11-17)
+
+### Features
+
+- Exit non-zero when a command fails ([#423](https://github.com/polyai/adk/pull/423),
+  [`ffc561f`](https://github.com/polyai/adk/commit/ffc561fbbd262ce48f737e1ee2f02190e86c94f4))
+
+
+## v0.85.0 (2026-11-17)
+
+### Features
+
+- Validate function names, parameters and latency control before push
+  ([#414](https://github.com/polyai/adk/pull/414),
+  [`6b0df68`](https://github.com/polyai/adk/commit/6b0df682d933f753a95110c9fd553c26b6dbbe36))
+
+
+## v0.84.0 (2026-11-16)
+
+### Features
+
+- **apikey**: Create Models-only keys with --type model, and keys now expire after 90 days by
+  default ([#430](https://github.com/polyai/adk/pull/430),
+  [`c43b1e8`](https://github.com/polyai/adk/commit/c43b1e895085138fee008648c242849e0624bb4a))
+
+
+## v0.83.0 (2026-11-16)
+
+### Features
+
+- **setup**: Offer an account API key as an optional step that runs poly apikey
+  ([#399](https://github.com/polyai/adk/pull/399),
+  [`5b540cd`](https://github.com/polyai/adk/commit/5b540cdcca002f06c9f4686b924fe82f9a080b57))
+
+
+## v0.82.0 (2026-11-16)
+
+### Features
+
+- **setup**: Report setup start, step outcomes and completion to PostHog with an opt-out
+  ([#398](https://github.com/polyai/adk/pull/398),
+  [`e3da1f0`](https://github.com/polyai/adk/commit/e3da1f00716a19ae06a76661e553248d1c044364))
+
+
+## v0.81.2 (2026-11-16)
+
+### Bug Fixes
+
+- Stop poly validate rejecting an empty flow description, step prompt or greeting
+  ([#421](https://github.com/polyai/adk/pull/421),
+  [`eec16fd`](https://github.com/polyai/adk/commit/eec16fd2d192a8be0a5f44f0503fcc9ad2c1435f))
+
+
+## v0.81.1 (2026-11-16)
+
+### Bug Fixes
+
+- Validate entity, handoff and API integration limits before push
+  ([#420](https://github.com/polyai/adk/pull/420),
+  [`7dc6b67`](https://github.com/polyai/adk/commit/7dc6b67db8a58616293021cf4deb2ed12ef7c40e))
+
+- Validate topics, documents, speech settings and tests before push
+  ([#417](https://github.com/polyai/adk/pull/417),
+  [`61649c4`](https://github.com/polyai/adk/commit/61649c4618ad6fc93feeb176b36e6b9b15b14019))
+
+
+## v0.81.0 (2026-11-16)
+
+### Bug Fixes
+
+- Show the platform's error when a push is rejected ([#415](https://github.com/polyai/adk/pull/415),
+  [`7c8f3af`](https://github.com/polyai/adk/commit/7c8f3af8e009f3831ef917464961074c3270ec4e))
+
+### Features
+
+- Validate flow conditions and step names before push
+  ([#413](https://github.com/polyai/adk/pull/413),
+  [`1bf35f8`](https://github.com/polyai/adk/commit/1bf35f855b9799a1f4b1eeb952b8a9f73e94bdc9))
+
+### Refactoring
+
+- Share the resource name and id lookups and drop_unset
+  ([#427](https://github.com/polyai/adk/pull/427),
+  [`5917eb1`](https://github.com/polyai/adk/commit/5917eb15b03f07a961cf4238b7b0b1e5208b99a2))
+
+
 ## v0.80.1 (2026-11-12)
 
 ### Bug Fixes

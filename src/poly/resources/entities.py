@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import ClassVar
@@ -76,6 +77,10 @@ EXPECTED_ENTITY_CONFIG_FIELDS: dict[EntityType, dict[str, type | tuple]] = {
     EntityType.FREE_TEXT: {},
     EntityType.NAME: {},
 }
+
+# The platform's bounds for a numeric entity's range.
+NUMERIC_MIN = 0
+NUMERIC_MAX = 1_000_000
 
 
 @register_resource("entities")
@@ -193,8 +198,30 @@ class Entity(MultiResourceYamlResource):
                     f"for entity type '{self.entity_type.value}'."
                 )
 
+        if not self.description.strip():
+            raise ValueError("Description cannot be empty.")
         if self.description != self.description.strip():
             raise ValueError("Description cannot contain leading or trailing whitespace.")
+
+        if self.entity_type == EntityType.NUMERIC:
+            minimum = self.config.get("min") or 0
+            maximum = self.config.get("max") or 0
+            if minimum < NUMERIC_MIN:
+                raise ValueError(f"Config field 'min' must be at least {NUMERIC_MIN}.")
+            if maximum > NUMERIC_MAX:
+                raise ValueError(f"Config field 'max' must be at most {NUMERIC_MAX:,}.")
+            if self.config.get("has_range") and maximum < minimum:
+                raise ValueError("Config field 'max' cannot be less than 'min'.")
+        elif self.entity_type == EntityType.ALPHANUMERIC:
+            try:
+                re.compile(self.config.get("regular_expression") or "")
+            except re.error as e:
+                raise ValueError(
+                    f"Config field 'regular_expression' is not a valid regular expression: {e}."
+                ) from e
+        for config_field in ("options", "country_codes"):
+            if any(not isinstance(item, str) for item in self.config.get(config_field, [])):
+                raise ValueError(f"Config field '{config_field}' must be a list of text values.")
 
     def build_update_proto(self) -> Entity_Update:
         """Create a proto for updating the resource."""

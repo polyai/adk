@@ -242,7 +242,7 @@ class ChannelGreeting(MultiResourceYamlResource):
         return cls(
             resource_id=resource_id,
             name=name,
-            welcome_message=yaml_dict.get("welcome_message", ""),
+            welcome_message=yaml_dict.get("welcome_message") or "",
             language_code=yaml_dict.get("language_code", "en-GB"),
         )
 
@@ -254,9 +254,6 @@ class ChannelGreeting(MultiResourceYamlResource):
         valid, invalid_references = utils.validate_references(references, resource_mappings)
         if not valid:
             raise ValueError(f"Invalid references: {invalid_references}")
-
-        if not self.welcome_message:
-            raise ValueError("Welcome message cannot be empty.")
 
         if not self.language_code:
             raise ValueError("Language code cannot be empty.")

@@ -266,3 +266,5 @@ class FunctionsCommand(BaseCommand):
             json_print(result)
         else:
             print_function_validation_issues(result.get("valid", False), result.get("issues", []))
+        if not result.get("valid", False):
+            sys.exit(1)

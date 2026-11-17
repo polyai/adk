@@ -45,7 +45,7 @@ All integrations for the project live in this one file, listed under the `api_in
 
 | Field | Required | Description |
 |---|---|---|
-| `name` | Yes | Identifier for the API. Becomes the runtime namespace: `conv.api.<name>`. Must match `^[a-z_][a-z0-9_]*$` — lowercase letters, digits, and underscores, starting with a letter or underscore. |
+| `name` | Yes | Identifier for the API. Becomes the runtime namespace: `conv.api.<name>`. At least 2 characters, matching `^[a-z_][a-z0-9_]*$` — lowercase letters, digits, and underscores, starting with a letter or underscore. |
 | `description` | No | Free-text note on what the API is used for. |
 | `environments` | Yes | Per-environment base URL and auth type — see below. |
 | `operations` | No | List of HTTP operations this API exposes — see below. |
@@ -67,7 +67,7 @@ Each entry is one HTTP endpoint:
 
 | Field | Description |
 |---|---|
-| `name` | Operation name. Called at runtime as `conv.api.<api_name>.<name>(...)`. |
+| `name` | Operation name. Called at runtime as `conv.api.<api_name>.<name>(...)`. Must match `^[a-z_][a-z0-9_]*$`. |
 | `description` | Optional note on what the operation does, up to 1000 characters. |
 | `method` | One of `GET`, `POST`, `PATCH`, `PUT`, `DELETE`. |
 | `resource` | Path template, e.g. `/tickets/{id}`. Path variables become call arguments. |
@@ -150,13 +150,13 @@ response = conv.api.salesforce.update_contact(
 
 ## Validation
 
-- `name` is required and must match `^[a-z_][a-z0-9_]*$`.
+- `name` is required, at least 2 characters, and must match `^[a-z_][a-z0-9_]*$`.
 - Each integration `name` must be unique.
 - Each environment's `base_url` must be a valid `http(s)://` URL, or empty.
 - `base_url` cannot be empty when `auth_type` is not `none`.
 - `auth_type` must be one of `none`, `basic`, `apiKey`, `oauth2`, `oauth2_client_credentials`,
   `jwt_client_assertion`.
-- Every operation needs a non-empty `name`, a `method` from the supported set, and a `resource` path matching a valid URL-path pattern (optionally with `{param}` placeholders).
+- Every operation needs a `name` matching `^[a-z_][a-z0-9_]*$`, a `method` from the supported set, and a `resource` path matching a valid URL-path pattern (optionally with `{param}` placeholders).
 - Each operation `name` must be unique within its integration.
 - An operation's `description` is at most 1000 characters.
 - Header names are HTTP tokens (letters, digits and ``!#$%&'*+-^_`|~``), unique ignoring case, and never `Authorization` or `Host`. Values are text, so quote one YAML would otherwise read as a number, date, list or mapping (`X-Version: '1.10'`); `true` and `false` are sent as written. Values are ASCII with no line breaks or control characters, don't start or end with a space, and are at most 4096 characters. An operation has at most 50 headers.
