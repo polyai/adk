@@ -28,6 +28,11 @@ FLOW_FUNCTION_REGEX = re.compile(r"{{ft:([\w-]+)}}")
 
 TOPIC_REFERENCES = ["global_functions", "sms", "handoff", "attributes", "variables", "translations"]
 
+# Agent Studio reserves this prefix for guardrails, matched without regard to case.
+GUARDRAIL_NAME_PREFIX = "Guardrail - "
+# Agent Studio uses this character to separate a topic's example queries.
+EXAMPLE_QUERY_SEPARATOR = "|"
+
 
 @dataclass
 class TopicTags(SubResource):
@@ -194,6 +199,11 @@ class Topic(YamlResource):
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         """Validate the topic resource."""
+        if self.name.strip().lower().startswith(GUARDRAIL_NAME_PREFIX.lower()):
+            raise ValueError(
+                f"Topic name '{self.name}' cannot start with '{GUARDRAIL_NAME_PREFIX}', "
+                "which is reserved for guardrails"
+            )
 
         references = utils.get_references_from_prompt(
             self.actions + self.content, TOPIC_REFERENCES, raise_on_invalid=True
@@ -205,6 +215,14 @@ class Topic(YamlResource):
         # limit example queries to 20
         if len(self.example_queries) > 20:
             raise ValueError("Example queries must be less than 20")
+        for query in self.example_queries:
+            if utils.is_blank(query):
+                raise ValueError("Example queries must not be empty")
+            if isinstance(query, str) and EXAMPLE_QUERY_SEPARATOR in query:
+                raise ValueError(
+                    f"Example query '{query}' must not contain the "
+                    f"'{EXAMPLE_QUERY_SEPARATOR}' character"
+                )
 
         self._validate_tags()
 

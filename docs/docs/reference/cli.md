@@ -45,7 +45,7 @@ poly push --help
 |---|---|
 | [`poly setup`](./cli/setup.md) | Set up everything in one command: auth, completion, AI skills, and a project |
 | [`poly login`](./cli/login.md) | Sign in to, or sign up for, an Agent Studio account |
-| [`poly apikey`](./cli/apikey.md) | Get an account-scoped API key for the PolyAI APIs / Dialog RSN and export `POLY_API_KEY` |
+| [`poly apikey`](./cli/apikey.md) | Get an account-scoped API key for the PolyAI APIs / Dialog RSN and export `POLY_API_KEY` (`--type model` for a Models-only key in `POLY_MODEL_API_KEY`, `--expires-in` for its lifetime) |
 | [`poly init`](./cli/init.md) | Connect a local folder to an existing project |
 | [`poly project`](./cli/project.md) | Create and manage Agent Studio projects |
 | [`poly template`](./cli/template.md) | Browse and load example project templates |

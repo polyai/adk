@@ -51,6 +51,10 @@ AVAILABLE_AUTH_TYPES = {
     "jwt_client_assertion",
 }
 
+# Integration and operation names become `conv.api.<integration>.<operation>`.
+NAME_PATTERN = re.compile(r"^[a-z_][a-z0-9_]*$")
+INTEGRATION_NAME_MIN = 2
+
 # Matches an empty string (no URL configured) or a valid http(s) base URL
 URL_PATTERN = re.compile(r"^(https?://[^\s]+)?$")
 
@@ -351,6 +355,12 @@ class ApiIntegrationOperation(SubResource):
         """Validate the operation's fields."""
         if not self.name:
             raise ValueError("Operation name cannot be empty.")
+        if not NAME_PATTERN.fullmatch(self.name):
+            raise ValueError(
+                f"Operation name '{self.name}' must follow Python function naming convention "
+                "(lowercase letters, numbers, and underscores only, starting with letter or "
+                "underscore)."
+            )
         if not self.method:
             raise ValueError(f"Operation '{self.name}': method cannot be empty.")
         if self.method not in AVAILABLE_OPERATIONS:
@@ -675,7 +685,10 @@ class ApiIntegration(MultiResourceYamlResource):
         ops_data = yaml_dict.get("operations") or []
         if isinstance(ops_data, dict):
             ops_data = list(ops_data.values())
-        operations = [ApiIntegrationOperation.from_dict(o) for o in ops_data]
+        # Operation ids are not written to the file, so one found there is not read.
+        operations = [
+            replace(ApiIntegrationOperation.from_dict(o), resource_id="") for o in ops_data
+        ]
         return cls(
             resource_id=resource_id,
             name=yaml_dict.get("name") or name,
@@ -683,8 +696,6 @@ class ApiIntegration(MultiResourceYamlResource):
             environments=environments,
             operations=operations,
         )
-
-    _NAME_PATTERN: ClassVar[re.Pattern] = re.compile(r"^[a-z_][a-z0-9_]*$")
 
     def validate(
         self,
@@ -694,10 +705,15 @@ class ApiIntegration(MultiResourceYamlResource):
         """Validate the API integration resource."""
         if not self.name:
             raise ValueError("Name cannot be empty.")
-        if not self._NAME_PATTERN.fullmatch(self.name):
+        if not NAME_PATTERN.fullmatch(self.name):
             raise ValueError(
                 f"API integration name '{self.name}' must follow Python function naming convention "
                 "(lowercase letters, numbers, and underscores only, starting with letter or underscore)."
+            )
+        if len(self.name) < INTEGRATION_NAME_MIN:
+            raise ValueError(
+                f"API integration name '{self.name}' must be at least "
+                f"{INTEGRATION_NAME_MIN} characters."
             )
 
         for env_name in ("sandbox", "pre_release", "live"):

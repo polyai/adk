@@ -156,6 +156,8 @@ class UpdateCommand(BaseCommand):
         # Refuse before hitting the network or announcing anything, so an install we
         # cannot upgrade is not told that an update is on the way.
         if cls.refuse_if_not_upgradable(output_json):
+            if output_json:
+                sys.exit(1)
             return
 
         if target_version:
