@@ -22,6 +22,8 @@ poly deployments list --limit 10
 
 By default shows all deployments. Pass `--limit` to cap the number of entries shown. Long listings are automatically paged through the system pager when stdout is a TTY; output piped to a file or another command is never paged.
 
+When there are no deployments in the selected environment, the command prints a muted "No versions found." message and exits 0. Under `--json`, it returns an empty `versions` array and exits 0.
+
 | Flag | Description |
 |---|---|
 | `--env`, `-e` | Environment to list. Choices: `sandbox`, `pre-release`, `live`. Defaults to `live` for projects using simplified deployments, otherwise `sandbox`. |
@@ -117,7 +119,18 @@ Without `--force`, the command prompts for confirmation before proceeding and op
 }
 ~~~
 
-Adds `"dry_run": true` instead of pushing changes when `--dry-run` is passed.
+With `--dry-run`, `"success": true` and `"dry_run": true` are added and no changes are made:
+
+~~~json
+{
+  "success": true,
+  "dry_run": true,
+  "to_env": "pre-release",
+  "from_hash": "abc123def...",
+  "message": "",
+  "included_deployments": []
+}
+~~~
 
 ## `poly deployments rollback`
 
@@ -152,7 +165,17 @@ Without `--force`, the command prompts for confirmation before proceeding.
 }
 ~~~
 
-Adds `"dry_run": true` instead of rolling back when `--dry-run` is passed.
+With `--dry-run`, `"success": true` and `"dry_run": true` are added and no changes are made:
+
+~~~json
+{
+  "success": true,
+  "dry_run": true,
+  "target_hash": "abc123def...",
+  "message": "",
+  "reverted_deployments": []
+}
+~~~
 
 ## `poly deployments experiment`
 
