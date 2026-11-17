@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, fields
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from enum import Enum
 from functools import cached_property
 from pathlib import PurePath
@@ -788,6 +788,7 @@ class AgentStudioProject:
 
         if projection_json is None:
             self.branch_id = self.api_handler.branch_id
+            self.refresh_library()
 
         self.save_config()
         return resources, projection
@@ -5273,7 +5274,7 @@ class AgentStudioProject:
         if (
             not self.library
             or force_refresh
-            or datetime.now() - self.library.last_refreshed > timedelta(days=1)
+            or datetime.now(timezone.utc) - self.library.last_refreshed > timedelta(days=1)
         ):
             # Load the latest ASR and LLM async models and build the library
             with ThreadPoolExecutor(max_workers=2) as executor:

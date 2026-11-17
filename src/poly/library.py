@@ -1,8 +1,8 @@
 """Library module for PolyAI models."""
 
 import os
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 
 from poly.constants import POLY_HOME_DIR
 
@@ -27,6 +27,14 @@ class ASRModel:
             model=api_response.get("model"),
         )
 
+    def to_dict(self) -> dict:
+        return {
+            "id": self.model_id,
+            "name": self.name,
+            "provider": self.provider,
+            "model": self.model,
+        }
+
 
 @dataclass
 class LLMModel:
@@ -35,6 +43,7 @@ class LLMModel:
     model_id: str
     name: str
     provider_model_id: str
+    poly_ai_model: str
     speech_native: bool
     supports_webchat: bool
     supports_temperature: bool
@@ -45,10 +54,22 @@ class LLMModel:
             model_id=api_response.get("id"),
             name=api_response.get("name"),
             provider_model_id=api_response.get("providerModelId"),
+            poly_ai_model=api_response.get("polyaiModel"),
             speech_native=api_response.get("endToEnd", False),
             supports_webchat=api_response.get("supportsWebchat", False),
             supports_temperature=api_response.get("supportsTemperature", False),
         )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.model_id,
+            "name": self.name,
+            "polyaiModel": self.poly_ai_model,
+            "providerModelId": self.provider_model_id,
+            "endToEnd": self.speech_native,
+            "supportsWebchat": self.supports_webchat,
+            "supportsTemperature": self.supports_temperature,
+        }
 
 
 @dataclass
@@ -66,7 +87,7 @@ class Library:
     ) -> "Library":
         # Load a library object from API responses
         return cls(
-            last_refreshed=datetime.now(),
+            last_refreshed=datetime.now(tz=timezone.utc),
             region=region,
             asr_models=[ASRModel.from_api_response(asr) for asr in asr_models],
             llm_models=[LLMModel.from_api_response(llm) for llm in llm_models],
@@ -81,7 +102,7 @@ class Library:
         library_path = os.path.join(LIBRARY_DIR, f"{region}.json")
         if os.path.exists(library_path):
             try:
-                with open(library_path, "r") as f:
+                with open(library_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     asr_models = [ASRModel(**asr) for asr in data.get("asr_models", [])]
                     llm_models = [LLMModel(**llm) for llm in data.get("llm_models", [])]
@@ -102,13 +123,13 @@ class Library:
 
         os.makedirs(LIBRARY_DIR, exist_ok=True)
         library_path = os.path.join(LIBRARY_DIR, f"{self.region}.json")
-        with open(library_path, "w") as f:
+        with open(library_path, "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "last_refreshed": self.last_refreshed.isoformat(),
                     "region": self.region,
-                    "asr_models": [asr_model.__dict__ for asr_model in self.asr_models],
-                    "llm_models": [llm_model.__dict__ for llm_model in self.llm_models],
+                    "asr_models": [asdict(asr_model) for asr_model in self.asr_models],
+                    "llm_models": [asdict(llm_model) for llm_model in self.llm_models],
                 },
                 f,
                 indent=4,
