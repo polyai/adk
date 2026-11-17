@@ -2,6 +2,49 @@
 
 <!-- version list -->
 
+## v0.87.0 (2026-11-17)
+
+### Features
+
+- Sync outbound campaigns as files ([#428](https://github.com/polyai/adk/pull/428),
+  [`706f04a`](https://github.com/polyai/adk/commit/706f04a7825e5ba6c82dbb4cf51fd045d097ce39))
+
+
+## v0.86.1 (2026-11-17)
+
+### Bug Fixes
+
+- Refuse poly update on Windows and give the command to run instead
+  ([#407](https://github.com/polyai/adk/pull/407),
+  [`0fdd0a5`](https://github.com/polyai/adk/commit/0fdd0a5e387b39ff07250dd2a63a245e4595c319))
+
+
+## v0.86.0 (2026-11-17)
+
+### Features
+
+- Exit non-zero when a command fails ([#423](https://github.com/polyai/adk/pull/423),
+  [`ffc561f`](https://github.com/polyai/adk/commit/ffc561fbbd262ce48f737e1ee2f02190e86c94f4))
+
+
+## v0.85.0 (2026-11-17)
+
+### Features
+
+- Validate function names, parameters and latency control before push
+  ([#414](https://github.com/polyai/adk/pull/414),
+  [`6b0df68`](https://github.com/polyai/adk/commit/6b0df682d933f753a95110c9fd553c26b6dbbe36))
+
+
+## v0.84.0 (2026-11-16)
+
+### Features
+
+- **apikey**: Create Models-only keys with --type model, and keys now expire after 90 days by
+  default ([#430](https://github.com/polyai/adk/pull/430),
+  [`c43b1e8`](https://github.com/polyai/adk/commit/c43b1e895085138fee008648c242849e0624bb4a))
+
+
 ## v0.83.0 (2026-11-16)
 
 ### Features

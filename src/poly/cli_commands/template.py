@@ -182,7 +182,7 @@ class TemplateCommand(BaseCommand):
                 json_print({"success": False, "error": str(e)})
             else:
                 error(f"Failed to fetch templates: {e}")
-            return
+            sys.exit(1)
 
         if output_json:
             json_print({"success": True, "templates": templates})
@@ -223,14 +223,14 @@ class TemplateCommand(BaseCommand):
                 json_print({"success": False, "error": str(e)})
             else:
                 error(f"Failed to fetch templates: {e}")
-            return
+            sys.exit(1)
 
         if not templates:
             if output_json:
                 json_print({"success": False, "error": "No templates available."})
             else:
                 info("No templates available.")
-            return
+            sys.exit(1)
 
         if not template_name:
             if output_json:

@@ -104,6 +104,10 @@ text: "Hi {{vrbl:customer_name}}, your booking is confirmed for {{vrbl:booking_d
 
 ## Important rules
 
+### Names
+
+A variable name cannot be a Python reserved word, such as `class`.
+
 ### In prompts
 
 Use:

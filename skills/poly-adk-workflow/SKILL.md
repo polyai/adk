@@ -9,7 +9,7 @@ description: >
 metadata:
   author: PolyAI
   license: Apache-2.0
-  version: 0.83.0
+  version: 0.87.0
   requires:
     bins:
       - poly
@@ -87,6 +87,7 @@ A project looks like:
 ├── chat/                    # webchat channel config
 ├── flows/                   # multi-step guided conversations
 ├── functions/               # Python functions (deterministic logic, lifecycle hooks)
+├── outbound_campaigns/      # outbound campaign drafts: campaign.yaml + functions/<node name>.py
 ├── topics/                  # knowledge base entries
 ├── test_suite/              # simulated conversation tests
 ├── real_time_configuration/ # per-environment RTC (see poly-adk-rtc)

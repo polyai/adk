@@ -50,6 +50,7 @@ A typical project structure looks like this:
 │   └── safety_filters.yaml             # Optional
 ├── flows/                              # Optional - flow definitions
 ├── functions/                          # Global functions
+├── outbound_campaigns/                 # Optional - outbound campaign drafts
 ├── topics/                             # Knowledge base topics
 ├── test_suite/                         # Optional - simulated conversation tests
 ├── real_time_configuration/            # Optional - per-environment RTC

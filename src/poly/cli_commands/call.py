@@ -151,7 +151,7 @@ class CallCommand(BaseCommand):
             push_success, output, _ = project.push_project(
                 force=False, skip_validation=False, dry_run=False, format=False
             )
-            if not push_success and output != "No changes detected":
+            if not push_success:
                 error(f"Failed to push before calling: {output}")
                 sys.exit(1)
             success("Project pushed.")
