@@ -253,7 +253,7 @@ poly sip-trunks get <trunk_id> --json
 |---|---|
 | `trunk_id` | SIP trunk ID. Required. |
 
-`--json` returns the trunk API response. It omits separately fetched extension bindings; use `list --json` for an export that includes them. Optional API settings such as `inbound.default_route` and `outbound` are absent when unconfigured.
+`--json` returns the trunk API response with an `extensions` array containing its extension bindings. The array is empty when no bindings exist. Optional API settings such as `inbound.default_route` and `outbound` are absent when unconfigured.
 
 `--json` output shape:
 
@@ -270,6 +270,16 @@ poly sip-trunks get <trunk_id> --json
     "sip_auth": {"enabled": false},
     "sip_token_auth": {"enabled": false}
   },
+  "extensions": [
+    {
+      "extension": "1000",
+      "agent": {
+        "agent_id": "project-1",
+        "client_env": "live",
+        "variant_id": ""
+      }
+    }
+  ],
   "created_at": "2026-08-12T12:00:00Z",
   "updated_at": "2026-08-12T12:01:00Z"
 }

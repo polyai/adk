@@ -264,3 +264,39 @@ def test_list_preserves_routes_to_multiple_projects(
         {"extension": "1000", "agent_id": "project-1", "client_env": "live"},
         {"extension": "2000", "agent_id": "project-3", "client_env": "sandbox"},
     ]
+
+
+@pytest.mark.parametrize(
+    "extensions",
+    [
+        [],
+        [
+            {
+                "extension": "+441234567890",
+                "agent": {
+                    "agent_id": "project-1",
+                    "client_env": "live",
+                    "variant_id": "variant-1",
+                },
+            }
+        ],
+    ],
+)
+def test_get_json_includes_trunk_details_and_extension_bindings(tmp_path, capsys, extensions):
+    (tmp_path / "project.yaml").write_text(
+        "project_id: project-1\naccount_id: acct-123\nregion: uk-1\n"
+    )
+    trunk = {
+        "id": "tr-123",
+        "name": "Example carrier",
+        "inbound": {"hostname": "tr-123.example.com"},
+    }
+    with patch.object(
+        PlatformAPIHandler,
+        "make_request",
+        side_effect=[trunk, {"extensions": extensions}],
+    ):
+        SIPTrunksCommand.run(sip_args(tmp_path, "get", "tr-123"))
+
+    result = json.loads(capsys.readouterr().out)
+    assert result == {**trunk, "extensions": extensions}

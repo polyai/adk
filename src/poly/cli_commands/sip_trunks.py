@@ -234,15 +234,15 @@ class SIPTrunksCommand(BaseCommand):
         """Show a SIP trunk and its extension routing."""
         project = load_project(args.path, output_json=args.json)
         result = project.get_sip_trunk(args.trunk_id)
+        extension_response = project.list_sip_trunk_extensions(args.trunk_id)
+        extensions = extension_response.get("extensions", [])
         if not args.json:
-            extension_response = project.list_sip_trunk_extensions(args.trunk_id)
-            extensions = extension_response.get("extensions", [])
             from poly.output.console import print_sip_trunk_detail
 
             print_sip_trunk_detail(result, extensions)
             return
 
-        json_print(result)
+        json_print({**result, "extensions": extensions})
 
     @classmethod
     def sip_trunks_delete(cls, args: Namespace) -> None:
