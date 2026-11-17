@@ -73,7 +73,10 @@ from poly.resources import (
     TestCase,
     Topic,
 )
-from poly.resources.outbound_campaign import campaign_folder_of
+from poly.resources.outbound_campaign import (
+    campaign_folder_of,
+    route_targets,
+)
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
     RESOURCE_NAME_TO_CLASS,
@@ -1594,6 +1597,7 @@ class AgentStudioProject:
             updated_resources,
             new_state,
         )
+        self._assign_campaign_positions(new_state, new_resources, post_changes.new)
 
         # Queue new/updated/deleted resources
         commands = self.api_handler.get_queued_commands()
@@ -1834,6 +1838,22 @@ class AgentStudioProject:
         return True, "Resources pushed successfully.", commands
 
     @staticmethod
+    def _assign_campaign_positions(new_state: ResourceMap, *new_resources: ResourceMap) -> None:
+        """Lay out the new nodes of each campaign around the nodes it already has."""
+        campaign_ids = {
+            node.campaign_id
+            for changes in new_resources
+            for node in changes.get(OutboundCampaignNode, {}).values()
+        }
+        for campaign_id in campaign_ids:
+            nodes = [
+                node
+                for node in new_state.get(OutboundCampaignNode, {}).values()
+                if node.campaign_id == campaign_id
+            ]
+            resource_utils.assign_campaign_positions(nodes, lambda node: route_targets(node.data))
+
+    @staticmethod
     def _assign_flow_positions(
         new_resources: ResourceMap,
         updated_resources: ResourceMap,
@@ -2000,6 +2020,14 @@ class AgentStudioProject:
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
         prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
+        prepush.group_outbound_campaign_changes(
+            state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            pre_push_updated_resources,
+            pre_push_deleted_resources,
+        )
         prepush.fix_orphaned_variables(
             state,
             new_resources,
@@ -2663,6 +2691,9 @@ class AgentStudioProject:
             saved_campaign = (
                 original_resource if isinstance(original_resource, OutboundCampaign) else None
             )
+            additional_kwargs["known_identity"] = (
+                saved_campaign.identity if saved_campaign else None
+            )
             additional_kwargs["known_status"] = saved_campaign.status if saved_campaign else None
             additional_kwargs["known_settings"] = (
                 saved_campaign.settings if saved_campaign else None
@@ -2678,6 +2709,7 @@ class AgentStudioProject:
             )
             additional_kwargs["known_position"] = saved_node.position if saved_node else None
             additional_kwargs["known_type"] = saved_node.data.get("type") if saved_node else None
+            additional_kwargs["known_label"] = saved_node.platform_name if saved_node else None
             additional_kwargs["known_data"] = saved_node.data if saved_node else None
             additional_kwargs["known_code"] = saved_node.code if saved_node else None
             additional_kwargs["known_published"] = bool(
