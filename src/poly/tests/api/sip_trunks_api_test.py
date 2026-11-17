@@ -108,7 +108,7 @@ def test_sip_requests_retain_shared_auth_and_user_override_headers():
         patch("poly.handlers.platform_api.retrieve_api_key", return_value="test-api-key"),
         patch.dict(os.environ, {"ADK_COMMAND_USER_OVERRIDE": "developer@example.com"}),
         patch(
-            "poly.handlers.platform_api.requests.request",
+            "requests.request",
             return_value=make_mock_response(status_code=201, json_body=response),
         ) as request,
     ):
