@@ -20,6 +20,8 @@ poly push --format
 poly push --include-rtc --rtc-env live
 ~~~
 
+If Agent Studio rejects the push, the command prints the reason it gave.
+
 | Flag | Description |
 |---|---|
 | `--force`, `-f` | Force push the project, overwriting remote changes. |
@@ -42,5 +44,7 @@ poly push --include-rtc --rtc-env live
   "dry_run": false
 }
 ~~~
+
+With nothing to push, `"message"` is `"No changes detected"` and `"success"` is `true`. A failed push exits non-zero.
 
 `"switched_to"` and `"new_branch_id"` are added if pushing from `main` created and switched to a new branch. `"rtc"` is added when `--include-rtc` is passed, containing the result of the RTC push.

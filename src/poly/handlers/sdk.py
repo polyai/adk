@@ -866,7 +866,13 @@ class SourcererSDK:
             return self.fetch_projection(force_refresh=True)
 
         except requests.exceptions.RequestException as e:
-            raise SourcererAPIError.from_request_error(e) from e
+            error = SourcererAPIError.from_request_error(e)
+            raise SourcererAPIError(
+                self._rejection_message(e),
+                status_code=error.status_code,
+                error_code=error.error_code,
+                server_message=error.server_message,
+            ) from e
 
     def get_project_data(self) -> dict[str, Any]:
         """Get the cached projection data
@@ -1210,6 +1216,29 @@ class SourcererSDK:
         if self.email:
             headers["X-PolyAI-Email"] = self.email
         return headers
+
+    @staticmethod
+    def _rejection_message(e: requests.exceptions.RequestException) -> str:
+        """Describe why the platform refused a command batch, one reason per line."""
+        response = getattr(e, "response", None)
+        if response is None:
+            return f"Request failed: {e}"
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            body = {}
+
+        lines = [body.get("error_message") or f"API Error {response.status_code}: {response.text}"]
+        for issue in (body.get("data") or {}).get("issues") or []:
+            path = ".".join(str(part) for part in issue.get("path") or [])
+            lines.append(
+                f"- {path}: {issue.get('message')}" if path else f"- {issue.get('message')}"
+            )
+        if response.status_code == 413:
+            lines.append("The push is too large to send in one request. Push it in smaller parts.")
+        return "\n".join(lines)
 
     @staticmethod
     def _format_request_error(e: requests.exceptions.RequestException) -> str:

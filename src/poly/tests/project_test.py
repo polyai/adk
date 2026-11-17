@@ -1730,6 +1730,44 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertIn(FlowStep, post_deleted)
         self.assertIn("flow-new-func-start_entry_func_start_step_temp", post_deleted[FlowStep])
 
+    def _new_flow_dummy_start_step(self, flow_name: str, other_steps: list[FlowStep]) -> FlowStep:
+        """Push a new flow starting on a function step and return its temporary step."""
+        flow_config = FlowConfig(
+            resource_id="flow-new",
+            name=flow_name,
+            description="Flow with function step as start",
+            start_step="entry_func",
+        )
+        function_start_step = FunctionStep(
+            resource_id="flow-new_entry_func",
+            step_id="entry_func",
+            name="entry",
+            flow_id="flow-new",
+            flow_name=flow_name,
+            code="def entry(conv, flow): pass",
+            function_id="FUNC-entry",
+        )
+        new_resources = {
+            FlowConfig: {"flow-new": flow_config},
+            FunctionStep: {function_start_step.resource_id: function_start_step},
+        }
+        if other_steps:
+            new_resources[FlowStep] = {step.resource_id: step for step in other_steps}
+
+        push_changes = self.project._clean_resources_before_push({}, new_resources, {}, {})
+
+        created_flow = push_changes.main.new[FlowConfig]["flow-new"]
+        dummy_step = next(s for s in created_flow.steps if s.step_id == created_flow.start_step)
+        self.assertIn(dummy_step.resource_id, push_changes.post.deleted[FlowStep])
+        return dummy_step
+
+    def test_clean_resources_before_push_dummy_start_step_is_named_after_the_function_step(self):
+        """The temporary step's name comes from the function step, so it is a valid step name
+        whatever characters the flow name holds."""
+        dummy_step = self._new_flow_dummy_start_step("Billing (v2): refunds", other_steps=[])
+
+        self.assertEqual(dummy_step.name, "entry-temp")
+
     def test_clean_resources_before_push_orphaned_variable_delete_and_recreate(self):
         """When all functions referencing a variable are deleted, variable is delete+recreated."""
         var_id = "VAR-orphan"
@@ -2195,7 +2233,7 @@ class PushProjectTest(unittest.TestCase):
 
         success, message, commands = project.push_project(force=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
@@ -2215,7 +2253,7 @@ class PushProjectTest(unittest.TestCase):
 
         success, message, _ = project.push_project(force=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.mock_api_handler.queue_resources.assert_not_called()
 
@@ -2259,6 +2297,20 @@ class PushProjectTest(unittest.TestCase):
         # New resources get random IDs, so check by name
         topic_names = [r.name for r in new_resources[Topic].values()]
         self.assertIn("Topic 1", topic_names)
+
+    def test_push_project_rejected_by_the_platform_returns_its_reason(self):
+        """A rejected push returns the platform's reason, not a list of resources."""
+        self.mock_api_handler.send_queued_commands.side_effect = ValueError(
+            "API error: Topic name is not unique"
+        )
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["topics"].pop("TOPIC-Topic 1")
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, message, _ = project.push_project(force=True)
+
+        self.assertFalse(success)
+        self.assertEqual(message, "API error: Topic name is not unique\nNothing was pushed.")
 
     def test_push_project_new_resource_flow(self):
         project_data = deepcopy(PROJECT_DATA)
@@ -2389,7 +2441,7 @@ class PushProjectTest(unittest.TestCase):
 
         success, message, _ = project.push_project(force=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
 
     def test_push_project_ambiguous_rename_stays_delete_and_create(self):
@@ -2736,14 +2788,10 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_validation_error(self):
         project_data = deepcopy(PROJECT_DATA)
-        # Create invalid resource (empty description)
-        project_data["resources"]["flow_config"]["FLOW_CONFIG-test_flow"]["description"] = (
-            "description"
-        )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        # Modify the local file to match
+        # Point the local flow at a start step that doesn't exist
         flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
-        invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
+        invalid_content = "name: test_flow\ndescription: desc\nstart_step: missing_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
             success, message, commands = project.push_project(force=True, skip_validation=False)
@@ -2753,14 +2801,10 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_validation_error_skip(self):
         project_data = deepcopy(PROJECT_DATA)
-        # Create invalid resource (empty description)
-        project_data["resources"]["flow_config"]["FLOW_CONFIG-test_flow"]["description"] = (
-            "description"
-        )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        # Modify the local file to match
+        # Point the local flow at a start step that doesn't exist
         flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
-        invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
+        invalid_content = "name: test_flow\ndescription: desc\nstart_step: missing_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
             success, message, commands = project.push_project(force=True, skip_validation=True)
@@ -2979,12 +3023,12 @@ class ValidateProjectTest(unittest.TestCase):
             {
                 os.path.join(
                     TEST_DIR, "flows", "test_flow", "flow_config.yaml"
-                ): "name: test_flow\ndescription: \nstart_step: start_step\n"
+                ): "name: test_flow\ndescription: \nstart_step: missing_step\n"
             }
         ):
             errors = project.validate_project()
         self.assertEqual(len(errors), 1)
-        self.assertIn("Description cannot be empty.", errors[0])
+        self.assertIn("Start step 'missing_step' not found.", errors[0])
 
     def test_validate_project_invalid_multiple(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
@@ -4149,6 +4193,20 @@ class GetRemoteResourcesByNameLocalTest(unittest.TestCase):
     def tearDown(self):
         patch.stopall()
 
+    def test_diff_against_a_name_that_matches_nothing_raises(self):
+        """A name that resolves to no resources is an error, not an empty diff."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        with patch.object(
+            AgentStudioProject,
+            "get_remote_resources_by_name",
+            side_effect=[({}, []), (project.resources, [])],
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                project.diff_remote_named_versions(before_name="typo", after_name="local")
+
+        self.assertIn("named 'typo' was found", str(ctx.exception))
+
     def test_local_returns_local_resources(self):
         """'local' should resolve to the current local filesystem state."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
@@ -5021,7 +5079,7 @@ class TopicTagsSyncTest(unittest.TestCase):
         success, message, _ = project.push_project(force=True)
 
         self.assertEqual(project.resources[Topic]["TOPIC-Topic 2"].tags, ["email", "validation"])
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
 
     def test_force_push_clears_tags_when_file_has_no_tags_key(self):
@@ -5040,7 +5098,7 @@ class TopicTagsSyncTest(unittest.TestCase):
 
         success, message, _ = project.push_project()
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.assertIn("enabled: true\ntags:\n- billing\nactions:", self._read_topic_file())
 
@@ -9030,7 +9088,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         success, message, commands = self.project.push_project(dry_run=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.assertEqual(commands, [])
 
@@ -9132,7 +9190,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         success, message, _ = self.project.push_project(dry_run=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
 
     def test_pull_keeps_the_local_order_and_edits_and_takes_remote_code(self):
@@ -9799,7 +9857,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
 
         self.assertTrue(success, message)
         success, message, commands = self.project.push_project(dry_run=True)
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.assertEqual(commands, [])
 
@@ -10483,7 +10541,7 @@ class OutboundCampaignSyncTest(unittest.TestCase):
         self.assertEqual(conflicts, [])
         self.assertEqual(self._read("reminders", "functions", "dial.py"), self.CALL_CODE)
         success, message, _ = self.project.push_project(dry_run=True)
-        self.assertEqual((success, message), (False, "No changes detected"))
+        self.assertEqual((success, message), (True, "No changes detected"))
 
     def test_node_renamed_alike_with_different_code_on_both_sides_conflicts(self):
         self._pull_with_call_code()
@@ -11048,7 +11106,7 @@ class ApiIntegrationSyncTest(unittest.TestCase):
 
         success, message, commands = self.project.push_project(dry_run=True)
 
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
         self.assertEqual(commands, [])
 
@@ -11218,7 +11276,7 @@ class ApiIntegrationSyncTest(unittest.TestCase):
 
         self.assertEqual(self.project.project_status(), ([], [], [], []))
         success, message, _ = self.project.push_project(dry_run=True)
-        self.assertFalse(success)
+        self.assertTrue(success)
         self.assertEqual(message, "No changes detected")
 
     def test_body_schema_on_get_fails_push_validation(self):
