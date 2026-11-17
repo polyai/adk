@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.86.0 (2026-11-17)
+
+### Features
+
+- Exit non-zero when a command fails ([#423](https://github.com/polyai/adk/pull/423),
+  [`ffc561f`](https://github.com/polyai/adk/commit/ffc561fbbd262ce48f737e1ee2f02190e86c94f4))
+
+
 ## v0.85.0 (2026-11-17)
 
 ### Features
