@@ -108,6 +108,33 @@ def info(message: str) -> None:
     console.print(f"[info]{message}[/info]")
 
 
+def print_secrets(secrets: list[dict]) -> None:
+    """Display account secret metadata without reading or rendering stored values."""
+    if not secrets:
+        info("No matching account secrets.")
+        return
+    table = Table(title="Account secrets", box=box.SIMPLE)
+    table.add_column("Name", min_width=12, overflow="fold")
+    for heading in ("Description", "Type", "Project access", "Created", "Updated"):
+        table.add_column(heading, overflow="fold")
+    for secret in secrets:
+        table.add_row(
+            *[
+                Text(str(value or ""))
+                for value in (
+                    secret.get("display_name"),
+                    secret.get("description"),
+                    secret.get("value_type"),
+                    "\n".join(secret.get("access_config") or []) or "None",
+                    secret.get("created_at"),
+                    secret.get("last_updated"),
+                )
+            ]
+        )
+    with paged_output():
+        console.print(table)
+
+
 def plain(message: str) -> None:
     console.print(message)
 

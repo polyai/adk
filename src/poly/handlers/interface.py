@@ -50,6 +50,21 @@ class AgentStudioInterface:
     sync_client: Optional[SyncClientHandler] = None
 
     @staticmethod
+    def get_secrets(region: str, account_id: str) -> list[dict]:
+        """List metadata for secrets belonging to an account."""
+        return PlatformAPIHandler.get_secrets(region, account_id)
+
+    @staticmethod
+    def set_secret(region: str, account_id: str, data: dict, create: bool) -> dict:
+        """Create or update an account secret without reading its stored value."""
+        return PlatformAPIHandler.set_secret(region, account_id, data, create)
+
+    @staticmethod
+    def delete_secrets(region: str, account_id: str, names: list[str]) -> None:
+        """Delete one or more secrets from an account."""
+        PlatformAPIHandler.delete_secrets(region, account_id, names)
+
+    @staticmethod
     def _extract_error_code(e: Exception) -> Optional[str]:
         """Extract the error_code field from an API error response body.
 
