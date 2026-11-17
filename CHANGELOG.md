@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.86.1 (2026-11-17)
+
+### Bug Fixes
+
+- Refuse poly update on Windows and give the command to run instead
+  ([#407](https://github.com/polyai/adk/pull/407),
+  [`0fdd0a5`](https://github.com/polyai/adk/commit/0fdd0a5e387b39ff07250dd2a63a245e4595c319))
+
+
 ## v0.86.0 (2026-11-17)
 
 ### Features
