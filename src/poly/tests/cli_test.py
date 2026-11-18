@@ -7038,3 +7038,105 @@ class UpdateCheckStampTest(unittest.TestCase):
         _record_update_check()
 
         self.assertFalse(self.stamp_file.exists())
+
+
+class CommandCompletedEventTest(unittest.TestCase):
+    """Tests for the one cli_command_completed event sent per command."""
+
+    def setUp(self):
+        self.track = patch("poly.handlers.posthog.track", return_value=True).start()
+        self.addCleanup(patch.stopall)
+
+    def _run(self, side_effect=None, **args) -> dict:
+        """Run a fake command through the CLI wrapper; return the event's properties."""
+        from argparse import Namespace
+
+        from poly.cli import _run_and_report
+
+        command = MagicMock()
+        command.run.side_effect = side_effect
+        namespace = Namespace(command="pull", **args)
+        try:
+            _run_and_report(command, namespace)
+        except BaseException:
+            pass
+        self.track.assert_called_once()
+        region, event = self.track.call_args.args
+        self.assertEqual(event, "cli_command_completed")
+        return {"region": region, **self.track.call_args.kwargs}
+
+    def test_success(self):
+        """A command that returns is a success, with its name and duration."""
+        sent = self._run(region="studio")
+
+        self.assertEqual(sent["outcome"], "success")
+        self.assertEqual(sent["command"], "pull")
+        self.assertEqual(sent["region"], "studio")
+        self.assertIsInstance(sent["duration_ms"], int)
+        self.assertNotIn("error_type", sent)
+
+    def test_exception_carries_the_error_class_and_status_not_the_message(self):
+        """An exception is an error with its class and HTTP status, never its text."""
+        response = MagicMock(status_code=403)
+        sent = self._run(requests.HTTPError("secret path /Users/x", response=response))
+
+        self.assertEqual(sent["outcome"], "error")
+        self.assertEqual(sent["error_type"], "HTTPError")
+        self.assertEqual(sent["http_status"], 403)
+        self.assertNotIn("secret", json.dumps(sent))
+
+    def test_exit_codes(self):
+        """sys.exit(1) is an error; sys.exit(0) is a success."""
+        failed = self._run(SystemExit(1))
+        self.track.reset_mock()
+        clean = self._run(SystemExit(0))
+
+        self.assertEqual(failed["outcome"], "error")
+        self.assertEqual(failed["error_type"], "SystemExit")
+        self.assertEqual(failed["exit_code"], 1)
+        self.assertEqual(clean["outcome"], "success")
+
+    def test_ctrl_c_is_interrupted(self):
+        """KeyboardInterrupt is its own outcome."""
+        self.assertEqual(self._run(KeyboardInterrupt())["outcome"], "interrupted")
+
+    def test_exception_is_re_raised(self):
+        """Reporting never swallows the command's own error."""
+        from argparse import Namespace
+
+        from poly.cli import _run_and_report
+
+        command = MagicMock()
+        command.run.side_effect = ValueError("bad")
+        with self.assertRaises(ValueError):
+            _run_and_report(command, Namespace(command="pull"))
+
+    def test_subcommand_and_command_properties_are_added(self):
+        """The subcommand is named, and a command's own properties ride along."""
+        from poly.handlers.posthog import add_command_properties
+
+        def run(_args):
+            add_command_properties(failed_step="env", ref="docs")
+            raise SystemExit(1)
+
+        sent = self._run(run, branch_subcommand="list")
+
+        self.assertEqual(sent["subcommand"], "list")
+        self.assertEqual(sent["failed_step"], "env")
+        self.assertEqual(sent["ref"], "docs")
+
+    def test_properties_do_not_leak_into_the_next_command(self):
+        """Each command starts with no extra properties."""
+        from poly.handlers.posthog import add_command_properties
+
+        add_command_properties(failed_step="env")
+
+        self.assertNotIn("failed_step", self._run())
+
+    def test_json_output_is_unchanged(self):
+        """The event never writes to stdout, so --json stays one JSON object."""
+        out = StringIO()
+        with patch("sys.stdout", out):
+            self._run(json=True)
+
+        self.assertEqual(out.getvalue(), "")

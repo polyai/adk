@@ -13,7 +13,7 @@ For first-time onboarding, [`poly setup`](./setup.md) runs this same sign-in flo
 
 1. Prompts for a region if `--region` is not supplied.
 2. Opens a browser window for sign-in via the Auth0 device authorization flow.
-3. Fetches or creates an ADK key for your user and saves it to `~/.poly/credentials.json` under the chosen region.
+3. Fetches or creates an ADK key for your user and saves it to `~/.poly/credentials.json` under the chosen region, along with your email and account id so [usage data](../cli.md#usage-data) is tied to your sign-in.
 
 On an enterprise region (`us-1`, `uk-1`, `euw-1`) your account must already be provisioned by PolyAI. If it isn't, the command stops with a message saying so; `studio` is the self-serve region, where signing in creates your workspace.
 
@@ -32,6 +32,7 @@ poly login --region studio
 | Flag | Description |
 |---|---|
 | `--region` | Region to log in to. One of `us`, `eu`, `uk`, `studio` — see [Regions](../cli.md#regions). If omitted, you are prompted to pick one. |
+| `--ref TAG` | Where you started, such as the page you copied the setup prompt from. Only used in [usage data](../cli.md#usage-data). Letters, digits and `. _ : -`, up to 64 characters; anything else is ignored. Also read from `POLY_SIGNUP_REF`. |
 
 ## ADK key vs account API key
 

@@ -62,6 +62,7 @@ Install [uv](https://docs.astral.sh/uv/) with `winget install astral-sh.uv`. If 
 | `--account-id ID` | Account ID to scope the key to. Skips polling for a newly created account. With more than one account and no `--account-id`, a terminal shows a picker; otherwise the command stops and lists the accounts. |
 | `--force`, `-f` | Create a new key and overwrite any `POLY_API_KEY` already in your profile, even one that still works. |
 | `--no-session-cache` | Sign in fresh and do not keep the sign-in for later runs. |
+| `--ref TAG` | Where you started, such as the page you copied the setup prompt from. Only used in [usage data](../cli.md#usage-data). Letters, digits and `. _ : -`, up to 64 characters; anything else is ignored. Also read from `POLY_SIGNUP_REF`. |
 
 `--json` output shape:
 

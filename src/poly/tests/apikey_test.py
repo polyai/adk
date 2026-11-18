@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import contextlib
 import io
 import json
+import os
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -306,33 +307,57 @@ class RegionSelection(ApiKeyTestCase):
 
 
 class SignupEvent(ApiKeyTestCase):
-    """Tests for the apikey_signup PostHog event fired on genuine first-time signup."""
+    """Tests for the cli_signup event and the identity saved at sign-in."""
 
-    def test_studio_first_login_emits_signup(self):
-        """A first login on studio fires apikey_signup for the resolved account."""
-        self.mocks["authorise"].return_value = {"user": {"is_first_login": True}}
+    def _events(self, name: str) -> list:
+        """(properties, distinct_id, groups) of each captured `name` event."""
+        return [
+            (call.args[2], call.args[3], call.kwargs.get("groups"))
+            for call in self.mocks["capture_event"].call_args_list
+            if call.args[1] == name
+        ]
 
-        ApiKeyCommand.apikey(region="studio")
+    def test_studio_first_login_emits_signup_for_the_person(self):
+        """A first login on studio sends cli_signup under the email, account as group."""
+        self.mocks["authorise"].return_value = {
+            "user": {"is_first_login": True, "email": ME, "auth_provider": "github"}
+        }
 
-        self.mocks["capture_event"].assert_called_once_with(
-            "studio", "apikey_signup", {"source": "apikey"}, distinct_id=FAKE_ACCOUNT
-        )
+        ApiKeyCommand.apikey(region="studio", ref="devhome.7f3a")
+
+        [(properties, distinct_id, groups)] = self._events("cli_signup")
+        self.assertEqual(distinct_id, ME)
+        self.assertEqual(groups["company"], FAKE_ACCOUNT)
+        self.assertEqual(properties["source"], "apikey")
+        self.assertEqual(properties["ref"], "devhome.7f3a")
+        self.assertEqual(properties["auth_provider"], "github")
+        self.assertEqual(self._events("apikey_signup"), [])
+
+    def test_setup_passes_its_own_source(self):
+        """When poly setup runs this, the sign-up is counted as setup."""
+        self.mocks["authorise"].return_value = {"user": {"is_first_login": True, "email": ME}}
+
+        ApiKeyCommand.apikey(region="studio", source="setup")
+
+        [(properties, _, _)] = self._events("cli_signup")
+        self.assertEqual(properties["source"], "setup")
+        self.assertNotIn("ref", properties)
+
+    def test_ref_from_the_environment_is_used(self):
+        """POLY_SIGNUP_REF stands in for --ref."""
+        self.mocks["authorise"].return_value = {"user": {"is_first_login": True, "email": ME}}
+
+        with patch.dict(os.environ, {"POLY_SIGNUP_REF": "docs"}):
+            ApiKeyCommand.apikey(region="studio")
+
+        [(properties, _, _)] = self._events("cli_signup")
+        self.assertEqual(properties["ref"], "docs")
 
     def test_studio_returning_user_does_not_emit_signup(self):
         """A returning user on studio (is_first_login False) does not fire the event."""
-        self.mocks["authorise"].return_value = {"user": {"is_first_login": False}}
-
         ApiKeyCommand.apikey(region="studio")
 
-        self.mocks["capture_event"].assert_not_called()
-
-    def test_studio_missing_is_first_login_key_does_not_emit_signup(self):
-        """A response with no is_first_login key at all is treated as not-a-signup."""
-        self.mocks["authorise"].return_value = {"user": {}}
-
-        ApiKeyCommand.apikey(region="studio")
-
-        self.mocks["capture_event"].assert_not_called()
+        self.assertEqual(self._events("cli_signup"), [])
 
     def test_non_studio_first_login_does_not_emit_signup(self):
         """is_first_login on a non-studio region does not fire the event.
@@ -340,27 +365,63 @@ class SignupEvent(ApiKeyTestCase):
         On enterprise regions is_first_login also covers an existing user with no
         admin role on any account yet, not just a genuine new signup.
         """
-        self.mocks["authorise"].return_value = {"user": {"is_first_login": True}}
+        self.mocks["authorise"].return_value = {"user": {"is_first_login": True, "email": ME}}
 
         ApiKeyCommand.apikey(region="us-1")
 
-        self.mocks["capture_event"].assert_not_called()
+        self.assertEqual(self._events("cli_signup"), [])
 
-    def test_none_auth_response_does_not_crash_or_emit_signup(self):
-        """A None authorise response is handled defensively, not treated as a signup."""
-        self.mocks["authorise"].return_value = None
+    def test_malformed_auth_responses_do_not_crash_or_emit_signup(self):
+        """None, no user, or a user with no email are handled defensively."""
+        for response in (None, {}, {"user": {}}, {"user": {"is_first_login": True}}):
+            with self.subTest(response=response):
+                self.mocks["capture_event"].reset_mock()
+                self.mocks["authorise"].return_value = response
+
+                ApiKeyCommand.apikey(region="studio")
+
+                self.assertEqual(self._events("cli_signup"), [])
+
+    def test_sign_in_saves_the_identity_for_later_events(self):
+        """After sign-in, events are sent as the email with the account group."""
+        from poly.handlers.posthog import get_user_identity
+        from poly.utils.credentials import load_signin_identity
 
         ApiKeyCommand.apikey(region="studio")
 
-        self.mocks["capture_event"].assert_not_called()
+        self.assertEqual(
+            load_signin_identity(),
+            {"email": ME, "account_id": FAKE_ACCOUNT, "region": "studio"},
+        )
+        self.assertEqual(get_user_identity(), ME)
 
-    def test_auth_response_missing_user_key_does_not_crash_or_emit_signup(self):
-        """An authorise response with no "user" key is handled defensively."""
-        self.mocks["authorise"].return_value = {}
+    def test_milestones_are_reported_in_order(self):
+        """apikey_step goes signed_in, account_ready, key_ready, env_written."""
+        ApiKeyCommand.apikey(region="studio", ref="docs")
 
-        ApiKeyCommand.apikey(region="studio")
+        steps = self._events("apikey_step")
+        self.assertEqual(
+            [properties["step"] for properties, _, _ in steps],
+            ["signed_in", "account_ready", "key_ready", "env_written"],
+        )
+        self.assertTrue(all(p["ref"] == "docs" and p["source"] == "apikey" for p, _, _ in steps))
+        self.assertIs(steps[0][0]["session_reused"], False)
+        self.assertIs(steps[2][0]["key_reused"], False)
 
-        self.mocks["capture_event"].assert_not_called()
+    def test_failure_names_the_step_for_the_command_event(self):
+        """A failed run records the step and error class for cli_command_completed."""
+        from poly.handlers.posthog import command_properties, reset_command_properties
+
+        reset_command_properties()
+        self.mocks["authorise"].side_effect = _http_error(500)
+
+        with self.assertRaises(SystemExit):
+            ApiKeyCommand.apikey(region="studio")
+
+        self.assertEqual(
+            command_properties(),
+            {"failed_step": "authorise", "error_type": "HTTPError", "http_status": 500},
+        )
 
 
 class AccountPollFailure(ApiKeyTestCase):

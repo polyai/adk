@@ -46,6 +46,8 @@ Assume the user is already logged in — do not check credentials up front. Only
 
 Credentials are resolved in this order: `~/.poly/credentials.json` (written by `poly login`), then a region-scoped env var (`POLY_ADK_KEY_US` / `POLY_ADK_KEY_EUW` / `POLY_ADK_KEY_UK` / `POLY_ADK_KEY_STUDIO`), then `POLY_ADK_KEY` — useful when debugging why the CLI is using the wrong account or region. `POLY_API_KEY` is an account API key for the PolyAI APIs; the ADK does not read it, so exporting it does not log the CLI in. When no ADK key resolves, the error names the region, any other regions that already hold a key, and `poly login --region <region>` as the fix.
 
+Every `poly` command sends a usage event (command, outcome, error type, versions; never keys, arguments or file contents), tied to the signed-in email. If the user asks to turn it off, set `POLY_NO_TELEMETRY=1` or `DO_NOT_TRACK=1`.
+
 ## 3. Load the resource documentation
 
 Before creating or editing any resource, load the built-in docs — they define each resource type's exact schema, valid values, and conventions:
