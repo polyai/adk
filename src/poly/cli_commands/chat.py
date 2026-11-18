@@ -18,6 +18,7 @@ from typing import Optional
 
 from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
+from poly.handlers.platform_api import PlatformAPIError
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 
@@ -242,7 +243,6 @@ class ChatCommand(BaseCommand):
         conversation_id: Optional[str] = None,
     ) -> None:
         """Start an interactive chat session with the agent."""
-        import requests
 
         from poly.output.console import error, info, plain, print_turn_metadata, success
 
@@ -323,7 +323,7 @@ class ChatCommand(BaseCommand):
                         output_lang,
                         sip_headers=sip_headers,
                     )
-                except (requests.HTTPError, ValueError) as e:
+                except (ValueError, PlatformAPIError) as e:
                     if output_json:
                         json_output["success"] = False
                         json_output["error"] = str(e)
@@ -415,7 +415,6 @@ class ChatCommand(BaseCommand):
             requested a new session, and conversation is a dict with conversation_id,
             url, and turns (populated when output_json=True).
         """
-        import requests
 
         from poly.output.console import error, info, plain, print_turn_metadata, warning
 
@@ -466,7 +465,7 @@ class ChatCommand(BaseCommand):
                     reply = project.send_message(
                         conversation_id, user_input, environment, input_lang, output_lang
                     )
-                except requests.HTTPError as e:
+                except PlatformAPIError as e:
                     if output_json:
                         turns.append({"input": user_input, "error": str(e)})
                     else:
@@ -498,7 +497,7 @@ class ChatCommand(BaseCommand):
                     if not output_json:
                         info(f"Chat session ended (conversation: {conversation_id})")
                         plain(f"[info]Call Link:[/info] [link={url}]{url}[/link]")
-                except requests.HTTPError:
+                except PlatformAPIError:
                     if not output_json:
                         warning("Failed to end chat session on server.")
 

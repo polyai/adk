@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import requests
 
 from poly.handlers.interface import AgentStudioInterface
+from poly.handlers.platform_api import PlatformAPIError
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
 from poly.resources import Entity, Topic, Variable
@@ -63,7 +64,7 @@ class HandleApiError(unittest.TestCase):
         """A FORBIDDEN error code maps to a permission-denied message."""
         error = _http_error_with_code("FORBIDDEN")
 
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(PlatformAPIError) as ctx:
             self.interface._handle_api_error(error)
 
         self.assertIn("Forbidden", str(ctx.exception))
@@ -73,7 +74,7 @@ class HandleApiError(unittest.TestCase):
         """A DEPLOYMENT_NOT_FOUND error code maps to a project-not-found message."""
         error = _http_error_with_code("DEPLOYMENT_NOT_FOUND")
 
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(PlatformAPIError) as ctx:
             self.interface._handle_api_error(error)
 
         self.assertIn("not found", str(ctx.exception))
@@ -83,38 +84,38 @@ class HandleApiError(unittest.TestCase):
         """An unrecognised error code falls back to a generic API error message."""
         error = _http_error_with_code("SOMETHING_ELSE")
 
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(PlatformAPIError) as ctx:
             self.interface._handle_api_error(error)
 
         self.assertIn("API error", str(ctx.exception))
 
 
 class WrapperErrorTranslation(unittest.TestCase):
-    """Tests that interface wrappers translate API errors into ValueError."""
+    """Tests that interface wrappers raise API errors as PlatformAPIError."""
 
     def setUp(self):
         self.interface = AgentStudioInterface()
         self.interface.sync_client = MagicMock()
 
     def test_pull_resources_translates_http_error(self):
-        """pull_resources converts a requests.HTTPError into a ValueError."""
+        """pull_resources raises a requests.HTTPError as a PlatformAPIError."""
         self.interface.sync_client.pull_projection.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.pull_resources()
 
     def test_pull_resources_translates_sourcerer_error(self):
-        """pull_resources converts a SourcererAPIError into a ValueError."""
+        """pull_resources raises a SourcererAPIError as a PlatformAPIError."""
         self.interface.sync_client.pull_projection.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.pull_resources()
 
     def test_queue_command_translates_sourcerer_error(self):
-        """queue_command converts a SourcererAPIError into a ValueError."""
+        """queue_command raises a SourcererAPIError as a PlatformAPIError."""
         self.interface.sync_client.queue_command.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.queue_command(MagicMock())
 
 
@@ -227,17 +228,17 @@ class GetBranchHistoryInterface(unittest.TestCase):
         self.interface.sync_client.get_branch_history.assert_called_once_with("branch-1")
 
     def test_translates_http_error(self):
-        """An HTTPError from the sync client is translated into a ValueError."""
+        """An HTTPError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.get_branch_history.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.get_branch_history("branch-1")
 
     def test_translates_sourcerer_api_error(self):
-        """A SourcererAPIError from the sync client is translated into a ValueError."""
+        """A SourcererAPIError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.get_branch_history.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.get_branch_history("branch-1")
 
 
@@ -258,17 +259,17 @@ class RenameBranchInterface(unittest.TestCase):
         self.interface.sync_client.rename_branch.assert_called_once_with("new-name")
 
     def test_translates_http_error(self):
-        """An HTTPError from the sync client is translated into a ValueError."""
+        """An HTTPError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.rename_branch.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.rename_branch("new-name")
 
     def test_translates_sourcerer_api_error(self):
-        """A SourcererAPIError from the sync client is translated into a ValueError."""
+        """A SourcererAPIError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.rename_branch.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.rename_branch("new-name")
 
 
@@ -290,17 +291,17 @@ class ListArchivedBranchesInterface(unittest.TestCase):
         self.interface.sync_client.list_archived_branches.assert_called_once()
 
     def test_translates_http_error(self):
-        """An HTTPError from the sync client is translated into a ValueError."""
+        """An HTTPError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.list_archived_branches.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.list_archived_branches()
 
     def test_translates_sourcerer_api_error(self):
-        """A SourcererAPIError is translated into a ValueError."""
+        """A SourcererAPIError is raised as a PlatformAPIError."""
         self.interface.sync_client.list_archived_branches.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.list_archived_branches()
 
 
@@ -329,17 +330,17 @@ class RestoreBranchInterface(unittest.TestCase):
         self.assertFalse(result)
 
     def test_translates_http_error(self):
-        """An HTTPError from the sync client is translated into a ValueError."""
+        """An HTTPError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.restore_branch.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.restore_branch("branch-1")
 
     def test_translates_sourcerer_api_error(self):
-        """A SourcererAPIError is translated into a ValueError."""
+        """A SourcererAPIError is raised as a PlatformAPIError."""
         self.interface.sync_client.restore_branch.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.restore_branch("branch-1")
 
 
@@ -385,13 +386,13 @@ class ImportMetricsFromFileInterfaceTest(unittest.TestCase):
 
 
 class CustomMetricErrorTranslation(unittest.TestCase):
-    """Tests that create/update_custom_metric translate HTTPError into ValueError."""
+    """Tests that create/update_custom_metric turn a 409 or 404 into ValueError."""
 
     @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
     def test_create_conflict_gives_already_exists_message(self, mock_create):
         """A 409 on create is translated into a friendly 'already exists' error."""
         response = MagicMock(status_code=409, text="conflict")
-        mock_create.side_effect = requests.HTTPError("conflict", response=response)
+        mock_create.side_effect = PlatformAPIError("conflict", response=response)
 
         with self.assertRaises(ValueError) as ctx:
             AgentStudioInterface.create_custom_metric(
@@ -402,23 +403,23 @@ class CustomMetricErrorTranslation(unittest.TestCase):
         self.assertIn("already exists", str(ctx.exception))
 
     @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
-    def test_create_other_error_gives_generic_message(self, mock_create):
-        """A non-409 error on create falls back to a generic failure message."""
-        response = MagicMock(status_code=500, text="server error")
-        mock_create.side_effect = requests.HTTPError("boom", response=response)
+    def test_create_other_error_is_raised_unchanged(self, mock_create):
+        """A non-409 error on create is an API failure, not a problem with the metric."""
+        error = PlatformAPIError("boom", response=MagicMock(status_code=500))
+        mock_create.side_effect = error
 
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(PlatformAPIError) as ctx:
             AgentStudioInterface.create_custom_metric(
                 "us", "acc1", "proj1", {"name": "SCORE", "type": "int"}
             )
 
-        self.assertIn("Failed to create metric", str(ctx.exception))
+        self.assertIs(ctx.exception, error)
 
     @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
     def test_update_not_found_gives_not_found_message(self, mock_update):
         """A 404 on update is translated into a friendly 'not found' error."""
         response = MagicMock(status_code=404, text="missing")
-        mock_update.side_effect = requests.HTTPError("missing", response=response)
+        mock_update.side_effect = PlatformAPIError("missing", response=response)
 
         with self.assertRaises(ValueError) as ctx:
             AgentStudioInterface.update_custom_metric(
@@ -429,17 +430,17 @@ class CustomMetricErrorTranslation(unittest.TestCase):
         self.assertIn("not found", str(ctx.exception))
 
     @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
-    def test_update_other_error_gives_generic_message(self, mock_update):
-        """A non-404 error on update falls back to a generic failure message."""
-        response = MagicMock(status_code=500, text="server error")
-        mock_update.side_effect = requests.HTTPError("boom", response=response)
+    def test_update_other_error_is_raised_unchanged(self, mock_update):
+        """A non-404 error on update is an API failure, not a problem with the metric."""
+        error = PlatformAPIError("boom", response=MagicMock(status_code=500))
+        mock_update.side_effect = error
 
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(PlatformAPIError) as ctx:
             AgentStudioInterface.update_custom_metric(
                 "us", "acc1", "proj1", "SCORE", {"active": False}
             )
 
-        self.assertIn("Failed to update metric", str(ctx.exception))
+        self.assertIs(ctx.exception, error)
 
 
 class SetDeploymentModeInterface(unittest.TestCase):
@@ -483,17 +484,17 @@ class GetBranchCallInfoInterface(unittest.TestCase):
         self.interface.sync_client.get_branch_call_info.assert_called_once_with("branch-1")
 
     def test_translates_http_error(self):
-        """An HTTPError from the sync client is translated into a ValueError."""
+        """An HTTPError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.get_branch_call_info.side_effect = requests.HTTPError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.get_branch_call_info("branch-1")
 
     def test_translates_sourcerer_api_error(self):
-        """A SourcererAPIError from the sync client is translated into a ValueError."""
+        """A SourcererAPIError from the sync client is raised as a PlatformAPIError."""
         self.interface.sync_client.get_branch_call_info.side_effect = SourcererAPIError("boom")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PlatformAPIError):
             self.interface.get_branch_call_info("branch-1")
 
 

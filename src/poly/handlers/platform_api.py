@@ -18,6 +18,9 @@ from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
 from poly.handlers.utils import camel_to_snake_keys
 from poly.utils import raise_if_no_credentials, retrieve_api_key
 
+if ty.TYPE_CHECKING:
+    import requests
+
 logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/adk/v1/accounts"
 PROJECTS_URL = "/adk/v1/accounts/{account_id}/projects"
@@ -82,6 +85,31 @@ DATA_METRICS_AGGREGATE_URL = "/api/v1/metrics/aggregate"
 DATA_CONVERSATIONS_SEARCH_URL = "/api/v1/conversations/search"
 DATA_TRANSCRIPTS_SEARCH_URL = "/api/v1/transcripts/search"
 DATA_TRANSCRIPT_URL = "/api/v1/transcripts/conversation/{conversation_id}"
+
+
+class PlatformAPIError(Exception):
+    """A PolyAI platform API call failed.
+
+    Attributes:
+        response: The platform's response, or None when the request got none.
+    """
+
+    def __init__(self, message: str, response: ty.Optional["requests.Response"] = None):
+        super().__init__(message)
+        self.response = response
+
+
+def _raise_for_status(response: "requests.Response") -> None:
+    """Raise PlatformAPIError if the platform refused the request."""
+    import requests
+
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        logger.debug(
+            f"Error in request status_code={response.status_code!r} response={response.text!r}"
+        )
+        raise PlatformAPIError(str(e), response=response) from e
 
 
 class PlatformAPIHandler:
@@ -174,29 +202,25 @@ class PlatformAPIHandler:
         logger.info(f"Making {method} request to {url}")
 
         # Use requests.request() to handle all HTTP methods uniformly
-        api_response = requests.request(
-            method=method,
-            url=url,
-            headers=headers,
-            params=params,
-            allow_redirects=False,
-            files=files,
-            data=json.dumps(data) if data and not files else None,
-        )
+        try:
+            api_response = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                allow_redirects=False,
+                files=files,
+                data=json.dumps(data) if data and not files else None,
+            )
+        except requests.RequestException as e:
+            raise PlatformAPIError(str(e)) from e
 
         logger.debug(
             f"Request/response url={url!r} body={data!r}"
             f" status_code={api_response.status_code!r} response={api_response.text!r}"
         )
 
-        try:
-            api_response.raise_for_status()
-        except requests.HTTPError:
-            logger.debug(
-                f"Error in request status_code={api_response.status_code!r}"
-                f" response={api_response.text!r}"
-            )
-            raise
+        _raise_for_status(api_response)
 
         if api_response.status_code == 204:
             logger.info(f"Request to {url} successful (no content)")
@@ -1182,20 +1206,17 @@ class PlatformAPIHandler:
         params = {"direction": direction, "redacted": str(redacted).lower()}
 
         logger.info(f"Making GET request to {url}")
-        response = requests.get(url, headers=headers, params=params, allow_redirects=False)
+        try:
+            response = requests.get(url, headers=headers, params=params, allow_redirects=False)
+        except requests.RequestException as e:
+            raise PlatformAPIError(str(e)) from e
 
         logger.debug(
             f"Request/response url={url!r}"
             f" status_code={response.status_code!r} content_length={len(response.content)}"
         )
 
-        try:
-            response.raise_for_status()
-        except requests.HTTPError:
-            logger.debug(
-                f"Error in request status_code={response.status_code!r} response={response.text!r}"
-            )
-            raise
+        _raise_for_status(response)
 
         return response.content
 
@@ -1251,20 +1272,17 @@ class PlatformAPIHandler:
             headers["X-PolyAI-Email"] = email
 
         logger.info(f"Making GET request to {url}")
-        response = requests.get(url, headers=headers, allow_redirects=False)
+        try:
+            response = requests.get(url, headers=headers, allow_redirects=False)
+        except requests.RequestException as e:
+            raise PlatformAPIError(str(e)) from e
 
         logger.debug(
             f"Request/response url={url!r}"
             f" status_code={response.status_code!r} content_length={len(response.content)}"
         )
 
-        try:
-            response.raise_for_status()
-        except requests.HTTPError:
-            logger.debug(
-                f"Error in request status_code={response.status_code!r} response={response.text!r}"
-            )
-            raise
+        _raise_for_status(response)
 
         return response.content
 
@@ -1302,22 +1320,19 @@ class PlatformAPIHandler:
             headers["X-Filename"] = filename
 
         logger.info(f"Making PATCH request to {url}")
-        response = requests.request(
-            method="PATCH", url=url, headers=headers, data=audio_bytes, allow_redirects=False
-        )
+        try:
+            response = requests.request(
+                method="PATCH", url=url, headers=headers, data=audio_bytes, allow_redirects=False
+            )
+        except requests.RequestException as e:
+            raise PlatformAPIError(str(e)) from e
 
         logger.debug(
             f"Request/response url={url!r}"
             f" status_code={response.status_code!r} response={response.text!r}"
         )
 
-        try:
-            response.raise_for_status()
-        except requests.HTTPError:
-            logger.debug(
-                f"Error in request status_code={response.status_code!r} response={response.text!r}"
-            )
-            raise
+        _raise_for_status(response)
 
     @staticmethod
     def update_audio_cache_details(
@@ -1352,27 +1367,24 @@ class PlatformAPIHandler:
             headers["X-PolyAI-Email"] = email
 
         logger.info(f"Making PUT request to {url}")
-        response = requests.request(
-            method="PUT",
-            url=url,
-            headers=headers,
-            files={"file": (filename, audio_bytes, "audio/wav")},
-            data={"settings": json.dumps(settings)},
-            allow_redirects=False,
-        )
+        try:
+            response = requests.request(
+                method="PUT",
+                url=url,
+                headers=headers,
+                files={"file": (filename, audio_bytes, "audio/wav")},
+                data={"settings": json.dumps(settings)},
+                allow_redirects=False,
+            )
+        except requests.RequestException as e:
+            raise PlatformAPIError(str(e)) from e
 
         logger.debug(
             f"Request/response url={url!r}"
             f" status_code={response.status_code!r} response={response.text!r}"
         )
 
-        try:
-            response.raise_for_status()
-        except requests.HTTPError:
-            logger.debug(
-                f"Error in request status_code={response.status_code!r} response={response.text!r}"
-            )
-            raise
+        _raise_for_status(response)
 
     @staticmethod
     def delete_audio_cache_entry(region: str, project_id: str, entry_id: str) -> dict:
@@ -1444,22 +1456,23 @@ class PlatformAPIHandler:
             body["language"] = language
 
         logger.info(f"Making POST request to {url}")
-        response = requests.request(
-            method="POST", url=url, headers=headers, data=json.dumps(body), allow_redirects=False
-        )
+        try:
+            response = requests.request(
+                method="POST",
+                url=url,
+                headers=headers,
+                data=json.dumps(body),
+                allow_redirects=False,
+            )
+        except requests.RequestException as e:
+            raise PlatformAPIError(str(e)) from e
 
         logger.debug(
             f"Request/response url={url!r}"
             f" status_code={response.status_code!r} content_length={len(response.content)}"
         )
 
-        try:
-            response.raise_for_status()
-        except requests.HTTPError:
-            logger.debug(
-                f"Error in request status_code={response.status_code!r} response={response.text!r}"
-            )
-            raise
+        _raise_for_status(response)
 
         return response.content
 

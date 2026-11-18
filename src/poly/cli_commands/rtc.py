@@ -10,6 +10,7 @@ from typing import Optional
 
 from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
+from poly.handlers.platform_api import PlatformAPIError
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 from poly.resources.resource_utils import contains_merge_conflict
@@ -395,7 +396,6 @@ class RTCCommand(BaseCommand):
         Returns:
             dict: Result with success status and files_written list.
         """
-        import requests
 
         project = load_project(base_path, output_json=output_json)
 
@@ -414,7 +414,7 @@ class RTCCommand(BaseCommand):
 
             return {"success": True, "files_written": results}
 
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             return {"success": False, "error": str(e), "files_written": results}
 
     @classmethod
@@ -435,7 +435,6 @@ class RTCCommand(BaseCommand):
             dict with success status, or None if the user cancelled interactively.
         """
         import questionary
-        import requests
 
         from poly.output.console import error, info
 
@@ -466,7 +465,7 @@ class RTCCommand(BaseCommand):
         if not force:
             try:
                 drift = project.check_rtc_drift(env)
-            except requests.HTTPError as e:
+            except PlatformAPIError as e:
                 return {"success": False, "error": f"Drift check failed: {e}"}
 
             if drift["status"] == "no_metadata":
@@ -617,7 +616,6 @@ class RTCCommand(BaseCommand):
             dict with success status, or None if cancelled/no changes.
         """
         import questionary
-        import requests
 
         from poly.output.console import edit_in_editor, info
 
@@ -625,7 +623,7 @@ class RTCCommand(BaseCommand):
 
         try:
             config = project.rtc_fetch_config(env)
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             return {"success": False, "error": f"Failed to fetch RTC config: {e}"}
 
         baseline_last_updated = config.get("lastUpdated")
@@ -671,7 +669,7 @@ class RTCCommand(BaseCommand):
         # Race check
         try:
             current_config = project.rtc_fetch_config(env)
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             return {"success": False, "error": f"Failed to check remote state: {e}"}
 
         if current_config.get("lastUpdated") != baseline_last_updated:
@@ -710,7 +708,6 @@ class RTCCommand(BaseCommand):
         Returns:
             dict with success status and per-environment diffs.
         """
-        import requests
 
         from poly.output.console import info
 
@@ -736,7 +733,7 @@ class RTCCommand(BaseCommand):
 
             return {"success": True, "diffs": diffs}
 
-        except requests.HTTPError as e:
+        except PlatformAPIError as e:
             return {"success": False, "error": str(e)}
 
     @classmethod

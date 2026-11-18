@@ -9,8 +9,6 @@ import unittest
 from argparse import Namespace
 from unittest.mock import MagicMock, patch
 
-import requests
-
 from poly.cli_commands.metrics import VALID_METRIC_TYPES, MetricsCommand, _parse_bool_flag
 from poly.cli_commands.shared import (
     describe_data_api_error,
@@ -18,6 +16,7 @@ from poly.cli_commands.shared import (
     having_flags_to_having,
     sort_flag_to_sort,
 )
+from poly.handlers.platform_api import PlatformAPIError
 from poly.output.console import console
 from poly.project import AgentStudioProject
 
@@ -51,8 +50,8 @@ def _query_args(**overrides) -> Namespace:
     return Namespace(**base)
 
 
-def _http_error(status: int, payload=None, text: str = "") -> requests.HTTPError:
-    """An HTTPError whose response has the given status and JSON body."""
+def _api_error(status: int, payload=None, text: str = "") -> PlatformAPIError:
+    """A PlatformAPIError whose response has the given status and JSON body."""
     response = MagicMock()
     response.status_code = status
     response.text = text
@@ -60,7 +59,7 @@ def _http_error(status: int, payload=None, text: str = "") -> requests.HTTPError
         response.json.side_effect = ValueError("no body")
     else:
         response.json.return_value = payload
-    return requests.HTTPError(response=response)
+    return PlatformAPIError(f"{status} error", response=response)
 
 
 class ParseBoolFlagTest(unittest.TestCase):
@@ -340,6 +339,23 @@ class MetricsAddTest(unittest.TestCase):
         printed = mock_json.call_args[0][0]
         self.assertFalse(printed["success"])
         self.assertIn("only valid for string", printed["error"])
+
+    @patch("poly.cli_commands.metrics.json_print")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_add_api_failure_json(self, mock_load, mock_json):
+        """In JSON mode, a failed API call is reported as JSON rather than a traceback."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+        project.create_custom_metric.side_effect = _api_error(500)
+
+        with self.assertRaises(SystemExit):
+            MetricsCommand.metrics_add(
+                "/tmp/test", name="SCORE", metric_type="int", output_json=True
+            )
+
+        printed = mock_json.call_args[0][0]
+        self.assertFalse(printed["success"])
+        self.assertIn("500", printed["error"])
 
     @patch("poly.cli_commands.metrics.json_print")
     @patch("poly.cli_commands.metrics.load_project")
@@ -887,9 +903,9 @@ class MetricsAvailableTest(MetricsReadCommandTest):
         mock_json.assert_called_once_with({"metrics": [], "total": 0})
 
     @patch("poly.output.console.error")
-    def test_http_error_is_explained_and_exits(self, mock_error):
+    def test_api_error_is_explained_and_exits(self, mock_error):
         """A Data API error becomes a plain message and a non-zero exit."""
-        self.mock_request.side_effect = _http_error(401)
+        self.mock_request.side_effect = _api_error(401)
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_available(TEST_DIR, output_json=False)
@@ -1281,21 +1297,21 @@ class DescribeDataApiErrorTest(unittest.TestCase):
 
     def test_statuses_map_to_plain_messages(self):
         """Each status the Data API returns gets a message in the caller's terms."""
-        self.assertIn("poly apikey", describe_data_api_error(_http_error(401)))
-        self.assertIn("permission", describe_data_api_error(_http_error(403)))
-        self.assertIn("100 requests", describe_data_api_error(_http_error(429)))
+        self.assertIn("poly apikey", describe_data_api_error(_api_error(401)))
+        self.assertIn("permission", describe_data_api_error(_api_error(403)))
+        self.assertIn("100 requests", describe_data_api_error(_api_error(429)))
         self.assertEqual(
-            describe_data_api_error(_http_error(400, {"detail": "metric not found"})),
+            describe_data_api_error(_api_error(400, {"detail": "metric not found"})),
             "The Data API rejected the request: metric not found.",
         )
 
     def test_validation_detail_list_is_joined(self):
         """A FastAPI-style list of errors is flattened into one line."""
         payload = {"detail": [{"msg": "field required", "loc": ["body", "metric"]}]}
-        self.assertIn("field required", describe_data_api_error(_http_error(422, payload)))
+        self.assertIn("field required", describe_data_api_error(_api_error(422, payload)))
 
     def test_unexpected_body_shapes_do_not_raise(self):
         """A list body, a dict detail or no JSON at all still produce a message."""
-        self.assertIn("rejected", describe_data_api_error(_http_error(400, ["oops"])))
-        self.assertIn("rejected", describe_data_api_error(_http_error(400, {"detail": {"a": 1}})))
-        self.assertIn("rejected", describe_data_api_error(_http_error(400, text="plain text")))
+        self.assertIn("rejected", describe_data_api_error(_api_error(400, ["oops"])))
+        self.assertIn("rejected", describe_data_api_error(_api_error(400, {"detail": {"a": 1}})))
+        self.assertIn("rejected", describe_data_api_error(_api_error(400, text="plain text")))

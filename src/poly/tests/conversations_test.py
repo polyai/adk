@@ -9,9 +9,8 @@ import unittest
 from argparse import Namespace
 from unittest.mock import MagicMock, patch
 
-import requests
-
 from poly.cli_commands.conversations import ConversationsCommand
+from poly.handlers.platform_api import PlatformAPIError
 from poly.output.console import console
 from poly.project import AgentStudioProject
 
@@ -38,12 +37,12 @@ def _search_args(**overrides) -> Namespace:
     return Namespace(**base)
 
 
-def _http_error(status: int) -> requests.HTTPError:
+def _api_error(status: int) -> PlatformAPIError:
     response = MagicMock()
     response.status_code = status
     response.json.return_value = {}
     response.text = ""
-    return requests.HTTPError(response=response)
+    return PlatformAPIError(f"{status} error", response=response)
 
 
 class ConversationsSearchTest(unittest.TestCase):
@@ -149,9 +148,9 @@ class ConversationsSearchTest(unittest.TestCase):
         self.assertIn("started_at", mock_json.call_args[0][0]["error"])
 
     @patch("poly.cli_commands.shared.json_print")
-    def test_http_error_is_explained(self, mock_json):
+    def test_api_error_is_explained(self, mock_json):
         """A 403 is reported as a permission problem on the key."""
-        self.mock_request.side_effect = _http_error(403)
+        self.mock_request.side_effect = _api_error(403)
 
         with self.assertRaises(SystemExit):
             ConversationsCommand.conversations_search(TEST_DIR, _search_args(), output_json=True)
