@@ -106,3 +106,7 @@ nodes:
 def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
     return {"contacts": [...]}
 ```
+
+## Running a campaign
+
+Use `poly campaign validate` after you push to check the whole graph, such as every node being reachable; see `poly campaign --help`.

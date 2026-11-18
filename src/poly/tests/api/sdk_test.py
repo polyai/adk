@@ -7,6 +7,9 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
+import requests
+
+from poly.handlers.platform_api import PlatformAPIHandler
 from poly.handlers.protobuf.commands_pb2 import Command, CommandBatch
 from poly.handlers.sdk import SourcererAPIError, SourcererSDK
 from poly.tests.testing_utils import make_mock_response
@@ -406,6 +409,93 @@ class GetBranchCallInfo(unittest.TestCase):
 
         with self.assertRaises(SourcererAPIError):
             sdk.get_branch_call_info("branch-1")
+
+
+class OutboundCampaignRequests(unittest.TestCase):
+    """Tests for the outbound campaign routes and how their errors are read."""
+
+    def setUp(self):
+        patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key").start()
+        self.request = patch("requests.request").start()
+        self.addCleanup(patch.stopall)
+
+    def _validate(self, campaign_id: str = "CMPGN-1") -> dict:
+        return PlatformAPIHandler.validate_outbound_campaign(
+            "us-1", "acc-1", "proj-1", "main", campaign_id
+        )
+
+    def _error_from(self, response) -> SourcererAPIError:
+        self.request.return_value = response
+        with self.assertRaises(SourcererAPIError) as error:
+            self._validate()
+        return error.exception
+
+    def test_campaign_id_is_quoted_into_the_url(self):
+        self.request.return_value = make_mock_response(200, json_body={"valid": True})
+
+        self._validate("CMPGN/1")
+
+        self.assertEqual(self.request.call_args.kwargs["method"], "POST")
+        self.assertEqual(
+            self.request.call_args.kwargs["url"],
+            "https://api.us.poly.ai/adk/v1/accounts/acc-1/projects/proj-1/branches/main"
+            "/outbound-campaigns/CMPGN%2F1/validate",
+        )
+
+    def test_json_error_keeps_status_code_and_message(self):
+        error = self._error_from(
+            make_mock_response(
+                412,
+                json_body={
+                    "error": "Not set up",
+                    "error_code": "CAMPAIGNS_KEY_MISSING",
+                    "error_message": "Not set up",
+                },
+            )
+        )
+
+        self.assertEqual(error.status_code, 412)
+        self.assertEqual(error.error_code, "CAMPAIGNS_KEY_MISSING")
+        self.assertEqual(error.server_message, "Not set up")
+
+    def test_error_that_is_not_json_keeps_the_body_text(self):
+        error = self._error_from(make_mock_response(502, content=b"Bad gateway"))
+
+        self.assertEqual(error.status_code, 502)
+        self.assertIsNone(error.error_code)
+        self.assertEqual(error.server_message, "Bad gateway")
+
+    def test_html_error_page_is_reduced_to_its_status(self):
+        page = (
+            b"<!DOCTYPE html>\n<html><body><pre>Cannot POST /x/CMPGN-1/validate</pre></body></html>"
+        )
+        error = self._error_from(make_mock_response(404, content=page))
+
+        self.assertEqual(error.status_code, 404)
+        self.assertEqual(error.server_message, "Not Found")
+        self.assertNotIn("<", str(error))
+
+    def test_html_error_page_with_an_unknown_status_still_reads_cleanly(self):
+        error = self._error_from(make_mock_response(520, content=b"<html>origin error</html>"))
+
+        self.assertEqual(error.status_code, 520)
+        self.assertEqual(error.server_message, "Unexpected response")
+
+    def test_error_body_that_is_a_list_is_read_as_text(self):
+        response = make_mock_response(400, json_body=["bad"], content=b'["bad"]')
+
+        error = self._error_from(response)
+
+        self.assertEqual(error.status_code, 400)
+        self.assertEqual(error.server_message, '["bad"]')
+
+    def test_no_response_has_no_status(self):
+        self.request.side_effect = requests.ConnectionError("reset")
+
+        with self.assertRaises(SourcererAPIError) as error:
+            self._validate()
+
+        self.assertIsNone(error.exception.status_code)
 
 
 if __name__ == "__main__":
