@@ -636,7 +636,7 @@ class FlowStep(BaseFlowStep, YamlResource):
                 )
                 if llm_model_name:
                     d["llm"] = {
-                        "model": llm_model_name.name,
+                        "name": llm_model_name.name,
                         **{k: v for k, v in d["llm"].items() if k != "provider_model_id"},
                     }
 
@@ -707,10 +707,10 @@ class FlowStep(BaseFlowStep, YamlResource):
                     asr_settings["model"] = asr_model.model
 
         if llm_settings := yaml_dict.get("llm"):
-            name = llm_settings.get("model")
+            name = llm_settings.get("name")
             if name and "provider_model_id" not in llm_settings and library:
                 if llm_model := library.get_llm_model_by_name(name):
-                    del llm_settings["model"]
+                    del llm_settings["name"]
                     llm_settings["provider_model_id"] = llm_model.provider_model_id
 
         return yaml_dict
@@ -1339,21 +1339,21 @@ class LLMConfig:
     provider_model_id: Optional[str] = None
     reasoning_effort: ReasoningEffort = ReasoningEffort.UNSPECIFIED
     # A model name from the file that the library couldn't turn into a provider model ID.
-    model: Optional[str] = None
+    name: Optional[str] = None
 
     def validate(self, library: Optional[Library] = None):
         """Validate the LLM configuration against the model library, when there is one."""
-        if self.model and self.provider_model_id:
-            raise ValueError("LLM override takes either model or provider_model_id, not both.")
-        if self.model:
+        if self.name and self.provider_model_id:
+            raise ValueError("LLM override takes either name or provider_model_id, not both.")
+        if self.name:
             if library is None:
                 logger.warning(
-                    f"Can't check language model '{self.model}' without the model library. "
+                    f"Can't check language model '{self.name}' without the model library. "
                     "Run 'poly library refresh'."
                 )
                 return
             raise ValueError(
-                f"Unknown language model '{self.model}'. Run 'poly library llm' to see the options."
+                f"Unknown language model '{self.name}'. Run 'poly library llm' to see the options."
             )
         if library and self.provider_model_id:
             if not library.get_llm_model_by_provider_model_id(self.provider_model_id):
@@ -1365,7 +1365,7 @@ class LLMConfig:
         """Return a dictionary suitable for YAML serialization."""
         return utils.drop_unset(
             {
-                "model": self.model,
+                "name": self.name,
                 "provider_model_id": self.provider_model_id,
                 "reasoning_effort": self.reasoning_effort.value,
             }
@@ -1373,9 +1373,9 @@ class LLMConfig:
 
     def to_proto(self) -> FlowLLMConfig:
         """Convert to proto representation."""
-        if self.model:
+        if self.name:
             raise ValueError(
-                f"Unknown language model '{self.model}'. "
+                f"Unknown language model '{self.name}'. "
                 "Use a known model name, or a provider_model_id."
             )
         return FlowLLMConfig(
