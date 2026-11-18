@@ -628,16 +628,17 @@ class FlowStep(BaseFlowStep, YamlResource):
                     asr_settings.get("provider"), asr_settings.get("model")
                 )
                 if asr_model_name:
-                    d["asr"]["model"] = asr_model_name.name
-                    del d["asr"]["provider"]
+                    d["asr"] = {"name": asr_model_name.name}
 
             if llm_settings := d.get("llm"):
                 llm_model_name = library.get_llm_model_by_provider_model_id(
                     llm_settings.get("provider_model_id")
                 )
                 if llm_model_name:
-                    d["llm"]["model"] = llm_model_name.name
-                    del d["llm"]["provider_model_id"]
+                    d["llm"] = {
+                        "model": llm_model_name.name,
+                        **{k: v for k, v in d["llm"].items() if k != "provider_model_id"},
+                    }
 
         return d
 
@@ -696,16 +697,21 @@ class FlowStep(BaseFlowStep, YamlResource):
                     ]
                     condition["required_entities"] = new_required_entities
 
-        if library:
-            if asr_settings := yaml_dict.get("asr"):
-                if asr_model := library.get_asr_model_by_name(asr_settings.get("model")):
-                    yaml_dict["asr"]["model"] = asr_model.model
-                    yaml_dict["asr"]["provider"] = asr_model.provider
+        if asr_settings := yaml_dict.get("asr"):
+            name = asr_settings.get("name")
+            has_ids = "provider" in asr_settings or "model" in asr_settings
+            if name and not has_ids and library:
+                if asr_model := library.get_asr_model_by_name(name):
+                    del asr_settings["name"]
+                    asr_settings["provider"] = asr_model.provider
+                    asr_settings["model"] = asr_model.model
 
-            if llm_settings := yaml_dict.get("llm"):
-                if llm_model := library.get_llm_model_by_name(llm_settings.get("model")):
-                    yaml_dict["llm"]["provider_model_id"] = llm_model.provider_model_id
-                    del yaml_dict["llm"]["model"]
+        if llm_settings := yaml_dict.get("llm"):
+            name = llm_settings.get("model")
+            if name and "provider_model_id" not in llm_settings and library:
+                if llm_model := library.get_llm_model_by_name(name):
+                    del llm_settings["model"]
+                    llm_settings["provider_model_id"] = llm_model.provider_model_id
 
         return yaml_dict
 
@@ -779,7 +785,9 @@ class FlowStep(BaseFlowStep, YamlResource):
         utils.check_yaml_field_types(instance)
         return instance
 
-    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
+    def validate(
+        self, resource_mappings: list[ResourceMapping] = None, library: Library = None, **kwargs
+    ):
         """Validate the flow step resource."""
         if not self.name:
             raise ValueError("Name cannot be empty.")
@@ -854,7 +862,7 @@ class FlowStep(BaseFlowStep, YamlResource):
                 if entity_id not in entity_ids:
                     raise ValueError(f"Requested entity '{entity_id}' not found.")
 
-        self.settings.validate()
+        self.settings.validate(library=library)
 
     def build_update_proto(
         self,
@@ -1179,14 +1187,33 @@ class ASRConfig:
     # Every field is an optional override, so a step may set only some of them.
     provider: Optional[str] = None
     model: Optional[str] = None
+    # A model name from the file that the library couldn't turn into a provider and model.
+    name: Optional[str] = None
 
-    def validate(self):
-        """Validate the ASR configuration."""
-        pass
+    def validate(self, library: Optional[Library] = None):
+        """Validate the ASR configuration against the model library, when there is one."""
+        if self.name and (self.provider or self.model):
+            raise ValueError("ASR override takes either name, or provider and model, not both.")
+        if self.name:
+            if library is None:
+                raise ValueError(
+                    f"Can't look up ASR model '{self.name}' without the model library. "
+                    "Run 'poly library refresh'."
+                )
+            raise ValueError(
+                f"Unknown ASR model '{self.name}'. Run 'poly library asr' to see the options."
+            )
+        if library and self.provider and self.model:
+            if not library.get_asr_model_by_provider_and_model(self.provider, self.model):
+                logger.warning(
+                    "ASR model '%s' from '%s' isn't in the model library.",
+                    self.model,
+                    self.provider,
+                )
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
-        return utils.drop_unset({"provider": self.provider, "model": self.model})
+        return utils.drop_unset({"name": self.name, "provider": self.provider, "model": self.model})
 
     def to_proto(self) -> FlowASRConfig:
         """Convert to proto representation."""
@@ -1308,15 +1335,33 @@ class LLMConfig:
     # Both fields are optional overrides, so a step may set only one of them.
     provider_model_id: Optional[str] = None
     reasoning_effort: ReasoningEffort = ReasoningEffort.UNSPECIFIED
+    # A model name from the file that the library couldn't turn into a provider model ID.
+    model: Optional[str] = None
 
-    def validate(self):
-        """Validate the LLM configuration."""
-        pass
+    def validate(self, library: Optional[Library] = None):
+        """Validate the LLM configuration against the model library, when there is one."""
+        if self.model and self.provider_model_id:
+            raise ValueError("LLM override takes either model or provider_model_id, not both.")
+        if self.model:
+            if library is None:
+                raise ValueError(
+                    f"Can't look up language model '{self.model}' without the model library. "
+                    "Run 'poly library refresh'."
+                )
+            raise ValueError(
+                f"Unknown language model '{self.model}'. Run 'poly library llm' to see the options."
+            )
+        if library and self.provider_model_id:
+            if not library.get_llm_model_by_provider_model_id(self.provider_model_id):
+                logger.warning(
+                    "Language model '%s' isn't in the model library.", self.provider_model_id
+                )
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
         return utils.drop_unset(
             {
+                "model": self.model,
                 "provider_model_id": self.provider_model_id,
                 "reasoning_effort": self.reasoning_effort.value,
             }
@@ -1469,18 +1514,18 @@ class FlowSettings(SubResource):
             llm=llm_data or None,
         )
 
-    def validate(self, **kwargs):
+    def validate(self, library: Library = None, **kwargs):
         """Validate the flow settings resource."""
         self.asr_biasing.validate()
         self.dtmf.validate()
         if self.asr:
-            self.asr.validate()
+            self.asr.validate(library=library)
         if self.vad:
             self.vad.validate()
         if self.barge_in:
             self.barge_in.validate()
         if self.llm:
-            self.llm.validate()
+            self.llm.validate(library=library)
 
     def build_update_proto(self) -> Flow_UpdateStepSettings:
         """Create a proto for updating the flow settings."""

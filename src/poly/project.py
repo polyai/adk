@@ -1846,6 +1846,7 @@ class AgentStudioProject:
                 resource_mappings=resource_mappings,
                 new_resources=new_resources,
                 deleted_resources=deleted_resources,
+                library=self.library,
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
@@ -3592,6 +3593,7 @@ class AgentStudioProject:
             resource_mappings=resource_mappings,
             new_resources=new_resources,
             deleted_resources=deleted_resources,
+            library=self.library,
         )
 
     @staticmethod
@@ -3600,6 +3602,7 @@ class AgentStudioProject:
         resource_mappings: list[ResourceMapping],
         new_resources: Optional[ResourceMap] = None,
         deleted_resources: Optional[ResourceMap] = None,
+        library: Optional[Library] = None,
     ) -> list[str]:
         """Validate all resources in the project.
 
@@ -3608,6 +3611,7 @@ class AgentStudioProject:
             resource_mappings: The mappings to resolve references with.
             new_resources: The resources the push would create, to check deletes against.
             deleted_resources: The saved resources the push would delete.
+            library: The region's model lists, to check model references against.
 
         Returns:
             list[str]: A list of validation error messages.
@@ -3636,6 +3640,7 @@ class AgentStudioProject:
                 try:
                     resource.validate(
                         resource_mappings=resource_mappings,
+                        library=library,
                     )
                 except ValueError as e:
                     # ValueError already contains context, just add file path if missing
