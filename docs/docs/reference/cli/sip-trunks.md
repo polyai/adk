@@ -121,12 +121,12 @@ The file is a list of trunks. To create a trunk with one inbound extension:
 | Field | Description |
 |---|---|
 | `id` | Identifies an existing trunk. Omit for a new trunk. Without an ID, `manage` matches by name or creates the trunk if no match exists. Names must be unambiguous. |
-| `name` | Display name to apply. Keep this field when editing an existing trunk. |
-| `sip_cidr` | SIP server CIDR blocks. Required when creating a trunk. |
-| `rtp_cidr` | RTP/media server CIDR blocks. Required when creating a trunk. |
-| `encrypted` | Enable encrypted signaling and media. Defaults to `true` for a new trunk. |
+| `name` | Display name to apply, as a string. Keep this field when editing an existing trunk. |
+| `sip_cidr` | SIP server CIDR blocks, as a list of strings. Required when creating a trunk. |
+| `rtp_cidr` | RTP/media server CIDR blocks, as a list of strings. Required when creating a trunk. |
+| `encrypted` | Unquoted YAML boolean `true` or `false` to enable encrypted signaling and media. Defaults to `true` for a new trunk. |
 | `default_route` | **Required.** An agent target, or `null` to disable the default route. |
-| `outbound` | **Required.** Outbound destinations and optional caller ID, or `null` to disable outbound calling. |
+| `outbound` | **Required.** Outbound destinations and default caller ID, or `null` to disable outbound calling. |
 | `inbound_auth` | Authentication mode: `digest`, `token`, or `none`. Omit to leave existing authentication unchanged. |
 | `extensions` | The complete list of extension bindings to keep on this trunk. Omit to leave existing bindings unchanged. |
 
@@ -174,8 +174,8 @@ outbound:
 
 | Field | Description |
 |---|---|
-| `sip_addresses` | **Required.** 1–4 `sip:` or `sips:` server URIs, each at most 255 characters. A URI may include a port and transport parameter, but no user part such as `user@`. Address order has no effect. |
-| `default_caller_id` | Optional string of at most 128 characters. Omitting it, or setting it to an empty string, clears any existing default caller ID. |
+| `sip_addresses` | **Required.** 1–4 `sip:` or `sips:` server URIs, each at most 192 bytes. A URI may include a port and transport parameter, but no user part such as `user@`. Hostnames cannot contain underscores or end in `.svc`; IPv6 addresses must be bracketed. Address order has no effect. |
+| `default_caller_id` | **Required.** Non-empty string of at most 128 characters. |
 
 Set `outbound: null` to clear the outbound destinations and default caller ID, or create a trunk without outbound settings. An empty mapping or empty address list is not accepted in YAML.
 

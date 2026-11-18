@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Protocol
@@ -116,6 +117,24 @@ def managed_trunk_data(local_name: str, config: dict[str, Any], *, create: bool)
             data[field] = config[field]
     data.setdefault("name", local_name)
 
+    from jsonschema import Draft202012Validator, ValidationError
+
+    try:
+        Draft202012Validator(
+            {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "encrypted": {"type": "boolean"},
+                    "sip_cidr": {"type": "array", "items": {"type": "string"}},
+                    "rtp_cidr": {"type": "array", "items": {"type": "string"}},
+                },
+            }
+        ).validate(data)
+    except ValidationError as error:
+        field = ".".join(str(part) for part in error.absolute_path)
+        raise ValueError(f"SIP trunk '{local_name}' {field}: {error.message}") from None
+
     if create:
         missing = [field for field in ("sip_cidr", "rtp_cidr") if field not in data]
         if missing:
@@ -178,34 +197,41 @@ def managed_outbound(local_name: str, config: Any) -> dict[str, Any] | None:
     for address in addresses:
         if (
             not isinstance(address, str)
-            or len(address) > 255
+            or any(char.isspace() or not char.isprintable() for char in address)
+            or len(address.encode("utf-8")) > 192
             or not address.startswith(("sip:", "sips:"))
             or not address.partition(":")[2].split(";", 1)[0]
             or any(char in address for char in "@/?#")
-            or any(char.isspace() or not char.isprintable() for char in address)
         ):
             raise ValueError(
                 f"SIP trunk '{local_name}' outbound.sip_addresses must contain sip: or sips: "
-                "URIs without a user part, each at most 255 characters."
+                "URIs without a user part, each at most 192 bytes."
             )
         hostport = address.partition(":")[2].split(";", 1)[0]
         try:
             parsed = urlsplit(f"//{hostport}")
-            valid_host = bool(parsed.hostname) and (parsed.port is None or parsed.port > 0)
+            host = parsed.hostname or ""
+            label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+            hostport_pattern = rf"(?:{label}(?:\.{label})*\.?|\[[0-9a-f:.]+\])(?::[0-9]+)?"
+            valid_host = (
+                re.fullmatch(hostport_pattern, hostport, re.IGNORECASE | re.ASCII) is not None
+                and not host.rstrip(".").endswith(".svc")
+                and (parsed.port is None or parsed.port > 0)
+            )
         except ValueError:
             valid_host = False
         if not valid_host:
             raise ValueError(
-                f"SIP trunk '{local_name}' outbound.sip_addresses must contain a hostname "
-                "or IP address and an optional port between 1 and 65535."
+                f"SIP trunk '{local_name}' outbound.sip_addresses must contain a valid hostname "
+                "or IP address and an optional port between 1 and 65535. Hostnames cannot contain "
+                "underscores or end in .svc; IPv6 addresses must be bracketed."
             )
-    caller_id = config.get("default_caller_id", "")
-    if not isinstance(caller_id, str) or len(caller_id) > 128:
+    caller_id = config.get("default_caller_id")
+    if not isinstance(caller_id, str) or not caller_id.strip() or len(caller_id) > 128:
         raise ValueError(
-            f"SIP trunk '{local_name}' outbound.default_caller_id must be a string "
+            f"SIP trunk '{local_name}' outbound.default_caller_id must be a non-empty string "
             "of at most 128 characters."
         )
-    # An omitted caller ID selects no default, including when replacing one.
     return {"sip_addresses": list(addresses), "default_caller_id": caller_id}
 
 

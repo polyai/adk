@@ -925,21 +925,32 @@ class SIPTrunkOutboundTest(unittest.TestCase):
 
     @patch.object(AgentStudioInterface, "list_sip_trunks")
     def test_invalid_outbound_is_rejected_before_remote_discovery(self, list_trunks):
-        valid = {"sip_addresses": ["sip:carrier.example.com"]}
+        valid = {
+            "sip_addresses": ["sip:carrier.example.com"], "default_caller_id": "+442012345678",
+        }
         invalid = [
             False, "sip:carrier.example.com", [], {}, {"disable": True},
             {"default_caller_id": "+442012345678"},
-            {"sip_addresses": None}, {"sip_addresses": []},
-            {"sip_addresses": "sip:carrier.example.com"},
-            {"sip_addresses": ["sip:carrier.example.com"] * 5},
+            {"sip_addresses": ["sip:carrier.example.com"]},
+            {**valid, "sip_addresses": None}, {**valid, "sip_addresses": []},
+            {**valid, "sip_addresses": "sip:carrier.example.com"},
+            {**valid, "sip_addresses": ["sip:carrier.example.com"] * 5},
+            {**valid, "default_caller_id": ""}, {**valid, "default_caller_id": " "},
             {**valid, "default_caller_id": None}, {**valid, "default_caller_id": 123},
             {**valid, "default_caller_id": "1" * 129}, {**valid, "unknown": "value"},
         ]
-        invalid.extend({"sip_addresses": [address]} for address in (
+        invalid.extend({**valid, "sip_addresses": [address]} for address in (
             None, 123, "https://carrier.example.com", "sip:", "sip::5060",
             "sip:;transport=tcp", "sip:user@carrier.example.com",
             "sip:carrier.example.com ", "sip:carrier.example.com\n",
-            "sip:" + "a" * 252,
+            "sip:" + "a" * 60 + "." + "b" * 60 + "." + "c" * 59 + ".example",
+            "sip:carrier_sbc.example.com", "sip:carrier.svc", "sip:carrier.SVC.",
+            "sip:carrier.\u212a.example.com", "sip:carrier.\u0130.example.com",
+            "sip:[203.0.113.1]", "sip:[carrier.example.com]", "sip:[v1.example]",
+            "sip:2001:db8::1", "sip:[2001:db8::1]extra", "sip:carrier.example.com:",
+            "sip:carrier.example.com:0", "sip:carrier.example.com:65536",
+            "sip:-carrier.example.com", "sip:carrier-.example.com",
+            "sip:" + "a" * 64 + ".example.com",
         ))
         for outbound in invalid:
             with self.subTest(outbound=outbound):
@@ -950,7 +961,7 @@ class SIPTrunkOutboundTest(unittest.TestCase):
                     )
                 list_trunks.assert_not_called()
 
-    def test_outbound_creation_preserves_addresses_and_defaults_caller_id(self):
+    def test_outbound_creation_preserves_addresses_and_caller_id(self):
         addresses = [
             "sips:secure.example.com:5061", "sip:plain.example.com:5060;transport=tcp",
             "sip:[2001:db8::1]:5060", "sip:backup.example.com",
@@ -958,15 +969,28 @@ class SIPTrunkOutboundTest(unittest.TestCase):
         payload = managed_trunk_data(
             "Primary carrier",
             {
-                "default_route": None, "outbound": {"sip_addresses": addresses},
+                "default_route": None,
+                "outbound": {"sip_addresses": addresses, "default_caller_id": "+442012345678"},
                 "sip_cidr": ["203.0.113.0/24"], "rtp_cidr": ["198.51.100.0/24"],
             },
             create=True,
         )
         self.assertEqual(payload["outbound"], {
-            "sip_addresses": addresses, "default_caller_id": "",
+            "sip_addresses": addresses, "default_caller_id": "+442012345678",
         })
         self.assertNotIn("inbound", payload)
+
+    def test_outbound_address_and_caller_id_limits_are_accepted(self):
+        addresses = [
+            "sip:" + "a" * 60 + "." + "b" * 60 + "." + "c" * 58 + ".example",
+            "sip:carrier.example.com.", "sip:[2001:db8::1]", "sip:203.0.113.1:65535",
+        ]
+        outbound = {"sip_addresses": addresses, "default_caller_id": "1" * 128}
+        payload = managed_trunk_data(
+            "Primary carrier", {"default_route": None, "outbound": outbound}, create=False,
+        )
+        self.assertEqual(len(addresses[0].encode("utf-8")), 192)
+        self.assertEqual(payload["outbound"], outbound)
 
     def test_updates_only_changed_outbound_fields(self):
         old_addresses = ["sip:old.example.com"]
@@ -979,7 +1003,6 @@ class SIPTrunkOutboundTest(unittest.TestCase):
              {"sip_addresses": new_addresses}),
             ({"sip_addresses": old_addresses, "default_caller_id": "+442087654321"},
              {"default_caller_id": "+442087654321"}),
-            ({"sip_addresses": old_addresses}, {"default_caller_id": ""}),
         )
         for outbound, expected in cases:
             with self.subTest(outbound=outbound):
@@ -1026,15 +1049,15 @@ class SIPTrunkOutboundTest(unittest.TestCase):
                     self.assertEqual(plan.trunks[0].payload, {})
                     self.assertEqual(plan.changes, ())
 
-    def test_address_order_duplicates_and_absent_caller_id_do_not_cause_updates(self):
+    def test_address_order_and_duplicates_do_not_cause_updates(self):
         addresses = ["sip:first.example.com", "sip:second.example.com"]
-        for caller_fields in ({}, {"default_caller_id": ""}):
-            for desired_addresses in (addresses, addresses[::-1], [*addresses, addresses[0]]):
-                with self.subTest(caller_fields=caller_fields, addresses=desired_addresses):
-                    current = self._current(outbound={"sip_addresses": addresses, **caller_fields})
-                    plan = self._plan(current, {"sip_addresses": desired_addresses})
-                    self.assertEqual(plan.trunks[0].payload, {})
-                    self.assertEqual(plan.changes, ())
+        caller_fields = {"default_caller_id": "+442012345678"}
+        for desired_addresses in (addresses, addresses[::-1], [*addresses, addresses[0]]):
+            with self.subTest(addresses=desired_addresses):
+                current = self._current(outbound={"sip_addresses": addresses, **caller_fields})
+                plan = self._plan(current, {"sip_addresses": desired_addresses, **caller_fields})
+                self.assertEqual(plan.trunks[0].payload, {})
+                self.assertEqual(plan.changes, ())
 
     def test_outbound_and_route_changes_survive_credential_rotation(self):
         existing = {"sip_addresses": ["sip:old.example.com"], "default_caller_id": "+442012345678"}
@@ -1076,14 +1099,30 @@ class SIPTrunkOutboundTest(unittest.TestCase):
                 self.assertNotIn("secret-value", repr(plan))
 
     @patch.object(AgentStudioInterface, "list_sip_trunk_extensions", return_value={"extensions": []})
+    def test_export_preserves_missing_caller_id_but_manage_requires_it(self, _list_extensions):
+        addresses = ["sip:carrier.example.com"]
+        for caller_fields in ({}, {"default_caller_id": ""}):
+            with self.subTest(caller_fields=caller_fields):
+                current = self._current(outbound={"sip_addresses": addresses, **caller_fields})
+                with patch.object(
+                    AgentStudioInterface, "list_sip_trunks", return_value={"sip_trunks": [current]}
+                ) as list_trunks:
+                    exported = export_config("uk-1", "acct-123")
+                    self.assertEqual(exported["sip_trunks"][0]["outbound"], {
+                        "sip_addresses": addresses,
+                    })
+                    with self.assertRaisesRegex(ValueError, "outbound.default_caller_id"):
+                        build_manage_plan(
+                            "/project/sip-trunks.yaml", "uk-1", "acct-123", exported["sip_trunks"],
+                        )
+                list_trunks.assert_called_once_with("uk-1", "acct-123")
+
+    @patch.object(AgentStudioInterface, "list_sip_trunk_extensions", return_value={"extensions": []})
     def test_exported_outbound_configuration_reconciles_without_changes(self, _list_extensions):
         addresses = ["sip:first.example.com", "sip:second.example.com"]
         states = (
             ({}, None), ({"outbound": None}, None),
             ({"outbound": {"sip_addresses": [], "default_caller_id": ""}}, None),
-            ({"outbound": {"sip_addresses": addresses}}, {"sip_addresses": addresses}),
-            ({"outbound": {"sip_addresses": addresses, "default_caller_id": ""}},
-             {"sip_addresses": addresses}),
             ({"outbound": {"sip_addresses": addresses, "default_caller_id": "+442012345678"}},
              {"sip_addresses": addresses, "default_caller_id": "+442012345678"}),
         )

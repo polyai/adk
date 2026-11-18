@@ -31,8 +31,9 @@ def sip_args(path, action, *extra):
 
 @pytest.mark.parametrize("disable_default_route", [False, True])
 @pytest.mark.parametrize("disable_outbound", [False, True])
+@pytest.mark.parametrize("encrypted", [False, True])
 def test_manage_creates_shared_trunk_and_persists_metadata(
-    tmp_path, capsys, disable_default_route, disable_outbound
+    tmp_path, capsys, disable_default_route, disable_outbound, encrypted
 ):
     project_dir = tmp_path / "current-project"
     project_dir.mkdir()
@@ -62,6 +63,7 @@ def test_manage_creates_shared_trunk_and_persists_metadata(
     )
     config_path.write_text(
         "- name: Shared carrier\n"
+        f"  encrypted: {str(encrypted).lower()}\n"
         "  sip_cidr: [203.0.113.0/24]\n"
         "  rtp_cidr: [198.51.100.0/24]\n" + route_yaml + outbound_yaml + "  extensions:\n"
         "    - extension: '1000'\n"
@@ -92,6 +94,7 @@ def test_manage_creates_shared_trunk_and_persists_metadata(
         "name": "Shared carrier",
         "sip_cidr": ["203.0.113.0/24"],
         "rtp_cidr": ["198.51.100.0/24"],
+        "encrypted": encrypted,
     }
     expected_default_route = None
     if not disable_default_route:
@@ -279,6 +282,59 @@ def test_manage_json_keeps_changes_without_new_credentials_noninteractive(
         assert result["trunks"][0]["status"] == "updated"
     secret.assert_not_called()
     confirm.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("name", 123),
+        ("name", None),
+        ("encrypted", "false"),
+        ("encrypted", 0),
+        ("encrypted", 1),
+        ("encrypted", None),
+        ("sip_cidr", "203.0.113.0/24"),
+        ("sip_cidr", [123]),
+        ("sip_cidr", None),
+        ("rtp_cidr", "198.51.100.0/24"),
+        ("rtp_cidr", [None]),
+        ("rtp_cidr", {"cidr": "198.51.100.0/24"}),
+        ("outbound", {"sip_addresses": ["sip:carrier.example.com"]}),
+        ("outbound", {"sip_addresses": ["sip:carrier.example.com"], "default_caller_id": ""}),
+        *[("outbound", {"sip_addresses": [address], "default_caller_id": "+441234567890"})
+          for address in (
+              "sip:" + "a" * 60 + "." + "b" * 60 + "." + "c" * 59 + ".example",
+              "sip:carrier_sbc.example.com", "sip:carrier.svc", "sip:[203.0.113.1]",
+          )],
+    ],
+)
+@pytest.mark.parametrize("trunk_id", [None, "tr-123"])
+def test_manage_rejects_invalid_trunk_fields_before_remote_calls(tmp_path, field, value, trunk_id):
+    (tmp_path / "project.yaml").write_text(
+        "project_id: project-1\naccount_id: acct-123\nregion: uk-1\n", encoding="utf-8"
+    )
+    config = {
+        "name": "Example carrier", "default_route": None, "outbound": None,
+        "sip_cidr": ["203.0.113.0/24"], "rtp_cidr": ["198.51.100.0/24"], field: value,
+    }
+    if trunk_id is not None:
+        config["id"] = trunk_id
+    config_path = tmp_path / "sip-trunks.yaml"
+    with config_path.open("w", encoding="utf-8") as config_file:
+        YAML().dump([config], config_file)
+    source = config_path.read_text(encoding="utf-8")
+    with (
+        patch.object(PlatformAPIHandler, "make_request") as request,
+        patch("getpass.getpass") as secret,
+        patch("questionary.confirm") as confirm,
+    ):
+        with pytest.raises(ValueError, match=field):
+            SIPTrunksCommand.run(sip_args(tmp_path, "manage"))
+
+    request.assert_not_called()
+    secret.assert_not_called()
+    confirm.assert_not_called()
+    assert config_path.read_text(encoding="utf-8") == source
 
 
 @pytest.mark.parametrize("extension", ["1000", "+441234567890", "1.5"])
