@@ -5450,6 +5450,12 @@ class AgentStudioProject:
             Library: The refreshed library object.
         """
         if not self.library or force_refresh or self.library.is_stale:
-            library = Library.load_library_from_api(self.region, self.api_handler)
-            self.library = library
+            try:
+                library = Library.load_library_from_api(self.region, self.api_handler)
+                self.library = library
+            except Exception as e:
+                if not force_refresh:
+                    logger.warning(f"Failed to refresh library: {e}")
+                else:
+                    raise e
         return self.library
