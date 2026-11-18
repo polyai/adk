@@ -7218,6 +7218,40 @@ class LibraryCommandTest(unittest.TestCase):
         self.mock_get_asr.assert_not_called()
         self.assertEqual([m["name"] for m in output], ["Soniox STT RT v5"])
 
+    def _save_stale_region(self, region: str) -> None:
+        stale = Library.build_library(region, self.ASR_MODELS[:1], self.LLM_MODELS[:1])
+        stale.last_refreshed = datetime.now(UTC) - timedelta(days=2)
+        stale.save_library()
+
+    def test_failed_refresh_lists_the_stale_copy_with_a_warning(self):
+        """If a stale library can't be refreshed, its saved models are listed with a warning."""
+        self._save_stale_region("uk-1")
+        self.mock_get_asr.side_effect = RuntimeError("list route down")
+
+        with console.capture() as capture:
+            LibraryCommand.list_asr_models(TEST_DIR, "uk-1")
+        output = capture.get()
+
+        self.assertIn("Warning", output)
+        self.assertIn("list route down", output)
+        self.assertIn("Soniox STT RT v5", output)
+
+    def test_failed_refresh_with_json_prints_only_the_stale_list(self):
+        """With --json, the stale fallback still prints exactly one JSON document."""
+        self._save_stale_region("uk-1")
+        self.mock_get_llm.side_effect = RuntimeError("list route down")
+
+        output = self._json_output(LibraryCommand.list_llm_models, "uk-1")
+
+        self.assertEqual([m["name"] for m in output], ["GPT-4.1 mini"])
+
+    def test_failed_fetch_with_nothing_saved_raises(self):
+        """With no saved library to fall back on, the fetch error reaches the user."""
+        self.mock_get_asr.side_effect = RuntimeError("list route down")
+
+        with self.assertRaisesRegex(RuntimeError, "list route down"):
+            LibraryCommand.list_asr_models(TEST_DIR, "euw-1")
+
     def test_refresh_flag_refetches_and_prints_one_json_document(self):
         """--refresh refetches before listing, and --json still prints only the list."""
         Library.build_library("uk-1", [], []).save_library()
