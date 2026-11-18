@@ -5256,10 +5256,17 @@ class ModelOverrideValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown language model 'Typo'"):
             LLMConfig(model="Typo").validate(library=self.library)
 
-    def test_llm_name_without_a_library_is_an_error(self):
-        """A language model name can't be checked or sent without the library."""
-        with self.assertRaisesRegex(ValueError, "without the model library"):
+    def test_llm_name_without_a_library_warns(self):
+        """A language model name can't be checked without the library, so validate warns."""
+        with self.assertLogs("poly.resources.flows", level="WARNING") as logs:
             LLMConfig(model="PolyAI Raven 3.5").validate()
+
+        self.assertIn("without the model library", logs.output[0])
+
+    def test_unresolved_llm_name_cannot_become_a_proto(self):
+        """A name that never resolved can't be pushed, even with validation skipped."""
+        with self.assertRaisesRegex(ValueError, "Use a known model name"):
+            LLMConfig(model="PolyAI Raven 3.5").to_proto()
 
     def test_llm_model_and_provider_model_id_together_is_an_error(self):
         """An override can't give both a name and an ID."""
@@ -5284,10 +5291,25 @@ class ModelOverrideValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown ASR model 'Typo'"):
             ASRConfig(name="Typo").validate(library=self.library)
 
-    def test_asr_name_without_a_library_is_an_error(self):
-        """An ASR name can't be turned into a provider and model without the library."""
-        with self.assertRaisesRegex(ValueError, "without the model library"):
+    def test_asr_name_without_a_library_warns(self):
+        """An ASR name can't be checked without the library, so validate warns."""
+        with self.assertLogs("poly.resources.flows", level="WARNING") as logs:
             ASRConfig(name="Deepgram Nova 3").validate()
+
+        self.assertIn("without the model library", logs.output[0])
+
+    def test_unresolved_asr_name_cannot_become_a_proto(self):
+        """A name that never resolved can't be pushed, even with validation skipped."""
+        with self.assertRaisesRegex(ValueError, "Use a known model name"):
+            ASRConfig(name="Deepgram Nova 3").to_proto()
+
+    def test_resolved_overrides_become_protos(self):
+        """Overrides holding IDs convert to protos as before."""
+        self.assertEqual(ASRConfig(provider="deepgram", model="nova-3").to_proto().model, "nova-3")
+        self.assertEqual(
+            LLMConfig(provider_model_id="polywhirl-3-5").to_proto().provider_model_id,
+            "polywhirl-3-5",
+        )
 
     def test_asr_name_with_provider_or_model_is_an_error(self):
         """An ASR override can't give both a name and IDs."""
