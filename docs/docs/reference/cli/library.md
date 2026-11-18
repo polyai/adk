@@ -21,7 +21,7 @@ In both lists, PolyAI's own models come first and are tagged `PolyAI`, and the r
 
 ## `poly library llm`
 
-List the language models a project can use, with the ID a [flow step's `llm` override](../resources/flows.md#llm) takes and what each model supports.
+List the language models a project can use, with the name a [flow step's `llm` override](../resources/flows.md#llm) takes and what each model supports.
 
 Examples:
 
@@ -60,11 +60,11 @@ The table shows each model's name, its model ID (the ID a channel stores, which 
 }
 ~~~
 
-`id` differs between regions. `providerModelId` is the same everywhere, and is the value a step's `llm.provider_model_id` takes.
+`id` differs between regions. A step's `llm` override takes the `name`.
 
 ## `poly library asr`
 
-List the speech recognition models the voice channel can use, with the provider and model a [flow step's `asr` override](../resources/flows.md#asr-override) takes.
+List the speech recognition models the voice channel can use, with the name a [flow step's `asr` override](../resources/flows.md#asr-override) takes.
 
 Examples:
 
@@ -95,7 +95,7 @@ poly library asr --refresh --json
 }
 ~~~
 
-`id` differs between regions. `provider` and `model` are the values a step's `asr` override takes.
+`id` differs between regions. A step's `asr` override takes the `name`.
 
 ## `poly library refresh`
 

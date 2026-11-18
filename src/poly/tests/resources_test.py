@@ -5116,14 +5116,14 @@ class FlowStepModelNamesTest(unittest.TestCase):
         self.assertEqual(self._pretty(step, self.library)["asr"], {"name": "Deepgram Nova 3"})
 
     def test_llm_override_is_written_by_name(self):
-        """A known provider model ID is written as `model`, keeping reasoning effort."""
+        """A known provider model ID is written as `name`, keeping reasoning effort."""
         step = self._step(
             llm=LLMConfig(provider_model_id="polywhirl-3-5", reasoning_effort=ReasoningEffort.HIGH)
         )
 
         self.assertEqual(
             self._pretty(step, self.library)["llm"],
-            {"model": "PolyAI Raven 3.5", "reasoning_effort": "high"},
+            {"name": "PolyAI Raven 3.5", "reasoning_effort": "high"},
         )
 
     def test_unknown_models_are_written_as_stored(self):
@@ -5153,7 +5153,7 @@ class FlowStepModelNamesTest(unittest.TestCase):
         step = self._read(
             "step_type: advanced_step\nname: Test Step\nprompt: Hello\n"
             "asr:\n  name: Deepgram Nova 3\n"
-            "llm:\n  model: PolyAI Raven 3.5\n  reasoning_effort: high\n",
+            "llm:\n  name: PolyAI Raven 3.5\n  reasoning_effort: high\n",
             library=self.library,
         )
 
@@ -5167,7 +5167,7 @@ class FlowStepModelNamesTest(unittest.TestCase):
             llm=LLMConfig(provider_model_id="polywhirl-3-5", reasoning_effort=ReasoningEffort.HIGH)
         )
 
-        self.assertEqual(list(self._pretty(step, self.library)["llm"]), ["model", "reasoning_effort"])
+        self.assertEqual(list(self._pretty(step, self.library)["llm"]), ["name", "reasoning_effort"])
 
     def test_partial_asr_override_with_only_a_model_is_still_read(self):
         """An override that sets only the ASR model isn't mistaken for a name."""
@@ -5183,25 +5183,25 @@ class FlowStepModelNamesTest(unittest.TestCase):
         raw = (
             "step_type: advanced_step\nname: Test Step\nprompt: Hello\n"
             "asr:\n  name: Typo ASR\n"
-            "llm:\n  model: Typo LLM\n"
+            "llm:\n  name: Typo LLM\n"
         )
         step = self._read(raw, library=self.library)
 
         self.assertEqual(step.settings.asr.name, "Typo ASR")
-        self.assertEqual(step.settings.llm.model, "Typo LLM")
+        self.assertEqual(step.settings.llm.name, "Typo LLM")
         pretty = self._pretty(step, self.library)
         self.assertEqual(pretty["asr"], {"name": "Typo ASR"})
-        self.assertEqual(pretty["llm"]["model"], "Typo LLM")
+        self.assertEqual(pretty["llm"]["name"], "Typo LLM")
 
     def test_names_without_a_library_are_kept(self):
         """With no library, names stay as names for validate to report."""
         step = self._read(
             "step_type: advanced_step\nname: Test Step\nprompt: Hello\n"
-            "asr:\n  name: Deepgram Nova 3\nllm:\n  model: PolyAI Raven 3.5\n"
+            "asr:\n  name: Deepgram Nova 3\nllm:\n  name: PolyAI Raven 3.5\n"
         )
 
         self.assertEqual(step.settings.asr, ASRConfig(name="Deepgram Nova 3"))
-        self.assertEqual(step.settings.llm.model, "PolyAI Raven 3.5")
+        self.assertEqual(step.settings.llm.name, "PolyAI Raven 3.5")
         self.assertIsNone(step.settings.llm.provider_model_id)
 
     def test_ids_are_still_read(self):
@@ -5254,24 +5254,24 @@ class ModelOverrideValidationTest(unittest.TestCase):
     def test_unresolved_llm_name_is_an_error(self):
         """A language model name the library doesn't know fails validation."""
         with self.assertRaisesRegex(ValueError, "Unknown language model 'Typo'"):
-            LLMConfig(model="Typo").validate(library=self.library)
+            LLMConfig(name="Typo").validate(library=self.library)
 
     def test_llm_name_without_a_library_warns(self):
         """A language model name can't be checked without the library, so validate warns."""
         with self.assertLogs("poly.resources.flows", level="WARNING") as logs:
-            LLMConfig(model="PolyAI Raven 3.5").validate()
+            LLMConfig(name="PolyAI Raven 3.5").validate()
 
         self.assertIn("without the model library", logs.output[0])
 
     def test_unresolved_llm_name_cannot_become_a_proto(self):
         """A name that never resolved can't be pushed, even with validation skipped."""
         with self.assertRaisesRegex(ValueError, "Use a known model name"):
-            LLMConfig(model="PolyAI Raven 3.5").to_proto()
+            LLMConfig(name="PolyAI Raven 3.5").to_proto()
 
     def test_llm_model_and_provider_model_id_together_is_an_error(self):
         """An override can't give both a name and an ID."""
         with self.assertRaisesRegex(ValueError, "not both"):
-            LLMConfig(model="PolyAI Raven 3.5", provider_model_id="polywhirl-3-5").validate(
+            LLMConfig(name="PolyAI Raven 3.5", provider_model_id="polywhirl-3-5").validate(
                 library=self.library
             )
 
@@ -5333,7 +5333,7 @@ class ModelOverrideValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown ASR model"):
             self._settings(asr=ASRConfig(name="Typo")).validate(library=self.library)
         with self.assertRaisesRegex(ValueError, "Unknown language model"):
-            self._settings(llm=LLMConfig(model="Typo")).validate(library=self.library)
+            self._settings(llm=LLMConfig(name="Typo")).validate(library=self.library)
 
 class EntityTests(unittest.TestCase):
     def test_validate_entity(self):
