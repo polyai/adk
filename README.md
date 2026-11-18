@@ -292,6 +292,7 @@ To create a trunk, add an entry such as:
 required credentials and saves generated trunk IDs and hostnames back to the YAML.
 Changes take effect immediately and may affect live calls.
 Use `--force` to apply without confirmation; `--json` also skips confirmation.
+JSON mode rejects changes that require new credentials; run without `--json` to enter them.
 The required `default_route` and `outbound` fields use `null` to disable those features.
 
 An `extensions` list specifies all bindings to keep; removing an entry deletes that

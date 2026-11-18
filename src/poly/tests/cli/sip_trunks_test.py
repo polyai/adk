@@ -171,7 +171,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
     def test_manage_json_applies_without_confirmation(
         self, confirm, build_plan, print_diff, apply_plan, json_print
     ):
-        plan = MagicMock(changes=(PlanChange("create", "trunk Example", "+ trunk"),))
+        plan = MagicMock(changes=(PlanChange("create", "trunk Example", "+ trunk"),), trunks=())
         result = {"success": True, "trunks": []}
         build_plan.return_value = plan
         apply_plan.return_value = result
@@ -194,7 +194,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
     def test_manage_json_with_no_changes_does_not_apply(
         self, confirm, build_plan, print_diff, apply_plan, json_print
     ):
-        build_plan.return_value = MagicMock(changes=())
+        build_plan.return_value = MagicMock(changes=(), trunks=())
         args = self._project_args(["manage", "--json"])
 
         SIPTrunksCommand.run(args)

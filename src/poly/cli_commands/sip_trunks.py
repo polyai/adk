@@ -65,6 +65,7 @@ class SIPTrunksCommand(BaseCommand):
             description=(
                 "Create or update SIP trunks declared in sip-trunks.yaml.\n"
                 "Changes take effect immediately and may affect live calls.\n"
+                "JSON mode rejects changes that require credentials.\n"
                 "Trunks omitted from the file are left unchanged."
             ),
         )
@@ -166,6 +167,11 @@ class SIPTrunksCommand(BaseCommand):
         plan = project.build_sip_trunk_plan(
             file_path=args.file_path, rotate_auth=getattr(args, "rotate_auth", None)
         )
+        if args.json and any(operation.credential_required for operation in plan.trunks):
+            raise ValueError(
+                "Cannot use --json when SIP trunk changes require credentials. "
+                "Run without --json to enter them securely."
+            )
         changes = [change.as_dict() for change in plan.changes]
         if not changes:
             if args.json:

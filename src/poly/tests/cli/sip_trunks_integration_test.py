@@ -152,6 +152,135 @@ def test_manage_creates_shared_trunk_and_persists_metadata(
     assert result["trunks"][0]["extensions_created"] == 2
 
 
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize(
+    ("auth_type", "change"),
+    [
+        ("digest", "create"), ("token", "create"),
+        ("digest", "enable"), ("token", "enable"),
+        ("digest", "switch"), ("token", "switch"),
+        ("digest", "rotate"), ("token", "rotate"),
+        ("digest", "username"),
+    ],
+)
+def test_manage_json_rejects_credentials_before_any_changes(tmp_path, capsys, auth_type, change, force):
+    (tmp_path / "project.yaml").write_text(
+        "project_id: project-1\naccount_id: acct-123\nregion: uk-1\n", encoding="utf-8"
+    )
+    auth_config = {"type": auth_type}
+    if auth_type == "digest":
+        auth_config["username"] = "bob" if change == "username" else "alice"
+    credential_trunk = {
+        "name": "Credential carrier", "default_route": None, "outbound": None,
+        "sip_cidr": ["203.0.113.0/24"], "rtp_cidr": ["198.51.100.0/24"],
+        "inbound_auth": auth_config,
+    }
+    remote_trunks = [{"id": "tr-safe", "name": "Old carrier", "inbound": {}}]
+    if change != "create":
+        credential_trunk["id"] = "tr-secret"
+        current_type = (
+            ("token" if auth_type == "digest" else "digest") if change == "switch" else auth_type
+        )
+        inbound = {}
+        if change != "enable":
+            inbound = (
+                {"sip_auth": {"enabled": True, "username": "alice"}}
+                if current_type == "digest" else {"sip_token_auth": {"enabled": True}}
+            )
+        remote_trunks.append({"id": "tr-secret", "name": "Credential carrier", "inbound": inbound})
+    config_path = tmp_path / "sip-trunks.yaml"
+    with config_path.open("w", encoding="utf-8") as config_file:
+        YAML().dump([
+            {"id": "tr-safe", "name": "Updated carrier", "default_route": None, "outbound": None},
+            credential_trunk,
+        ], config_file)
+    source = config_path.read_text(encoding="utf-8")
+    extra = ["--rotate-auth", "tr-secret"] if change == "rotate" else []
+    if force:
+        extra.append("--force")
+    with (
+        patch.object(
+            PlatformAPIHandler, "make_request", return_value={"sip_trunks": remote_trunks}
+        ) as request,
+        patch("getpass.getpass") as secret,
+        patch("questionary.confirm") as confirm,
+        patch("poly.cli.display_update_message"),
+    ):
+        with pytest.raises(SystemExit) as exit_info:
+            AgentStudioCLI().main([
+                "sip-trunks", "manage", "--path", str(tmp_path), "--json", *extra,
+            ])
+
+    assert exit_info.value.code == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["success"] is False
+    assert "--json" in result["error"]
+    assert "credentials" in result["error"]
+    assert "Run without --json" in result["error"]
+    request.assert_called_once_with("uk-1", "/v1/accounts/acct-123/telephony/sip-trunks")
+    secret.assert_not_called()
+    confirm.assert_not_called()
+    assert config_path.read_text(encoding="utf-8") == source
+
+
+@pytest.mark.parametrize("auth_type", ["digest", "token"])
+@pytest.mark.parametrize("change", ["update", "unchanged", "disable"])
+def test_manage_json_keeps_changes_without_new_credentials_noninteractive(
+    tmp_path, capsys, auth_type, change
+):
+    (tmp_path / "project.yaml").write_text(
+        "project_id: project-1\naccount_id: acct-123\nregion: uk-1\n", encoding="utf-8"
+    )
+    auth_field = "sip_auth" if auth_type == "digest" else "sip_token_auth"
+    remote_auth = {"enabled": True}
+    auth_config = {"type": auth_type}
+    if auth_type == "digest":
+        remote_auth.update(username="alice", realm="example.com")
+        auth_config.update(username="alice", realm="example.com")
+    remote = {
+        "id": "tr-123", "name": "Example carrier",
+        "inbound": {"hostname": "tr-123.example.com", auth_field: remote_auth},
+    }
+    name = "Updated carrier" if change == "update" else remote["name"]
+    config_path = tmp_path / "sip-trunks.yaml"
+    with config_path.open("w", encoding="utf-8") as config_file:
+        YAML().dump([{
+            "id": "tr-123", "name": name, "hostname": "tr-123.example.com",
+            "default_route": None, "outbound": None,
+            "inbound_auth": {"type": "none"} if change == "disable" else auth_config,
+        }], config_file)
+    updated = {**remote, "name": name}
+    if change == "disable":
+        updated["inbound"] = {**remote["inbound"], auth_field: {"enabled": False}}
+    endpoint = "/v1/accounts/acct-123/telephony/sip-trunks"
+    with (
+        patch.object(
+            PlatformAPIHandler, "make_request",
+            side_effect=[{"sip_trunks": [remote]}, updated],
+        ) as request,
+        patch("getpass.getpass") as secret,
+        patch("questionary.confirm") as confirm,
+    ):
+        SIPTrunksCommand.run(sip_args(tmp_path, "manage"))
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["success"] is True
+    if change == "unchanged":
+        assert result["changed"] is False
+        assert request.call_args_list == [call("uk-1", endpoint)]
+    else:
+        expected_patch = (
+            {"name": name} if change == "update" else {"inbound": {auth_field: {"disable": True}}}
+        )
+        assert request.call_args_list == [
+            call("uk-1", endpoint),
+            call("uk-1", f"{endpoint}/tr-123", "PATCH", data=expected_patch),
+        ]
+        assert result["trunks"][0]["status"] == "updated"
+    secret.assert_not_called()
+    confirm.assert_not_called()
+
+
 @pytest.mark.parametrize("extension", ["1000", "+441234567890", "1.5"])
 def test_manage_rejects_numeric_extensions_before_remote_calls(tmp_path, extension):
     (tmp_path / "project.yaml").write_text(

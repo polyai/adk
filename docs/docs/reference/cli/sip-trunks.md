@@ -204,9 +204,9 @@ Passwords and tokens are entered through secure prompts. Do not put credentials 
 
     `manage` updates the account's active SIP trunks directly and may affect live calls. The changes do not wait for a project deployment.
 
-!!! info "JSON mode skips confirmation"
+!!! info "JSON mode is non-interactive"
 
-    `manage --json` applies changes without asking for confirmation. Required credential prompts still appear.
+    `manage --json` applies changes without asking for confirmation. If any trunk requires a new password or token, the entire plan is rejected before any changes are applied, including when using `--force`. Run without `--json` to enter the required credentials securely. Routine updates that retain existing credentials and changes that disable authentication work in JSON mode.
 
 `--json` output shape after applying changes:
 
