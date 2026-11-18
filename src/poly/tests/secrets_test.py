@@ -159,6 +159,55 @@ class SecretsCommandTest(unittest.TestCase):
             "secret_value", [body for method, body in self.calls if method == "PUT"][0]
         )
 
+    def test_metadata_only_get_and_put_responses_confirm_success(self):
+        def metadata_response(**kwargs):
+            payload = self.request(**kwargs).json()
+            records = payload if isinstance(payload, list) else [payload]
+            for record in records:
+                record.pop("secret_value", None)
+                record.pop("server_debug", None)
+            return make_mock_response(json_body=payload)
+
+        self.http.side_effect = metadata_response
+        for replace_value in (False, True):
+            with self.subTest(replace_value=replace_value):
+                args = ["set", "single", "--description", "Updated", "--json"]
+                if replace_value:
+                    args.append("--replace-value")
+                code, output, errors = self.run_cli(
+                    *args, stdin="replacement" if replace_value else "", tty=not replace_value
+                )
+
+                self.assertEqual(code, 0, output + errors)
+                result = json.loads(output)
+                self.assertTrue(result["success"])
+                self.assertEqual(result["secret"]["display_name"], "single")
+                self.assertEqual(result["secret"]["description"], "Updated")
+                self.assertNotIn("secret_value", result["secret"])
+                self.assertEqual(
+                    self.state["single"]["secret_value"],
+                    "replacement" if replace_value else SENTINEL,
+                )
+                self.assertEqual(self.calls[-1][0], "PUT")
+                self.assertEqual("secret_value" in self.calls[-1][1], replace_value)
+
+    def test_failed_put_is_not_reported_as_saved(self):
+        for status in (400, 500):
+            with self.subTest(status=status):
+
+                def reject_put(**kwargs):
+                    if kwargs["method"] == "PUT":
+                        return make_mock_response(status, {"error_message": "Update failed"})
+                    return self.request(**kwargs)
+
+                self.http.side_effect = reject_put
+                code, output, errors = self.run_cli("set", "single", "--json", stdin="replacement")
+
+                self.assertEqual(code, 1, output + errors)
+                self.assertFalse(json.loads(output)["success"])
+                self.assertIn(f"HTTP {status}", output)
+                self.assertEqual(self.state["single"]["secret_value"], SENTINEL)
+
     def test_grant_and_revoke_preserve_untouched_access_and_value(self):
         code, output, _ = self.run_cli(
             "set",
