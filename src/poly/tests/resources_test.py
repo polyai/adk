@@ -5113,7 +5113,7 @@ class FlowStepModelNamesTest(unittest.TestCase):
         """A known provider and model pair is written as the model's name alone."""
         step = self._step(asr=ASRConfig(provider="deepgram", model="nova-3"))
 
-        self.assertEqual(self._pretty(step, self.library)["asr"], {"model": "Deepgram Nova 3"})
+        self.assertEqual(self._pretty(step, self.library)["asr"], {"name": "Deepgram Nova 3"})
 
     def test_llm_override_is_written_by_name(self):
         """A known provider model ID is written as `model`, keeping reasoning effort."""
@@ -5152,7 +5152,7 @@ class FlowStepModelNamesTest(unittest.TestCase):
         """Reading a file written by name resolves each name to the platform's IDs."""
         step = self._read(
             "step_type: advanced_step\nname: Test Step\nprompt: Hello\n"
-            "asr:\n  model: Deepgram Nova 3\n"
+            "asr:\n  name: Deepgram Nova 3\n"
             "llm:\n  model: PolyAI Raven 3.5\n  reasoning_effort: high\n",
             library=self.library,
         )
@@ -5160,6 +5160,23 @@ class FlowStepModelNamesTest(unittest.TestCase):
         self.assertEqual(step.settings.asr, ASRConfig(provider="deepgram", model="nova-3"))
         self.assertEqual(step.settings.llm.provider_model_id, "polywhirl-3-5")
         self.assertEqual(step.settings.llm.reasoning_effort, ReasoningEffort.HIGH)
+
+    def test_llm_model_is_written_before_other_settings(self):
+        """In the written file, the model name comes before reasoning_effort."""
+        step = self._step(
+            llm=LLMConfig(provider_model_id="polywhirl-3-5", reasoning_effort=ReasoningEffort.HIGH)
+        )
+
+        self.assertEqual(list(self._pretty(step, self.library)["llm"]), ["model", "reasoning_effort"])
+
+    def test_partial_asr_override_with_only_a_model_is_still_read(self):
+        """An override that sets only the ASR model isn't mistaken for a name."""
+        step = self._read(
+            "step_type: advanced_step\nname: Test Step\nprompt: Hello\nasr:\n  model: nova-3\n",
+            library=self.library,
+        )
+
+        self.assertEqual(step.settings.asr, ASRConfig(provider=None, model="nova-3"))
 
     def test_ids_are_still_read(self):
         """A file that still holds raw IDs reads the same with a library loaded."""
