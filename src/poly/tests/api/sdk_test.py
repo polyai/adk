@@ -297,7 +297,8 @@ class MergeBranch(unittest.TestCase):
         sdk.merge_branch(deployment_message="msg")
 
         session.get.assert_called_once_with(
-            "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/branch-1/sequence"
+            "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/branch-1/sequence",
+            timeout=None,
         )
         payload = session.post.call_args.kwargs["json"]
         self.assertEqual(payload["expectedBranchLastKnownSequence"], 1751)
@@ -496,6 +497,72 @@ class OutboundCampaignRequests(unittest.TestCase):
             self._validate()
 
         self.assertIsNone(error.exception.status_code)
+
+
+class SendCommandBatchToBranch(unittest.TestCase):
+    """Tests for SourcererSDK.send_command_batch with a target branch."""
+
+    def setUp(self):
+        self.sdk = build_sdk()
+        self.session = MagicMock()
+        self.sdk._session = self.session
+        self.session.get.return_value = make_mock_response(
+            200, json_body={"lastKnownSequence": "4"}
+        )
+        patch("poly.handlers.sdk.retrieve_api_key", return_value="secret-key").start()
+        self.post = patch("requests.post").start()
+        self.addCleanup(patch.stopall)
+        self.sdk.add_command_to_queue(Command(type="outbound_campaign_pause", command_id="c-1"))
+
+    def test_sends_to_the_branch_with_its_own_sequence(self):
+        self.post.return_value = make_mock_response(200, json_body={"success": True})
+
+        response = self.sdk.send_command_batch(branch_id="main", timeout=30)
+
+        self.assertEqual(response, {"success": True})
+        self.assertIn("/branches/main/command-batch", self.post.call_args.args[0])
+        self.session.get.assert_called_once_with(
+            "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/main/sequence",
+            timeout=30,
+        )
+        batch = CommandBatch()
+        batch.ParseFromString(self.post.call_args.kwargs["data"])
+        self.assertEqual(batch.last_known_sequence, 4)
+        self.assertEqual(self.sdk.get_queue_size(), 0)
+
+    def test_timeout_reaches_the_request(self):
+        self.post.return_value = make_mock_response(200, json_body={"success": True})
+
+        self.sdk.send_command_batch(branch_id="main", timeout=30)
+
+        self.assertEqual(self.post.call_args.kwargs["timeout"], 30)
+
+    def test_command_batch_answered_200_with_an_error_raises(self):
+        """The command-batch route can refuse with a 200 body that carries the error."""
+        self.post.return_value = make_mock_response(
+            200, json_body={"error": "Refused", "error_code": "OUTBOUND_CAMPAIGNS_DISABLED"}
+        )
+
+        with self.assertRaises(SourcererAPIError) as error:
+            self.sdk.send_command_batch(branch_id="main")
+
+        self.assertEqual(error.exception.error_code, "OUTBOUND_CAMPAIGNS_DISABLED")
+        self.assertEqual(error.exception.server_message, "Refused")
+
+    def test_refusal_keeps_the_platform_error_code(self):
+        self.post.return_value = make_mock_response(
+            403,
+            json_body={
+                "error": "Campaigns aren’t turned on for this project",
+                "error_code": "OUTBOUND_CAMPAIGNS_DISABLED",
+            },
+        )
+
+        with self.assertRaises(SourcererAPIError) as error:
+            self.sdk.send_command_batch(branch_id="main")
+
+        self.assertEqual(error.exception.status_code, 403)
+        self.assertEqual(error.exception.error_code, "OUTBOUND_CAMPAIGNS_DISABLED")
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import argcomplete
 import requests
+import urllib3
 from rich.console import Console
 
 from poly.cli import AgentStudioCLI
@@ -74,6 +75,7 @@ from poly.cli_commands.update import (
     display_update_message,
 )
 from poly.cli_commands.utils import CompletionCommand
+from poly.handlers.protobuf.commands_pb2 import CommandBatch
 from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
 from poly.tests.testing_utils import make_mock_response
@@ -7145,6 +7147,106 @@ class CampaignCommandTest(unittest.TestCase):
             "Reminder call: flowName: No live flow is named test_flow",
         )
 
+    def test_lifecycle_sends_one_command_to_main(self):
+        """Each lifecycle action sends exactly one command, straight to main."""
+        expected = {
+            "publish": "outbound_campaign_publish",
+            "pause": "outbound_campaign_pause",
+            "resume": "outbound_campaign_resume",
+            "archive": "outbound_campaign_archive_definition",
+        }
+        self._on_branch()
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = make_mock_response(200, {"success": True})
+        for action, command_type in expected.items():
+            with self.subTest(action=action):
+                self.post.reset_mock()
+
+                CampaignCommand.campaign_lifecycle(
+                    TEST_DIR, action, self.CAMPAIGN, force=True, output_json=True
+                )
+
+                url = self.post.call_args.args[0]
+                self.assertTrue(url.endswith("/branches/main/command-batch"), url)
+                batch = CommandBatch()
+                batch.ParseFromString(self.post.call_args.kwargs["data"])
+                self.assertEqual(batch.last_known_sequence, 41)
+                self.assertEqual([command.type for command in batch.commands], [command_type])
+                self.assertEqual(getattr(batch.commands[0], command_type).id, self.CAMPAIGN_ID)
+                self.assertEqual(
+                    self._output(), {"success": True, "campaign": self.CAMPAIGN, "action": action}
+                )
+        self.session.get.assert_called_with(
+            "https://api.us.poly.ai/adk/v1/accounts/test_account/projects/test_project"
+            "/branches/main/sequence",
+            timeout=30,
+        )
+
+    @staticmethod
+    def _platform_error(status: int, code: str, message: str) -> MagicMock:
+        return make_mock_response(
+            status,
+            {
+                "error": message,
+                "error_id": "adk-1",
+                "error_code": code,
+                "error_message": message,
+                "success": False,
+            },
+        )
+
+    def test_missing_campaigns_key_shows_the_platform_message_once(self):
+        """The platform's own setup advice is shown once, with the campaign by name."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = self._platform_error(
+            412,
+            "CAMPAIGNS_KEY_MISSING",
+            f"[command 1: outboundCampaignResume ({self.CAMPAIGN_ID})] This project isn’t set "
+            "up to run campaigns yet. Publish or resume a campaign once in Agent Studio, then "
+            "try again",
+        )
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        error = self._output()["error"]
+        self.assertIn(f"Could not resume campaign '{self.CAMPAIGN}'", error)
+        self.assertEqual(error.count("in Agent Studio"), 1)
+        self.assertEqual(error.count("set up to run campaigns"), 1)
+        self.assertNotIn(self.CAMPAIGN_ID, error)
+
+    def test_lifecycle_asks_before_acting_on_live(self):
+        """Without --force, a lifecycle action asks first and sends nothing when declined."""
+        with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
+            confirm.return_value.ask.return_value = False
+            CampaignCommand.campaign_lifecycle(TEST_DIR, "publish", self.CAMPAIGN)
+
+        self.assertEqual(exit.exception.code, 0)
+        self.assertIn("to live", confirm.call_args.args[0])
+        self.post.assert_not_called()
+
+    def test_lifecycle_on_an_unknown_campaign_fails_before_asking(self):
+        """A name that matches no campaign fails straight away, without the live warning."""
+        with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_lifecycle(TEST_DIR, "publish", "Nope")
+
+        self.assertEqual(exit.exception.code, 1)
+        confirm.assert_not_called()
+        self.post.assert_not_called()
+
+    def test_lifecycle_by_folder_name_shows_the_campaign_name(self):
+        """Naming a campaign by its folder still prompts and reports with its real name."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = make_mock_response(200, {"success": True})
+
+        with patch("questionary.confirm") as confirm:
+            confirm.return_value.ask.return_value = True
+            CampaignCommand.campaign_lifecycle(TEST_DIR, "pause", "appointment_reminders")
+
+        self.assertIn(f"'{self.CAMPAIGN}'", confirm.call_args.args[0])
+
     def test_unknown_campaign_lists_the_known_ones(self):
         """An unknown name lists the campaigns that do exist."""
         with self.assertRaises(SystemExit):
@@ -7254,6 +7356,56 @@ class CampaignCommandTest(unittest.TestCase):
         )
         self.request.assert_not_called()
 
+    def test_platform_refusal_for_campaigns_turned_off_shows_its_message_once(self):
+        """The platform's flag refusal is shown in its own words, not as a bare 403."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = self._platform_error(
+            403, "OUTBOUND_CAMPAIGNS_DISABLED", "Campaigns aren’t turned on for this project"
+        )
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        error = self._output()["error"]
+        self.assertEqual(
+            error,
+            f"Could not pause campaign '{self.CAMPAIGN}': "
+            "Campaigns aren’t turned on for this project",
+        )
+
+    def test_412_with_no_message_says_to_publish_once_from_studio(self):
+        """A 412 that carries no message of its own gets the ADK's setup advice."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = make_mock_response(412)
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "publish", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(
+            self._output()["error"],
+            f"Could not publish campaign '{self.CAMPAIGN}': HTTP 412 Precondition Failed\n"
+            "This project is not set up to run campaigns yet. Publish or resume a campaign once "
+            "in Agent Studio, then try again.",
+        )
+
+    def _on_branch(self, main_resources: dict | None = None) -> MagicMock:
+        self.project.branch_id = "BRANCH-1"
+        handler = self.project.api_handler
+        self.assertEqual(handler.branch_id, "BRANCH-1")
+        pull = patch.object(
+            handler,
+            "pull_branch_resources",
+            return_value=(
+                self.project.resources if main_resources is None else main_resources,
+                [],
+            ),
+        ).start()
+        return pull
+
     def test_campaign_requests_have_a_timeout(self):
         """A stalled connection cannot hang a campaign call: each request has a timeout."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
@@ -7261,6 +7413,220 @@ class CampaignCommandTest(unittest.TestCase):
         CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
 
         self.assertEqual(self.request.call_args.kwargs["timeout"], 30)
+
+    def test_main_is_read_once_per_command_even_on_main(self):
+        """Live checks read main's projection, not the local copy, and only once."""
+        self.post.return_value = make_mock_response(200, {"success": True})
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+
+        CampaignCommand.campaign_lifecycle(
+            TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
+        )
+
+        self.pull_main.assert_called_once_with("main")
+
+    def test_main_that_cannot_be_read_gives_the_platform_message(self):
+        """A failed read of main reads like the other campaign errors, not a raw error body."""
+        from poly.handlers.sdk import SourcererAPIError
+
+        self.pull_main.side_effect = None
+        self.pull_main.return_value = None
+        cause = SourcererAPIError(
+            "API Error 503: {'error': 'Try again shortly', 'error_code': 'X'}",
+            status_code=503,
+            error_code="X",
+            server_message="Try again shortly",
+        )
+
+        def fail(*_):
+            raise ValueError(f"API error: {cause}") from cause
+
+        self.pull_main.side_effect = fail
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(
+            self._output()["error"], "Could not read the campaigns on main: Try again shortly"
+        )
+
+    def test_branch_changes_forget_what_main_held(self):
+        """Switching, merging and pushing clear the copy of main, which may have moved on."""
+        project = self.project
+        attempts = {
+            "switch": lambda: project.switch_branch("other", force=True, keep_files=True),
+            "merge": lambda: project.merge_branch("message"),
+            "push": lambda: project.push_project(force=True),
+        }
+        patch.object(project.api_handler, "get_branches", side_effect=RuntimeError).start()
+        patch.object(project, "load_project", side_effect=RuntimeError).start()
+        for name, attempt in attempts.items():
+            with self.subTest(name=name):
+                project._main_resources = {}
+
+                with self.assertRaises((ValueError, RuntimeError)):
+                    attempt()
+
+                self.assertIsNone(project._main_resources)
+
+    def test_lifecycle_that_times_out_says_it_may_have_gone_through(self):
+        """A change the platform is slow to answer may still apply, so it is not called a failure."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.side_effect = requests.ReadTimeout("read timed out")
+
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        output = self._output()
+        self.assertFalse(output["success"])
+        self.assertEqual(
+            output["error"],
+            "The platform did not answer in time, so `poly campaign resume` on campaign "
+            f"'{self.CAMPAIGN}' may have gone through, even if Agent Studio still shows the old "
+            "status. Run `poly campaign resume` again: if it says the campaign is active, the "
+            "first resume went through. If you didn't want the change, send `poly campaign "
+            "pause` instead.",
+        )
+        self.assertEqual(self.post.call_count, 1)
+
+    def test_lifecycle_stopped_while_sending_says_it_may_have_gone_through(self):
+        """Ctrl+C during the send gets the same warning, not a bare abort."""
+        with (
+            patch.object(self.project, "resume_campaign", side_effect=KeyboardInterrupt),
+            patch("poly.output.console.error") as error,
+            self.assertRaises(SystemExit) as exit,
+        ):
+            CampaignCommand.campaign_lifecycle(TEST_DIR, "resume", self.CAMPAIGN, force=True)
+
+        self.assertEqual(exit.exception.code, 130)
+        message = error.call_args.args[0]
+        self.assertTrue(message.startswith("You stopped the command while it was being sent"))
+        self.assertIn("may have gone through", message)
+        self.assertIn("Run `poly campaign resume` again", message)
+        self.assertIn("send `poly campaign pause` instead", message)
+
+    @staticmethod
+    def _dropped() -> requests.ConnectionError:
+        return requests.ConnectionError(
+            urllib3.exceptions.ProtocolError("Connection aborted.", ConnectionResetError())
+        )
+
+    @staticmethod
+    def _unreachable() -> requests.ConnectionError:
+        return requests.ConnectionError(
+            urllib3.exceptions.MaxRetryError(
+                None, "/", urllib3.exceptions.NewConnectionError(None, "refused")
+            )
+        )
+
+    def test_lifecycle_that_may_have_reached_the_platform_is_unconfirmed(self):
+        """The same outcomes leave a live change unconfirmed, not failed."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        cases = {
+            "dropped connection": self._dropped(),
+            "gateway 502": make_mock_response(502, content=b"Bad gateway"),
+            "gateway 504": make_mock_response(504),
+            "engine unavailable": self._platform_error(
+                503,
+                "HERMES_UNAVAILABLE",
+                "The campaign could not be updated right now. Try again shortly",
+            ),
+        }
+        for case, answer in cases.items():
+            with self.subTest(case=case):
+                self.post.side_effect = [answer]
+
+                with self.assertRaises(SystemExit):
+                    CampaignCommand.campaign_lifecycle(
+                        TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+                    )
+
+                output = self._output()
+                self.assertTrue(output["unconfirmed"])
+                self.assertEqual(output["action"], "resume")
+                self.assertIn("may have gone through", output["error"])
+                self.assertNotIn("Could not resume", output["error"])
+
+    def test_lifecycle_that_never_reached_the_platform_is_a_plain_failure(self):
+        """A connection that never opened changed nothing."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.side_effect = [self._unreachable()]
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertNotIn("unconfirmed", self._output())
+        self.assertTrue(self._output()["error"].startswith("Could not resume campaign"))
+
+    def test_lifecycle_finds_the_campaign_by_its_name_on_main(self):
+        """A campaign renamed on the branch is paused by its live name, and named as main has it."""
+        from poly.resources import OutboundCampaign, OutboundCampaignNode
+
+        live = dataclasses.replace(
+            self.project.resources[OutboundCampaign][self.CAMPAIGN_ID],
+            name="Live reminders",
+            folder_name="live_reminders",
+        )
+        self._on_branch(
+            {
+                OutboundCampaign: {self.CAMPAIGN_ID: live},
+                OutboundCampaignNode: self.project.resources[OutboundCampaignNode],
+            }
+        )
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = make_mock_response(200, {"success": True})
+
+        with patch("questionary.confirm") as confirm, patch("poly.output.console.success") as ok:
+            confirm.return_value.ask.return_value = True
+            CampaignCommand.campaign_lifecycle(TEST_DIR, "pause", "Live reminders")
+
+        self.assertIn("'Live reminders'", confirm.call_args.args[0])
+        self.assertEqual(ok.call_args.args[0], "Paused campaign 'Live reminders'.")
+        batch = CommandBatch()
+        batch.ParseFromString(self.post.call_args.kwargs["data"])
+        self.assertEqual(batch.commands[0].outbound_campaign_pause.id, self.CAMPAIGN_ID)
+
+    def test_failed_sequence_read_is_a_plain_failure(self):
+        """Nothing is sent when main's sequence can't be read, so the change is not unconfirmed."""
+        self.session.get.side_effect = self._dropped()
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        output = self._output()
+        self.assertNotIn("unconfirmed", output)
+        self.assertTrue(output["error"].startswith(f"Could not resume campaign '{self.CAMPAIGN}'"))
+        self.assertEqual(self.session.get.call_args.kwargs["timeout"], 30)
+        self.post.assert_not_called()
+
+    def test_lifecycle_refusal_says_how_to_see_the_status(self):
+        """The platform's "Refresh" advice is replaced by what to run in a terminal."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = self._platform_error(
+            409,
+            "CAMPAIGN_LIFECYCLE_REFUSED",
+            "The campaign could not be paused. Refresh to see its current status",
+        )
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(
+            self._output()["error"],
+            f"Could not pause campaign '{self.CAMPAIGN}': The campaign could not be paused.\n"
+            "Check the campaign's status in Agent Studio.",
+        )
 
     def test_ctrl_c_under_json_keeps_stdout_json(self):
         """An interrupt the command does not handle itself still ends in one JSON object."""
@@ -7295,6 +7661,47 @@ class CampaignCommandTest(unittest.TestCase):
             CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN)
         warning.assert_called_once_with("Your branch no longer exists, so this ran on main.")
 
+    def test_lifecycle_refusal_drops_the_command_prefix(self):
+        """The command batch's "[command 1: …]" prefix is not shown."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = self._platform_error(
+            409,
+            "CAMPAIGN_LIFECYCLE_REFUSED",
+            f"[command 1: outboundCampaignArchiveDefinition ({self.CAMPAIGN_ID})] The campaign "
+            "could not be archived. Refresh to see its current status",
+        )
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "archive", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(
+            self._output()["error"],
+            f"Could not archive campaign '{self.CAMPAIGN}': The campaign could not be archived.\n"
+            "Check the campaign's status in Agent Studio.",
+        )
+
+    def test_live_campaign_missing_on_main_lists_main_campaigns(self):
+        """A name main lacks lists main's campaigns, whatever the branch holds."""
+        from poly.resources import OutboundCampaign
+
+        live = dataclasses.replace(
+            self.project.resources[OutboundCampaign][self.CAMPAIGN_ID], name="Live reminders"
+        )
+        self._on_branch({OutboundCampaign: {self.CAMPAIGN_ID: live}})
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "pause", "Nope", force=True, output_json=True
+            )
+
+        self.assertEqual(
+            self._output()["error"],
+            "No campaign named 'Nope' on main, or it is already archived. A campaign made on a "
+            "branch must be merged first. Campaigns on main: Live reminders.",
+        )
+
     def test_validate_checks_the_branch_once(self):
         """The branch is looked up once per command, not again for the request."""
         self.project.branch_id = "BRANCH-1"
@@ -7307,6 +7714,109 @@ class CampaignCommandTest(unittest.TestCase):
 
         check.assert_called_once()
         self.assertNotIn("branch", self._output())
+
+    def test_unconfirmed_change_says_how_to_settle_or_undo_it(self):
+        """Each action's advice is to resend it, or send its opposite; archive can't be undone."""
+        from poly.project import AgentStudioProject
+
+        cases = {
+            "publish": (
+                "Sending `poly campaign publish` again is safe and settles it.",
+                "send `poly campaign pause` to stop it contacting people instead.",
+            ),
+            "pause": (
+                "Sending `poly campaign pause` again is safe and settles it.",
+                "send `poly campaign resume` instead.",
+            ),
+            "resume": (
+                "Run `poly campaign resume` again: if it says the campaign is active, the first "
+                "resume went through.",
+                "send `poly campaign pause` instead.",
+            ),
+            "archive": (
+                "Run `poly campaign archive` again: if it says the campaign is not on main or is "
+                "already archived, the first archive went through.",
+                "Archiving can't be undone.",
+            ),
+        }
+        for action, (resend, ending) in cases.items():
+            with self.subTest(action=action):
+                message = AgentStudioProject.campaign_change_unconfirmed("Gone", action, "X")
+
+                self.assertIn(resend, message)
+                self.assertTrue(message.endswith(ending), message)
+                self.assertIn("even if Agent Studio still shows the old status", message)
+                self.assertNotIn("poly pull", message)
+
+    def test_ctrl_c_while_reading_main_is_a_plain_stop(self):
+        """Ctrl+C before the batch is posted changed nothing, so it is not unconfirmed."""
+        self.session.get.side_effect = KeyboardInterrupt
+
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 130)
+        self.post.assert_not_called()
+        self.assertEqual(
+            self._output(),
+            {
+                "success": False,
+                "error": "Stopped before anything was sent.",
+                "campaign": self.CAMPAIGN,
+                "action": "resume",
+            },
+        )
+
+    def test_lifecycle_refusal_without_the_refresh_sentence_still_gets_the_hint(self):
+        """The hint is added whether or not the platform's web-UI sentence is there."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = self._platform_error(
+            409, "CAMPAIGN_LIFECYCLE_REFUSED", "The campaign could not be paused"
+        )
+
+        with self.assertRaises(SystemExit):
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(
+            self._output()["error"],
+            f"Could not pause campaign '{self.CAMPAIGN}': The campaign could not be paused\n"
+            "Check the campaign's status in Agent Studio.",
+        )
+
+    def test_resending_a_change_that_went_through_gives_the_documented_reply(self):
+        """After an unconfirmed resume or archive that went through, the resend says so."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = self._platform_error(
+            422,
+            "VALIDATION_FAILED",
+            f"[command 1: outboundCampaignResume ({self.CAMPAIGN_ID})] Cannot resume campaign "
+            f"“{self.CAMPAIGN}” — it is active, not paused",
+        )
+
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertNotIn("unconfirmed", self._output())
+        self.assertIn("it is active", self._output()["error"])
+
+        self.project._main_resources = None
+        self.pull_main.side_effect = lambda *_: ({}, [])
+        self.post.reset_mock()
+        with self.assertRaises(SystemExit) as exit:
+            CampaignCommand.campaign_lifecycle(
+                TEST_DIR, "archive", self.CAMPAIGN, force=True, output_json=True
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        self.post.assert_not_called()
+        self.assertIn("on main, or it is already archived", self._output()["error"])
 
     def test_unpushed_campaign_named_by_folder_says_to_push(self):
         """A local campaign not yet pushed is found by its folder, and the user told to push."""

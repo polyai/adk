@@ -47,7 +47,7 @@ from poly.constants import (
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
-from poly.handlers.sdk import SourcererAPIError
+from poly.handlers.sdk import SourcererAPIError, request_outcome
 from poly.migration_utils import (
     MigrationFlag,
     get_all_migration_flags,
@@ -101,6 +101,10 @@ AB_TEST_ACTIVE = "AB_TEST_ACTIVE"
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
+
+
+class CampaignOutcomeUnconfirmed(SourcererAPIError):
+    """A live campaign change got no clear answer, so it may have happened."""
 
 
 @dataclass
@@ -409,6 +413,7 @@ class AgentStudioProject:
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
     _deployment_mode: Optional[DeploymentMode] = None
+    _main_resources: Optional[ResourceMap] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -1668,6 +1673,7 @@ class AgentStudioProject:
                 - String message.
                 - List of commands serialized to protobuf.
         """
+        self._main_resources = None
 
         if not dry_run:
             # If force, load latest version of the project
@@ -3120,6 +3126,7 @@ class AgentStudioProject:
             ValueError: If the options conflict, there are uncommitted changes without force
                 or keep_files, or the branch doesn't exist and can't be created.
         """
+        self._main_resources = None
         if keep_files and (force or format):
             raise ValueError("--keep-files cannot be combined with --force or --format.")
         if source_branch_name is not None and not create:
@@ -3642,6 +3649,7 @@ class AgentStudioProject:
             list[dict[str, str]]: A list of conflicts
             list[dict[str, str]]: A list of errors
         """
+        self._main_resources = None
         branches = self.api_handler.get_branches()
         branch_meta = {meta["branchId"]: meta for meta in branches.values()}
         current_branch_meta = branch_meta.get(self.branch_id)
@@ -4174,11 +4182,50 @@ class AgentStudioProject:
                 folders[folder] = None
         return folders
 
-    def campaign_node_names(self, campaign: OutboundCampaign) -> dict[str, str]:
-        """Return the names of a pushed campaign's nodes, by node id."""
+    def _campaign_resources(self, live: bool) -> ResourceMap:
+        if not live:
+            return self.resources
+        if self._main_resources is None:
+            try:
+                self._main_resources, _ = self.api_handler.pull_branch_resources("main")
+            except ValueError as e:
+                reason = getattr(e.__cause__, "server_message", None) or str(e)
+                raise ValueError(f"Could not read the campaigns on main: {reason}") from e
+        return self._main_resources
+
+    def get_live_campaign(self, name: str) -> OutboundCampaign:
+        """Return the campaign on main with this name or folder name, as main has it.
+
+        The lifecycle commands act on main, so the name is matched against main's
+        campaigns, whatever the current branch calls them. Fetches main's projection once, on
+        main too: the local copy may be stale.
+
+        Raises:
+            ValueError: if main has no campaign by that name, or several.
+        """
+        live = list(self._campaign_resources(live=True).get(OutboundCampaign, {}).values())
+        if campaign := self._match_campaign(name, live):
+            return campaign
+        known = ", ".join(sorted(campaign.name for campaign in live)) or "none"
+        raise ValueError(
+            f"No campaign named '{name}' on main, or it is already archived. A campaign made on "
+            f"a branch must be merged first. Campaigns on main: {known}."
+        )
+
+    def campaign_node_names(self, campaign: OutboundCampaign, live: bool = False) -> dict[str, str]:
+        """Return the names of a pushed campaign's nodes, by node id.
+
+        Args:
+            campaign: The campaign.
+            live: Name the nodes as they are on main rather than as they
+                are locally. Fetches main's projection once, on main too.
+
+        Raises:
+            ValueError: if `live` and main's projection cannot be fetched.
+        """
         return {
             node.node_id: node.name
-            for node in self.resources.get(OutboundCampaignNode, {}).values()
+            for node in self._campaign_resources(live).get(OutboundCampaignNode, {}).values()
             if node.campaign_id == campaign.resource_id
         }
 
@@ -4193,9 +4240,18 @@ class AgentStudioProject:
             except ValueError:
                 reason = f"HTTP {error.status_code}"
         reason = reason.replace(campaign.resource_id, campaign.name)
+        if error.error_code == "CAMPAIGN_LIFECYCLE_REFUSED":
+            reason = re.sub(r"\s*Refresh to see its current status\.?", "", reason)
         message = f"Could not {action} campaign '{campaign.name}': {reason}"
+        if error.error_code == "CAMPAIGN_LIFECYCLE_REFUSED":
+            message += "\nCheck the campaign's status in Agent Studio."
         if not error.server_message:
-            if error.error_code == "OUTBOUND_CAMPAIGNS_DISABLED":
+            if error.error_code == "CAMPAIGNS_KEY_MISSING" or error.status_code == 412:
+                message += (
+                    "\nThis project is not set up to run campaigns yet. Publish or resume a "
+                    "campaign once in Agent Studio, then try again."
+                )
+            elif error.error_code == "OUTBOUND_CAMPAIGNS_DISABLED":
                 message += "\nOutbound campaigns aren't turned on for this project."
         return SourcererAPIError(
             message,
@@ -4221,6 +4277,102 @@ class AgentStudioProject:
             return self.api_handler.validate_outbound_campaign(campaign.resource_id)
         except SourcererAPIError as e:
             raise self._campaign_error("validate", campaign, e) from e
+
+    @classmethod
+    def _campaign_send_error(
+        cls,
+        action: str,
+        campaign: OutboundCampaign,
+        error: SourcererAPIError,
+        unconfirmed: Callable[[str], str],
+    ) -> SourcererAPIError:
+        reason = cls._unconfirmed_reason(error)
+        if reason is None:
+            return cls._campaign_error(action, campaign, error)
+        return CampaignOutcomeUnconfirmed(
+            unconfirmed(reason),
+            status_code=error.status_code,
+            error_code=error.error_code,
+            server_message=error.server_message,
+        )
+
+    @staticmethod
+    def _unconfirmed_reason(error: SourcererAPIError) -> Optional[str]:
+        outcome = request_outcome(error)
+        if outcome == "not_sent":
+            return None
+        if outcome == "timed_out":
+            return "The platform did not answer in time"
+        if outcome == "dropped":
+            return "The connection dropped before the platform answered"
+        status = error.status_code
+        if status is None:
+            return "The platform's answer could not be read"
+        if status < 400:
+            return "The platform's answer could not be read"
+        if status < 500:
+            if status == 409 and error.error_code == "CONFLICT":
+                return "The platform could not confirm it"
+            return None
+        return f"The platform could not confirm it (HTTP {status})"
+
+    @staticmethod
+    def campaign_change_unconfirmed(reason: str, action: str, campaign_name: str) -> str:
+        """Say that a publish, pause, resume or archive that went unanswered may have applied.
+
+        Args:
+            reason: Why the change went unanswered, as the start of a sentence.
+            action: `publish`, `pause`, `resume` or `archive`.
+            campaign_name: The campaign's name.
+        """
+        undo = {
+            "publish": "send `poly campaign pause` to stop it contacting people",
+            "pause": "send `poly campaign resume`",
+            "resume": "send `poly campaign pause`",
+        }.get(action)
+        resend = {
+            "resume": "Run `poly campaign resume` again: if it says the campaign is active, the "
+            "first resume went through.",
+            "archive": "Run `poly campaign archive` again: if it says the campaign is not on "
+            "main or is already archived, the first archive went through.",
+        }.get(action, f"Sending `poly campaign {action}` again is safe and settles it.")
+        return (
+            f"{reason}, so `poly campaign {action}` on campaign '{campaign_name}' may have gone "
+            f"through, even if Agent Studio still shows the old status. {resend} "
+            + (
+                f"If you didn't want the change, {undo} instead."
+                if undo
+                else "Archiving can't be undone."
+            )
+        )
+
+    def _send_campaign_lifecycle(self, action: str, command_type: str, name: str) -> None:
+        campaign = self.get_live_campaign(name)
+        try:
+            self.api_handler.send_outbound_campaign_lifecycle(command_type, campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_send_error(
+                action,
+                campaign,
+                e,
+                lambda reason: self.campaign_change_unconfirmed(reason, action, campaign.name),
+            ) from e
+
+    def publish_campaign(self, name: str) -> None:
+        """Publish the campaign on live, so it starts contacting people."""
+        self._send_campaign_lifecycle("publish", "outbound_campaign_publish", name)
+
+    def pause_campaign(self, name: str) -> None:
+        """Pause the live campaign."""
+        self._send_campaign_lifecycle("pause", "outbound_campaign_pause", name)
+
+    def resume_campaign(self, name: str) -> None:
+        """Resume the paused live campaign, so it contacts people again."""
+        self._send_campaign_lifecycle("resume", "outbound_campaign_resume", name)
+
+    def archive_campaign(self, name: str) -> None:
+        """Archive the campaign on live."""
+        self._send_campaign_lifecycle("archive", "outbound_campaign_archive_definition", name)
 
     def trigger_tests(self, test_ids: list[str], name: str | None = None) -> dict:
         """Trigger tests for the project.
