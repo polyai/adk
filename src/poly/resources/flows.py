@@ -1196,10 +1196,11 @@ class ASRConfig:
             raise ValueError("ASR override takes either name, or provider and model, not both.")
         if self.name:
             if library is None:
-                raise ValueError(
-                    f"Can't look up ASR model '{self.name}' without the model library. "
+                logger.warning(
+                    f"Can't check ASR model '{self.name}' without the model library. "
                     "Run 'poly library refresh'."
                 )
+                return
             raise ValueError(
                 f"Unknown ASR model '{self.name}'. Run 'poly library asr' to see the options."
             )
@@ -1215,6 +1216,10 @@ class ASRConfig:
 
     def to_proto(self) -> FlowASRConfig:
         """Convert to proto representation."""
+        if self.name:
+            raise ValueError(
+                f"Unknown ASR model '{self.name}'. Use a known model name, or a provider and model."
+            )
         return FlowASRConfig(provider=self.provider, model=self.model)
 
 
@@ -1342,10 +1347,11 @@ class LLMConfig:
             raise ValueError("LLM override takes either model or provider_model_id, not both.")
         if self.model:
             if library is None:
-                raise ValueError(
-                    f"Can't look up language model '{self.model}' without the model library. "
+                logger.warning(
+                    f"Can't check language model '{self.model}' without the model library. "
                     "Run 'poly library refresh'."
                 )
+                return
             raise ValueError(
                 f"Unknown language model '{self.model}'. Run 'poly library llm' to see the options."
             )
@@ -1367,6 +1373,11 @@ class LLMConfig:
 
     def to_proto(self) -> FlowLLMConfig:
         """Convert to proto representation."""
+        if self.model:
+            raise ValueError(
+                f"Unknown language model '{self.model}'. "
+                "Use a known model name, or a provider_model_id."
+            )
         return FlowLLMConfig(
             provider_model_id=self.provider_model_id,
             reasoning_effort=REASONING_EFFORT_TO_PROTO_INT[self.reasoning_effort],
