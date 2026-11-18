@@ -206,10 +206,16 @@ class PlatformAPIHandler:
             if sensitive:
                 from poly.handlers.sdk import SourcererAPIError
 
-                raise SourcererAPIError(
-                    f"Secret request failed (HTTP {api_response.status_code}); "
-                    "check your account secrets permissions."
-                ) from None
+                status = api_response.status_code
+                message = f"Secret request failed (HTTP {status})."
+                if status in (401, 403):
+                    message += " Check your API key and account secrets permissions."
+                elif status == 404:
+                    message += (
+                        " The account-secrets API or requested secret was not found; "
+                        "check the account, secret name and API availability in your region."
+                    )
+                raise SourcererAPIError(message) from None
             logger.debug(
                 f"Error in request status_code={api_response.status_code!r}"
                 f" response={api_response.text!r}"

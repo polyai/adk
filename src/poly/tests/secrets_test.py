@@ -206,6 +206,7 @@ class SecretsCommandTest(unittest.TestCase):
                 self.assertEqual(code, 1, output + errors)
                 self.assertFalse(json.loads(output)["success"])
                 self.assertIn(f"HTTP {status}", output)
+                self.assertNotIn("permissions", output)
                 self.assertEqual(self.state["single"]["secret_value"], SENTINEL)
 
     def test_grant_and_revoke_preserve_untouched_access_and_value(self):
@@ -415,6 +416,22 @@ class SecretsCommandTest(unittest.TestCase):
         self.http.side_effect = requests.Timeout(SENTINEL)
         code, output, errors = self.run_cli("list", "--json")
         self.assertEqual(code, 1)
+        self.assertNotIn(SENTINEL, output + errors)
+
+    def test_missing_endpoint_is_not_reported_as_a_permission_failure(self):
+        self.http.side_effect = None
+        self.http.return_value = make_mock_response(
+            404, {"error_message": SENTINEL}, content=SENTINEL.encode()
+        )
+
+        code, output, errors = self.run_cli("list", "--json")
+
+        self.assertEqual(code, 1, output + errors)
+        self.assertFalse(json.loads(output)["success"])
+        self.assertIn("HTTP 404", output)
+        self.assertIn("not found", output)
+        self.assertIn("API", output)
+        self.assertNotIn("permissions", output)
         self.assertNotIn(SENTINEL, output + errors)
 
     def test_bulk_delete_json_skips_confirmation_and_deduplicates(self):
