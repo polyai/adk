@@ -5178,6 +5178,32 @@ class FlowStepModelNamesTest(unittest.TestCase):
 
         self.assertEqual(step.settings.asr, ASRConfig(provider=None, model="nova-3"))
 
+    def test_unresolved_names_are_kept_and_written_back(self):
+        """A name the library doesn't know is read into the override and written back as is."""
+        raw = (
+            "step_type: advanced_step\nname: Test Step\nprompt: Hello\n"
+            "asr:\n  name: Typo ASR\n"
+            "llm:\n  model: Typo LLM\n"
+        )
+        step = self._read(raw, library=self.library)
+
+        self.assertEqual(step.settings.asr.name, "Typo ASR")
+        self.assertEqual(step.settings.llm.model, "Typo LLM")
+        pretty = self._pretty(step, self.library)
+        self.assertEqual(pretty["asr"], {"name": "Typo ASR"})
+        self.assertEqual(pretty["llm"]["model"], "Typo LLM")
+
+    def test_names_without_a_library_are_kept(self):
+        """With no library, names stay as names for validate to report."""
+        step = self._read(
+            "step_type: advanced_step\nname: Test Step\nprompt: Hello\n"
+            "asr:\n  name: Deepgram Nova 3\nllm:\n  model: PolyAI Raven 3.5\n"
+        )
+
+        self.assertEqual(step.settings.asr, ASRConfig(name="Deepgram Nova 3"))
+        self.assertEqual(step.settings.llm.model, "PolyAI Raven 3.5")
+        self.assertIsNone(step.settings.llm.provider_model_id)
+
     def test_ids_are_still_read(self):
         """A file that still holds raw IDs reads the same with a library loaded."""
         step = self._read(
@@ -5204,6 +5230,88 @@ class FlowStepModelNamesTest(unittest.TestCase):
         self.assertEqual(read_back.settings.asr, step.settings.asr)
         self.assertEqual(read_back.settings.llm, step.settings.llm)
 
+
+
+class ModelOverrideValidationTest(unittest.TestCase):
+    """Step ASR and LLM overrides are checked against the model library in validate."""
+
+    def setUp(self):
+        self.library = make_library()
+
+    def _settings(self, asr: ASRConfig = None, llm: LLMConfig = None) -> FlowSettings:
+        return FlowSettings(flow_id="flow-123", step_id="step-1", asr=asr, llm=llm)
+
+    def test_known_models_validate_without_warnings(self):
+        """Overrides the library knows pass silently."""
+        settings = self._settings(
+            asr=ASRConfig(provider="deepgram", model="nova-3"),
+            llm=LLMConfig(provider_model_id="polywhirl-3-5"),
+        )
+
+        with self.assertNoLogs("poly.resources.flows", level="WARNING"):
+            settings.validate(library=self.library)
+
+    def test_unresolved_llm_name_is_an_error(self):
+        """A language model name the library doesn't know fails validation."""
+        with self.assertRaisesRegex(ValueError, "Unknown language model 'Typo'"):
+            LLMConfig(model="Typo").validate(library=self.library)
+
+    def test_llm_name_without_a_library_is_an_error(self):
+        """A language model name can't be checked or sent without the library."""
+        with self.assertRaisesRegex(ValueError, "without the model library"):
+            LLMConfig(model="PolyAI Raven 3.5").validate()
+
+    def test_llm_model_and_provider_model_id_together_is_an_error(self):
+        """An override can't give both a name and an ID."""
+        with self.assertRaisesRegex(ValueError, "not both"):
+            LLMConfig(model="PolyAI Raven 3.5", provider_model_id="polywhirl-3-5").validate(
+                library=self.library
+            )
+
+    def test_llm_id_missing_from_the_library_only_warns(self):
+        """An ID the list doesn't have, such as a deprecated model, warns but validates."""
+        with self.assertLogs("poly.resources.flows", level="WARNING") as logs:
+            LLMConfig(provider_model_id="old-model").validate(library=self.library)
+
+        self.assertIn("old-model", logs.output[0])
+
+    def test_llm_id_without_a_library_validates(self):
+        """With no library, a raw ID can't be checked and passes."""
+        LLMConfig(provider_model_id="anything").validate()
+
+    def test_unresolved_asr_name_is_an_error(self):
+        """An ASR name the library doesn't know fails validation."""
+        with self.assertRaisesRegex(ValueError, "Unknown ASR model 'Typo'"):
+            ASRConfig(name="Typo").validate(library=self.library)
+
+    def test_asr_name_without_a_library_is_an_error(self):
+        """An ASR name can't be turned into a provider and model without the library."""
+        with self.assertRaisesRegex(ValueError, "without the model library"):
+            ASRConfig(name="Deepgram Nova 3").validate()
+
+    def test_asr_name_with_provider_or_model_is_an_error(self):
+        """An ASR override can't give both a name and IDs."""
+        with self.assertRaisesRegex(ValueError, "not both"):
+            ASRConfig(name="Deepgram Nova 3", provider="deepgram").validate(library=self.library)
+
+    def test_asr_pair_missing_from_the_library_only_warns(self):
+        """A pair the list doesn't have warns but validates."""
+        with self.assertLogs("poly.resources.flows", level="WARNING") as logs:
+            ASRConfig(provider="deepgram", model="nova-9").validate(library=self.library)
+
+        self.assertIn("nova-9", logs.output[0])
+
+    def test_partial_asr_override_validates_without_warnings(self):
+        """An override that sets only the model can't be checked on its own, so it passes."""
+        with self.assertNoLogs("poly.resources.flows", level="WARNING"):
+            ASRConfig(model="nova-3").validate(library=self.library)
+
+    def test_settings_pass_the_library_to_both_overrides(self):
+        """FlowSettings.validate checks each override against the library it's given."""
+        with self.assertRaisesRegex(ValueError, "Unknown ASR model"):
+            self._settings(asr=ASRConfig(name="Typo")).validate(library=self.library)
+        with self.assertRaisesRegex(ValueError, "Unknown language model"):
+            self._settings(llm=LLMConfig(model="Typo")).validate(library=self.library)
 
 class EntityTests(unittest.TestCase):
     def test_validate_entity(self):
