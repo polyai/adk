@@ -1206,9 +1206,7 @@ class ASRConfig:
         if library and self.provider and self.model:
             if not library.get_asr_model_by_provider_and_model(self.provider, self.model):
                 logger.warning(
-                    "ASR model '%s' from '%s' isn't in the model library.",
-                    self.model,
-                    self.provider,
+                    f"ASR model {self.model} from '{self.provider}' isn't in the model library.",
                 )
 
     def to_yaml_dict(self) -> dict:
@@ -1354,7 +1352,7 @@ class LLMConfig:
         if library and self.provider_model_id:
             if not library.get_llm_model_by_provider_model_id(self.provider_model_id):
                 logger.warning(
-                    "Language model '%s' isn't in the model library.", self.provider_model_id
+                    f"Language model '{self.provider_model_id}' isn't in the model library."
                 )
 
     def to_yaml_dict(self) -> dict:
