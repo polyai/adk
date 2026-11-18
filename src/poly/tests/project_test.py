@@ -3150,6 +3150,21 @@ class PullProjectTest(unittest.TestCase):
         self.assertEqual(project.library.get_asr_model_by_id("ASR-1").name, "Deepgram Nova 3")
         self.mock_api_handler.get_llm_models.assert_called_once_with("us-1")
 
+    def test_pull_succeeds_when_the_library_fetch_fails(self):
+        """A failing model-list route doesn't stop the pull itself."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        project.library = None
+        original_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (original_resources, [], {})
+        self.mock_api_handler.get_asr_models.side_effect = RuntimeError("list route down")
+
+        with self.assertLogs("poly.project", level="WARNING"):
+            files_with_conflicts, _ = project.pull_project(force=False)
+
+        self.assertEqual(files_with_conflicts, [])
+        self.assertEqual(project.resources, original_resources)
+        self.assertIsNone(project.library)
+
     def test_pull_from_a_projection_leaves_the_library_alone(self):
         """A pull from a supplied projection makes no list calls."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
@@ -4478,6 +4493,34 @@ class RefreshLibraryTest(unittest.TestCase):
 
         self.mock_asr.assert_called_once()
         self.mock_llm.assert_called_once()
+
+    def test_failed_refresh_keeps_the_old_library_and_warns(self):
+        """When a due refresh fails, the stale library is kept and a warning is logged."""
+        self._set_library_age(timedelta(days=2))
+        stale = self.project.library
+        self.mock_asr.side_effect = RuntimeError("list route down")
+
+        with self.assertLogs("poly.project", level="WARNING") as logs:
+            library = self.project.refresh_library()
+
+        self.assertIs(library, stale)
+        self.assertIs(self.project.library, stale)
+        self.assertIn("list route down", logs.output[0])
+
+    def test_failed_first_fetch_leaves_no_library(self):
+        """With nothing saved, a failed fetch leaves the project without a library."""
+        self.mock_llm.side_effect = RuntimeError("list route down")
+
+        with self.assertLogs("poly.project", level="WARNING"):
+            self.assertIsNone(self.project.refresh_library())
+
+    def test_failed_forced_refresh_raises(self):
+        """A forced refresh reports the failure instead of keeping the old library."""
+        self._set_library_age(timedelta(minutes=5))
+        self.mock_asr.side_effect = RuntimeError("list route down")
+
+        with self.assertRaisesRegex(RuntimeError, "list route down"):
+            self.project.refresh_library(force_refresh=True)
 
     def test_saved_library_is_loaded_with_the_project(self):
         """A project loaded after a refresh picks up the saved library for its region."""
