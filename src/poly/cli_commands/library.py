@@ -207,7 +207,15 @@ class LibraryCommand(BaseCommand):
             library = None
 
         if library is None or library.is_stale:
-            library = cls._refresh_library(base_path, region, output_json=output_json)
+            try:
+                library = cls._refresh_library(base_path, region, output_json=output_json)
+            except Exception as e:
+                if library is None:
+                    raise
+                if not output_json:
+                    from poly.output.console import warning
+
+                    warning(f"Failed to refresh library: {e}. Using previously loaded library.")
         return library
 
     @classmethod

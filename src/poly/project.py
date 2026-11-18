@@ -5457,5 +5457,5 @@ class AgentStudioProject:
                 if not force_refresh:
                     logger.warning(f"Failed to refresh library: {e}")
                 else:
-                    raise e
+                    raise
         return self.library
