@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.87.0 (2026-11-17)
+
+### Features
+
+- Sync outbound campaigns as files ([#428](https://github.com/polyai/adk/pull/428),
+  [`706f04a`](https://github.com/polyai/adk/commit/706f04a7825e5ba6c82dbb4cf51fd045d097ce39))
+
+
 ## v0.86.1 (2026-11-17)
 
 ### Bug Fixes
