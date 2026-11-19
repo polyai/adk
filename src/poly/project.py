@@ -8,6 +8,7 @@ import copy
 import json
 import logging
 import os
+import re
 import shutil
 import uuid
 from collections.abc import Callable
@@ -15,6 +16,7 @@ from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from functools import cached_property
+from http import HTTPStatus
 from pathlib import PurePath
 from typing import Any, Optional, TypeAlias
 from zoneinfo import ZoneInfo
@@ -4107,6 +4109,108 @@ class AgentStudioProject:
             raise ValueError("No tests found to run based on the provided criteria.")
 
         return matched
+
+    @property
+    def outbound_campaigns_enabled(self) -> bool:
+        """Whether outbound campaigns are turned on for this project in Agent Studio."""
+        return self.api_handler.feature_flag_enabled(
+            key="outbound-campaigns",
+            region=self.region,
+            project_id=self.project_id,
+            account_id=self.account_id,
+            default=False,
+        )
+
+    def get_campaign(self, name: str) -> OutboundCampaign:
+        """Return the pulled campaign with this name or folder name.
+
+        Raises:
+            ValueError: if no campaign matches, or several share the name.
+        """
+        campaigns = list(self.resources.get(OutboundCampaign, {}).values())
+        found = [
+            campaign
+            for campaign in campaigns
+            if name in (campaign.name, campaign.platform_label, campaign.folder)
+        ]
+        if len(found) > 1:
+            folders = ", ".join(sorted(campaign.folder for campaign in found))
+            raise ValueError(
+                f"More than one campaign is named '{name}'. Name it by its folder instead: "
+                f"{folders}."
+            )
+        if not found:
+            known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
+            raise ValueError(f"No campaign named '{name}'. Campaigns: {known}.")
+        return found[0]
+
+    def campaign_node_names(self, campaign: OutboundCampaign) -> dict[str, str]:
+        """Return the names of a pushed campaign's nodes, by node id."""
+        return {
+            node.node_id: node.name
+            for node in self.resources.get(OutboundCampaignNode, {}).values()
+            if node.campaign_id == campaign.resource_id
+        }
+
+    @staticmethod
+    def _campaign_error(
+        action: str, campaign: OutboundCampaign, error: SourcererAPIError
+    ) -> SourcererAPIError:
+        reason = re.sub(r"^\[command [^\]]*\] ", "", error.server_message or "") or str(error)
+        if not error.server_message and error.status_code:
+            try:
+                reason = f"HTTP {error.status_code} {HTTPStatus(error.status_code).phrase}"
+            except ValueError:
+                reason = f"HTTP {error.status_code}"
+        reason = reason.replace(campaign.resource_id, campaign.name)
+        message = f"Could not {action} campaign '{campaign.name}': {reason}"
+        if not error.server_message:
+            if error.error_code == "OUTBOUND_CAMPAIGNS_DISABLED":
+                message += "\nOutbound campaigns aren't turned on for this project."
+        return SourcererAPIError(
+            message,
+            status_code=error.status_code,
+            error_code=error.error_code,
+            server_message=error.server_message,
+        )
+
+    def validate_campaign(self, name: str) -> dict[str, Any]:
+        """Check the campaign as pushed to the current branch.
+
+        Returns:
+            The platform's result: `valid`, plus `errors` and `warnings`, each issue naming
+            its node by name in `node` and in its `message`.
+        """
+        campaign = self.get_campaign(name)
+        try:
+            result = self.api_handler.validate_outbound_campaign(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("validate", campaign, e) from e
+        names = self.campaign_node_names(campaign)
+        for key in ("errors", "warnings"):
+            result[key] = [
+                self._campaign_issue_with_node_names(issue, names)
+                for issue in result.get(key) or []
+            ]
+        return result
+
+    @staticmethod
+    def _replace_campaign_node_ids(text: str, names: dict[str, str]) -> str:
+        for node_id in sorted(names, key=len, reverse=True):
+            if names[node_id]:
+                text = text.replace(node_id, names[node_id])
+        return text
+
+    @classmethod
+    def _campaign_issue_with_node_names(
+        cls, issue: dict[str, Any], names: dict[str, str]
+    ) -> dict[str, Any]:
+        named = dict(issue)
+        if issue.get("node_id"):
+            named["node"] = names.get(issue["node_id"]) or issue["node_id"]
+        if issue.get("message") is not None:
+            named["message"] = cls._replace_campaign_node_ids(str(issue["message"]), names)
+        return named
 
     def trigger_tests(self, test_ids: list[str], name: str | None = None) -> dict:
         """Trigger tests for the project.
