@@ -4522,6 +4522,17 @@ class RefreshLibraryTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "list route down"):
             self.project.refresh_library(force_refresh=True)
 
+    def test_test_project_loads_the_test_library(self):
+        """The fixture project picks up the test library, so its files can use model names."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        self.assertIsNotNone(project.library)
+        self.assertFalse(project.library.is_stale)
+        self.assertEqual(
+            project.library.get_llm_model_by_name("PolyAI Raven 3.5").provider_model_id,
+            "polywhirl-3-5",
+        )
+
     def test_saved_library_is_loaded_with_the_project(self):
         """A project loaded after a refresh picks up the saved library for its region."""
         self.project.refresh_library()
