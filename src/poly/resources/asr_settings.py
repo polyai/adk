@@ -7,7 +7,7 @@ import logging
 import os
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from google.protobuf.message import Message
 
@@ -23,6 +23,9 @@ from poly.handlers.protobuf.channels_pb2 import (
 )
 from poly.library import Library
 from poly.resources.resource import ResourceMapping, SubResource, YamlResource, register_resource
+
+if TYPE_CHECKING:
+    from poly.resources.channel_settings import VoiceLLMSettings
 
 logger = logging.getLogger(__name__)
 
@@ -325,8 +328,23 @@ class AsrSettings(YamlResource):
         )
 
     def validate(
-        self, resource_mappings: list[ResourceMapping] = None, library: Library = None, **kwargs
+        self,
+        library: Library = None,
+        voice_llm_settings: Optional["VoiceLLMSettings"] = None,
+        **kwargs,
     ) -> None:
+        if voice_llm_settings and voice_llm_settings.model_id and library:
+            model = library.get_llm_model_by_id(voice_llm_settings.model_id)
+            if model and model.speech_native:
+                if self.asr_model is not None:
+                    raise ValueError(
+                        f"asr_model doesn't apply while the voice channel uses '{model.name}', which is end to end."
+                    )
+                if self.speech_end_delay_ms is not None:
+                    raise ValueError(
+                        f"speech_end_delay_ms doesn't apply while the voice channel uses '{model.name}', which is end to end."
+                    )
+
         if self.speech_end_delay_ms is not None and not (
             SPEECH_END_DELAY_MS_MIN <= self.speech_end_delay_ms <= SPEECH_END_DELAY_MS_MAX
         ):
