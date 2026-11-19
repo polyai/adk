@@ -1196,14 +1196,9 @@ class ASRConfig:
             raise ValueError("ASR override takes either name, or provider and model, not both.")
         if self.name:
             if library is None:
-                logger.warning(
-                    f"Can't check ASR model '{self.name}' without the model library. "
-                    "Run 'poly library refresh'."
-                )
+                logger.warning(f"Can't check ASR model '{self.name}' without the model library.")
                 return
-            raise ValueError(
-                f"Unknown ASR model '{self.name}'. Run 'poly library asr' to see the options."
-            )
+            raise ValueError(f"Unknown ASR model '{self.name}'.")
         if library and self.provider and self.model:
             if not library.get_asr_model_by_provider_and_model(self.provider, self.model):
                 logger.warning(
@@ -1348,13 +1343,10 @@ class LLMConfig:
         if self.name:
             if library is None:
                 logger.warning(
-                    f"Can't check language model '{self.name}' without the model library. "
-                    "Run 'poly library refresh'."
+                    f"Can't check language model '{self.name}' without the model library."
                 )
                 return
-            raise ValueError(
-                f"Unknown language model '{self.name}'. Run 'poly library llm' to see the options."
-            )
+            raise ValueError(f"Unknown language model '{self.name}'.")
         if library and self.provider_model_id:
             if not library.get_llm_model_by_provider_model_id(self.provider_model_id):
                 logger.warning(
