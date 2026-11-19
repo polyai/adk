@@ -620,24 +620,50 @@ class AgentStudioInterface:
 
     def dry_run_outbound_campaign(self, campaign_id: str, body: dict[str, Any]) -> dict[str, Any]:
         """Dry-run a campaign on the current branch. Nothing is sent or stored."""
+        import requests
+
         self.sync_client.assert_branch_exists()
-        return PlatformAPIHandler.dry_run_outbound_campaign(
-            self.region, self.account_id, self.project_id, self.branch_id, campaign_id, body
-        )
+        try:
+            return PlatformAPIHandler.dry_run_outbound_campaign(
+                self.region, self.account_id, self.project_id, self.branch_id, campaign_id, body
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
 
     def start_outbound_campaign_test_step(
         self, campaign_id: str, body: dict[str, Any]
     ) -> dict[str, Any]:
-        """Start a real test step of the live campaign."""
-        return PlatformAPIHandler.start_outbound_campaign_test_step(
-            self.region, self.account_id, self.project_id, campaign_id, body
-        )
+        """Start a real test step of the live campaign.
+
+        Raises:
+            SourcererAPIError: after a read timeout, raised from the `requests.ReadTimeout`:
+                the step may have started.
+        """
+        import requests
+
+        try:
+            return PlatformAPIHandler.start_outbound_campaign_test_step(
+                self.region, self.account_id, self.project_id, campaign_id, body
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
 
     def get_outbound_campaign_test_step(self, campaign_id: str, step_id: str) -> dict[str, Any]:
         """Read a test step of the live campaign."""
-        return PlatformAPIHandler.get_outbound_campaign_test_step(
-            self.region, self.account_id, self.project_id, campaign_id, step_id
-        )
+        import requests
+
+        try:
+            return PlatformAPIHandler.get_outbound_campaign_test_step(
+                self.region, self.account_id, self.project_id, campaign_id, step_id
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
 
     def send_outbound_campaign_lifecycle(self, command_type: str, campaign_id: str) -> None:
         """Send a publish, pause, resume or archive command for a campaign to main."""

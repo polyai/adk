@@ -1888,13 +1888,15 @@ class PlatformAPIHandler:
         campaign_id: str,
         body: dict,
     ) -> dict:
-        """Dry-run a campaign on `branch_id`. Nothing is sent or stored.
-
-        Raises:
-            SourcererAPIError: with the platform's status, error code and message.
-        """
-        return PlatformAPIHandler._outbound_campaign_request(
-            region, account_id, project_id, branch_id, (campaign_id, "dry-run"), data=body
+        """Dry-run a campaign on `branch_id`. Nothing is sent or stored."""
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id=quote(branch_id, safe=""),
+            path=f"{quote(campaign_id, safe='')}/dry-run",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "POST", data=body, timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
         )
 
     @staticmethod
@@ -1904,35 +1906,31 @@ class PlatformAPIHandler:
         """Start a real test step of the live campaign, on main.
 
         Raises:
-            SourcererAPIError: with the platform's status, error code and message. After a
-                read timeout, raised from the `requests.ReadTimeout`: the step may have started.
+            requests.ReadTimeout: the step may have started.
         """
-        return PlatformAPIHandler._outbound_campaign_request(
-            region,
-            account_id,
-            project_id,
-            "main",
-            (campaign_id, "test-steps"),
-            data=body,
-            timeout=OUTBOUND_CAMPAIGN_TEST_START_TIMEOUT,
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id="main",
+            path=f"{quote(campaign_id, safe='')}/test-steps",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "POST", data=body, timeout=OUTBOUND_CAMPAIGN_TEST_START_TIMEOUT
         )
 
     @staticmethod
     def get_outbound_campaign_test_step(
         region: str, account_id: str, project_id: str, campaign_id: str, step_id: str
     ) -> dict:
-        """Read a test step of the live campaign, on main.
-
-        Raises:
-            SourcererAPIError: with the platform's status, error code and message.
-        """
-        return PlatformAPIHandler._outbound_campaign_request(
-            region,
-            account_id,
-            project_id,
-            "main",
-            (campaign_id, "test-steps", step_id),
-            method="GET",
+        """Read a test step of the live campaign, on main."""
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id="main",
+            path=f"{quote(campaign_id, safe='')}/test-steps/{quote(step_id, safe='')}",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "GET", timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
         )
 
     @staticmethod
