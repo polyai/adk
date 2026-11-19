@@ -16,7 +16,6 @@ from urllib.parse import quote
 from ruamel.yaml import YAML
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
-from poly.handlers.sdk import SourcererAPIError
 from poly.handlers.utils import camel_to_snake_keys
 from poly.utils import raise_if_no_credentials, retrieve_api_key
 
@@ -1855,44 +1854,29 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
 
     @staticmethod
-    def _outbound_campaign_request(
-        region: str,
-        account_id: str,
-        project_id: str,
-        branch_id: str,
-        segments: tuple[str, ...],
-        method: str = "POST",
-        data: ty.Optional[dict] = None,
-        timeout: ty.Union[float, tuple[float, float]] = OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT,
-    ) -> dict:
-        import requests
-
-        endpoint = OUTBOUND_CAMPAIGN_URL.format(
-            account_id=account_id,
-            project_id=project_id,
-            branch_id=quote(branch_id, safe=""),
-            path="/".join(quote(segment, safe="") for segment in segments),
-        )
-        try:
-            return PlatformAPIHandler.make_request(
-                region, endpoint, method, data=data, timeout=timeout
-            )
-        except requests.exceptions.RequestException as e:
-            raise SourcererAPIError.from_request_error(e) from e
-        except ValueError as e:
-            raise SourcererAPIError(str(e)) from e
-
-    @staticmethod
     def validate_outbound_campaign(
         region: str, account_id: str, project_id: str, branch_id: str, campaign_id: str
     ) -> dict:
         """Validate a campaign as it is on `branch_id`.
 
-        Raises:
-            SourcererAPIError: with the platform's status, error code and message.
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            campaign_id: The campaign ID.
+
+        Returns:
+            dict: {"valid": bool, "errors": [...], "warnings": [...]}.
         """
-        return PlatformAPIHandler._outbound_campaign_request(
-            region, account_id, project_id, branch_id, (campaign_id, "validate")
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id=quote(branch_id, safe=""),
+            path=f"{quote(campaign_id, safe='')}/validate",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "POST", timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
         )
 
     @staticmethod
