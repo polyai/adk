@@ -15,6 +15,7 @@ from poly.handlers.interface import AgentStudioInterface
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
     load_api_key_from_credential_file,
+    matching_key_records,
     save_api_key_credential_file,
 )
 
@@ -72,12 +73,9 @@ def authorise_or_explain(
 def _is_own_pat(key: str, user_pats: list[dict]) -> bool:
     """Whether `key` is one of the signed-in user's PATs.
 
-    The PAT list only carries the first and last four characters of each secret, so the
-    match is on those.
+    Every PAT in the list is the user's own, so more than one match still means yes.
     """
-    return any(
-        key[:4] == pat.get("key_prefix") and key[-4:] == pat.get("key_suffix") for pat in user_pats
-    )
+    return bool(matching_key_records(key, user_pats))
 
 
 def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
