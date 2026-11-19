@@ -39,6 +39,7 @@ from poly.resources import (
     Variant,
     VariantAttribute,
 )
+from poly.resources.channel_settings import ChatLLMSettings
 from poly.resources.outbound_campaign import (
     campaign_nodes,
     function_file_stem,
@@ -76,10 +77,11 @@ def enable_webchat_channel(
         ChatGreeting in new_resources
         or ChatSafetyFilters in new_resources
         or ChatStylePrompt in new_resources
+        or ChatLLMSettings in new_resources
     ):
         queue_command(create_command_webchat_channel_update_status(enabled=True))
         # Move any Webchat config in new resources to updated resources
-        for resource_type in [ChatGreeting, ChatSafetyFilters, ChatStylePrompt]:
+        for resource_type in [ChatGreeting, ChatSafetyFilters, ChatStylePrompt, ChatLLMSettings]:
             for resource_id, resource in new_resources.get(resource_type, {}).items():
                 pre_push_updated_resources.setdefault(resource_type, {})[resource_id] = resource
             if resource_type in new_resources:

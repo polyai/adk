@@ -279,7 +279,7 @@ class ChannelLLMSettings(MultiResourceYamlResource):
             )
         return Channel_UpdateLLMSettings(
             channel_type=self.channel_type,
-            llm=LLMSettings_UpdateLLMSettings(
+            llm_settings=LLMSettings_UpdateLLMSettings(
                 model_id=self.model_id,
             ),
         )
