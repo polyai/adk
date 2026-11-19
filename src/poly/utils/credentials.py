@@ -77,6 +77,30 @@ def load_api_key_from_credential_file(region: str) -> Optional[str]:
     return None
 
 
+def matching_key_records(key: str, records: list) -> list[dict]:
+    """The records in a key list that could be `key`.
+
+    Key lists never carry a secret, only its first and last four characters as
+    `key_prefix` and `key_suffix`, so the match is on those. Entries that are not
+    dicts are skipped.
+
+    Args:
+        key: The secret to look for.
+        records: A key list as the platform returns it (PATs or account API keys).
+
+    Returns:
+        Every record whose prefix and suffix match `key`. Callers that need one
+        specific record should treat more than one match as ambiguous.
+    """
+    return [
+        record
+        for record in records
+        if isinstance(record, dict)
+        and record.get("key_prefix") == key[:4]
+        and record.get("key_suffix") == key[-4:]
+    ]
+
+
 _ACCOUNT_API_KEY_ENV_VAR = "POLY_API_KEY"
 _CREDENTIALS_FILE_DISPLAY_PATH = "~/.poly/credentials.json"
 

@@ -12,6 +12,7 @@ from unittest.mock import patch
 from poly.utils import credentials
 from poly.utils.credentials import (
     _missing_key_message,
+    matching_key_records,
     raise_if_no_credentials,
     retrieve_api_key,
 )
@@ -206,6 +207,38 @@ class RaiseIfNoCredentialsTest(_CredentialsTestCase):
         del os.environ["POLY_ADK_KEY_US"]
         os.environ["POLY_ADK_KEY"] = "generic-env-key"
         raise_if_no_credentials()
+
+
+class MatchingKeyRecordsTest(unittest.TestCase):
+    """Matching a secret against a key list that only carries its first and last four characters."""
+
+    KEY = "abcd-secret-wxyz"
+
+    def test_record_with_matching_prefix_and_suffix_matches(self):
+        record = {"id": "k1", "key_prefix": "abcd", "key_suffix": "wxyz"}
+
+        self.assertEqual(matching_key_records(self.KEY, [record]), [record])
+
+    def test_prefix_or_suffix_alone_does_not_match(self):
+        records = [
+            {"key_prefix": "abcd", "key_suffix": "0000"},
+            {"key_prefix": "0000", "key_suffix": "wxyz"},
+        ]
+
+        self.assertEqual(matching_key_records(self.KEY, records), [])
+
+    def test_every_match_is_returned(self):
+        records = [
+            {"id": "k1", "key_prefix": "abcd", "key_suffix": "wxyz"},
+            {"id": "k2", "key_prefix": "abcd", "key_suffix": "wxyz"},
+        ]
+
+        self.assertEqual([r["id"] for r in matching_key_records(self.KEY, records)], ["k1", "k2"])
+
+    def test_entries_that_are_not_dicts_are_skipped(self):
+        record = {"key_prefix": "abcd", "key_suffix": "wxyz"}
+
+        self.assertEqual(matching_key_records(self.KEY, ["junk", None, record]), [record])
 
 
 if __name__ == "__main__":

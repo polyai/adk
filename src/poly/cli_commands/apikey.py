@@ -33,6 +33,7 @@ from poly.utils import apikey_session
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
     load_api_key_from_credential_file,
+    matching_key_records,
     save_api_key_credential_file,
 )
 from poly.utils.env_profile import (
@@ -198,13 +199,7 @@ def _lookup_key_record(
         return None, False
     if not isinstance(records, list):
         return None, False
-    matches = [
-        r
-        for r in records
-        if isinstance(r, dict)
-        and r.get("key_prefix") == api_key[:4]
-        and r.get("key_suffix") == api_key[-4:]
-    ]
+    matches = matching_key_records(api_key, records)
     if len(matches) > 1:
         # Ambiguous, so say nothing about it rather than describe the wrong key.
         return None, False
