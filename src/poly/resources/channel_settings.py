@@ -381,7 +381,7 @@ class ChatLLMSettings(ChannelLLMSettings):
             logger.debug("No read access to the chat llm settings - it will not be pulled.")
             return {}
 
-        chat_config = projection.get("channels", {}).get("chat", {}).get("config", {}) or {}
+        chat_config = projection.get("channels", {}).get("webChat", {}).get("config", {}) or {}
         chat_llm_settings = chat_config.get("llmSettings", None)
         if not chat_llm_settings:
             return {}
