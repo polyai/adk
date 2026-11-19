@@ -1156,6 +1156,7 @@ _WEBCHAT_CONFIG_TYPES: list[str] = [
     "ChatGreeting",
     "ChatSafetyFilters",
     "ChatStylePrompt",
+    "ChatLLMSettings",
 ]
 
 
