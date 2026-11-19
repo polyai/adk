@@ -1872,7 +1872,6 @@ class PlatformAPIHandler:
             branch_id=quote(branch_id, safe=""),
             path="/".join(quote(segment, safe="") for segment in segments),
         )
-        PlatformAPIHandler.get_base_url(region)
         try:
             return PlatformAPIHandler.make_request(
                 region, endpoint, method, data=data, timeout=timeout

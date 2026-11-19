@@ -2,11 +2,11 @@
 
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
-from typing import Any, Callable, Optional
+from typing import Any
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project, require_outbound_campaigns_enabled
-from poly.handlers.sdk import InterruptedBeforeSending, SourcererAPIError
+from poly.handlers.sdk import SourcererAPIError
 from poly.output.json_output import json_print
 
 LIFECYCLE_ACTIONS = {
@@ -113,87 +113,40 @@ class CampaignCommand(BaseCommand):
 
     @classmethod
     def run(cls, args: Namespace) -> None:
-        """Dispatch to the chosen `campaign` subcommand, keeping stdout JSON under `--json`."""
-        try:
-            cls._dispatch(args)
-        except KeyboardInterrupt:
-            if not args.json:
-                raise
-            json_print({"success": False, "error": "Stopped.", "campaign": args.name})
-            sys.exit(130)
-
-    @classmethod
-    def _dispatch(cls, args: Namespace) -> None:
-        if args.campaign_subcommand == "validate":
-            cls.campaign_validate(args.path, args.name, output_json=args.json)
-        else:
-            cls.campaign_lifecycle(
-                args.path,
-                args.campaign_subcommand,
-                args.name,
-                force=args.force,
-                output_json=args.json,
-            )
-
-    @staticmethod
-    def _fail(message: str, output_json: bool, exit_code: int = 1, **details: Any) -> None:
+        """Dispatch to the chosen `campaign` subcommand; a failure prints its error and exits 1."""
         from poly.output.console import error
-
-        if output_json:
-            json_print({"success": False, "error": message, **details})
-        else:
-            error(message)
-        sys.exit(exit_code)
-
-    @classmethod
-    def _call(
-        cls,
-        output_json: bool,
-        operation: Callable[[], Any],
-        interrupted: Optional[str] = None,
-        interrupted_unconfirmed: bool = False,
-        **details: Any,
-    ) -> Any:
         from poly.project import CampaignOutcomeUnconfirmed
 
+        details: dict[str, Any] = {"campaign": args.name}
+        if args.campaign_subcommand in LIFECYCLE_ACTIONS:
+            details["action"] = args.campaign_subcommand
         try:
-            return operation()
-        except CampaignOutcomeUnconfirmed as e:
-            cls._fail(str(e), output_json, **details, unconfirmed=True)
+            if args.campaign_subcommand == "validate":
+                cls.campaign_validate(args.path, args.name, output_json=args.json)
+            else:
+                cls.campaign_lifecycle(
+                    args.path,
+                    args.campaign_subcommand,
+                    args.name,
+                    force=args.force,
+                    output_json=args.json,
+                )
         except (ValueError, SourcererAPIError) as e:
-            cls._fail(str(e), output_json, **details)
-        except InterruptedBeforeSending:
-            cls._fail("Stopped before anything was sent.", output_json, exit_code=130, **details)
-        except KeyboardInterrupt:
-            if interrupted is None:
-                raise
-            if interrupted_unconfirmed:
+            if isinstance(e, CampaignOutcomeUnconfirmed):
                 details["unconfirmed"] = True
-            cls._fail(interrupted, output_json, exit_code=130, **details)
+            if args.json:
+                json_print({"success": False, "error": str(e), **details})
+            else:
+                error(str(e))
+            sys.exit(1)
 
     @staticmethod
-    def _node_labels(project: Any, name: str) -> dict[str, str]:
-        try:
-            return project.campaign_node_names(project.get_campaign(name))
-        except (ValueError, SourcererAPIError):
-            return {}
-
-    @staticmethod
-    def _name_nodes(text: str, labels: dict[str, str]) -> str:
-        for node_id in sorted(labels, key=len, reverse=True):
-            if labels[node_id]:
-                text = text.replace(node_id, labels[node_id])
-        return text
-
-    @classmethod
-    def _branch_note(cls, project: Any, name: str, output_json: bool) -> dict[str, str]:
-        from poly.output.console import warning
-
-        if not cls._call(output_json, project.campaign_branch_is_gone, campaign=name):
-            return {}
-        if not output_json:
-            warning("Your branch no longer exists, so this ran on main.")
-        return {"branch": "main"}
+    def _describe(issue: dict[str, Any]) -> str:
+        where = issue.get("node") or issue.get("node_id")
+        prefix = f"{where}: " if where else ""
+        if issue.get("field"):
+            prefix += f"{issue['field']}: "
+        return f"{prefix}{issue.get('message')}"
 
     @classmethod
     def campaign_validate(cls, base_path: str, name: str, output_json: bool = False) -> None:
@@ -202,11 +155,10 @@ class CampaignCommand(BaseCommand):
 
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json, campaign=name)
-        branch = cls._branch_note(project, name, output_json)
-        result = cls._call(output_json, lambda: project.validate_campaign(name), campaign=name)
+        result = project.validate_campaign(name)
         valid = bool(result.get("valid"))
         if output_json:
-            outcome = {"success": valid, "campaign": name, **branch, "result": result}
+            outcome = {"success": valid, "campaign": name, "result": result}
             if not valid:
                 outcome["error"] = f"Campaign '{name}' is not valid."
             json_print(outcome)
@@ -214,22 +166,13 @@ class CampaignCommand(BaseCommand):
                 sys.exit(1)
             return
 
-        labels = cls._node_labels(project, name)
-
-        def describe(issue: dict) -> str:
-            where = labels.get(issue.get("node_id"), issue.get("node_id"))
-            prefix = f"{where}: " if where else ""
-            if issue.get("field"):
-                prefix += f"{issue['field']}: "
-            return f"{prefix}{cls._name_nodes(str(issue.get('message')), labels)}"
-
         for issue in result.get("warnings") or []:
-            warning(describe(issue))
+            warning(cls._describe(issue))
         if valid:
             success(f"Campaign '{name}' is valid.")
             return
         for issue in result.get("errors") or []:
-            error(describe(issue))
+            error(cls._describe(issue))
         error(f"Campaign '{name}' is not valid.")
         sys.exit(1)
 
@@ -250,7 +193,7 @@ class CampaignCommand(BaseCommand):
         _, prompt, done_message = LIFECYCLE_ACTIONS[action]
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json, campaign=name)
-        campaign = cls._call(output_json, lambda: project.get_live_campaign(name), campaign=name)
+        campaign = project.get_live_campaign(name)
         if not output_json and not force:
             if not questionary.confirm(
                 prompt.format(name=campaign.name), default=False, auto_enter=False
@@ -258,17 +201,7 @@ class CampaignCommand(BaseCommand):
                 warning("Aborted.")
                 sys.exit(0)
 
-        method = getattr(project, f"{action}_campaign")
-        cls._call(
-            output_json,
-            lambda: method(name),
-            interrupted=project.campaign_change_unconfirmed(
-                "You stopped the command while it was being sent", action, campaign.name
-            ),
-            interrupted_unconfirmed=True,
-            campaign=name,
-            action=action,
-        )
+        getattr(project, f"{action}_campaign")(name)
         if output_json:
             json_print({"success": True, "campaign": name, "action": action})
         else:

@@ -6,13 +6,12 @@ Copyright PolyAI Limited
 import dataclasses
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
-from argparse import ArgumentParser, _SubParsersAction
+from argparse import ArgumentParser, Namespace, _SubParsersAction
 from importlib.metadata import PackageNotFoundError
 from io import StringIO
 from pathlib import Path
@@ -451,7 +450,6 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.pull_project_from_env.assert_not_called()
         self.proj.push_project.assert_not_called()
-
 
     @patch("poly.output.console.plain")
     @patch("poly.output.console.error")
@@ -2577,7 +2575,6 @@ class SyncExitCodeTest(unittest.TestCase):
             mock_json_print.call_args[0][0], {"success": True, "message": "No changes detected"}
         )
 
-
     @patch("poly.cli_commands.sync.json_print")
     def test_validate_json_with_errors_exits_1(self, mock_json_print):
         """JSON mode reports validation errors as a failure and exits 1."""
@@ -3246,7 +3243,6 @@ class DeploymentsPromoteTest(unittest.TestCase):
         self.proj.promote_deployment.assert_called_once_with(
             "dep-1", "pre-release", message="custom notes"
         )
-
 
     @patch("poly.cli_commands.deployments.json_print")
     def test_dry_run_is_a_json_success_without_calling_api(self, mock_json):
@@ -5905,10 +5901,8 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
 
     def setUp(self):
         """Simulate a pip install on Windows, with the call extra installed."""
-        self.method = self._patch_update("_detect_install_method", return_value="pip"
-        )
-        self._patch_update("_package_spec", return_value="polyai-adk[call]"
-        )
+        self.method = self._patch_update("_detect_install_method", return_value="pip")
+        self._patch_update("_package_spec", return_value="polyai-adk[call]")
         self._patch("sys.platform", new="win32")
         self._patch("sys.executable", new=self.WINDOWS_PYTHON)
         self.warning = self._patch("poly.output.console.warning")
@@ -5986,8 +5980,7 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
 
     @patch("poly.output.console.info")
     def test_windows_check_still_reports_an_update(self, mock_info):
-        self._patch_update("check_for_updates", return_value=(True, "9.9.9")
-        )
+        self._patch_update("check_for_updates", return_value=(True, "9.9.9"))
 
         UpdateCommand.update(check=True, output_json=False)
 
@@ -5996,8 +5989,7 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
 
     @patch("poly.output.console.info")
     def test_windows_update_refuses_before_announcing_it(self, mock_info):
-        self._patch_update("check_for_updates", return_value=(True, "9.9.9")
-        )
+        self._patch_update("check_for_updates", return_value=(True, "9.9.9"))
         run = self._patch("poly.cli_commands.update.subprocess.run")
 
         UpdateCommand.update(check=False, output_json=False)
@@ -6009,10 +6001,8 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
 
     @patch("poly.output.console.info")
     def test_windows_update_with_nothing_new_still_refreshes_skills(self, mock_info):
-        self._patch_update("check_for_updates", return_value=(False, "0.0.1")
-        )
-        skills = self._patch_update("update_skills_step", return_value=True
-        )
+        self._patch_update("check_for_updates", return_value=(False, "0.0.1"))
+        skills = self._patch_update("update_skills_step", return_value=True)
 
         UpdateCommand.update(check=False, output_json=False)
 
@@ -7100,11 +7090,29 @@ class CampaignCommandTest(unittest.TestCase):
     def _output(self) -> dict:
         return self.json_print.call_args.args[0]
 
+    def _lifecycle(
+        self, action: str, name: str, force: bool = False, output_json: bool = False
+    ) -> None:
+        CampaignCommand.run(
+            Namespace(
+                campaign_subcommand=action,
+                path=TEST_DIR,
+                name=name,
+                force=force,
+                json=output_json,
+            )
+        )
+
+    def _validate(self, name: str, output_json: bool = True) -> None:
+        CampaignCommand.run(
+            Namespace(campaign_subcommand="validate", path=TEST_DIR, name=name, json=output_json)
+        )
+
     def test_validate_posts_to_the_branch_route(self):
         """validate checks the campaign on the current branch and returns the platform's result."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+        self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(
             self._request(), ("POST", self.CAMPAIGN_URL.format(branch="main") + "/validate", None)
@@ -7139,7 +7147,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with patch("poly.output.console.error") as error, self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN)
+            self._validate(self.CAMPAIGN, output_json=False)
 
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(
@@ -7162,9 +7170,7 @@ class CampaignCommandTest(unittest.TestCase):
             with self.subTest(action=action):
                 self.post.reset_mock()
 
-                CampaignCommand.campaign_lifecycle(
-                    TEST_DIR, action, self.CAMPAIGN, force=True, output_json=True
-                )
+                self._lifecycle(action, self.CAMPAIGN, force=True, output_json=True)
 
                 url = self.post.call_args.args[0]
                 self.assertTrue(url.endswith("/branches/main/command-batch"), url)
@@ -7207,9 +7213,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
 
         error = self._output()["error"]
         self.assertIn(f"Could not resume campaign '{self.CAMPAIGN}'", error)
@@ -7221,7 +7225,7 @@ class CampaignCommandTest(unittest.TestCase):
         """Without --force, a lifecycle action asks first and sends nothing when declined."""
         with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
             confirm.return_value.ask.return_value = False
-            CampaignCommand.campaign_lifecycle(TEST_DIR, "publish", self.CAMPAIGN)
+            self._lifecycle("publish", self.CAMPAIGN)
 
         self.assertEqual(exit.exception.code, 0)
         self.assertIn("to live", confirm.call_args.args[0])
@@ -7230,7 +7234,7 @@ class CampaignCommandTest(unittest.TestCase):
     def test_lifecycle_on_an_unknown_campaign_fails_before_asking(self):
         """A name that matches no campaign fails straight away, without the live warning."""
         with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_lifecycle(TEST_DIR, "publish", "Nope")
+            self._lifecycle("publish", "Nope")
 
         self.assertEqual(exit.exception.code, 1)
         confirm.assert_not_called()
@@ -7243,19 +7247,18 @@ class CampaignCommandTest(unittest.TestCase):
 
         with patch("questionary.confirm") as confirm:
             confirm.return_value.ask.return_value = True
-            CampaignCommand.campaign_lifecycle(TEST_DIR, "pause", "appointment_reminders")
+            self._lifecycle("pause", "appointment_reminders")
 
         self.assertIn(f"'{self.CAMPAIGN}'", confirm.call_args.args[0])
 
     def test_unknown_campaign_lists_the_known_ones(self):
         """An unknown name lists the campaigns that do exist."""
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_validate(TEST_DIR, "Nope", output_json=True)
+            self._validate("Nope", output_json=True)
 
         self.assertEqual(
             self._output()["error"],
-            f"No campaign named 'Nope'. Campaigns: {self.CAMPAIGN}. If it was made in Agent "
-            "Studio or pushed by someone else, run `poly pull` first.",
+            f"No campaign named 'Nope'. Campaigns: {self.CAMPAIGN}.",
         )
         self.request.assert_not_called()
 
@@ -7263,7 +7266,7 @@ class CampaignCommandTest(unittest.TestCase):
         """A campaign can be named by its folder as well as its name."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
-        CampaignCommand.campaign_validate(TEST_DIR, "appointment_reminders", output_json=True)
+        self._validate("appointment_reminders", output_json=True)
 
         self.assertTrue(self._output()["success"])
 
@@ -7285,7 +7288,7 @@ class CampaignCommandTest(unittest.TestCase):
         self._add_namesake()
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+            self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
@@ -7303,7 +7306,7 @@ class CampaignCommandTest(unittest.TestCase):
                     make_mock_response(200, {"valid": True, "errors": [], "warnings": []})
                 )
 
-                CampaignCommand.campaign_validate(TEST_DIR, name, output_json=True)
+                self._validate(name, output_json=True)
 
                 self.assertEqual(
                     self._request()[1],
@@ -7311,39 +7314,34 @@ class CampaignCommandTest(unittest.TestCase):
                     + "/validate",
                 )
 
-    def test_validate_names_nodes_inside_issue_messages(self):
-        """A node id inside the platform's message is replaced by the node's name."""
+    def test_validate_campaign_names_nodes_in_its_issues(self):
+        """The project returns issues with node names, inside the platform's message too."""
         self._respond(
             make_mock_response(
                 200,
                 {
                     "valid": False,
                     "errors": [
-                        {
-                            "node_id": None,
-                            "field": None,
-                            "message": "Node 'call-1' cannot reach an end",
-                            "is_warning": False,
-                        }
+                        {"node_id": None, "message": "Node 'call-1' cannot reach an end"},
+                        {"node_id": "call-1", "field": "flowName", "message": "No flow"},
                     ],
                     "warnings": [],
                 },
             )
         )
 
-        with patch("poly.output.console.error") as error, self.assertRaises(SystemExit):
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN)
+        result = self.project.validate_campaign(self.CAMPAIGN)
 
-        self.assertEqual(
-            error.call_args_list[0].args[0], "Node 'Reminder call' cannot reach an end"
-        )
+        self.assertEqual(result["errors"][0]["message"], "Node 'Reminder call' cannot reach an end")
+        self.assertEqual(result["errors"][1]["node"], "Reminder call")
+        self.assertEqual(result["errors"][1]["node_id"], "call-1")
 
     def test_campaigns_turned_off_exit_before_any_request(self):
         """The ADK checks the project's flag first, so nothing reaches the platform."""
         self.campaigns_enabled.return_value = False
 
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+            self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(
@@ -7364,9 +7362,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
 
         error = self._output()["error"]
         self.assertEqual(
@@ -7381,9 +7377,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.post.return_value = make_mock_response(412)
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "publish", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("publish", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
@@ -7410,18 +7404,29 @@ class CampaignCommandTest(unittest.TestCase):
         """A stalled connection cannot hang a campaign call: each request has a timeout."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+        self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(self.request.call_args.kwargs["timeout"], 30)
+
+    def test_validate_checks_the_branch_exists_first(self):
+        """validate checks the branch exists before its request, as other remote calls do."""
+        self.project.branch_id = "BRANCH-1"
+        check = patch.object(
+            self.project.api_handler.sync_client, "assert_branch_exists", return_value="BRANCH-1"
+        ).start()
+        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
+
+        self._validate(self.CAMPAIGN, output_json=True)
+
+        check.assert_called_once()
+        self.assertNotIn("branch", self._output())
 
     def test_main_is_read_once_per_command_even_on_main(self):
         """Live checks read main's projection, not the local copy, and only once."""
         self.post.return_value = make_mock_response(200, {"success": True})
         self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
 
-        CampaignCommand.campaign_lifecycle(
-            TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
-        )
+        self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
 
         self.pull_main.assert_called_once_with("main")
 
@@ -7444,9 +7449,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.pull_main.side_effect = fail
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(
             self._output()["error"], "Could not read the campaigns on main: Try again shortly"
@@ -7477,9 +7480,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.post.side_effect = requests.ReadTimeout("read timed out")
 
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(exit.exception.code, 1)
         output = self._output()
@@ -7493,22 +7494,6 @@ class CampaignCommandTest(unittest.TestCase):
             "pause` instead.",
         )
         self.assertEqual(self.post.call_count, 1)
-
-    def test_lifecycle_stopped_while_sending_says_it_may_have_gone_through(self):
-        """Ctrl+C during the send gets the same warning, not a bare abort."""
-        with (
-            patch.object(self.project, "resume_campaign", side_effect=KeyboardInterrupt),
-            patch("poly.output.console.error") as error,
-            self.assertRaises(SystemExit) as exit,
-        ):
-            CampaignCommand.campaign_lifecycle(TEST_DIR, "resume", self.CAMPAIGN, force=True)
-
-        self.assertEqual(exit.exception.code, 130)
-        message = error.call_args.args[0]
-        self.assertTrue(message.startswith("You stopped the command while it was being sent"))
-        self.assertIn("may have gone through", message)
-        self.assertIn("Run `poly campaign resume` again", message)
-        self.assertIn("send `poly campaign pause` instead", message)
 
     @staticmethod
     def _dropped() -> requests.ConnectionError:
@@ -7542,9 +7527,7 @@ class CampaignCommandTest(unittest.TestCase):
                 self.post.side_effect = [answer]
 
                 with self.assertRaises(SystemExit):
-                    CampaignCommand.campaign_lifecycle(
-                        TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-                    )
+                    self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
 
                 output = self._output()
                 self.assertTrue(output["unconfirmed"])
@@ -7558,9 +7541,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.post.side_effect = [self._unreachable()]
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertNotIn("unconfirmed", self._output())
         self.assertTrue(self._output()["error"].startswith("Could not resume campaign"))
@@ -7585,7 +7566,7 @@ class CampaignCommandTest(unittest.TestCase):
 
         with patch("questionary.confirm") as confirm, patch("poly.output.console.success") as ok:
             confirm.return_value.ask.return_value = True
-            CampaignCommand.campaign_lifecycle(TEST_DIR, "pause", "Live reminders")
+            self._lifecycle("pause", "Live reminders")
 
         self.assertIn("'Live reminders'", confirm.call_args.args[0])
         self.assertEqual(ok.call_args.args[0], "Paused campaign 'Live reminders'.")
@@ -7598,9 +7579,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.session.get.side_effect = self._dropped()
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
 
         output = self._output()
         self.assertNotIn("unconfirmed", output)
@@ -7618,48 +7597,13 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
             f"Could not pause campaign '{self.CAMPAIGN}': The campaign could not be paused.\n"
             "Check the campaign's status in Agent Studio.",
         )
-
-    def test_ctrl_c_under_json_keeps_stdout_json(self):
-        """An interrupt the command does not handle itself still ends in one JSON object."""
-        cli = AgentStudioCLI()
-        cli.register_commands()
-        args = cli._create_parser().parse_args(["campaign", "validate", self.CAMPAIGN, "--json"])
-
-        with (
-            patch.object(CampaignCommand, "campaign_validate", side_effect=KeyboardInterrupt),
-            self.assertRaises(SystemExit) as exit,
-        ):
-            CampaignCommand.run(args)
-
-        self.assertEqual(exit.exception.code, 130)
-        self.assertEqual(
-            self._output(), {"success": False, "error": "Stopped.", "campaign": self.CAMPAIGN}
-        )
-
-    def test_check_on_a_branch_that_is_gone_says_it_ran_on_main(self):
-        """When the local branch no longer exists, validate says it used main."""
-        self.project.branch_id = "BRANCH-1"
-        patch.object(
-            self.project.api_handler, "ensure_remote_branch", return_value="main"
-        ).start()
-        valid = {"valid": True, "errors": [], "warnings": []}
-        self._respond(make_mock_response(200, valid), make_mock_response(200, valid))
-
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
-        self.assertEqual(self._output()["branch"], "main")
-
-        with patch("poly.output.console.warning") as warning:
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN)
-        warning.assert_called_once_with("Your branch no longer exists, so this ran on main.")
 
     def test_lifecycle_refusal_drops_the_command_prefix(self):
         """The command batch's "[command 1: …]" prefix is not shown."""
@@ -7672,9 +7616,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "archive", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("archive", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
@@ -7692,28 +7634,13 @@ class CampaignCommandTest(unittest.TestCase):
         self._on_branch({OutboundCampaign: {self.CAMPAIGN_ID: live}})
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "pause", "Nope", force=True, output_json=True
-            )
+            self._lifecycle("pause", "Nope", force=True, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
             "No campaign named 'Nope' on main, or it is already archived. A campaign made on a "
             "branch must be merged first. Campaigns on main: Live reminders.",
         )
-
-    def test_validate_checks_the_branch_once(self):
-        """The branch is looked up once per command, not again for the request."""
-        self.project.branch_id = "BRANCH-1"
-        check = patch.object(
-            self.project.api_handler.sync_client, "assert_branch_exists", return_value="BRANCH-1"
-        ).start()
-        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
-
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
-
-        check.assert_called_once()
-        self.assertNotIn("branch", self._output())
 
     def test_unconfirmed_change_says_how_to_settle_or_undo_it(self):
         """Each action's advice is to resend it, or send its opposite; archive can't be undone."""
@@ -7748,27 +7675,6 @@ class CampaignCommandTest(unittest.TestCase):
                 self.assertIn("even if Agent Studio still shows the old status", message)
                 self.assertNotIn("poly pull", message)
 
-    def test_ctrl_c_while_reading_main_is_a_plain_stop(self):
-        """Ctrl+C before the batch is posted changed nothing, so it is not unconfirmed."""
-        self.session.get.side_effect = KeyboardInterrupt
-
-        with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-            )
-
-        self.assertEqual(exit.exception.code, 130)
-        self.post.assert_not_called()
-        self.assertEqual(
-            self._output(),
-            {
-                "success": False,
-                "error": "Stopped before anything was sent.",
-                "campaign": self.CAMPAIGN,
-                "action": "resume",
-            },
-        )
-
     def test_lifecycle_refusal_without_the_refresh_sentence_still_gets_the_hint(self):
         """The hint is added whether or not the platform's web-UI sentence is there."""
         self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
@@ -7777,9 +7683,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
@@ -7798,9 +7702,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(exit.exception.code, 1)
         self.assertNotIn("unconfirmed", self._output())
@@ -7810,31 +7712,11 @@ class CampaignCommandTest(unittest.TestCase):
         self.pull_main.side_effect = lambda *_: ({}, [])
         self.post.reset_mock()
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "archive", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("archive", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(exit.exception.code, 1)
         self.post.assert_not_called()
         self.assertIn("on main, or it is already archived", self._output()["error"])
-
-    def test_unpushed_campaign_named_by_folder_says_to_push(self):
-        """A local campaign not yet pushed is found by its folder, and the user told to push."""
-        folder = os.path.join(TEST_DIR, "outbound_campaigns", "new_reminders")
-        os.makedirs(folder)
-        self.addCleanup(shutil.rmtree, folder)
-        with open(os.path.join(folder, "campaign.yaml"), "w", encoding="utf-8") as file:
-            file.write("name: New reminders\n")
-
-        for value in ("new_reminders", "New reminders", "new-reminders"):
-            with self.subTest(value=value):
-                with self.assertRaises(SystemExit):
-                    CampaignCommand.campaign_validate(TEST_DIR, value, output_json=True)
-
-                self.assertEqual(
-                    self._output()["error"],
-                    f"Campaign '{value}' has not been pushed yet. Run `poly push` first.",
-                )
 
     def test_parsed_command_line_reaches_validate(self):
         """`poly campaign validate <name> --json` is wired through the parser to the handler."""
