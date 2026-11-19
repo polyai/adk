@@ -92,7 +92,8 @@ class ASRModelConfig(SubResource):
     def build_update_proto(self) -> VoiceChannel_UpdateAsrConfig:
         if self.asr_model.name:
             raise ValueError(
-                f"Unknown ASR model '{self.asr_model.name}'. Use a known model name, or a provider and model."
+                f"Unknown ASR model '{self.asr_model.name}'. "
+                "Use a known model name, or a provider and model."
             )
         return VoiceChannel_UpdateAsrConfig(
             asr_config=Asr(provider_id=self.asr_model.provider, model_id=self.asr_model.model)
@@ -338,11 +339,14 @@ class AsrSettings(YamlResource):
             if model and model.speech_native:
                 if self.asr_model is not None:
                     raise ValueError(
-                        f"asr_model doesn't apply while the voice channel uses '{model.name}', which is end to end."
+                        f"asr_model doesn't apply while the voice channel uses '{model.name}', "
+                        "which is end to end. Remove the asr_model setting."
                     )
                 if self.speech_end_delay_ms is not None:
                     raise ValueError(
-                        f"speech_end_delay_ms doesn't apply while the voice channel uses '{model.name}', which is end to end."
+                        "speech_end_delay_ms doesn't apply while the voice channel uses "
+                        f"'{model.name}', which is end to end. Remove the speech_end_delay_ms "
+                        "setting."
                     )
 
         if self.speech_end_delay_ms is not None and not (
