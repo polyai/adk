@@ -498,6 +498,20 @@
         "prompt": "You are a helpful and professional web chat assistant."
       }
     },
+    "voice_llm_settings": {
+      "voice_llm_settings": {
+        "resource_id": "voice_llm_settings",
+        "name": "voice_llm_settings",
+        "model_id": "MODEL-raven035"
+      }
+    },
+    "chat_llm_settings": {
+      "chat_llm_settings": {
+        "resource_id": "chat_llm_settings",
+        "name": "chat_llm_settings",
+        "model_id": "MODEL-gpt41min"
+      }
+    },
     "persona": {
       "PERSONA-persona": {
         "resource_id": "PERSONA-persona",
@@ -1253,6 +1267,10 @@
           "enabled": false,
           "allow_on_first_turn": false,
           "max_per_call": 5
+        },
+        "asr_model": {
+          "provider": "deepgram",
+          "model": "nova-3"
         }
       }
     },

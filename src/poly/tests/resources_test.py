@@ -21,6 +21,7 @@ from google.protobuf.json_format import MessageToDict
 from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
+from poly.handlers.protobuf.channels_pb2 import ChannelType
 from poly.handlers.protobuf.knowledge_base_pb2 import KnowledgeBase_DeleteTopic
 from poly.handlers.protobuf.variant_pb2 import Variant_UpdateVariant
 from poly.resources.agent_settings import (
@@ -42,14 +43,22 @@ from poly.resources.api_integration import (
     ApiIntegrationEnvironments,
     ApiIntegrationOperation,
 )
-from poly.resources.asr_settings import AsrSettings, BargeIn, VoiceBargeInConfig
+from poly.resources.asr_settings import (
+    ASRModel,
+    ASRModelConfig,
+    AsrSettings,
+    BargeIn,
+    VoiceBargeInConfig,
+)
 from poly.resources.channel_settings import (
     ChatGreeting,
+    ChatLLMSettings,
     ChatStylePrompt,
     VoiceBackgroundAmbience,
     VoiceDisclaimerMessage,
     VoiceFillerPhrases,
     VoiceGreeting,
+    VoiceLLMSettings,
     VoiceStylePrompt,
 )
 from poly.resources.child_topic import ChildTopic
@@ -5335,6 +5344,223 @@ class ModelOverrideValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown language model"):
             self._settings(llm=LLMConfig(name="Typo")).validate(library=self.library)
 
+
+class AsrModelLibraryTest(unittest.TestCase):
+    """asr_model by name, checked against the model library."""
+
+    def setUp(self):
+        self.library = make_library()
+
+    def _settings(self, **fields) -> AsrSettings:
+        return AsrSettings(resource_id="asr_settings", name="asr_settings", **fields)
+
+    def _voice_llm(self, model_id: str) -> VoiceLLMSettings:
+        return VoiceLLMSettings(
+            resource_id="voice_llm_settings", name="voice_llm_settings", model_id=model_id
+        )
+
+    def test_known_pair_is_written_by_name(self):
+        """Pull writes a provider and model the library knows as the model's name."""
+        pretty = AsrSettings.to_pretty_dict(
+            {"asr_model": {"provider": "deepgram", "model": "nova-3"}}, library=self.library
+        )
+
+        self.assertEqual(pretty["asr_model"], {"name": "Deepgram Nova 3"})
+
+    def test_unknown_pair_is_written_as_stored(self):
+        """A pair the library doesn't have keeps its IDs."""
+        pretty = AsrSettings.to_pretty_dict(
+            {"asr_model": {"provider": "deepgram", "model": "nova-9"}}, library=self.library
+        )
+
+        self.assertEqual(pretty["asr_model"], {"provider": "deepgram", "model": "nova-9"})
+
+    def test_name_is_read_back_as_ids(self):
+        """A known name resolves to the provider and model, ignoring case."""
+        yaml_dict = AsrSettings.from_pretty_dict(
+            {"asr_model": {"name": "deepgram nova 3"}}, library=self.library
+        )
+
+        self.assertEqual(yaml_dict["asr_model"], {"provider": "deepgram", "model": "nova-3"})
+
+    def test_unknown_name_is_kept_for_validate(self):
+        """A name the library doesn't know stays a name, and validate refuses it."""
+        yaml_dict = AsrSettings.from_pretty_dict(
+            {"asr_model": {"name": "Typo"}}, library=self.library
+        )
+        settings = self._settings(asr_model=yaml_dict["asr_model"])
+
+        self.assertEqual(settings.asr_model, ASRModel(name="Typo"))
+        with self.assertRaisesRegex(ValueError, "Unknown ASR model 'Typo'"):
+            settings.validate(library=self.library)
+
+    def test_name_with_ids_is_an_error(self):
+        """asr_model takes a name or IDs, not both."""
+        settings = self._settings(asr_model={"name": "Deepgram Nova 3", "provider": "deepgram"})
+
+        with self.assertRaisesRegex(ValueError, "not both"):
+            settings.validate(library=self.library)
+
+    def test_name_without_a_library_warns(self):
+        """With no library the name can't be checked, so validate warns."""
+        settings = self._settings(asr_model={"name": "Deepgram Nova 3"})
+
+        with self.assertLogs("poly.resources.asr_settings", level="WARNING") as logs:
+            settings.validate()
+
+        self.assertIn("without the model library", logs.output[0])
+
+    def test_pair_missing_from_the_library_warns(self):
+        """A pair the list doesn't have warns but validates."""
+        settings = self._settings(asr_model={"provider": "deepgram", "model": "nova-9"})
+
+        with self.assertLogs("poly.resources.asr_settings", level="WARNING"):
+            settings.validate(library=self.library)
+
+    def test_asr_model_with_end_to_end_voice_model_is_refused(self):
+        """asr_model doesn't apply while the voice language model is end to end."""
+        settings = self._settings(asr_model={"provider": "deepgram", "model": "nova-3"})
+
+        with self.assertRaisesRegex(ValueError, "asr_model doesn't apply"):
+            settings.validate(library=self.library, voice_llm_settings=self._voice_llm("MODEL-2"))
+
+    def test_speech_end_delay_with_end_to_end_voice_model_is_refused(self):
+        """speech_end_delay_ms doesn't apply while the voice language model is end to end."""
+        settings = self._settings(speech_end_delay_ms=800)
+
+        with self.assertRaisesRegex(ValueError, "speech_end_delay_ms doesn't apply"):
+            settings.validate(library=self.library, voice_llm_settings=self._voice_llm("MODEL-2"))
+
+    def test_settings_with_a_traditional_voice_model_validate(self):
+        """With a voice model that isn't end to end, both settings are fine."""
+        settings = self._settings(
+            asr_model={"provider": "deepgram", "model": "nova-3"}, speech_end_delay_ms=800
+        )
+
+        settings.validate(library=self.library, voice_llm_settings=self._voice_llm("MODEL-1"))
+
+    def test_end_to_end_check_needs_the_library(self):
+        """Without a library there's no way to tell the model is end to end, so it passes."""
+        settings = self._settings(speech_end_delay_ms=800)
+
+        settings.validate(voice_llm_settings=self._voice_llm("MODEL-2"))
+
+
+class ChannelLLMSettingsTests(unittest.TestCase):
+    """The voice and web chat language models, by name."""
+
+    def setUp(self):
+        self.library = make_library()
+
+    def _settings(self, cls=VoiceLLMSettings, **fields):
+        resource_id = "voice_llm_settings" if cls is VoiceLLMSettings else "chat_llm_settings"
+        return cls(resource_id=resource_id, name=resource_id, **fields)
+
+    def test_from_projection_reads_each_channels_model(self):
+        """Each channel's llmSettings.modelId becomes that channel's model_id."""
+        projection = {
+            "channels": {
+                "voice": {"config": {"llmSettings": {"modelId": "MODEL-1"}}},
+                "webChat": {"config": {"llmSettings": {"modelId": "MODEL-2"}}},
+            }
+        }
+
+        voice = VoiceLLMSettings.from_projection(projection)["voice_llm_settings"]
+        chat = ChatLLMSettings.from_projection(projection)["chat_llm_settings"]
+
+        self.assertEqual(voice.model_id, "MODEL-1")
+        self.assertEqual(chat.model_id, "MODEL-2")
+
+    def test_no_channel_access_pulls_nothing(self):
+        """Without the channels slice there's nothing to pull."""
+        self.assertEqual(VoiceLLMSettings.from_projection({}), {})
+        self.assertEqual(ChatLLMSettings.from_projection({}), {})
+
+    def test_known_model_id_is_written_by_name(self):
+        """Pull writes a model ID the library knows as the model's name."""
+        pretty = VoiceLLMSettings.to_pretty_dict({"model_id": "MODEL-1"}, library=self.library)
+
+        self.assertEqual(pretty, {"name": "PolyAI Raven 3.5"})
+
+    def test_unknown_model_id_is_written_as_stored(self):
+        """A model ID the library doesn't have stays as the ID."""
+        pretty = VoiceLLMSettings.to_pretty_dict({"model_id": "MODEL-9"}, library=self.library)
+
+        self.assertEqual(pretty, {"model_id": "MODEL-9"})
+
+    def test_name_is_read_back_as_the_model_id(self):
+        """A known name resolves to the model ID, ignoring case."""
+        yaml_dict = VoiceLLMSettings.from_pretty_dict(
+            {"name": "polyai raven 3.5"}, library=self.library
+        )
+
+        self.assertEqual(yaml_dict, {"model_id": "MODEL-1"})
+
+    def test_name_without_a_library_is_kept(self):
+        """Loading never fails on a model name, even with no library."""
+        self.assertEqual(
+            VoiceLLMSettings.from_pretty_dict({"name": "PolyAI Raven 3.5"}),
+            {"name": "PolyAI Raven 3.5"},
+        )
+
+    def test_yaml_round_trips_by_name_and_by_id(self):
+        """The section is written back as it was read."""
+        for yaml_dict in ({"name": "Typo"}, {"model_id": "MODEL-9"}):
+            with self.subTest(yaml_dict=yaml_dict):
+                settings = VoiceLLMSettings.from_yaml_dict(
+                    yaml_dict, resource_id="voice_llm_settings", name="voice_llm_settings"
+                )
+
+                self.assertEqual(settings.to_yaml_dict(), yaml_dict)
+
+    def test_update_proto_names_the_channel_and_model(self):
+        """Push sends the model ID with the right channel type."""
+        for cls, channel_type in (
+            (VoiceLLMSettings, ChannelType.VOICE),
+            (ChatLLMSettings, ChannelType.WEB_CHAT),
+        ):
+            with self.subTest(cls=cls.__name__):
+                proto = self._settings(cls, model_id="MODEL-1").build_update_proto()
+
+                self.assertEqual(proto.channel_type, channel_type)
+                self.assertEqual(proto.llm_settings.model_id, "MODEL-1")
+
+    def test_unresolved_name_cannot_be_pushed(self):
+        """A name that never resolved can't become a command."""
+        with self.assertRaisesRegex(ValueError, "Unknown language model 'Typo'"):
+            self._settings(model_name="Typo").build_update_proto()
+
+    def test_unknown_name_is_an_error(self):
+        """A name the library doesn't know fails validation."""
+        with self.assertRaisesRegex(ValueError, "Unknown language model 'Typo'"):
+            self._settings(model_name="Typo").validate(library=self.library)
+
+    def test_name_and_model_id_together_is_an_error(self):
+        """The section takes a name or a model ID, not both."""
+        with self.assertRaisesRegex(ValueError, "not both"):
+            self._settings(model_name="PolyAI Raven 3.5", model_id="MODEL-1").validate(
+                library=self.library
+            )
+
+    def test_name_without_a_library_warns(self):
+        """With no library a name can't be checked, so validate warns."""
+        with self.assertLogs("poly.resources.channel_settings", level="WARNING"):
+            self._settings(model_name="PolyAI Raven 3.5").validate()
+
+    def test_model_id_missing_from_the_library_warns(self):
+        """An ID the list doesn't have warns but validates."""
+        with self.assertLogs("poly.resources.channel_settings", level="WARNING"):
+            self._settings(model_id="MODEL-9").validate(library=self.library)
+
+    def test_web_chat_refuses_a_model_without_web_chat_support(self):
+        """Web chat only takes models that support it."""
+        with self.assertRaisesRegex(ValueError, "does not support chat"):
+            self._settings(ChatLLMSettings, model_id="MODEL-2").validate(library=self.library)
+
+    def test_voice_takes_a_model_without_web_chat_support(self):
+        """The voice channel takes any model."""
+        self._settings(model_id="MODEL-2").validate(library=self.library)
+
 class EntityTests(unittest.TestCase):
     def test_validate_entity(self):
         """Test validation of entity config fields."""
@@ -9025,6 +9251,55 @@ class AsrSettingsTests(unittest.TestCase):
     def test_omitted_sections_stay_omitted(self):
         """A file with no sections writes back with no sections."""
         self.assertEqual(self._from_yaml({}).to_yaml_dict(), {})
+
+    def test_asr_model_round_trips_by_name_and_by_ids(self):
+        """asr_model is written back as it was read, whether by name or by IDs."""
+        for asr_model in ({"name": "Deepgram Nova 3"}, {"provider": "deepgram", "model": "nova-3"}):
+            with self.subTest(asr_model=asr_model):
+                yaml_dict = {**self.FULL_YAML, "asr_model": asr_model}
+
+                self.assertEqual(self._from_yaml(yaml_dict).to_yaml_dict(), yaml_dict)
+
+    def test_adding_asr_model_pushes_an_update(self):
+        """A new asr_model is sent with the voice channel's ASR config command."""
+        new = {**self.FULL_YAML, "asr_model": {"provider": "deepgram", "model": "nova-3"}}
+
+        _, updated, deleted = self._changes(new, self.FULL_YAML)
+
+        asr = [sub for sub in updated if isinstance(sub, ASRModelConfig)]
+        self.assertEqual(len(asr), 1)
+        proto = asr[0].build_update_proto()
+        self.assertEqual((proto.asr_config.provider_id, proto.asr_config.model_id), ("deepgram", "nova-3"))
+        self.assertEqual(deleted, [])
+
+    def test_removing_asr_model_pushes_a_reset(self):
+        """Removing asr_model resets the voice channel to Auto."""
+        old = {**self.FULL_YAML, "asr_model": {"provider": "deepgram", "model": "nova-3"}}
+
+        _, updated, deleted = self._changes(self.FULL_YAML, old)
+
+        asr = [sub for sub in deleted if isinstance(sub, ASRModelConfig)]
+        self.assertEqual(len(asr), 1)
+        self.assertEqual(asr[0].delete_command_type, "voice_channel_reset_asr_config")
+        asr[0].build_delete_proto()
+        self.assertFalse(any(isinstance(sub, ASRModelConfig) for sub in updated))
+
+    def test_unchanged_asr_model_pushes_nothing(self):
+        """An asr_model that hasn't changed sends no ASR command."""
+        yaml_dict = {**self.FULL_YAML, "asr_model": {"provider": "deepgram", "model": "nova-3"}}
+
+        _, updated, deleted = self._changes(yaml_dict, yaml_dict)
+
+        self.assertFalse(any(isinstance(sub, ASRModelConfig) for sub in updated + deleted))
+
+    def test_unresolved_asr_model_name_cannot_be_pushed(self):
+        """A name that never resolved to a provider and model can't become a command."""
+        config = ASRModelConfig(
+            resource_id="asr_settings", name="asr_model", asr_model=ASRModel(name="Typo")
+        )
+
+        with self.assertRaisesRegex(ValueError, "Unknown ASR model 'Typo'"):
+            config.build_update_proto()
 
     def test_status_dict_roundtrip(self):
         """The status file form rebuilds an equal resource."""
@@ -14261,15 +14536,26 @@ class ValidateWebchatSiblingsTests(unittest.TestCase):
             resource_prefix=None,
         )
 
-    def test_all_three_present_no_error(self):
+    def test_all_present_no_error(self):
         """No error when all webchat config types are present."""
         mappings = [
             self._make_mapping(ChatGreeting),
+            self._make_mapping(ChatLLMSettings),
             self._make_mapping(ChatSafetyFilters),
             self._make_mapping(ChatStylePrompt),
         ]
         # Should not raise
         resource_utils.validate_webchat_siblings(ChatGreeting, mappings)
+
+    def test_missing_chat_llm_settings_raises(self):
+        """The chat language model is one of the webchat config resources that go together."""
+        mappings = [
+            self._make_mapping(ChatGreeting),
+            self._make_mapping(ChatSafetyFilters),
+            self._make_mapping(ChatStylePrompt),
+        ]
+        with self.assertRaisesRegex(ValueError, "ChatLLMSettings"):
+            resource_utils.validate_webchat_siblings(ChatGreeting, mappings)
 
     def test_none_present_no_error(self):
         """No error when resource_mappings is empty."""
@@ -15983,6 +16269,22 @@ class AsrSettingsFromProjection(unittest.TestCase):
                 "barge_in": {"enabled": True, "allow_on_first_turn": False, "max_per_call": 5},
             },
         )
+
+    def test_asr_config_is_pulled_as_asr_model(self):
+        """The voice channel's ASR config becomes asr_model, by provider and model."""
+        projection = {
+            "channels": {"voice": {"asrConfig": {"providerId": "deepgram", "modelId": "nova-3"}}}
+        }
+
+        asr = AsrSettings.from_projection(projection)["asr_settings"]
+
+        self.assertEqual(asr.asr_model, ASRModel(provider="deepgram", model="nova-3"))
+
+    def test_no_asr_config_pulls_no_asr_model(self):
+        """A voice channel on Auto has no asrConfig, and pulls no asr_model."""
+        asr = AsrSettings.from_projection({"channels": {"voice": {}}})["asr_settings"]
+
+        self.assertIsNone(asr.asr_model)
 
     def test_unset_fields_pull_only_the_legacy_barge_in(self):
         """A voice channel with nothing set pulls barge-in off, from the unset legacy flag."""
