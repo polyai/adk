@@ -1,0 +1,47 @@
+{
+    "last_refreshed": "2999-01-01T00:00:00+00:00",
+    "region": "us-1",
+    "asr_models": [
+        {
+            "model_id": "ASR-auto0001",
+            "name": "Auto",
+            "provider": "default",
+            "model": "poly-latency"
+        },
+        {
+            "model_id": "ASR-nova0003",
+            "name": "Deepgram Nova 3",
+            "provider": "deepgram",
+            "model": "nova-3"
+        }
+    ],
+    "llm_models": [
+        {
+            "model_id": "MODEL-raven035",
+            "name": "PolyAI Raven 3.5",
+            "provider_model_id": "polywhirl-3-5",
+            "poly_ai_model": true,
+            "speech_native": false,
+            "supports_webchat": true,
+            "supports_temperature": true
+        },
+        {
+            "model_id": "MODEL-rsn00001",
+            "name": "Dialog-RSN-1",
+            "provider_model_id": "raven-omni",
+            "poly_ai_model": true,
+            "speech_native": true,
+            "supports_webchat": true,
+            "supports_temperature": false
+        },
+        {
+            "model_id": "MODEL-gpt41min",
+            "name": "GPT-4.1 mini",
+            "provider_model_id": "azure-oai-gpt-41-mini",
+            "poly_ai_model": false,
+            "speech_native": false,
+            "supports_webchat": true,
+            "supports_temperature": true
+        }
+    ]
+}
