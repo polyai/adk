@@ -7,6 +7,23 @@ Voice settings configure the agent's behavior on the voice (phone call) channel.
 ## Location
 `voice/configuration.yaml`
 
+## Language model
+
+The model that runs the agent on calls, in `llm`.
+
+### Fields
+- **name** (str): The model's name, as `poly library llm` lists it. A model whose name can't be
+  resolved by that region's list is pulled as `model_id` instead, and that keeps working.
+
+### Example
+```yaml
+llm:
+  name: PolyAI Raven 3.5
+```
+
+A name not in the region's list fails `poly validate`. An end-to-end model handles speech itself,
+so the ASR model and speech end delay in `asr_settings.yaml` can't be set with one.
+
 ## Greeting
 
 The first message the agent speaks when a call starts.
@@ -100,6 +117,8 @@ error.
 
 ## Full `voice/configuration.yaml` example
 ```yaml
+llm:
+  name: PolyAI Raven 3.5
 greeting:
   welcome_message: Hello! Welcome to our service. Your account shows {{attr:member_status}}. How can I assist you today?
   language_code: en-GB

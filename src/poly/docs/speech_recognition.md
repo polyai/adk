@@ -6,14 +6,18 @@ Speech recognition resources control how the agent processes user speech input o
 
 ```
 voice/speech_recognition/
-├── asr_settings.yaml               # Turn-taking: speech end delay, barge-in
+├── asr_settings.yaml               # ASR model and turn-taking: speech end delay, barge-in
 ├── keyphrase_boosting.yaml         # Optional - bias ASR toward specific words
 └── transcript_corrections.yaml     # Optional - regex corrections on ASR output
 ```
 
 ## ASR Settings (`asr_settings.yaml`)
 
-The voice channel's turn-taking. Update only: the file can't be created or deleted.
+The voice channel's ASR model and turn-taking. Update only: the file can't be created or deleted.
+
+`asr_model` is optional: left out, the voice channel uses Auto, and removing it resets it on the
+next push. Give the model's `name`, as `poly library asr` lists it. A model whose name can't be
+resolved by that region's list is pulled as `provider` and `model` instead, and those keep working.
 
 `speech_end_delay_ms` is optional: left out, it uses the platform default, and removing it
 resets it on the next push.
@@ -23,11 +27,17 @@ off. Older projects that set barge-in with Agent Studio's earlier ASR setting pu
 from that setting, and the first change pushed to `barge_in` stores the whole section.
 
 ### Fields
+- **asr_model**: The voice channel's speech recognition model.
+  - **name** (str) The model's name, as `poly library asr` lists it
 - **speech_end_delay_ms** (int): Silence, in milliseconds, before the caller's turn is treated as finished. 200–1500.
 - **barge_in**: Whether the caller can interrupt the agent.
   - **enabled** (bool), **allow_on_first_turn** (bool), **max_per_call** (int, 0 or more).
 
 Keys inside a section are checked, so a misspelt key is an error.
+
+An `asr_model` name not in the region's list fails `poly validate`. `asr_model` and
+`speech_end_delay_ms` can't be set while the voice channel's language model is end to end, since
+neither applies then.
 
 If PolyAI manages the project's voice configuration, `speech_end_delay_ms` is overwritten at
 runtime. You can check on the project's **Voice › Model** page in Agent Studio, which shows a
@@ -35,6 +45,8 @@ runtime. You can check on the project's **Voice › Model** page in Agent Studio
 
 ### Example
 ```yaml
+asr_model:
+  name: Deepgram Nova 3
 speech_end_delay_ms: 800
 barge_in:
   enabled: true

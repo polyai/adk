@@ -60,7 +60,9 @@ ASR settings are defined in:
 voice/speech_recognition/asr_settings.yaml
 ~~~
 
-They hold the voice channel's turn-taking settings, and apply to the whole voice channel. Individual flow steps can override barge-in, ASR provider, VAD, and LLM settings for a single turn — see [ASR override](./flows.md#asr-override) and [barge-in](./flows.md#barge-in) in the flows reference.
+They hold the voice channel's speech recognition model and turn-taking settings, and apply to the whole voice channel. Individual flow steps can override barge-in, ASR provider, VAD, and LLM settings for a single turn — see [ASR override](./flows.md#asr-override) and [barge-in](./flows.md#barge-in) in the flows reference.
+
+`asr_model` is optional: left out, the voice channel uses Auto, and removing it resets it on the next push. Give the model's `name`, as [`poly library asr`](../cli/library.md#poly-library-asr) lists it. If a model's name can't be resolved by that region's list, `poly pull` writes its `provider` and `model` IDs instead, and those keep working.
 
 `speech_end_delay_ms` is optional: left out, it uses the platform default, and removing it resets it on the next push.
 
@@ -70,12 +72,16 @@ They hold the voice channel's turn-taking settings, and apply to the whole voice
 
 | Field | Description |
 |---|---|
+| `asr_model` | The voice channel's speech recognition model, by `name`. |
 | `speech_end_delay_ms` | How long the caller must be silent, in milliseconds, before the agent treats their turn as finished. |
 | `barge_in` | Whether the caller can interrupt the agent: `enabled`, `allow_on_first_turn` and `max_per_call`. |
 
 ### Example
 
 ~~~yaml
+asr_model:
+  name: Deepgram Nova 3
+
 speech_end_delay_ms: 800
 
 barge_in:
@@ -182,6 +188,8 @@ corrections:
 
 ## Validation
 
+- `asr_model` takes either a `name` or the model's `provider` and `model`, not both. A `name` must be in the region's list, which [`poly library asr`](../cli/library.md#poly-library-asr) shows; with no saved list, `poly validate` warns that it can't check the name, and `poly push` refuses it. A `provider` and `model` that aren't in the list only warn.
+- `asr_model` and `speech_end_delay_ms` can't be set while the voice channel's [language model](./voice_settings.md#language-model) is end to end, since neither applies then. Remove them, or choose a language model that isn't end to end.
 - `speech_end_delay_ms` must be a whole number between 200 and 1500.
 - `barge_in` can't be removed; set `enabled: false` instead.
 - `barge_in.max_per_call` can't be negative.
