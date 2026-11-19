@@ -25,6 +25,12 @@ chat/
 
 <div class="grid cards" markdown>
 
+-   **Language model**
+
+    ---
+
+    The model that runs the agent in web chat.
+
 -   **Greeting**
 
     ---
@@ -44,6 +50,25 @@ chat/
     Optional chat-channel content safety filter overrides.
 
 </div>
+
+## Language model
+
+The model that runs the agent in web chat, set in `llm`.
+
+### Fields
+
+| Field | Description |
+|---|---|
+| `name` | Model to use, by the name [`poly library llm`](../cli/library.md#poly-library-llm) lists. It must be one that works in web chat |
+
+### Example
+
+~~~yaml
+llm:
+  name: GPT-4.1 mini
+~~~
+
+If a model's name can't be resolved by that region's list, `poly pull` writes its `model_id` instead, and that keeps working.
 
 ## Greeting
 
@@ -105,11 +130,15 @@ See the [Safety filters reference](./safety_filters.md) for the full schema, fie
 
 ## Validation
 
-Chat greeting, style prompt, and safety filters are validated as a set: if any one of `chat/configuration.yaml`'s `greeting` or `style_prompt` sections or `chat/safety_filters.yaml` is present locally, the other two must be present as well. `poly push` fails with a "Webchat config resources must all be present together" error if one is missing.
+- Chat language model, greeting, style prompt, and safety filters are validated as a set: if any one of `chat/configuration.yaml`'s `llm`, `greeting` or `style_prompt` sections or `chat/safety_filters.yaml` is present locally, the others must be present as well. `poly push` fails with a "Webchat config resources must all be present together" error if one is missing.
+- `llm` takes either a `name` or a `model_id`, not both. A `name` must be in the region's list, which [`poly library llm`](../cli/library.md#poly-library-llm) shows; with no saved list, `poly validate` warns that it can't check the name, and `poly push` refuses it. A `model_id` that isn't in the list only warns.
+- The model must work in web chat: `poly library llm` shows which do.
 
 ## Full example
 
 ~~~yaml
+llm:
+  name: GPT-4.1 mini
 greeting:
   welcome_message: Hi! How can I help you today?
   language_code: en-GB

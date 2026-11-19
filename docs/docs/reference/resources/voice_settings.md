@@ -27,6 +27,12 @@ voice/
 
 <div class="grid cards" markdown>
 
+-   **Language model**
+
+    ---
+
+    The model that runs the agent on calls.
+
 -   **Greeting**
 
     ---
@@ -64,6 +70,27 @@ voice/
     Optional voice-channel content safety filter overrides.
 
 </div>
+
+## Language model
+
+The model that runs the agent on the voice channel, set in `llm`.
+
+### Fields
+
+| Field | Description |
+|---|---|
+| `name` | Model to use, by the name [`poly library llm`](../cli/library.md#poly-library-llm) lists |
+
+### Example
+
+~~~yaml
+llm:
+  name: PolyAI Raven 3.5
+~~~
+
+If a model's name can't be resolved by that region's list, `poly pull` writes its `model_id` instead, and that keeps working.
+
+An end-to-end model handles speech itself, so the voice channel's ASR model and speech end delay don't apply with one. See [speech recognition](./speech_recognition.md#asr-settings).
 
 ## Greeting
 
@@ -202,6 +229,9 @@ See the [Safety filters reference](./safety_filters.md) for the full schema, fie
 ## Full example
 
 ~~~yaml
+llm:
+  name: PolyAI Raven 3.5
+
 greeting:
   welcome_message: Hello! Welcome to our service. Your account shows {{attr:member_status}}. How can I assist you today?
   language_code: en-GB
@@ -231,6 +261,7 @@ background_ambience:
 
 ## Validation
 
+- `llm` takes either a `name` or a `model_id`, not both. A `name` must be in the region's list, which [`poly library llm`](../cli/library.md#poly-library-llm) shows; with no saved list, `poly validate` warns that it can't check the name, and `poly push` refuses it. A `model_id` that isn't in the list only warns.
 - `filler_phrases.initial_interval_seconds` must be at least 0.5, and `interval_seconds` at least 1. An enabled `filler_phrases` needs at least one phrase.
 - `background_ambience` can't be removed once it exists; set `enabled: false` instead.
 - `background_ambience` needs a `preset`, and `loudness` must be between -70 and -20. A preset Agent Studio doesn't know is a warning, not an error.
