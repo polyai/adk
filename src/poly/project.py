@@ -54,6 +54,7 @@ from poly.migration_utils import (
     run_migrations,
 )
 from poly.resources import (
+    AsrSettings,
     BaseFlowStep,
     ChildTopic,
     Document,
@@ -74,6 +75,7 @@ from poly.resources import (
     TestCase,
     Topic,
 )
+from poly.resources.channel_settings import VoiceLLMSettings
 from poly.resources.outbound_campaign import (
     campaign_folder_of,
     route_targets,
@@ -3638,9 +3640,16 @@ class AgentStudioProject:
         for resource_type, resources in resources_dict.items():
             for resource_id, resource in resources.items():
                 try:
+                    kwargs = {}
+                    if isinstance(resource, AsrSettings):
+                        kwargs["voice_llm_settings"] = next(
+                            iter(resources_dict.get(VoiceLLMSettings, {}).values()), None
+                        )
+
                     resource.validate(
                         resource_mappings=resource_mappings,
                         library=library,
+                        **kwargs,
                     )
                 except ValueError as e:
                     # ValueError already contains context, just add file path if missing
