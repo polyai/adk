@@ -9,9 +9,10 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from poly.handlers.platform_api import PlatformAPIHandler
+from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command, CommandBatch
 from poly.handlers.sdk import SourcererAPIError, SourcererSDK
+from poly.handlers.sync_client import SyncClientHandler
 from poly.tests.testing_utils import make_mock_response
 
 
@@ -420,9 +421,9 @@ class OutboundCampaignRequests(unittest.TestCase):
         self.addCleanup(patch.stopall)
 
     def _validate(self, campaign_id: str = "CMPGN-1") -> dict:
-        return PlatformAPIHandler.validate_outbound_campaign(
-            "us-1", "acc-1", "proj-1", "main", campaign_id
-        )
+        interface = AgentStudioInterface("us-1", "acc-1", "proj-1", "main")
+        interface.sync_client = MagicMock(spec=SyncClientHandler, branch_id="main")
+        return interface.validate_outbound_campaign(campaign_id)
 
     def _error_from(self, response) -> SourcererAPIError:
         self.request.return_value = response
