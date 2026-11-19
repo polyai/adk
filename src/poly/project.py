@@ -4122,57 +4122,27 @@ class AgentStudioProject:
         )
 
     def get_campaign(self, name: str) -> OutboundCampaign:
-        """Return the pushed campaign with this name or folder name.
+        """Return the pulled campaign with this name or folder name.
 
         Raises:
-            ValueError: if no campaign matches, several do, or it exists only in local files.
+            ValueError: if no campaign matches, or several share the name.
         """
         campaigns = list(self.resources.get(OutboundCampaign, {}).values())
-        if campaign := self._match_campaign(name, campaigns):
-            return campaign
-        local_folders = self._local_campaign_folders()
-        if (
-            name in local_folders.values()
-            or name in local_folders
-            or resource_utils.clean_name(name) in local_folders
-        ):
-            raise ValueError(f"Campaign '{name}' has not been pushed yet. Run `poly push` first.")
-        known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
-        raise ValueError(
-            f"No campaign named '{name}'. Campaigns: {known}. If it was made in Agent Studio or "
-            "pushed by someone else, run `poly pull` first."
-        )
-
-    @staticmethod
-    def _match_campaign(name: str, campaigns: list[OutboundCampaign]) -> Optional[OutboundCampaign]:
-        for matches in (
-            lambda campaign: name in (campaign.name, campaign.platform_label),
-            lambda campaign: campaign.folder == name,
-            lambda campaign: campaign.folder == resource_utils.clean_name(name),
-        ):
-            found = [campaign for campaign in campaigns if matches(campaign)]
-            if len(found) == 1:
-                return found[0]
-            if len(found) > 1:
-                folders = ", ".join(sorted(campaign.folder for campaign in found))
-                raise ValueError(
-                    f"More than one campaign is named '{name}'. Name it by its folder "
-                    f"instead: {folders}."
-                )
-        return None
-
-    def _local_campaign_folders(self) -> dict[str, Optional[str]]:
-        folders: dict[str, Optional[str]] = {}
-        for file_path in OutboundCampaign.discover_resources(self.root_path):
-            folder = campaign_folder_of(file_path)
-            try:
-                campaign_file = os.path.dirname(file_path)
-                folders[folder] = resource_utils.load_yaml(Resource.read_from_file(campaign_file))[
-                    "name"
-                ]
-            except (OSError, ValueError, KeyError, TypeError):
-                folders[folder] = None
-        return folders
+        found = [
+            campaign
+            for campaign in campaigns
+            if name in (campaign.name, campaign.platform_label, campaign.folder)
+        ]
+        if len(found) > 1:
+            folders = ", ".join(sorted(campaign.folder for campaign in found))
+            raise ValueError(
+                f"More than one campaign is named '{name}'. Name it by its folder instead: "
+                f"{folders}."
+            )
+        if not found:
+            known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
+            raise ValueError(f"No campaign named '{name}'. Campaigns: {known}.")
+        return found[0]
 
     def campaign_node_names(self, campaign: OutboundCampaign) -> dict[str, str]:
         """Return the names of a pushed campaign's nodes, by node id."""
@@ -4204,23 +4174,38 @@ class AgentStudioProject:
             server_message=error.server_message,
         )
 
-    def campaign_branch_is_gone(self) -> bool:
-        """Whether the current branch no longer exists remotely, so campaign checks use main.
-
-        `validate_campaign` then runs on main.
-        """
-        local_branch = self.branch_id
-        return (
-            local_branch not in (None, "main") and self.api_handler.ensure_remote_branch() == "main"
-        )
-
     def validate_campaign(self, name: str) -> dict[str, Any]:
-        """Check the campaign as pushed to the current branch; returns its errors and warnings."""
+        """Check the campaign as pushed to the current branch.
+
+        Returns:
+            The platform's result: `valid`, plus `errors` and `warnings`, each issue naming
+            its node by name in `node` and in its `message`.
+        """
         campaign = self.get_campaign(name)
         try:
-            return self.api_handler.validate_outbound_campaign(campaign.resource_id)
+            result = self.api_handler.validate_outbound_campaign(campaign.resource_id)
         except SourcererAPIError as e:
             raise self._campaign_error("validate", campaign, e) from e
+        names = self.campaign_node_names(campaign)
+        for key in ("errors", "warnings"):
+            result[key] = [self._name_issue(issue, names) for issue in result.get(key) or []]
+        return result
+
+    @staticmethod
+    def _name_nodes(text: str, names: dict[str, str]) -> str:
+        for node_id in sorted(names, key=len, reverse=True):
+            if names[node_id]:
+                text = text.replace(node_id, names[node_id])
+        return text
+
+    @classmethod
+    def _name_issue(cls, issue: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
+        named = dict(issue)
+        if issue.get("node_id"):
+            named["node"] = names.get(issue["node_id"]) or issue["node_id"]
+        if issue.get("message") is not None:
+            named["message"] = cls._name_nodes(str(issue["message"]), names)
+        return named
 
     def trigger_tests(self, test_ids: list[str], name: str | None = None) -> dict:
         """Trigger tests for the project.

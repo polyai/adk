@@ -13,7 +13,7 @@ Examples:
 poly campaign validate 'Appointment reminders'
 ~~~
 
-Every subcommand takes the campaign's name (or its folder name) and acts on the campaign as pushed, not on your local files: run [`poly push`](./push.md) first. `validate` uses your current branch; if it no longer exists, it uses `main`, says so, and adds `"branch": "main"` to the `--json` output.
+Every subcommand takes the campaign's name (or its folder name) and acts on the campaign as pushed, not on your local files: run [`poly push`](./push.md) first. `validate` uses your current branch, or `main` if your branch no longer exists, as other commands do.
 
 Outbound campaigns must be turned on for the project; otherwise every subcommand exits `1` and says so.
 
@@ -46,9 +46,11 @@ Exits `1` when the campaign is not valid, with an `error` beside the `result` in
   "result": {
     "valid": true,
     "errors": [],
-    "warnings": [{"node_id": "call-1", "field": "flowName", "message": "...", "is_warning": true}]
+    "warnings": [
+      {"node_id": "call-1", "node": "Reminder call", "field": "flowName", "message": "...", "is_warning": true}
+    ]
   }
 }
 ~~~
 
-The `result` is the platform's own, so it refers to nodes by id; the human output shows their names, in its messages too.
+The `result` is the platform's, with each issue's node named in `node` and in its `message`; `node_id` keeps the id.

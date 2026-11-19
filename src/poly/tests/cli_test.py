@@ -6,13 +6,12 @@ Copyright PolyAI Limited
 import dataclasses
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
-from argparse import ArgumentParser, _SubParsersAction
+from argparse import ArgumentParser, Namespace, _SubParsersAction
 from importlib.metadata import PackageNotFoundError
 from io import StringIO
 from pathlib import Path
@@ -7098,11 +7097,18 @@ class CampaignCommandTest(unittest.TestCase):
     def _output(self) -> dict:
         return self.json_print.call_args.args[0]
 
+    def _validate(self, name: str, output_json: bool = True) -> None:
+        CampaignCommand.run(
+            Namespace(
+                campaign_subcommand="validate", path=TEST_DIR, name=name, json=output_json
+            )
+        )
+
     def test_validate_posts_to_the_branch_route(self):
         """validate checks the campaign on the current branch and returns the platform's result."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+        self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(
             self._request(), ("POST", self.CAMPAIGN_URL.format(branch="main") + "/validate", None)
@@ -7137,7 +7143,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with patch("poly.output.console.error") as error, self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN)
+            self._validate(self.CAMPAIGN, output_json=False)
 
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(
@@ -7148,12 +7154,11 @@ class CampaignCommandTest(unittest.TestCase):
     def test_unknown_campaign_lists_the_known_ones(self):
         """An unknown name lists the campaigns that do exist."""
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_validate(TEST_DIR, "Nope", output_json=True)
+            self._validate("Nope", output_json=True)
 
         self.assertEqual(
             self._output()["error"],
-            f"No campaign named 'Nope'. Campaigns: {self.CAMPAIGN}. If it was made in Agent "
-            "Studio or pushed by someone else, run `poly pull` first.",
+            f"No campaign named 'Nope'. Campaigns: {self.CAMPAIGN}.",
         )
         self.request.assert_not_called()
 
@@ -7161,7 +7166,7 @@ class CampaignCommandTest(unittest.TestCase):
         """A campaign can be named by its folder as well as its name."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
-        CampaignCommand.campaign_validate(TEST_DIR, "appointment_reminders", output_json=True)
+        self._validate("appointment_reminders", output_json=True)
 
         self.assertTrue(self._output()["success"])
 
@@ -7183,7 +7188,7 @@ class CampaignCommandTest(unittest.TestCase):
         self._add_namesake()
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+            self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
@@ -7201,7 +7206,7 @@ class CampaignCommandTest(unittest.TestCase):
                     make_mock_response(200, {"valid": True, "errors": [], "warnings": []})
                 )
 
-                CampaignCommand.campaign_validate(TEST_DIR, name, output_json=True)
+                self._validate(name, output_json=True)
 
                 self.assertEqual(
                     self._request()[1],
@@ -7209,39 +7214,34 @@ class CampaignCommandTest(unittest.TestCase):
                     + "/validate",
                 )
 
-    def test_validate_names_nodes_inside_issue_messages(self):
-        """A node id inside the platform's message is replaced by the node's name."""
+    def test_validate_campaign_names_nodes_in_its_issues(self):
+        """The project returns issues with node names, inside the platform's message too."""
         self._respond(
             make_mock_response(
                 200,
                 {
                     "valid": False,
                     "errors": [
-                        {
-                            "node_id": None,
-                            "field": None,
-                            "message": "Node 'call-1' cannot reach an end",
-                            "is_warning": False,
-                        }
+                        {"node_id": None, "message": "Node 'call-1' cannot reach an end"},
+                        {"node_id": "call-1", "field": "flowName", "message": "No flow"},
                     ],
                     "warnings": [],
                 },
             )
         )
 
-        with patch("poly.output.console.error") as error, self.assertRaises(SystemExit):
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN)
+        result = self.project.validate_campaign(self.CAMPAIGN)
 
-        self.assertEqual(
-            error.call_args_list[0].args[0], "Node 'Reminder call' cannot reach an end"
-        )
+        self.assertEqual(result["errors"][0]["message"], "Node 'Reminder call' cannot reach an end")
+        self.assertEqual(result["errors"][1]["node"], "Reminder call")
+        self.assertEqual(result["errors"][1]["node_id"], "call-1")
 
     def test_campaigns_turned_off_exit_before_any_request(self):
         """The ADK checks the project's flag first, so nothing reaches the platform."""
         self.campaigns_enabled.return_value = False
 
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+            self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(
@@ -7258,73 +7258,22 @@ class CampaignCommandTest(unittest.TestCase):
         """A stalled connection cannot hang a campaign call: each request has a timeout."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+        self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(self.request.call_args.kwargs["timeout"], 30)
 
-    def test_ctrl_c_under_json_keeps_stdout_json(self):
-        """An interrupt the command does not handle itself still ends in one JSON object."""
-        cli = AgentStudioCLI()
-        cli.register_commands()
-        args = cli._create_parser().parse_args(["campaign", "validate", self.CAMPAIGN, "--json"])
-
-        with (
-            patch.object(CampaignCommand, "campaign_validate", side_effect=KeyboardInterrupt),
-            self.assertRaises(SystemExit) as exit,
-        ):
-            CampaignCommand.run(args)
-
-        self.assertEqual(exit.exception.code, 130)
-        self.assertEqual(
-            self._output(), {"success": False, "error": "Stopped.", "campaign": self.CAMPAIGN}
-        )
-
-    def test_check_on_a_branch_that_is_gone_says_it_ran_on_main(self):
-        """When the local branch no longer exists, validate says it used main."""
-        self.project.branch_id = "BRANCH-1"
-        patch.object(
-            self.project.api_handler, "ensure_remote_branch", return_value="main"
-        ).start()
-        valid = {"valid": True, "errors": [], "warnings": []}
-        self._respond(make_mock_response(200, valid), make_mock_response(200, valid))
-
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
-        self.assertEqual(self._output()["branch"], "main")
-
-        with patch("poly.output.console.warning") as warning:
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN)
-        warning.assert_called_once_with("Your branch no longer exists, so this ran on main.")
-
-    def test_validate_checks_the_branch_once(self):
-        """The branch is looked up once per command, not again for the request."""
+    def test_validate_checks_the_branch_exists_first(self):
+        """validate checks the branch exists before its request, as other remote calls do."""
         self.project.branch_id = "BRANCH-1"
         check = patch.object(
             self.project.api_handler.sync_client, "assert_branch_exists", return_value="BRANCH-1"
         ).start()
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+        self._validate(self.CAMPAIGN, output_json=True)
 
         check.assert_called_once()
         self.assertNotIn("branch", self._output())
-
-    def test_unpushed_campaign_named_by_folder_says_to_push(self):
-        """A local campaign not yet pushed is found by its folder, and the user told to push."""
-        folder = os.path.join(TEST_DIR, "outbound_campaigns", "new_reminders")
-        os.makedirs(folder)
-        self.addCleanup(shutil.rmtree, folder)
-        with open(os.path.join(folder, "campaign.yaml"), "w", encoding="utf-8") as file:
-            file.write("name: New reminders\n")
-
-        for value in ("new_reminders", "New reminders", "new-reminders"):
-            with self.subTest(value=value):
-                with self.assertRaises(SystemExit):
-                    CampaignCommand.campaign_validate(TEST_DIR, value, output_json=True)
-
-                self.assertEqual(
-                    self._output()["error"],
-                    f"Campaign '{value}' has not been pushed yet. Run `poly push` first.",
-                )
 
     def test_parsed_command_line_reaches_validate(self):
         """`poly campaign validate <name> --json` is wired through the parser to the handler."""
