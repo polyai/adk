@@ -121,10 +121,6 @@ def request_outcome(error: SourcererAPIError) -> Optional[str]:
     return None
 
 
-class InterruptedBeforeSending(KeyboardInterrupt):
-    """Ctrl+C came before a command batch was sent, so nothing it holds was applied."""
-
-
 class SourcererSDK:
     """SDK for interacting with the Sourcerer API"""
 
@@ -792,8 +788,6 @@ class SourcererSDK:
                         error_code=e.error_code,
                         server_message=e.server_message,
                     ) from e
-                except KeyboardInterrupt as e:
-                    raise InterruptedBeforeSending() from e
 
             # Validate the command batch before sending
             logger.debug("Command batch validation:")

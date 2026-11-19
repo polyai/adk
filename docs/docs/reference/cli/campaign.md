@@ -15,7 +15,7 @@ poly campaign preview 'Appointment reminders' --phone +15550100
 poly campaign publish 'Appointment reminders'
 ~~~
 
-Every subcommand takes the campaign's name (or its folder name) and acts on the campaign as pushed, not on your local files: run [`poly push`](./push.md) first. `validate` and `preview` use your current branch; if it no longer exists, they use `main`, say so, and add `"branch": "main"` to the `--json` output. `test`, `publish`, `pause`, `resume` and `archive` act on the live campaign on `main`, whatever branch you are on, and take its name as `main` has it, so a campaign made on a branch must be merged first.
+Every subcommand takes the campaign's name (or its folder name) and acts on the campaign as pushed, not on your local files: run [`poly push`](./push.md) first. `validate` and `preview` use your current branch, or `main` if your branch no longer exists, as other commands do. `test`, `publish`, `pause`, `resume` and `archive` act on the live campaign on `main`, whatever branch you are on, and take its name as `main` has it, so a campaign made on a branch must be merged first.
 
 Outbound campaigns must be turned on for the project; otherwise every subcommand exits `1` and says so.
 
@@ -50,12 +50,14 @@ Exits `1` when the campaign is not valid, with an `error` beside the `result` in
   "result": {
     "valid": true,
     "errors": [],
-    "warnings": [{"node_id": "call-1", "field": "flowName", "message": "...", "is_warning": true}]
+    "warnings": [
+      {"node_id": "call-1", "node": "Reminder call", "field": "flowName", "message": "...", "is_warning": true}
+    ]
   }
 }
 ~~~
 
-The `result` is the platform's own, so it refers to nodes by id; the human output shows their names, in its messages too.
+The `result` is the platform's, with each issue's node named in `node` and in its `message`; `node_id` keeps the id.
 
 ## `poly campaign preview`
 
@@ -127,7 +129,7 @@ poly campaign test 'Appointment reminders' --phone +15550100 --start-node 'Remin
 
 !!! warning "A start that is not confirmed may still call"
 
-    If the platform does not confirm the start, for example because the connection dropped or you stopped the command, the step may still have started. The error says so, and `--json` adds `"unconfirmed": true`. Check the campaign's tests in Agent Studio before you run `test` again.
+    If the platform does not confirm the start, for example because the connection dropped, the step may still have started. The error says so, and `--json` adds `"unconfirmed": true`. Check the campaign's tests in Agent Studio before you run `test` again.
 
 `--json` output shape:
 
@@ -265,7 +267,7 @@ poly campaign archive 'Appointment reminders'
 
 !!! warning "These commands act on live"
 
-    `publish`, `pause`, `resume` and `archive` change what the live campaign does straight away. Each asks for confirmation unless you pass `--force` or `--json`. If the platform does not confirm the change, for example because the connection dropped or you stopped the command, it may still have gone through, even if Agent Studio still shows the old status: the error says so, and `--json` adds `"unconfirmed": true`. To settle it:
+    `publish`, `pause`, `resume` and `archive` change what the live campaign does straight away. Each asks for confirmation unless you pass `--force` or `--json`. If the platform does not confirm the change, for example because the connection dropped, it may still have gone through, even if Agent Studio still shows the old status: the error says so, and `--json` adds `"unconfirmed": true`. To settle it:
 
     - `publish` and `pause`: send the same command again. That is safe, since a campaign already in the state asked for counts as done.
     - `resume`: run it again. If it says the campaign is active, the first resume went through.

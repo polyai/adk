@@ -7,16 +7,16 @@ import dataclasses
 import json
 import os
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
-from argparse import ArgumentParser, _SubParsersAction
+from argparse import ArgumentParser, Namespace, _SubParsersAction
 from importlib.metadata import PackageNotFoundError
 from io import StringIO
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import argcomplete
@@ -452,7 +452,6 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.pull_project_from_env.assert_not_called()
         self.proj.push_project.assert_not_called()
-
 
     @patch("poly.output.console.plain")
     @patch("poly.output.console.error")
@@ -2578,7 +2577,6 @@ class SyncExitCodeTest(unittest.TestCase):
             mock_json_print.call_args[0][0], {"success": True, "message": "No changes detected"}
         )
 
-
     @patch("poly.cli_commands.sync.json_print")
     def test_validate_json_with_errors_exits_1(self, mock_json_print):
         """JSON mode reports validation errors as a failure and exits 1."""
@@ -3247,7 +3245,6 @@ class DeploymentsPromoteTest(unittest.TestCase):
         self.proj.promote_deployment.assert_called_once_with(
             "dep-1", "pre-release", message="custom notes"
         )
-
 
     @patch("poly.cli_commands.deployments.json_print")
     def test_dry_run_is_a_json_success_without_calling_api(self, mock_json):
@@ -5906,10 +5903,8 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
 
     def setUp(self):
         """Simulate a pip install on Windows, with the call extra installed."""
-        self.method = self._patch_update("_detect_install_method", return_value="pip"
-        )
-        self._patch_update("_package_spec", return_value="polyai-adk[call]"
-        )
+        self.method = self._patch_update("_detect_install_method", return_value="pip")
+        self._patch_update("_package_spec", return_value="polyai-adk[call]")
         self._patch("sys.platform", new="win32")
         self._patch("sys.executable", new=self.WINDOWS_PYTHON)
         self.warning = self._patch("poly.output.console.warning")
@@ -5987,8 +5982,7 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
 
     @patch("poly.output.console.info")
     def test_windows_check_still_reports_an_update(self, mock_info):
-        self._patch_update("check_for_updates", return_value=(True, "9.9.9")
-        )
+        self._patch_update("check_for_updates", return_value=(True, "9.9.9"))
 
         UpdateCommand.update(check=True, output_json=False)
 
@@ -5997,8 +5991,7 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
 
     @patch("poly.output.console.info")
     def test_windows_update_refuses_before_announcing_it(self, mock_info):
-        self._patch_update("check_for_updates", return_value=(True, "9.9.9")
-        )
+        self._patch_update("check_for_updates", return_value=(True, "9.9.9"))
         run = self._patch("poly.cli_commands.update.subprocess.run")
 
         UpdateCommand.update(check=False, output_json=False)
@@ -6010,10 +6003,8 @@ class RefuseIfNotUpgradableTest(unittest.TestCase):
 
     @patch("poly.output.console.info")
     def test_windows_update_with_nothing_new_still_refreshes_skills(self, mock_info):
-        self._patch_update("check_for_updates", return_value=(False, "0.0.1")
-        )
-        skills = self._patch_update("update_skills_step", return_value=True
-        )
+        self._patch_update("check_for_updates", return_value=(False, "0.0.1"))
+        skills = self._patch_update("update_skills_step", return_value=True)
 
         UpdateCommand.update(check=False, output_json=False)
 
@@ -7101,11 +7092,61 @@ class CampaignCommandTest(unittest.TestCase):
     def _output(self) -> dict:
         return self.json_print.call_args.args[0]
 
+    def _run(self, subcommand: str, name: str, **kwargs: Any) -> None:
+        renamed = {
+            "contact_file": "contact",
+            "sample_outputs_file": "sample_outputs",
+            "send_result": "result",
+            "send_state": "state",
+            "fields": "field",
+            "output_json": "json",
+        }
+        values = {
+            "contact": None,
+            "phone": None,
+            "first_name": None,
+            "last_name": None,
+            "external_id": None,
+            "field": [],
+            "sample_outputs": None,
+            "start_node": None,
+            "run": None,
+            "result": None,
+            "state": [],
+            "ask_branches": None,
+            "last_send": None,
+            "timeout": 600,
+            "force": False,
+            "json": False,
+        }
+        values.update({renamed.get(key, key): value for key, value in kwargs.items()})
+        CampaignCommand.run(
+            Namespace(campaign_subcommand=subcommand, path=TEST_DIR, name=name, **values)
+        )
+
+    def _lifecycle(
+        self, action: str, name: str, force: bool = False, output_json: bool = False
+    ) -> None:
+        CampaignCommand.run(
+            Namespace(
+                campaign_subcommand=action,
+                path=TEST_DIR,
+                name=name,
+                force=force,
+                json=output_json,
+            )
+        )
+
+    def _validate(self, name: str, output_json: bool = True) -> None:
+        CampaignCommand.run(
+            Namespace(campaign_subcommand="validate", path=TEST_DIR, name=name, json=output_json)
+        )
+
     def test_validate_posts_to_the_branch_route(self):
         """validate checks the campaign on the current branch and returns the platform's result."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+        self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(
             self._request(), ("POST", self.CAMPAIGN_URL.format(branch="main") + "/validate", None)
@@ -7140,7 +7181,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with patch("poly.output.console.error") as error, self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN)
+            self._validate(self.CAMPAIGN, output_json=False)
 
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(
@@ -7162,8 +7203,8 @@ class CampaignCommandTest(unittest.TestCase):
             json.dump({"Import contacts": {"contacts": []}}, outputs)
         self.addCleanup(os.remove, outputs.name)
 
-        CampaignCommand.campaign_preview(
-            TEST_DIR,
+        self._run(
+            "preview",
             self.CAMPAIGN,
             phone="+15550100",
             first_name="Ada",
@@ -7199,8 +7240,8 @@ class CampaignCommandTest(unittest.TestCase):
     def test_preview_of_a_node_the_campaign_lacks_fails_before_sending(self):
         """A node name that matches nothing is refused with the campaign's node names."""
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_preview(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", start_node="Goodbye", output_json=True
+            self._run(
+                "preview", self.CAMPAIGN, phone="+15550100", start_node="Goodbye", output_json=True
             )
 
         self.assertEqual(exit.exception.code, 1)
@@ -7219,9 +7260,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with patch("poly.project.time.sleep"):
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", first_name="Ada", output_json=True
-            )
+            self._run("test", self.CAMPAIGN, phone="+15550100", first_name="Ada", output_json=True)
 
         main_url = self.CAMPAIGN_URL.format(branch="main")
         self.assertEqual(
@@ -7245,8 +7284,8 @@ class CampaignCommandTest(unittest.TestCase):
             make_mock_response(200, {"step_id": "TSTEP-2", "status": "done", "run": run}),
         )
 
-        CampaignCommand.campaign_test(
-            TEST_DIR,
+        self._run(
+            "test",
             self.CAMPAIGN,
             phone="+15550100",
             start_node="call-1",
@@ -7311,8 +7350,8 @@ class CampaignCommandTest(unittest.TestCase):
     def test_test_refuses_a_run_without_its_node(self):
         """A run without the node it stopped at is refused before anything is sent."""
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_test(
-                TEST_DIR,
+            self._run(
+                "test",
                 self.CAMPAIGN,
                 phone="+15550100",
                 run='{"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}',
@@ -7338,9 +7377,7 @@ class CampaignCommandTest(unittest.TestCase):
             with self.subTest(action=action):
                 self.post.reset_mock()
 
-                CampaignCommand.campaign_lifecycle(
-                    TEST_DIR, action, self.CAMPAIGN, force=True, output_json=True
-                )
+                self._lifecycle(action, self.CAMPAIGN, force=True, output_json=True)
 
                 url = self.post.call_args.args[0]
                 self.assertTrue(url.endswith("/branches/main/command-batch"), url)
@@ -7383,9 +7420,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
 
         error = self._output()["error"]
         self.assertIn(f"Could not resume campaign '{self.CAMPAIGN}'", error)
@@ -7397,7 +7432,7 @@ class CampaignCommandTest(unittest.TestCase):
         """Without --force, a lifecycle action asks first and sends nothing when declined."""
         with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
             confirm.return_value.ask.return_value = False
-            CampaignCommand.campaign_lifecycle(TEST_DIR, "publish", self.CAMPAIGN)
+            self._lifecycle("publish", self.CAMPAIGN)
 
         self.assertEqual(exit.exception.code, 0)
         self.assertIn("to live", confirm.call_args.args[0])
@@ -7406,7 +7441,7 @@ class CampaignCommandTest(unittest.TestCase):
     def test_lifecycle_on_an_unknown_campaign_fails_before_asking(self):
         """A name that matches no campaign fails straight away, without the live warning."""
         with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_lifecycle(TEST_DIR, "publish", "Nope")
+            self._lifecycle("publish", "Nope")
 
         self.assertEqual(exit.exception.code, 1)
         confirm.assert_not_called()
@@ -7419,14 +7454,14 @@ class CampaignCommandTest(unittest.TestCase):
 
         with patch("questionary.confirm") as confirm:
             confirm.return_value.ask.return_value = True
-            CampaignCommand.campaign_lifecycle(TEST_DIR, "pause", "appointment_reminders")
+            self._lifecycle("pause", "appointment_reminders")
 
         self.assertIn(f"'{self.CAMPAIGN}'", confirm.call_args.args[0])
 
     def test_test_on_an_unknown_campaign_fails_before_asking(self):
         """test checks the campaign exists before warning that it will call the contact."""
         with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_test(TEST_DIR, "Nope", phone="+15550100")
+            self._run("test", "Nope", phone="+15550100")
 
         self.assertEqual(exit.exception.code, 1)
         confirm.assert_not_called()
@@ -7435,12 +7470,11 @@ class CampaignCommandTest(unittest.TestCase):
     def test_unknown_campaign_lists_the_known_ones(self):
         """An unknown name lists the campaigns that do exist."""
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_validate(TEST_DIR, "Nope", output_json=True)
+            self._validate("Nope", output_json=True)
 
         self.assertEqual(
             self._output()["error"],
-            f"No campaign named 'Nope'. Campaigns: {self.CAMPAIGN}. If it was made in Agent "
-            "Studio or pushed by someone else, run `poly pull` first.",
+            f"No campaign named 'Nope'. Campaigns: {self.CAMPAIGN}.",
         )
         self.request.assert_not_called()
 
@@ -7448,7 +7482,7 @@ class CampaignCommandTest(unittest.TestCase):
         """A campaign can be named by its folder as well as its name."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
-        CampaignCommand.campaign_validate(TEST_DIR, "appointment_reminders", output_json=True)
+        self._validate("appointment_reminders", output_json=True)
 
         self.assertTrue(self._output()["success"])
 
@@ -7470,7 +7504,7 @@ class CampaignCommandTest(unittest.TestCase):
         self._add_namesake()
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+            self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
@@ -7488,7 +7522,7 @@ class CampaignCommandTest(unittest.TestCase):
                     make_mock_response(200, {"valid": True, "errors": [], "warnings": []})
                 )
 
-                CampaignCommand.campaign_validate(TEST_DIR, name, output_json=True)
+                self._validate(name, output_json=True)
 
                 self.assertEqual(
                     self._request()[1],
@@ -7496,88 +7530,34 @@ class CampaignCommandTest(unittest.TestCase):
                     + "/validate",
                 )
 
-    def test_validate_names_nodes_inside_issue_messages(self):
-        """A node id inside the platform's message is replaced by the node's name."""
+    def test_validate_campaign_names_nodes_in_its_issues(self):
+        """The project returns issues with node names, inside the platform's message too."""
         self._respond(
             make_mock_response(
                 200,
                 {
                     "valid": False,
                     "errors": [
-                        {
-                            "node_id": None,
-                            "field": None,
-                            "message": "Node 'call-1' cannot reach an end",
-                            "is_warning": False,
-                        }
+                        {"node_id": None, "message": "Node 'call-1' cannot reach an end"},
+                        {"node_id": "call-1", "field": "flowName", "message": "No flow"},
                     ],
                     "warnings": [],
                 },
             )
         )
 
-        with patch("poly.output.console.error") as error, self.assertRaises(SystemExit):
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN)
+        result = self.project.validate_campaign(self.CAMPAIGN)
 
-        self.assertEqual(
-            error.call_args_list[0].args[0], "Node 'Reminder call' cannot reach an end"
-        )
-
-    def test_preview_carries_on_with_the_last_send(self):
-        """The previous step's last send goes back as journey.last_send, and the hint gives it."""
-        last_send = {
-            "node_id": "call-1",
-            "node_label": "Reminder call",
-            "channel": "voice",
-            "status": "completed",
-            "result": "voicemail",
-            "state": {},
-            "attempted_at": None,
-            "completed_at": None,
-        }
-        result = {
-            "steps": [],
-            "stopped_at": "sms-1",
-            "stop_reason": "reply",
-            "error": None,
-            "notes": [],
-            "last_send": {**last_send, "node_id": "sms-1"},
-        }
-        self._respond(make_mock_response(200, result))
-
-        with patch("poly.output.console.info") as info:
-            CampaignCommand.campaign_preview(
-                TEST_DIR,
-                self.CAMPAIGN,
-                phone="+15550100",
-                start_node="Reminder call",
-                send_result="voicemail",
-                last_send=json.dumps(last_send),
-            )
-
-        self.assertEqual(
-            self._request()[2]["contactData"],
-            {"phone": "+15550100", "journey": {"last_send": last_send}},
-        )
-        hint = next(call.args[0] for call in info.call_args_list if "Carry on" in call.args[0])
-        self.assertIn(f"--last-send {shlex.quote(json.dumps(result['last_send']))}", hint)
-
-    def test_preview_refuses_a_last_send_on_a_first_step(self):
-        """A last send only makes sense when carrying on from a node."""
-        with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_preview(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", last_send="{}", output_json=True
-            )
-
-        self.assertIn("carries on from a node", self._output()["error"])
-        self.request.assert_not_called()
+        self.assertEqual(result["errors"][0]["message"], "Node 'Reminder call' cannot reach an end")
+        self.assertEqual(result["errors"][1]["node"], "Reminder call")
+        self.assertEqual(result["errors"][1]["node_id"], "call-1")
 
     def test_campaigns_turned_off_exit_before_any_request(self):
         """The ADK checks the project's flag first, so nothing reaches the platform."""
         self.campaigns_enabled.return_value = False
 
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+            self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(
@@ -7598,9 +7578,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
 
         error = self._output()["error"]
         self.assertEqual(
@@ -7615,9 +7593,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.post.return_value = make_mock_response(412)
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "publish", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("publish", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
@@ -7641,9 +7617,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True, output_json=True
-            )
+            self._run("test", self.CAMPAIGN, phone="+15550100", force=True, output_json=True)
 
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(
@@ -7665,8 +7639,8 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", timeout=0, force=True, output_json=True
+            self._run(
+                "test", self.CAMPAIGN, phone="+15550100", timeout=0, force=True, output_json=True
             )
 
         self.assertEqual(exit.exception.code, 1)
@@ -7691,9 +7665,7 @@ class CampaignCommandTest(unittest.TestCase):
             patch("poly.project.time.sleep") as sleep,
             self.assertRaises(SystemExit) as exit,
         ):
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True, output_json=True
-            )
+            self._run("test", self.CAMPAIGN, phone="+15550100", force=True, output_json=True)
 
         self.assertEqual(exit.exception.code, 1)
         self.assertGreater(self.request.call_count, 10)
@@ -7718,9 +7690,7 @@ class CampaignCommandTest(unittest.TestCase):
         ]
 
         with patch("poly.project.time.sleep"):
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True, output_json=True
-            )
+            self._run("test", self.CAMPAIGN, phone="+15550100", force=True, output_json=True)
 
         self.assertEqual(
             self._output(), {"success": True, "campaign": self.CAMPAIGN, "test_step": done}
@@ -7735,15 +7705,13 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True, output_json=True
-            )
+            self._run("test", self.CAMPAIGN, phone="+15550100", force=True, output_json=True)
 
         self.assertEqual(self.request.call_count, 2)
         self.assertEqual(self._output()["run"], run)
 
     def test_test_prints_the_run_as_soon_as_the_step_starts(self):
-        """The run is printed, ready to paste, before waiting, so an interrupted wait keeps it."""
+        """The run is printed, ready to paste, before waiting, so a failed wait keeps it."""
         run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
         self._respond(
             make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run})
@@ -7751,15 +7719,17 @@ class CampaignCommandTest(unittest.TestCase):
 
         with (
             patch.object(
-                self.project, "wait_for_campaign_test_step", side_effect=KeyboardInterrupt
+                self.project,
+                "wait_for_campaign_test_step",
+                side_effect=TimeoutError("Stopped waiting. The step carries on."),
             ),
             patch("poly.output.console.info") as info,
             patch("poly.output.console.error") as error,
             self.assertRaises(SystemExit) as exit,
         ):
-            CampaignCommand.campaign_test(TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True)
+            self._run("test", self.CAMPAIGN, phone="+15550100", force=True)
 
-        self.assertEqual(exit.exception.code, 130)
+        self.assertEqual(exit.exception.code, 1)
         lines = [call.args[0] for call in info.call_args_list]
         self.assertIn("TSTEP-1", lines[0])
         self.assertEqual(lines[1], f"Run: {shlex.quote(json.dumps(run))}")
@@ -7777,7 +7747,7 @@ class CampaignCommandTest(unittest.TestCase):
                     patch("questionary.confirm") as confirm,
                     self.assertRaises(SystemExit) as exit,
                 ):
-                    CampaignCommand.campaign_test(TEST_DIR, self.CAMPAIGN, **kwargs)
+                    self._run("test", self.CAMPAIGN, **kwargs)
 
                 self.assertEqual(exit.exception.code, 1)
                 confirm.assert_not_called()
@@ -7788,9 +7758,7 @@ class CampaignCommandTest(unittest.TestCase):
         for value in ("contacts/ada.json", "ada.json"):
             with self.subTest(value=value):
                 with self.assertRaises(SystemExit):
-                    CampaignCommand.campaign_preview(
-                        TEST_DIR, self.CAMPAIGN, contact_file=value, output_json=True
-                    )
+                    self._run("preview", self.CAMPAIGN, contact_file=value, output_json=True)
 
                 self.assertEqual(self._output()["error"], f"No file at {value} for --contact.")
 
@@ -7829,8 +7797,8 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_test(
-                TEST_DIR,
+            self._run(
+                "test",
                 self.CAMPAIGN,
                 phone="+15550100",
                 start_node="Reminder call",
@@ -7840,8 +7808,8 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertIn("has no node named 'Reminder call'", self._output()["error"])
         self.request.assert_not_called()
 
-        CampaignCommand.campaign_test(
-            TEST_DIR,
+        self._run(
+            "test",
             self.CAMPAIGN,
             phone="+15550100",
             start_node="Reminder call (live)",
@@ -7856,12 +7824,8 @@ class CampaignCommandTest(unittest.TestCase):
         """A campaign only on an unmerged branch is refused before test or lifecycle prompts."""
         self._on_branch({})
         runs = {
-            "test": lambda: CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100"
-            ),
-            "publish": lambda: CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "publish", self.CAMPAIGN
-            ),
+            "test": lambda: self._run("test", self.CAMPAIGN, phone="+15550100"),
+            "publish": lambda: self._lifecycle("publish", self.CAMPAIGN),
         }
         for command, run in runs.items():
             with self.subTest(command=command):
@@ -7903,9 +7867,7 @@ class CampaignCommandTest(unittest.TestCase):
 
         self._respond(make_mock_response(202, queued), make_mock_response(200, step))
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True, output_json=True
-            )
+            self._run("test", self.CAMPAIGN, phone="+15550100", force=True, output_json=True)
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(
             self._output(),
@@ -7923,7 +7885,7 @@ class CampaignCommandTest(unittest.TestCase):
             patch("poly.output.console.error") as error,
             self.assertRaises(SystemExit) as exit,
         ):
-            CampaignCommand.campaign_test(TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True)
+            self._run("test", self.CAMPAIGN, phone="+15550100", force=True)
         self.assertEqual(exit.exception.code, 1)
         success.assert_not_called()
         messages = [call.args[0] for call in error.call_args_list]
@@ -7946,9 +7908,7 @@ class CampaignCommandTest(unittest.TestCase):
             ),
             self.assertRaises(SystemExit),
         ):
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
-            )
+            self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
 
         self.assertEqual(
             [json.loads(line) for line in stderr.getvalue().splitlines()],
@@ -7961,83 +7921,41 @@ class CampaignCommandTest(unittest.TestCase):
         self._respond(make_mock_response(202, {"status": "queued", "run": run}))
 
         with patch("sys.stderr", StringIO()), self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
-            )
+            self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
 
         self.assertEqual(exit.exception.code, 1)
         output = self._output()
         self.assertFalse(output["success"])
-        self.assertEqual((output["step_id"], output["run"]), (None, run))
+        self.assertEqual(output["run"], run)
         self.assertEqual(self.request.call_count, 1)
 
     def test_campaign_requests_have_a_timeout(self):
         """A stalled connection cannot hang a campaign call: each request has a timeout."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
+        self._validate(self.CAMPAIGN, output_json=True)
 
         self.assertEqual(self.request.call_args.kwargs["timeout"], 30)
 
-    def test_test_step_poll_that_times_out_is_retried(self):
-        """A poll whose request times out is retried like a dropped connection."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        done = {"step_id": "TSTEP-1", "status": "done", "run": run, "result": None}
-        self.request.side_effect = [
-            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
-            requests.ReadTimeout("stalled"),
-            make_mock_response(200, done),
-        ]
+    def test_validate_checks_the_branch_exists_first(self):
+        """validate checks the branch exists before its request, as other remote calls do."""
+        self.project.branch_id = "BRANCH-1"
+        check = patch.object(
+            self.project.api_handler.sync_client, "assert_branch_exists", return_value="BRANCH-1"
+        ).start()
+        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
 
-        with patch("poly.project.time.sleep"):
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True, output_json=True
-            )
+        self._validate(self.CAMPAIGN, output_json=True)
 
-        self.assertTrue(self._output()["success"])
-
-    def test_start_that_times_out_says_the_step_may_have_started(self):
-        """A start the platform is slow to answer may still call, so it is not called a failure."""
-        self.request.side_effect = requests.ReadTimeout("read timed out")
-
-        with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
-            )
-
-        self.assertEqual(exit.exception.code, 1)
-        error = self._output()["error"]
-        self.assertIn("may have started and may call or text +15550100", error)
-        self.assertIn("Check the campaign's tests in Agent Studio", error)
-        self.assertNotIn("Could not test", error)
-        self.assertEqual(self.request.call_count, 1)
-        self.assertEqual(self.request.call_args.kwargs["timeout"], (10, 300))
-
-    def test_polls_that_fail_stop_at_the_timeout(self):
-        """Retries never wait past --timeout."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        self._respond(
-            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
-            *[make_mock_response(503, content=b"Service Unavailable") for _ in range(4)],
-        )
-
-        with patch("poly.project.time.sleep") as sleep, self.assertRaises(SystemExit):
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", timeout=0, output_json=True
-            )
-
-        self.assertEqual(self.request.call_count, 2)
-        sleep.assert_not_called()
-        self.assertEqual(self._output()["run"], run)
+        check.assert_called_once()
+        self.assertNotIn("branch", self._output())
 
     def test_main_is_read_once_per_command_even_on_main(self):
         """Live checks read main's projection, not the local copy, and only once."""
         self.post.return_value = make_mock_response(200, {"success": True})
         self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
 
-        CampaignCommand.campaign_lifecycle(
-            TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
-        )
+        self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
 
         self.pull_main.assert_called_once_with("main")
 
@@ -8060,9 +7978,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.pull_main.side_effect = fail
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(
             self._output()["error"], "Could not read the campaigns on main: Try again shortly"
@@ -8093,9 +8009,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.post.side_effect = requests.ReadTimeout("read timed out")
 
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(exit.exception.code, 1)
         output = self._output()
@@ -8109,41 +8023,6 @@ class CampaignCommandTest(unittest.TestCase):
             "pause` instead.",
         )
         self.assertEqual(self.post.call_count, 1)
-
-    def test_lifecycle_stopped_while_sending_says_it_may_have_gone_through(self):
-        """Ctrl+C during the send gets the same warning, not a bare abort."""
-        with (
-            patch.object(self.project, "resume_campaign", side_effect=KeyboardInterrupt),
-            patch("poly.output.console.error") as error,
-            self.assertRaises(SystemExit) as exit,
-        ):
-            CampaignCommand.campaign_lifecycle(TEST_DIR, "resume", self.CAMPAIGN, force=True)
-
-        self.assertEqual(exit.exception.code, 130)
-        message = error.call_args.args[0]
-        self.assertTrue(message.startswith("You stopped the command while it was being sent"))
-        self.assertIn("may have gone through", message)
-        self.assertIn("Run `poly campaign resume` again", message)
-        self.assertIn("send `poly campaign pause` instead", message)
-
-    def test_test_stopped_while_starting_says_the_step_may_have_started(self):
-        """Ctrl+C while a step is starting warns that it may still call."""
-        with (
-            patch.object(self.project, "start_campaign_test", side_effect=KeyboardInterrupt),
-            self.assertRaises(SystemExit) as exit,
-        ):
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
-            )
-
-        self.assertEqual(exit.exception.code, 130)
-        output = self._output()
-        self.assertFalse(output["success"])
-        self.assertTrue(
-            output["error"].startswith("You stopped the command while the step was starting")
-        )
-        self.assertIn("may call or text +15550100", output["error"])
-        self.assertIn("Check the campaign's tests in Agent Studio", output["error"])
 
     @staticmethod
     def _dropped() -> requests.ConnectionError:
@@ -8162,9 +8041,7 @@ class CampaignCommandTest(unittest.TestCase):
     def _start_test_after(self, answer: object) -> dict:
         self.request.side_effect = [answer]
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
-            )
+            self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
         return self._output()
 
     def test_test_start_that_may_have_reached_the_platform_is_unconfirmed(self):
@@ -8222,9 +8099,7 @@ class CampaignCommandTest(unittest.TestCase):
                 self.post.side_effect = [answer]
 
                 with self.assertRaises(SystemExit):
-                    CampaignCommand.campaign_lifecycle(
-                        TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-                    )
+                    self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
 
                 output = self._output()
                 self.assertTrue(output["unconfirmed"])
@@ -8238,9 +8113,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.post.side_effect = [self._unreachable()]
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertNotIn("unconfirmed", self._output())
         self.assertTrue(self._output()["error"].startswith("Could not resume campaign"))
@@ -8248,8 +8121,8 @@ class CampaignCommandTest(unittest.TestCase):
     def test_contact_metadata_that_is_not_an_object_is_refused_with_fields(self):
         """--field adds to the contact's metadata, so that must be an object."""
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_test(
-                TEST_DIR,
+            self._run(
+                "test",
                 self.CAMPAIGN,
                 contact_file='{"phone": "+15550100", "metadata": ["a"]}',
                 fields=["plan=gold"],
@@ -8270,9 +8143,7 @@ class CampaignCommandTest(unittest.TestCase):
         """How a call or text went only makes sense when carrying on from it."""
         for kwargs in ({"send_result": "no_answer"}, {"send_state": ["booked=true"]}):
             with self.subTest(**kwargs), self.assertRaises(SystemExit):
-                CampaignCommand.campaign_preview(
-                    TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True, **kwargs
-                )
+                self._run("preview", self.CAMPAIGN, phone="+15550100", output_json=True, **kwargs)
 
             self.assertIn("carries on from a node", self._output()["error"])
         self.request.assert_not_called()
@@ -8283,7 +8154,7 @@ class CampaignCommandTest(unittest.TestCase):
         cases = {
             "validate": (
                 invalid,
-                lambda: CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True),
+                lambda: self._validate(self.CAMPAIGN, output_json=True),
                 f"Campaign '{self.CAMPAIGN}' is not valid.",
             ),
             "preview error": (
@@ -8294,9 +8165,7 @@ class CampaignCommandTest(unittest.TestCase):
                     "error": {"error": "TemplateError", "node_id": "call-1"},
                     "notes": [],
                 },
-                lambda: CampaignCommand.campaign_preview(
-                    TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
-                ),
+                lambda: self._run("preview", self.CAMPAIGN, phone="+15550100", output_json=True),
                 "The preview stopped at an error: TemplateError.",
             ),
             "preview step cap": (
@@ -8307,9 +8176,7 @@ class CampaignCommandTest(unittest.TestCase):
                     "error": None,
                     "notes": [],
                 },
-                lambda: CampaignCommand.campaign_preview(
-                    TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
-                ),
+                lambda: self._run("preview", self.CAMPAIGN, phone="+15550100", output_json=True),
                 "The path hit the step cap, which usually means the campaign loops.",
             ),
         }
@@ -8335,9 +8202,7 @@ class CampaignCommandTest(unittest.TestCase):
         }
         self._respond(make_mock_response(200, result))
 
-        CampaignCommand.campaign_preview(
-            TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
-        )
+        self._run("preview", self.CAMPAIGN, phone="+15550100", output_json=True)
 
         self.assertTrue(self._output()["success"])
 
@@ -8360,7 +8225,7 @@ class CampaignCommandTest(unittest.TestCase):
             patch("poly.output.console.error") as error,
             self.assertRaises(SystemExit) as exit,
         ):
-            CampaignCommand.campaign_test(TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True)
+            self._run("test", self.CAMPAIGN, phone="+15550100", force=True)
 
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(
@@ -8379,9 +8244,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with patch("poly.project.time.sleep"):
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True, output_json=True
-            )
+            self._run("test", self.CAMPAIGN, phone="+15550100", force=True, output_json=True)
 
         self.assertTrue(self._output()["success"])
 
@@ -8405,7 +8268,7 @@ class CampaignCommandTest(unittest.TestCase):
 
         with patch("questionary.confirm") as confirm, patch("poly.output.console.success") as ok:
             confirm.return_value.ask.return_value = True
-            CampaignCommand.campaign_lifecycle(TEST_DIR, "pause", "Live reminders")
+            self._lifecycle("pause", "Live reminders")
 
         self.assertIn("'Live reminders'", confirm.call_args.args[0])
         self.assertEqual(ok.call_args.args[0], "Paused campaign 'Live reminders'.")
@@ -8418,9 +8281,7 @@ class CampaignCommandTest(unittest.TestCase):
         self.session.get.side_effect = self._dropped()
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
 
         output = self._output()
         self.assertNotIn("unconfirmed", output)
@@ -8438,204 +8299,12 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
             f"Could not pause campaign '{self.CAMPAIGN}': The campaign could not be paused.\n"
             "Check the campaign's status in Agent Studio.",
-        )
-
-    def test_proxy_and_tls_failures_are_plain_failures(self):
-        """A proxy or TLS failure never reached the platform, so nothing started."""
-        cases = {
-            "proxy": requests.exceptions.ProxyError("proxy refused"),
-            "tls": requests.exceptions.SSLError("bad certificate"),
-        }
-        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
-        for case, failure in cases.items():
-            with self.subTest(case=case):
-                output = self._start_test_after(failure)
-                self.assertNotIn("unconfirmed", output)
-                self.assertTrue(output["error"].startswith("Could not test campaign"))
-
-                self.post.side_effect = [failure]
-                with self.assertRaises(SystemExit):
-                    CampaignCommand.campaign_lifecycle(
-                        TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
-                    )
-                self.assertNotIn("unconfirmed", self._output())
-
-    def test_server_errors_after_sending_are_unconfirmed(self):
-        """A 500 on either, or a concurrent-change 409 on a live change, may come after it applied."""
-        output = self._start_test_after(
-            self._platform_error(500, "UNHANDLED_EXCEPTION", "Internal Server Error")
-        )
-        self.assertTrue(output["unconfirmed"])
-        self.assertIn("may have started", output["error"])
-
-        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
-        cases = {
-            "500": self._platform_error(500, "UNHANDLED_EXCEPTION", "Internal Server Error"),
-            "409": self._platform_error(
-                409, "CONFLICT", "Concurrent change detected. Please retry."
-            ),
-        }
-        for case, answer in cases.items():
-            with self.subTest(case=case):
-                self.post.side_effect = [answer]
-
-                with self.assertRaises(SystemExit):
-                    CampaignCommand.campaign_lifecycle(
-                        TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-                    )
-
-                self.assertTrue(self._output()["unconfirmed"])
-                self.assertIn("may have gone through", self._output()["error"])
-
-    def test_test_step_that_hits_the_step_cap_fails(self):
-        """A step that hits the step cap is a failure, as in preview."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        step = {
-            "step_id": "TSTEP-1",
-            "status": "done",
-            "run": run,
-            "result": {"steps": [], "stopped_at": "wait-1", "stop_reason": "step_cap"},
-            "error": None,
-        }
-        self._respond(
-            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
-            make_mock_response(200, step),
-        )
-
-        with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
-            )
-
-        self.assertEqual(exit.exception.code, 1)
-        self.assertEqual(
-            self._output()["error"],
-            "Test step hit the step cap, which usually means the campaign loops.",
-        )
-
-    def test_empty_result_is_refused(self):
-        """The platform needs a result of at least one character; none is left out instead."""
-        with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_preview(
-                TEST_DIR,
-                self.CAMPAIGN,
-                phone="+15550100",
-                start_node="Reminder call",
-                send_result="",
-                output_json=True,
-            )
-
-        self.assertEqual(
-            self._output()["error"], "A result can't be empty. Leave it out for none."
-        )
-        self.request.assert_not_called()
-
-    def test_ctrl_c_under_json_keeps_stdout_json(self):
-        """An interrupt the command does not handle itself still ends in one JSON object."""
-        cli = AgentStudioCLI()
-        cli.register_commands()
-        args = cli._create_parser().parse_args(["campaign", "validate", self.CAMPAIGN, "--json"])
-
-        with (
-            patch.object(CampaignCommand, "campaign_validate", side_effect=KeyboardInterrupt),
-            self.assertRaises(SystemExit) as exit,
-        ):
-            CampaignCommand.run(args)
-
-        self.assertEqual(exit.exception.code, 130)
-        self.assertEqual(
-            self._output(), {"success": False, "error": "Stopped.", "campaign": self.CAMPAIGN}
-        )
-
-    def test_check_on_a_branch_that_is_gone_says_it_ran_on_main(self):
-        """When the local branch no longer exists, validate says it used main."""
-        self.project.branch_id = "BRANCH-1"
-        patch.object(
-            self.project.api_handler, "ensure_remote_branch", return_value="main"
-        ).start()
-        valid = {"valid": True, "errors": [], "warnings": []}
-        self._respond(make_mock_response(200, valid), make_mock_response(200, valid))
-
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
-        self.assertEqual(self._output()["branch"], "main")
-
-        with patch("poly.output.console.warning") as warning:
-            CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN)
-        warning.assert_called_once_with("Your branch no longer exists, so this ran on main.")
-
-    def test_unreadable_answers_after_sending_are_unconfirmed(self):
-        """A body cut off or not JSON, on a start or a live change, may follow the change."""
-        cut_off = requests.exceptions.ChunkedEncodingError("Connection broken")
-        not_json = make_mock_response(202, content=b"queued")
-        for case, answer in {"cut off": cut_off, "not json": not_json}.items():
-            with self.subTest(case=case, command="test"):
-                output = self._start_test_after(answer)
-
-                self.assertTrue(output["unconfirmed"])
-                self.assertIn("answer could not be read", output["error"])
-
-        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
-        for case, answer in {
-            "cut off": cut_off,
-            "not json": make_mock_response(200, content=b"ok"),
-        }.items():
-            with self.subTest(case=case, command="resume"):
-                self.post.side_effect = [answer]
-
-                with self.assertRaises(SystemExit):
-                    CampaignCommand.campaign_lifecycle(
-                        TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-                    )
-
-                self.assertTrue(self._output()["unconfirmed"])
-                self.assertIn("may have gone through", self._output()["error"])
-
-    def test_refusals_are_plain_failures(self):
-        """A 4xx refusal was not acted on, so it is a plain failure."""
-        output = self._start_test_after(
-            self._platform_error(422, "VALIDATION_FAILED", "Invalid test contact")
-        )
-
-        self.assertNotIn("unconfirmed", output)
-        self.assertEqual(
-            output["error"], f"Could not test campaign '{self.CAMPAIGN}': Invalid test contact"
-        )
-
-    def test_test_contact_keys_the_platform_drops_are_refused(self):
-        """Preview's import shape is refused for a test, before anything is sent."""
-        with (
-            patch("questionary.confirm") as confirm,
-            self.assertRaises(SystemExit) as exit,
-        ):
-            CampaignCommand.campaign_test(
-                TEST_DIR,
-                self.CAMPAIGN,
-                contact_file='{"phone": "+15550100", "first_name": "Ada", "plan": "gold"}',
-            )
-
-        self.assertEqual(exit.exception.code, 1)
-        confirm.assert_not_called()
-        self.request.assert_not_called()
-
-        with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_test(
-                TEST_DIR,
-                self.CAMPAIGN,
-                contact_file='{"phone": "+15550100", "first_name": "Ada", "plan": "gold"}',
-                output_json=True,
-            )
-        self.assertEqual(
-            self._output()["error"],
-            "The test contact has keys the platform doesn't take: first_name, plan. Use phone, "
-            "firstName, lastName, externalId and metadata, and put other columns in metadata.",
         )
 
     def test_lifecycle_refusal_drops_the_command_prefix(self):
@@ -8649,9 +8318,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "archive", self.CAMPAIGN, force=True, output_json=True
-            )
+            self._lifecycle("archive", self.CAMPAIGN, force=True, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
@@ -8669,54 +8336,13 @@ class CampaignCommandTest(unittest.TestCase):
         self._on_branch({OutboundCampaign: {self.CAMPAIGN_ID: live}})
 
         with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "pause", "Nope", force=True, output_json=True
-            )
+            self._lifecycle("pause", "Nope", force=True, output_json=True)
 
         self.assertEqual(
             self._output()["error"],
             "No campaign named 'Nope' on main, or it is already archived. A campaign made on a "
             "branch must be merged first. Campaigns on main: Live reminders.",
         )
-
-    def test_validate_checks_the_branch_once(self):
-        """The branch is looked up once per command, not again for the request."""
-        self.project.branch_id = "BRANCH-1"
-        check = patch.object(
-            self.project.api_handler.sync_client, "assert_branch_exists", return_value="BRANCH-1"
-        ).start()
-        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
-
-        CampaignCommand.campaign_validate(TEST_DIR, self.CAMPAIGN, output_json=True)
-
-        check.assert_called_once()
-        self.assertNotIn("branch", self._output())
-
-    def test_poll_through_a_broken_proxy_or_tls_ends_at_once(self):
-        """A proxy or TLS failure while polling will not pass, so the wait ends with the run."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        for failure in (
-            requests.exceptions.ProxyError("proxy refused"),
-            requests.exceptions.SSLError("bad certificate"),
-        ):
-            with self.subTest(failure=type(failure).__name__):
-                self.request.reset_mock()
-                self.request.side_effect = [
-                    make_mock_response(
-                        202, {"step_id": "TSTEP-1", "status": "queued", "run": run}
-                    ),
-                    failure,
-                ]
-
-                with patch("poly.project.time.sleep") as sleep, self.assertRaises(SystemExit):
-                    CampaignCommand.campaign_test(
-                        TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
-                    )
-
-                sleep.assert_not_called()
-                self.assertEqual(self.request.call_count, 2)
-                output = self._output()
-                self.assertEqual((output["step_id"], output["run"]), ("TSTEP-1", run))
 
     def test_unconfirmed_change_says_how_to_settle_or_undo_it(self):
         """Each action's advice is to resend it, or send its opposite; archive can't be undone."""
@@ -8751,26 +8377,309 @@ class CampaignCommandTest(unittest.TestCase):
                 self.assertIn("even if Agent Studio still shows the old status", message)
                 self.assertNotIn("poly pull", message)
 
-    def test_ctrl_c_while_reading_main_is_a_plain_stop(self):
-        """Ctrl+C before the batch is posted changed nothing, so it is not unconfirmed."""
-        self.session.get.side_effect = KeyboardInterrupt
+    def test_lifecycle_refusal_without_the_refresh_sentence_still_gets_the_hint(self):
+        """The hint is added whether or not the platform's web-UI sentence is there."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = self._platform_error(
+            409, "CAMPAIGN_LIFECYCLE_REFUSED", "The campaign could not be paused"
+        )
+
+        with self.assertRaises(SystemExit):
+            self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
+
+        self.assertEqual(
+            self._output()["error"],
+            f"Could not pause campaign '{self.CAMPAIGN}': The campaign could not be paused\n"
+            "Check the campaign's status in Agent Studio.",
+        )
+
+    def test_resending_a_change_that_went_through_gives_the_documented_reply(self):
+        """After an unconfirmed resume or archive that went through, the resend says so."""
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        self.post.return_value = self._platform_error(
+            422,
+            "VALIDATION_FAILED",
+            f"[command 1: outboundCampaignResume ({self.CAMPAIGN_ID})] Cannot resume campaign "
+            f"“{self.CAMPAIGN}” — it is active, not paused",
+        )
 
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertNotIn("unconfirmed", self._output())
+        self.assertIn("it is active", self._output()["error"])
+
+        self.project._main_resources = None
+        self.pull_main.side_effect = lambda *_: ({}, [])
+        self.post.reset_mock()
+        with self.assertRaises(SystemExit) as exit:
+            self._lifecycle("archive", self.CAMPAIGN, force=True, output_json=True)
+
+        self.assertEqual(exit.exception.code, 1)
+        self.post.assert_not_called()
+        self.assertIn("on main, or it is already archived", self._output()["error"])
+
+    def test_preview_carries_on_with_the_last_send(self):
+        """The previous step's last send goes back as journey.last_send, and the hint gives it."""
+        last_send = {
+            "node_id": "call-1",
+            "node_label": "Reminder call",
+            "channel": "voice",
+            "status": "completed",
+            "result": "voicemail",
+            "state": {},
+            "attempted_at": None,
+            "completed_at": None,
+        }
+        result = {
+            "steps": [],
+            "stopped_at": "sms-1",
+            "stop_reason": "reply",
+            "error": None,
+            "notes": [],
+            "last_send": {**last_send, "node_id": "sms-1"},
+        }
+        self._respond(make_mock_response(200, result))
+
+        with patch("poly.output.console.info") as info:
+            self._run(
+                "preview",
+                self.CAMPAIGN,
+                phone="+15550100",
+                start_node="Reminder call",
+                send_result="voicemail",
+                last_send=json.dumps(last_send),
             )
 
-        self.assertEqual(exit.exception.code, 130)
-        self.post.assert_not_called()
         self.assertEqual(
-            self._output(),
-            {
-                "success": False,
-                "error": "Stopped before anything was sent.",
-                "campaign": self.CAMPAIGN,
-                "action": "resume",
-            },
+            self._request()[2]["contactData"],
+            {"phone": "+15550100", "journey": {"last_send": last_send}},
         )
+        hint = next(call.args[0] for call in info.call_args_list if "Carry on" in call.args[0])
+        self.assertIn(f"--last-send {shlex.quote(json.dumps(result['last_send']))}", hint)
+
+    def test_preview_refuses_a_last_send_on_a_first_step(self):
+        """A last send only makes sense when carrying on from a node."""
+        with self.assertRaises(SystemExit):
+            self._run("preview", self.CAMPAIGN, phone="+15550100", last_send="{}", output_json=True)
+
+        self.assertIn("carries on from a node", self._output()["error"])
+        self.request.assert_not_called()
+
+    def test_test_step_poll_that_times_out_is_retried(self):
+        """A poll whose request times out is retried like a dropped connection."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        done = {"step_id": "TSTEP-1", "status": "done", "run": run, "result": None}
+        self.request.side_effect = [
+            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
+            requests.ReadTimeout("stalled"),
+            make_mock_response(200, done),
+        ]
+
+        with patch("poly.project.time.sleep"):
+            self._run("test", self.CAMPAIGN, phone="+15550100", force=True, output_json=True)
+
+        self.assertTrue(self._output()["success"])
+
+    def test_start_that_times_out_says_the_step_may_have_started(self):
+        """A start the platform is slow to answer may still call, so it is not called a failure."""
+        self.request.side_effect = requests.ReadTimeout("read timed out")
+
+        with self.assertRaises(SystemExit) as exit:
+            self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
+
+        self.assertEqual(exit.exception.code, 1)
+        error = self._output()["error"]
+        self.assertIn("may have started and may call or text +15550100", error)
+        self.assertIn("Check the campaign's tests in Agent Studio", error)
+        self.assertNotIn("Could not test", error)
+        self.assertEqual(self.request.call_count, 1)
+        self.assertEqual(self.request.call_args.kwargs["timeout"], (10, 300))
+
+    def test_polls_that_fail_stop_at_the_timeout(self):
+        """Retries never wait past --timeout."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        self._respond(
+            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
+            *[make_mock_response(503, content=b"Service Unavailable") for _ in range(4)],
+        )
+
+        with patch("poly.project.time.sleep") as sleep, self.assertRaises(SystemExit):
+            self._run("test", self.CAMPAIGN, phone="+15550100", timeout=0, output_json=True)
+
+        self.assertEqual(self.request.call_count, 2)
+        sleep.assert_not_called()
+        self.assertEqual(self._output()["run"], run)
+
+    def test_proxy_and_tls_failures_are_plain_failures(self):
+        """A proxy or TLS failure never reached the platform, so nothing started."""
+        cases = {
+            "proxy": requests.exceptions.ProxyError("proxy refused"),
+            "tls": requests.exceptions.SSLError("bad certificate"),
+        }
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        for case, failure in cases.items():
+            with self.subTest(case=case):
+                output = self._start_test_after(failure)
+                self.assertNotIn("unconfirmed", output)
+                self.assertTrue(output["error"].startswith("Could not test campaign"))
+
+                self.post.side_effect = [failure]
+                with self.assertRaises(SystemExit):
+                    self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
+                self.assertNotIn("unconfirmed", self._output())
+
+    def test_server_errors_after_sending_are_unconfirmed(self):
+        """A 500 on either, or a concurrent-change 409 on a live change, may come after it applied."""
+        output = self._start_test_after(
+            self._platform_error(500, "UNHANDLED_EXCEPTION", "Internal Server Error")
+        )
+        self.assertTrue(output["unconfirmed"])
+        self.assertIn("may have started", output["error"])
+
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        cases = {
+            "500": self._platform_error(500, "UNHANDLED_EXCEPTION", "Internal Server Error"),
+            "409": self._platform_error(
+                409, "CONFLICT", "Concurrent change detected. Please retry."
+            ),
+        }
+        for case, answer in cases.items():
+            with self.subTest(case=case):
+                self.post.side_effect = [answer]
+
+                with self.assertRaises(SystemExit):
+                    self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
+
+                self.assertTrue(self._output()["unconfirmed"])
+                self.assertIn("may have gone through", self._output()["error"])
+
+    def test_test_step_that_hits_the_step_cap_fails(self):
+        """A step that hits the step cap is a failure, as in preview."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        step = {
+            "step_id": "TSTEP-1",
+            "status": "done",
+            "run": run,
+            "result": {"steps": [], "stopped_at": "wait-1", "stop_reason": "step_cap"},
+            "error": None,
+        }
+        self._respond(
+            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
+            make_mock_response(200, step),
+        )
+
+        with self.assertRaises(SystemExit) as exit:
+            self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertEqual(
+            self._output()["error"],
+            "Test step hit the step cap, which usually means the campaign loops.",
+        )
+
+    def test_empty_result_is_refused(self):
+        """The platform needs a result of at least one character; none is left out instead."""
+        with self.assertRaises(SystemExit):
+            self._run(
+                "preview",
+                self.CAMPAIGN,
+                phone="+15550100",
+                start_node="Reminder call",
+                send_result="",
+                output_json=True,
+            )
+
+        self.assertEqual(self._output()["error"], "A result can't be empty. Leave it out for none.")
+        self.request.assert_not_called()
+
+    def test_unreadable_answers_after_sending_are_unconfirmed(self):
+        """A body cut off or not JSON, on a start or a live change, may follow the change."""
+        cut_off = requests.exceptions.ChunkedEncodingError("Connection broken")
+        not_json = make_mock_response(202, content=b"queued")
+        for case, answer in {"cut off": cut_off, "not json": not_json}.items():
+            with self.subTest(case=case, command="test"):
+                output = self._start_test_after(answer)
+
+                self.assertTrue(output["unconfirmed"])
+                self.assertIn("answer could not be read", output["error"])
+
+        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
+        for case, answer in {
+            "cut off": cut_off,
+            "not json": make_mock_response(200, content=b"ok"),
+        }.items():
+            with self.subTest(case=case, command="resume"):
+                self.post.side_effect = [answer]
+
+                with self.assertRaises(SystemExit):
+                    self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
+
+                self.assertTrue(self._output()["unconfirmed"])
+                self.assertIn("may have gone through", self._output()["error"])
+
+    def test_refusals_are_plain_failures(self):
+        """A 4xx refusal was not acted on, so it is a plain failure."""
+        output = self._start_test_after(
+            self._platform_error(422, "VALIDATION_FAILED", "Invalid test contact")
+        )
+
+        self.assertNotIn("unconfirmed", output)
+        self.assertEqual(
+            output["error"], f"Could not test campaign '{self.CAMPAIGN}': Invalid test contact"
+        )
+
+    def test_test_contact_keys_the_platform_drops_are_refused(self):
+        """Preview's import shape is refused for a test, before anything is sent."""
+        with (
+            patch("questionary.confirm") as confirm,
+            self.assertRaises(SystemExit) as exit,
+        ):
+            self._run(
+                "test",
+                self.CAMPAIGN,
+                contact_file='{"phone": "+15550100", "first_name": "Ada", "plan": "gold"}',
+            )
+
+        self.assertEqual(exit.exception.code, 1)
+        confirm.assert_not_called()
+        self.request.assert_not_called()
+
+        with self.assertRaises(SystemExit):
+            self._run(
+                "test",
+                self.CAMPAIGN,
+                contact_file='{"phone": "+15550100", "first_name": "Ada", "plan": "gold"}',
+                output_json=True,
+            )
+        self.assertEqual(
+            self._output()["error"],
+            "The test contact has keys the platform doesn't take: first_name, plan. Use phone, "
+            "firstName, lastName, externalId and metadata, and put other columns in metadata.",
+        )
+
+    def test_poll_through_a_broken_proxy_or_tls_ends_at_once(self):
+        """A proxy or TLS failure while polling will not pass, so the wait ends with the run."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        for failure in (
+            requests.exceptions.ProxyError("proxy refused"),
+            requests.exceptions.SSLError("bad certificate"),
+        ):
+            with self.subTest(failure=type(failure).__name__):
+                self.request.reset_mock()
+                self.request.side_effect = [
+                    make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
+                    failure,
+                ]
+
+                with patch("poly.project.time.sleep") as sleep, self.assertRaises(SystemExit):
+                    self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
+
+                sleep.assert_not_called()
+                self.assertEqual(self.request.call_count, 2)
+                output = self._output()
+                self.assertEqual((output["step_id"], output["run"]), ("TSTEP-1", run))
 
     def test_poll_refused_says_the_step_may_still_have_called(self):
         """A 4xx while polling comes after the step started, so it may still have called."""
@@ -8781,9 +8690,7 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_test(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", output_json=True
-            )
+            self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
 
         self.assertEqual(exit.exception.code, 1)
         output = self._output()
@@ -8806,61 +8713,12 @@ class CampaignCommandTest(unittest.TestCase):
         self._respond(make_mock_response(200, result))
 
         with patch("poly.output.console.info") as info:
-            CampaignCommand.campaign_preview(TEST_DIR, self.CAMPAIGN, phone="+15550100")
+            self._run("preview", self.CAMPAIGN, phone="+15550100")
 
         self.assertIn(
             "No route matched the outcome, so the path stopped there.",
             [call.args[0] for call in info.call_args_list],
         )
-
-    def test_lifecycle_refusal_without_the_refresh_sentence_still_gets_the_hint(self):
-        """The hint is added whether or not the platform's web-UI sentence is there."""
-        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
-        self.post.return_value = self._platform_error(
-            409, "CAMPAIGN_LIFECYCLE_REFUSED", "The campaign could not be paused"
-        )
-
-        with self.assertRaises(SystemExit):
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "pause", self.CAMPAIGN, force=True, output_json=True
-            )
-
-        self.assertEqual(
-            self._output()["error"],
-            f"Could not pause campaign '{self.CAMPAIGN}': The campaign could not be paused\n"
-            "Check the campaign's status in Agent Studio.",
-        )
-
-    def test_resending_a_change_that_went_through_gives_the_documented_reply(self):
-        """After an unconfirmed resume or archive that went through, the resend says so."""
-        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
-        self.post.return_value = self._platform_error(
-            422,
-            "VALIDATION_FAILED",
-            f"[command 1: outboundCampaignResume ({self.CAMPAIGN_ID})] Cannot resume campaign "
-            f"“{self.CAMPAIGN}” — it is active, not paused",
-        )
-
-        with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "resume", self.CAMPAIGN, force=True, output_json=True
-            )
-
-        self.assertEqual(exit.exception.code, 1)
-        self.assertNotIn("unconfirmed", self._output())
-        self.assertIn("it is active", self._output()["error"])
-
-        self.project._main_resources = None
-        self.pull_main.side_effect = lambda *_: ({}, [])
-        self.post.reset_mock()
-        with self.assertRaises(SystemExit) as exit:
-            CampaignCommand.campaign_lifecycle(
-                TEST_DIR, "archive", self.CAMPAIGN, force=True, output_json=True
-            )
-
-        self.assertEqual(exit.exception.code, 1)
-        self.post.assert_not_called()
-        self.assertIn("on main, or it is already archived", self._output()["error"])
 
     def test_preview_sends_ask_branches_and_repeats_it_in_the_hint(self):
         """--ask-branches reaches the body, and the condition hint keeps it."""
@@ -8874,32 +8732,12 @@ class CampaignCommandTest(unittest.TestCase):
         self._respond(make_mock_response(200, result))
 
         with patch("poly.output.console.info") as info:
-            CampaignCommand.campaign_preview(
-                TEST_DIR, self.CAMPAIGN, phone="+15550100", ask_branches=True
-            )
+            self._run("preview", self.CAMPAIGN, phone="+15550100", ask_branches=True)
 
         self.assertTrue(self._request()[2]["askBranches"])
         hint = next(call.args[0] for call in info.call_args_list if "Carry on" in call.args[0])
         self.assertIn("--sample-outputs <file> --ask-branches,", hint)
         self.assertIn('{"branch": null} for the default branch', hint)
-
-    def test_unpushed_campaign_named_by_folder_says_to_push(self):
-        """A local campaign not yet pushed is found by its folder, and the user told to push."""
-        folder = os.path.join(TEST_DIR, "outbound_campaigns", "new_reminders")
-        os.makedirs(folder)
-        self.addCleanup(shutil.rmtree, folder)
-        with open(os.path.join(folder, "campaign.yaml"), "w", encoding="utf-8") as file:
-            file.write("name: New reminders\n")
-
-        for value in ("new_reminders", "New reminders", "new-reminders"):
-            with self.subTest(value=value):
-                with self.assertRaises(SystemExit):
-                    CampaignCommand.campaign_validate(TEST_DIR, value, output_json=True)
-
-                self.assertEqual(
-                    self._output()["error"],
-                    f"Campaign '{value}' has not been pushed yet. Run `poly push` first.",
-                )
 
     def test_start_without_a_step_id_prints_the_run_but_no_step(self):
         """With no step id there is no "Started test step None" line, but the run is kept."""
@@ -8911,7 +8749,7 @@ class CampaignCommandTest(unittest.TestCase):
             patch("poly.output.console.error") as error,
             self.assertRaises(SystemExit) as exit,
         ):
-            CampaignCommand.campaign_test(TEST_DIR, self.CAMPAIGN, phone="+15550100", force=True)
+            self._run("test", self.CAMPAIGN, phone="+15550100", force=True)
 
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(
