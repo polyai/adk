@@ -1,3 +1,5 @@
+llm:
+  name: PolyAI Raven 3.5
 greeting:
   welcome_message: Hello! Welcome to our service. Your account shows {{attr:member_status}}. How can
     I assist you today?

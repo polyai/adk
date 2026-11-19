@@ -1,3 +1,5 @@
+asr_model:
+  name: Deepgram Nova 3
 speech_end_delay_ms: 800
 barge_in:
   enabled: false
