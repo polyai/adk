@@ -240,8 +240,8 @@ class ChannelLLMSettings(MultiResourceYamlResource):
         return cls(
             resource_id=resource_id,
             name=name,
-            model_id=yaml_dict.get("model_id") or "",
-            model_name=yaml_dict.get("name") or "",
+            model_id=yaml_dict.get("model_id"),
+            model_name=yaml_dict.get("name"),
         )
 
     @classmethod
