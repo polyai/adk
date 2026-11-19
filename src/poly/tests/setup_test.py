@@ -44,6 +44,16 @@ def tearDownModule():
         os.environ["POLY_NO_TELEMETRY"] = _saved_opt_out
 
 
+def _listed_pat(pat_id: str, key_prefix: str, key_suffix: str) -> dict:
+    """A PAT as the platform lists it: no secret, only its first and last four characters."""
+    return {
+        "id": pat_id,
+        "name": "adk-key",
+        "key_prefix": key_prefix,
+        "key_suffix": key_suffix,
+    }
+
+
 def _parse_setup_args(argv: list[str]):
     """Parse a ``poly setup ...`` command line with the real CLI parser."""
     cli = AgentStudioCLI()
@@ -618,7 +628,9 @@ class SetupTelemetryTest(unittest.TestCase):
         self.mock_credentials = patch(
             "poly.cli_commands.setup.any_credentials_exist", return_value=True
         ).start()
-        self.mock_gate = patch("poly.cli_commands.setup.node_gate_reason", return_value=None).start()
+        self.mock_gate = patch(
+            "poly.cli_commands.setup.node_gate_reason", return_value=None
+        ).start()
         patch("poly.cli_commands.setup.install_skills", return_value=True).start()
         patch("poly.cli_commands.setup.apikey_session").start()
         # An exported key makes the optional account key step skip itself.
@@ -646,9 +658,7 @@ class SetupTelemetryTest(unittest.TestCase):
             [call.args[1] for call in calls],
             ["setup_started", *["setup_step"] * 5, "setup_completed"],
         )
-        self.assertEqual(
-            list(self._steps()), ["auth", "apikey", "completion", "skills", "project"]
-        )
+        self.assertEqual(list(self._steps()), ["auth", "apikey", "completion", "skills", "project"])
         run_ids = {call.args[3] for call in calls}
         self.assertEqual(len(run_ids), 1)
         self.assertTrue(run_ids.pop().startswith("setup:"))
@@ -870,19 +880,45 @@ class AuthenticateAndSaveKeyTest(unittest.TestCase):
         self.addCleanup(env_patcher.stop)
 
         self.api = patch("poly.cli_commands.auth.AgentStudioInterface").start().return_value
-        self.api.get_pats.return_value = [{"key": "existing-pat"}]
+        # The PAT list carries no secrets, only each key's first and last four characters.
+        self.api.get_pats.return_value = [_listed_pat("pat-1", "savd", "1234")]
         self.api.create_pat.return_value = "new-pat"
         self.api.get_accounts.return_value = {"acc-1": "Account"}
+        self.mock_load = patch(
+            "poly.cli_commands.auth.load_api_key_from_credential_file", return_value=None
+        ).start()
         self.mock_save = patch("poly.cli_commands.auth.save_api_key_credential_file").start()
         patch("time.sleep").start()
         self.addCleanup(patch.stopall)
 
-    def test_existing_key_is_reused_and_saved_for_the_region(self):
-        """An account with a PAT already reuses it instead of creating another."""
+    def test_saved_key_that_is_still_one_of_the_users_pats_is_kept(self):
+        """A saved key that matches one of the user's PATs is kept, with nothing created."""
+        self.mock_load.return_value = "savd-secret-1234"
+
         _authenticate_and_save_key("jwt-token", region="us-1")
 
+        self.mock_load.assert_called_once_with("us-1")
         self.api.create_pat.assert_not_called()
-        self.mock_save.assert_called_once_with("existing-pat", region="us-1")
+        self.mock_save.assert_not_called()
+        self.assertEqual(os.environ["POLY_ADK_KEY"], "savd-secret-1234")
+
+    def test_existing_pats_without_a_saved_key_get_a_new_one_created(self):
+        """Existing PATs can't be read back, so a user with PATs but no saved key gets a new one."""
+        _authenticate_and_save_key("jwt-token", region="us-1")
+
+        self.api.create_pat.assert_called_once_with(
+            region="us-1", jwt_token="jwt-token", name="adk-key"
+        )
+        self.mock_save.assert_called_once_with("new-pat", region="us-1")
+
+    def test_saved_key_that_is_not_the_users_is_replaced(self):
+        """A saved key that isn't one of the signed-in user's PATs is replaced by a new one."""
+        self.mock_load.return_value = "othr-secret-9999"
+
+        _authenticate_and_save_key("jwt-token", region="us-1")
+
+        self.api.create_pat.assert_called_once()
+        self.mock_save.assert_called_once_with("new-pat", region="us-1")
 
     def test_account_without_a_key_gets_a_new_one_created(self):
         """With no PATs, a fresh adk-key is created and saved."""
@@ -895,15 +931,34 @@ class AuthenticateAndSaveKeyTest(unittest.TestCase):
         )
         self.mock_save.assert_called_once_with("new-pat", region="us-1")
 
-    def test_malformed_key_payload_exits(self):
-        """A PAT entry without a key is unusable, so the command exits."""
-        self.api.get_pats.return_value = [{"name": "adk-key"}]
+    @patch("poly.output.console.error")
+    def test_at_the_pat_limit_exits_without_creating(self, mock_error):
+        """With two PATs already, nothing is created and the user is told to delete one."""
+        self.api.get_pats.return_value = [
+            _listed_pat("pat-1", "aaaa", "1111"),
+            _listed_pat("pat-2", "bbbb", "2222"),
+        ]
 
         with self.assertRaises(SystemExit) as ctx:
             _authenticate_and_save_key("jwt-token", region="us-1")
 
         self.assertEqual(ctx.exception.code, 1)
+        self.api.create_pat.assert_not_called()
         self.mock_save.assert_not_called()
+        self.assertIn("Personal Access Token tab", mock_error.call_args[0][0])
+
+    def test_at_the_pat_limit_a_saved_key_that_is_one_of_them_is_kept(self):
+        """The limit only matters when a new PAT is needed."""
+        self.api.get_pats.return_value = [
+            _listed_pat("pat-1", "savd", "1234"),
+            _listed_pat("pat-2", "bbbb", "2222"),
+        ]
+        self.mock_load.return_value = "savd-secret-1234"
+
+        _authenticate_and_save_key("jwt-token", region="us-1")
+
+        self.api.create_pat.assert_not_called()
+        self.assertEqual(os.environ["POLY_ADK_KEY"], "savd-secret-1234")
 
     def test_polls_until_the_new_key_activates(self):
         """A key that is not active yet is retried until the platform accepts it."""
@@ -924,7 +979,7 @@ class AuthenticateAndSaveKeyTest(unittest.TestCase):
 
         _authenticate_and_save_key("jwt-token", region="us-1")
 
-        self.mock_save.assert_called_once_with("existing-pat", region="us-1")
+        self.mock_save.assert_called_once_with("new-pat", region="us-1")
         self.assertIn("not active yet", mock_warning.call_args[0][0])
 
 
