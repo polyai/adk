@@ -2158,18 +2158,18 @@ def print_llm_models(
     table.add_column("Name", style="bold yellow", no_wrap=True)
     table.add_column("", no_wrap=True)
     table.add_column("Model ID", style="muted", no_wrap=True)
+    table.add_column("Provider model ID", style="muted", no_wrap=True)
     table.add_column("Speech-native", justify="center")
     table.add_column("Web chat", justify="center")
-    table.add_column("Temperature", justify="center")
 
     for m in llm_models:
         table.add_row(
             m.get("name") or "—",
             _poly_tag(is_poly(m)),
+            m.get("id") or "—",
             m.get("providerModelId") or "—",
             _flag(m.get("endToEnd")),
             _flag(m.get("supportsWebchat")),
-            _flag(m.get("supportsTemperature")),
         )
 
     console.print(table)

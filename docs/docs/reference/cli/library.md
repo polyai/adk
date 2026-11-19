@@ -31,11 +31,10 @@ poly library llm --region us
 poly library llm --refresh --json
 ~~~
 
-The table shows each model's name and model ID, plus three columns:
+The table shows each model's name, its model ID (the ID a channel stores, which differs between regions) and its provider model ID (the ID a step override stores), plus two columns:
 
 - **Speech-native**: the model handles speech itself. On the voice channel, the ASR model then doesn't apply.
 - **Web chat**: web chat, SMS and email can use the model.
-- **Temperature**: a temperature can be set with the model.
 
 | Flag | Description |
 |---|---|

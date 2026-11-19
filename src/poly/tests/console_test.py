@@ -925,11 +925,14 @@ class PrintLlmModelsTest(unittest.TestCase):
         """No models renders a message instead of a table."""
         self.assertIn("No language models available", self._render([]))
 
-    def test_row_shows_name_model_id_and_count(self):
-        """Each row shows the name and provider model ID, with a count below the table."""
-        output = self._render([{"name": "GPT-4.1 mini", "providerModelId": "gpt-41-mini"}])
+    def test_row_shows_name_both_ids_and_count(self):
+        """Each row shows the name, model ID and provider model ID, with a count below."""
+        output = self._render(
+            [{"id": "MODEL-1", "name": "GPT-4.1 mini", "providerModelId": "gpt-41-mini"}]
+        )
 
         self.assertIn("GPT-4.1 mini", output)
+        self.assertIn("MODEL-1", output)
         self.assertIn("gpt-41-mini", output)
         self.assertIn("1 language models", output)
 
@@ -937,14 +940,14 @@ class PrintLlmModelsTest(unittest.TestCase):
         """Only rows the is_poly check accepts carry the PolyAI tag."""
         output = self._render(
             [
-                {"name": "PolyAI Raven 3.5", "providerModelId": "polywhirl-3-5"},
-                {"name": "GPT-4.1 mini", "providerModelId": "gpt-41-mini"},
+                {"id": "MODEL-1", "name": "PolyAI Raven 3.5", "providerModelId": "polywhirl-3-5"},
+                {"id": "MODEL-2", "name": "GPT-4.1 mini", "providerModelId": "gpt-41-mini"},
             ]
         )
         poly_row = next(line for line in output.splitlines() if "polywhirl-3-5" in line)
         other_row = next(line for line in output.splitlines() if "gpt-41-mini" in line)
 
-        self.assertIn("PolyAI  polywhirl-3-5", poly_row)
+        self.assertIn("PolyAI  MODEL-1", poly_row)
         self.assertNotIn("PolyAI", other_row)
 
     def test_flags_render_as_ticks_and_crosses(self):
@@ -955,7 +958,15 @@ class PrintLlmModelsTest(unittest.TestCase):
         row = next(line for line in output.splitlines() if "m-1" in line)
 
         self.assertEqual(row.count("✓"), 1)
-        self.assertEqual(row.count("✗"), 2)
+        self.assertEqual(row.count("✗"), 1)
+
+    def test_temperature_support_is_not_shown(self):
+        """Temperature can't be set in Agent Studio, so the table has no column for it."""
+        output = self._render(
+            [{"name": "M", "providerModelId": "m-1", "supportsTemperature": True}]
+        )
+
+        self.assertNotIn("Temperature", output)
 
 
 class PrintAsrModelsTest(unittest.TestCase):
