@@ -606,10 +606,17 @@ class AgentStudioInterface:
 
     def validate_outbound_campaign(self, campaign_id: str) -> dict[str, Any]:
         """Validate a campaign on the current branch."""
+        import requests
+
         self.sync_client.assert_branch_exists()
-        return PlatformAPIHandler.validate_outbound_campaign(
-            self.region, self.account_id, self.project_id, self.branch_id, campaign_id
-        )
+        try:
+            return PlatformAPIHandler.validate_outbound_campaign(
+                self.region, self.account_id, self.project_id, self.branch_id, campaign_id
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
 
     def send_outbound_campaign_lifecycle(self, command_type: str, campaign_id: str) -> None:
         """Send a publish, pause, resume or archive command for a campaign to main."""

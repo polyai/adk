@@ -4252,23 +4252,28 @@ class AgentStudioProject:
             raise self._campaign_error("validate", campaign, e) from e
         names = self.campaign_node_names(campaign)
         for key in ("errors", "warnings"):
-            result[key] = [self._name_issue(issue, names) for issue in result.get(key) or []]
+            result[key] = [
+                self._campaign_issue_with_node_names(issue, names)
+                for issue in result.get(key) or []
+            ]
         return result
 
     @staticmethod
-    def _name_nodes(text: str, names: dict[str, str]) -> str:
+    def _replace_campaign_node_ids(text: str, names: dict[str, str]) -> str:
         for node_id in sorted(names, key=len, reverse=True):
             if names[node_id]:
                 text = text.replace(node_id, names[node_id])
         return text
 
     @classmethod
-    def _name_issue(cls, issue: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
+    def _campaign_issue_with_node_names(
+        cls, issue: dict[str, Any], names: dict[str, str]
+    ) -> dict[str, Any]:
         named = dict(issue)
         if issue.get("node_id"):
             named["node"] = names.get(issue["node_id"]) or issue["node_id"]
         if issue.get("message") is not None:
-            named["message"] = cls._name_nodes(str(issue["message"]), names)
+            named["message"] = cls._replace_campaign_node_ids(str(issue["message"]), names)
         return named
 
     @classmethod
