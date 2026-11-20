@@ -89,7 +89,7 @@ poly push --help
 | [`poly rtc`](./cli/rtc.md) | Manage per-environment Real-Time Configuration |
 | [`poly audio-cache`](./cli/audio-cache.md) | Inspect and replace cached TTS audio |
 | [`poly functions`](./cli/functions.md) | Run and validate Functions via the REST API |
-| [`poly campaign`](./cli/campaign.md) | Validate outbound campaigns with the platform |
+| [`poly campaign`](./cli/campaign.md) | Validate, publish, pause, resume and archive outbound campaigns |
 | [`poly studio`](./cli/studio.md) | Open the project in the Agent Studio web app |
 
 ## Shared flags
@@ -164,6 +164,7 @@ poly audio-cache synthesize <entry_id> --text "Hello" --json
 poly functions execute <function_name> --args '{"x": 1}' --json
 poly functions validate --json
 poly campaign validate 'Appointment reminders' --json
+poly campaign pause 'Appointment reminders' --json
 poly apikey --region studio --json
 ~~~
 

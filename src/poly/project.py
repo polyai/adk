@@ -44,6 +44,7 @@ from poly.constants import (
     DATA_TRANSCRIPT_QUERY_MIN_CHARS,
     POLY_SCORE_VERSIONS,
 )
+from poly.handlers.campaigns import CampaignHandler
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
@@ -4128,6 +4129,15 @@ class AgentStudioProject:
             ValueError: if no campaign matches, or several share the name.
         """
         campaigns = list(self.resources.get(OutboundCampaign, {}).values())
+        known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
+        return self._match_campaign(
+            name, campaigns, f"No campaign named '{name}'. Campaigns: {known}."
+        )
+
+    @staticmethod
+    def _match_campaign(
+        name: str, campaigns: list[OutboundCampaign], not_found: str
+    ) -> OutboundCampaign:
         found = [
             campaign
             for campaign in campaigns
@@ -4140,9 +4150,24 @@ class AgentStudioProject:
                 f"{folders}."
             )
         if not found:
-            known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
-            raise ValueError(f"No campaign named '{name}'. Campaigns: {known}.")
+            raise ValueError(not_found)
         return found[0]
+
+    def get_live_campaign(self, name: str) -> OutboundCampaign:
+        """Return the campaign on main with this name or folder name, as main has it.
+
+        Raises:
+            ValueError: if main has no campaign by that name, or several.
+        """
+        resources, _ = self.api_handler.pull_branch_resources("main")
+        live = list(resources.get(OutboundCampaign, {}).values())
+        known = ", ".join(sorted(campaign.name for campaign in live)) or "none"
+        return self._match_campaign(
+            name,
+            live,
+            f"No campaign named '{name}' on main. A campaign made on a branch must be merged "
+            f"first. Campaigns on main: {known}.",
+        )
 
     def campaign_node_names(self, campaign: OutboundCampaign) -> dict[str, str]:
         """Return the names of a pushed campaign's nodes, by node id."""
@@ -4211,6 +4236,53 @@ class AgentStudioProject:
         if issue.get("message") is not None:
             named["message"] = cls._replace_campaign_node_ids(str(issue["message"]), names)
         return named
+
+    def _campaign_handler(self) -> CampaignHandler:
+        return CampaignHandler(self.region, self.account_id, self.project_id)
+
+    def publish_campaign(self, campaign: OutboundCampaign) -> None:
+        """Publish the campaign's draft to live, so it starts contacting people.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self._campaign_handler().publish(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("publish", campaign, e) from e
+
+    def pause_campaign(self, campaign: OutboundCampaign) -> None:
+        """Pause the live campaign.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self._campaign_handler().pause(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("pause", campaign, e) from e
+
+    def resume_campaign(self, campaign: OutboundCampaign) -> None:
+        """Resume the paused live campaign, so it contacts people again.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self._campaign_handler().resume(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("resume", campaign, e) from e
+
+    def archive_campaign(self, campaign: OutboundCampaign) -> None:
+        """Archive the campaign on live.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self._campaign_handler().archive(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("archive", campaign, e) from e
 
     def trigger_tests(self, test_ids: list[str], name: str | None = None) -> dict:
         """Trigger tests for the project.
