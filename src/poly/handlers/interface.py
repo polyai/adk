@@ -11,7 +11,6 @@ from google.protobuf.message import Message
 
 from poly.handlers.platform_api import PlatformAPIHandler
 from poly.handlers.posthog import PosthogHandler
-from poly.handlers.protobuf import outbound_campaigns_pb2
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
 from poly.handlers.sync_client import SyncClientHandler
@@ -35,13 +34,6 @@ from poly.resources import (
     Variant,
     VariantAttribute,
 )
-
-LIFECYCLE_COMMANDS = {
-    "outbound_campaign_publish": outbound_campaigns_pb2.OutboundCampaign_Publish,
-    "outbound_campaign_pause": outbound_campaigns_pb2.OutboundCampaign_Pause,
-    "outbound_campaign_resume": outbound_campaigns_pb2.OutboundCampaign_Resume,
-    "outbound_campaign_archive_definition": outbound_campaigns_pb2.OutboundCampaign_ArchiveDefinition,
-}
 
 REGIONS = [
     "us-1",
@@ -617,12 +609,6 @@ class AgentStudioInterface:
             raise SourcererAPIError.from_request_error(e) from e
         except ValueError as e:
             raise SourcererAPIError(str(e)) from e
-
-    def send_outbound_campaign_lifecycle(self, command_type: str, campaign_id: str) -> None:
-        """Send a publish, pause, resume or archive command for a campaign to main."""
-        message_type = LIFECYCLE_COMMANDS[command_type]
-        command = Command(type=command_type, **{command_type: message_type(id=campaign_id)})
-        self.sync_client.send_command_to_main(command)
 
     def get_branches(self) -> dict[str, dict[str, Any]]:
         """Get a list of branches with full metadata.
