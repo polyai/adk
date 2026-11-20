@@ -1,3 +1,5 @@
+llm:
+  name: GPT-4.1 mini
 greeting:
   welcome_message: Hello! Welcome to our web chat. Your account shows {{attr:member_status}}. How can
     I assist you today?

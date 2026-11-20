@@ -7,7 +7,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import ClassVar
+from typing import ClassVar, Optional
 
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.agent_settings_pb2 import (
@@ -17,6 +17,7 @@ from poly.handlers.protobuf.agent_settings_pb2 import (
 from poly.handlers.protobuf.channels_pb2 import (
     AmbienceSettings,
     Channel_UpdateGreeting,
+    Channel_UpdateLLMSettings,
     Channel_UpdateStylePrompt,
     ChannelType,
     FillerUtterances,
@@ -26,6 +27,8 @@ from poly.handlers.protobuf.channels_pb2 import (
     VoiceChannel_UpdateDisclaimer,
     VoiceChannel_UpdateSilenceFillerUtterances,
 )
+from poly.handlers.protobuf.llm_settings_pb2 import LLMSettings_UpdateLLMSettings
+from poly.library import Library
 from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
@@ -200,6 +203,195 @@ class VoiceDisclaimerMessage(MultiResourceYamlResource):
             return []
 
         return [os.path.join(file_path, VoiceDisclaimerMessage.top_level_name)]
+
+
+@dataclass
+class ChannelLLMSettings(MultiResourceYamlResource):
+    """Base class for channel LLM settings. Subclass for voice/chat."""
+
+    _singleton: ClassVar[bool] = True
+
+    model_id: Optional[str] = None
+    model_name: Optional[str] = None
+
+    top_level_name: ClassVar[str] = "llm"
+    channel_type: ClassVar[ChannelType] = ChannelType.VOICE
+    channel_subpath: ClassVar[str] = "voice"
+
+    @cached_property
+    def file_path(self) -> str:
+        """Get the file path for the LLM resource."""
+        return os.path.join(_config_path(self.channel_subpath), self.top_level_name)
+
+    def to_yaml_dict(self) -> dict:
+        """Convert the LLM settings to a YAML-serializable dict."""
+        output = {}
+        if self.model_id:
+            output["model_id"] = self.model_id
+        if self.model_name:
+            output["name"] = self.model_name
+        return output
+
+    @classmethod
+    def from_yaml_dict(
+        cls, yaml_dict: dict, resource_id: str, name: str, **kwargs
+    ) -> "ChannelLLMSettings":
+        """Construct LLM settings from YAML data and identity fields."""
+        return cls(
+            resource_id=resource_id,
+            name=name,
+            model_id=yaml_dict.get("model_id"),
+            model_name=yaml_dict.get("name"),
+        )
+
+    @classmethod
+    def to_pretty_dict(cls, d: dict, library: Library = None, **kwargs) -> dict:
+        """Return the pretty dictionary."""
+        # Replace library resource IDs with names
+        if library:
+            llm_model_name = library.get_llm_model_by_id(d.get("model_id"))
+            if llm_model_name:
+                d = {
+                    "name": llm_model_name.name,
+                    **{k: v for k, v in d.items() if k != "model_id"},
+                }
+        return d
+
+    @classmethod
+    def from_pretty_dict(
+        cls,
+        yaml_dict: dict,
+        library: Library = None,
+        **kwargs,
+    ) -> dict:
+        name = yaml_dict.get("name")
+        if library and name and "model_id" not in yaml_dict:
+            if llm_model := library.get_llm_model_by_name(name):
+                del yaml_dict["name"]
+                yaml_dict["model_id"] = llm_model.model_id
+        return yaml_dict
+
+    def build_update_proto(self) -> Channel_UpdateLLMSettings:
+        """Create a proto for updating the resource."""
+        if self.model_name:
+            raise ValueError(
+                f"Unknown language model '{self.model_name}'. Use a known model name, or a model_id."
+            )
+        return Channel_UpdateLLMSettings(
+            channel_type=self.channel_type,
+            llm_settings=LLMSettings_UpdateLLMSettings(
+                model_id=self.model_id,
+            ),
+        )
+
+    def build_create_proto(self):
+        """Create a proto for creating the resource."""
+        raise NotImplementedError("Create operation not supported for LLM settings.")
+
+    def build_delete_proto(self):
+        """Create a proto for deleting the resource."""
+        raise NotImplementedError("Delete operation not supported for LLM settings.")
+
+    @property
+    def command_type(self) -> str:
+        return "llm_settings"
+
+    @property
+    def update_command_type(self) -> str:
+        return "channel_update_llm_settings"
+
+    def validate(self, library: Library = None, **kwargs) -> None:
+        """Validate the LLM settings."""
+        if self.model_name and self.model_id:
+            raise ValueError("LLM settings take either name or model_id, not both.")
+
+        if self.model_name:
+            if library is None:
+                logger.warning(
+                    f"Can't check language model '{self.model_name}' without the model library."
+                )
+                return
+            raise ValueError(f"Unknown language model '{self.model_name}'.")
+        if library and self.model_id:
+            model = library.get_llm_model_by_id(self.model_id)
+            if not model:
+                logger.warning(f"Language model '{self.model_id}' isn't in the model library.")
+            elif self.channel_type != ChannelType.VOICE and not model.supports_webchat:
+                raise ValueError(
+                    f"Language model '{model.name}' ({model.model_id}) does not support chat."
+                )
+
+    @classmethod
+    def discover_resources(cls, base_path: str) -> list[str]:
+        """Discover LLM resources of this type in the given base path."""
+        file_path = os.path.join(base_path, _config_path(cls.channel_subpath))
+
+        if not os.path.exists(file_path):
+            return []
+
+        yaml_dict = cls._get_top_level_data(file_path)
+        llm: dict = yaml_dict.get("llm", {}) if yaml_dict else {}
+
+        if not llm:
+            return []
+
+        return [os.path.join(file_path, cls.top_level_name)]
+
+
+@register_resource("voice_llm_settings")
+class VoiceLLMSettings(ChannelLLMSettings):
+    """Voice-specific LLM settings."""
+
+    channel_type: ClassVar[ChannelType] = ChannelType.VOICE
+    channel_subpath: ClassVar[str] = "voice"
+
+    @classmethod
+    def from_projection(cls, projection) -> dict[str, "VoiceLLMSettings"]:
+        """Parse voice llm settings from a projection."""
+
+        if "channels" not in projection:
+            logger.debug("No read access to the voice llm settings - it will not be pulled.")
+            return {}
+
+        voice_config = projection.get("channels", {}).get("voice", {}).get("config", {}) or {}
+        voice_llm_settings = voice_config.get("llmSettings", None)
+        if not voice_llm_settings:
+            return {}
+        return {
+            "voice_llm_settings": cls(
+                resource_id="voice_llm_settings",
+                name="voice_llm_settings",
+                model_id=voice_llm_settings.get("modelId", ""),
+            )
+        }
+
+
+@register_resource("chat_llm_settings")
+class ChatLLMSettings(ChannelLLMSettings):
+    """Chat-specific LLM settings."""
+
+    channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
+    channel_subpath: ClassVar[str] = "chat"
+
+    @classmethod
+    def from_projection(cls, projection) -> dict[str, "ChatLLMSettings"]:
+        """Parse chat llm settings from a projection."""
+
+        if "channels" not in projection:
+            logger.debug("No read access to the chat llm settings - it will not be pulled.")
+            return {}
+
+        chat_config = projection.get("channels", {}).get("webChat", {}).get("config", {}) or {}
+        chat_llm_settings = chat_config.get("llmSettings", None)
+        if not chat_llm_settings:
+            return {}
+        return {
+            "chat_llm_settings": cls(
+                resource_id="chat_llm_settings",
+                name="chat_llm_settings",
+                model_id=chat_llm_settings.get("modelId", ""),
+            )
+        }
 
 
 @dataclass

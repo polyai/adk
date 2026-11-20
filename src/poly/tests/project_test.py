@@ -65,6 +65,7 @@ from poly.resources import (
     VoiceVadConfig,
 )
 from poly.resources.api_integration import HAND_WRITTEN_SCHEMA_SOURCE
+from poly.resources.channel_settings import VoiceLLMSettings
 from poly.resources.flows import (
     ASRBiasing,
     Condition,
@@ -4541,6 +4542,38 @@ class RefreshLibraryTest(unittest.TestCase):
 
         self.assertEqual(reloaded.library, self.project.library)
 
+
+
+class ValidateEndToEndVoiceModelTest(unittest.TestCase):
+    """validate_resources gives asr_settings.yaml the voice language model to check against."""
+
+    def _resources(self, voice_model_id: str) -> dict:
+        asr = AsrSettings(resource_id="asr_settings", name="asr_settings", speech_end_delay_ms=800)
+        voice_llm = VoiceLLMSettings(
+            resource_id="voice_llm_settings", name="voice_llm_settings", model_id=voice_model_id
+        )
+        return {
+            AsrSettings: {"asr_settings": asr},
+            VoiceLLMSettings: {"voice_llm_settings": voice_llm},
+        }
+
+    def test_end_to_end_voice_model_refuses_asr_settings(self):
+        """A speech end delay alongside an end-to-end voice model is reported."""
+        errors = AgentStudioProject.validate_resources(
+            self._resources("MODEL-2"), resource_mappings=[], library=make_library()
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("speech_end_delay_ms doesn't apply", errors[0])
+        self.assertIn("asr_settings.yaml", errors[0])
+
+    def test_traditional_voice_model_allows_asr_settings(self):
+        """With a voice model that isn't end to end, the same settings are valid."""
+        errors = AgentStudioProject.validate_resources(
+            self._resources("MODEL-1"), resource_mappings=[], library=make_library()
+        )
+
+        self.assertEqual(errors, [])
 
 class FetchProjectTest(unittest.TestCase):
     """Tests for the fetch_project method."""

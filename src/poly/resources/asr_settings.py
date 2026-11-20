@@ -7,24 +7,103 @@ import logging
 import os
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from google.protobuf.message import Message
 
+from poly.handlers.protobuf.asr_pb2 import Asr
 from poly.handlers.protobuf.channels_pb2 import (
     VADConfig,
+    VoiceChannel_ResetAsrConfig,
     VoiceChannel_ResetBargeInConfig,
     VoiceChannel_ResetVadConfig,
+    VoiceChannel_UpdateAsrConfig,
     VoiceChannel_UpdateBargeInConfig,
     VoiceChannel_UpdateVadConfig,
 )
+from poly.library import Library
 from poly.resources.resource import ResourceMapping, SubResource, YamlResource, register_resource
+
+if TYPE_CHECKING:
+    from poly.resources.channel_settings import VoiceLLMSettings
 
 logger = logging.getLogger(__name__)
 
 # Limits of Agent Studio's voice settings. The backend only checks for non-negative values.
 SPEECH_END_DELAY_MS_MIN = 200
 SPEECH_END_DELAY_MS_MAX = 1500
+
+
+@dataclass
+class ASRModel:
+    """Representation of an ASR model, either by name or by provider and model."""
+
+    # The actual ASR model provider and model name.
+    provider: Optional[str] = None
+    model: Optional[str] = None
+
+    # The replacement name for Yaml output
+    name: Optional[str] = None
+
+    def to_yaml_dict(self) -> dict:
+        output: dict[str, Any] = {}
+        if self.provider is not None:
+            output["provider"] = self.provider
+        if self.model is not None:
+            output["model"] = self.model
+        if self.name is not None:
+            output["name"] = self.name
+        return output
+
+    def validate(self, library: Optional[Library] = None):
+        """Validate the ASR configuration against the model library, when there is one."""
+        if self.name and (self.provider or self.model):
+            raise ValueError("ASR model takes either name, or provider and model, not both.")
+        if self.name:
+            if library is None:
+                logger.warning(f"Can't check ASR model '{self.name}' without the model library.")
+                return
+            raise ValueError(f"Unknown ASR model '{self.name}'.")
+        if library and self.provider and self.model:
+            if not library.get_asr_model_by_provider_and_model(self.provider, self.model):
+                logger.warning(
+                    f"ASR model {self.model} from '{self.provider}' isn't in the model library.",
+                )
+
+
+@dataclass
+class ASRModelConfig(SubResource):
+    """ASR model configuration for the voice channel's ASR."""
+
+    asr_model: Optional[ASRModel] = None
+
+    @property
+    def command_type(self) -> str:
+        return "voice_channel_asr_config"
+
+    @property
+    def update_command_type(self) -> str:
+        return "voice_channel_update_asr_config"
+
+    @property
+    def delete_command_type(self) -> str:
+        return "voice_channel_reset_asr_config"
+
+    def build_update_proto(self) -> VoiceChannel_UpdateAsrConfig:
+        if self.asr_model.name:
+            raise ValueError(
+                f"Unknown ASR model '{self.asr_model.name}'. "
+                "Use a known model name, or a provider and model."
+            )
+        return VoiceChannel_UpdateAsrConfig(
+            asr_config=Asr(provider_id=self.asr_model.provider, model_id=self.asr_model.model)
+        )
+
+    def build_delete_proto(self) -> VoiceChannel_ResetAsrConfig:
+        return VoiceChannel_ResetAsrConfig()
+
+    def build_create_proto(self) -> None:
+        raise NotImplementedError("ASR config cannot be created")
 
 
 @dataclass
@@ -156,6 +235,7 @@ class AsrSettings(YamlResource):
     resets it to the platform default. barge_in is always pulled and can't be removed.
     """
 
+    asr_model: Optional[ASRModel]
     speech_end_delay_ms: Optional[int]
     barge_in: Optional[BargeIn]
 
@@ -164,6 +244,7 @@ class AsrSettings(YamlResource):
         *,
         resource_id: str,
         name: str,
+        asr_model: Union[ASRModel, dict, None] = None,
         speech_end_delay_ms: Optional[int] = None,
         barge_in: Union[BargeIn, dict, None] = None,
     ):
@@ -171,6 +252,7 @@ class AsrSettings(YamlResource):
         self.name = name
         self.speech_end_delay_ms = speech_end_delay_ms
         self.barge_in = _as_section(barge_in, BargeIn, "barge_in")
+        self.asr_model = _as_section(asr_model, ASRModel, "asr_model")
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "AsrSettings"]:
@@ -202,10 +284,19 @@ class AsrSettings(YamlResource):
             legacy_enabled = (voice.get("asrSettings") or {}).get("bargeIn", False)
             barge_in = BargeIn(enabled=legacy_enabled)
 
+        if asr_config := voice.get("asrConfig"):
+            asr_model = ASRModel(
+                provider=asr_config.get("providerId"),
+                model=asr_config.get("modelId"),
+            )
+        else:
+            asr_model = None
+
         return {
             "asr_settings": cls(
                 resource_id="asr_settings",
                 name="asr_settings",
+                asr_model=asr_model,
                 speech_end_delay_ms=speech_end_delay_ms,
                 barge_in=barge_in,
             )
@@ -217,6 +308,8 @@ class AsrSettings(YamlResource):
 
     def to_yaml_dict(self) -> dict:
         output: dict[str, Any] = {}
+        if self.asr_model:
+            output["asr_model"] = self.asr_model.to_yaml_dict()
         if self.speech_end_delay_ms is not None:
             output["speech_end_delay_ms"] = self.speech_end_delay_ms
         if self.barge_in:
@@ -232,9 +325,30 @@ class AsrSettings(YamlResource):
             name=name,
             speech_end_delay_ms=yaml_dict.get("speech_end_delay_ms"),
             barge_in=yaml_dict.get("barge_in"),
+            asr_model=yaml_dict.get("asr_model"),
         )
 
-    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+    def validate(
+        self,
+        library: Library = None,
+        voice_llm_settings: Optional["VoiceLLMSettings"] = None,
+        **kwargs,
+    ) -> None:
+        if voice_llm_settings and voice_llm_settings.model_id and library:
+            model = library.get_llm_model_by_id(voice_llm_settings.model_id)
+            if model and model.speech_native:
+                if self.asr_model is not None:
+                    raise ValueError(
+                        f"asr_model doesn't apply while the voice channel uses '{model.name}', "
+                        "which is end to end. Remove the asr_model setting."
+                    )
+                if self.speech_end_delay_ms is not None:
+                    raise ValueError(
+                        "speech_end_delay_ms doesn't apply while the voice channel uses "
+                        f"'{model.name}', which is end to end. Remove the speech_end_delay_ms "
+                        "setting."
+                    )
+
         if self.speech_end_delay_ms is not None and not (
             SPEECH_END_DELAY_MS_MIN <= self.speech_end_delay_ms <= SPEECH_END_DELAY_MS_MAX
         ):
@@ -244,6 +358,50 @@ class AsrSettings(YamlResource):
             )
         if self.barge_in:
             self.barge_in.validate()
+
+        if self.asr_model:
+            self.asr_model.validate(library=library)
+
+    @staticmethod
+    def to_pretty_dict(
+        d: dict,
+        file_path: str = None,
+        resource_mappings: list[ResourceMapping] = None,
+        library: Library = None,
+        **kwargs,
+    ) -> dict:
+        """Return dict with resource IDs replaced by names."""
+        # Replace library resource IDs with names
+        if library:
+            if asr_model := d.get("asr_model"):
+                asr_model_name = library.get_asr_model_by_provider_and_model(
+                    asr_model.get("provider"), asr_model.get("model")
+                )
+                if asr_model_name:
+                    d["asr_model"] = {"name": asr_model_name.name}
+        return d
+
+    @classmethod
+    def from_pretty_dict(
+        cls,
+        yaml_dict: dict,
+        resource_mappings: list[ResourceMapping] = None,
+        file_path: str = None,
+        library: Library = None,
+        **kwargs,
+    ) -> dict:
+        """Replace resource names with IDs in a parsed YAML dict."""
+
+        if asr_model := yaml_dict.get("asr_model"):
+            name = asr_model.get("name")
+            has_ids = "provider" in asr_model or "model" in asr_model
+            if name and not has_ids and library:
+                if asr_model_obj := library.get_asr_model_by_name(name):
+                    del asr_model["name"]
+                    asr_model["provider"] = asr_model_obj.provider
+                    asr_model["model"] = asr_model_obj.model
+
+        return yaml_dict
 
     @property
     def command_type(self) -> str:
@@ -283,6 +441,7 @@ class AsrSettings(YamlResource):
 
         _diff("speech_end_delay_ms", VoiceVadConfig)
         _diff("barge_in", VoiceBargeInConfig)
+        _diff("asr_model", ASRModelConfig)
 
         old_barge_in = old_resource.barge_in if old_resource else None
         if (
