@@ -4051,9 +4051,7 @@ conditions:
                     prompt=prompt,
                     position={"x": 0.0, "y": 0.0},
                 )
-                self.assertIsNone(
-                    empty_prompt_step.validate(resource_mappings=resource_mappings)
-                )
+                self.assertIsNone(empty_prompt_step.validate(resource_mappings=resource_mappings))
 
         # Test with missing flow config
         invalid_step = FlowStep(
@@ -4402,9 +4400,7 @@ conditions:
         """A condition pointing at a step in its own flow validates."""
         condition = self._step_condition_to("step-2")
 
-        self.assertIsNone(
-            condition.validate(resource_mappings=self._step_mappings_in_two_flows())
-        )
+        self.assertIsNone(condition.validate(resource_mappings=self._step_mappings_in_two_flows()))
 
     def test_validate_condition_child_step_in_other_flow_raises(self):
         """A condition pointing at another flow's step is rejected."""

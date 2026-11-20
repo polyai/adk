@@ -12,7 +12,7 @@ import shutil
 import tempfile
 import unittest
 from copy import deepcopy
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
@@ -76,6 +76,7 @@ from poly.resources.function import FunctionParameters, FunctionType
 from poly.resources.outbound_campaign import NODE_FIELDS
 from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
 from poly.resources.test_suite import TestCaseApiOperationMock
+from poly.tests.library_test import ASR_RESPONSE, LLM_RESPONSE, make_library
 from poly.tests.testing_utils import (
     campaign_entity,
     campaign_function,
@@ -3135,6 +3136,47 @@ class PullProjectTest(unittest.TestCase):
         self.assertEqual(files_with_conflicts, [])
         self.assertEqual(project.resources, original_resources)
 
+    def test_pull_from_the_api_refreshes_the_library(self):
+        """A pull that calls the API also loads the region's model lists."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        project.library = None
+        self.mock_api_handler.pull_resources.return_value = (deepcopy(project.resources), [], {})
+        self.mock_api_handler.get_asr_models.return_value = ASR_RESPONSE
+        self.mock_api_handler.get_llm_models.return_value = LLM_RESPONSE
+
+        project.pull_project(force=False)
+
+        self.assertEqual(project.library.region, "us-1")
+        self.assertEqual(project.library.get_asr_model_by_id("ASR-1").name, "Deepgram Nova 3")
+        self.mock_api_handler.get_llm_models.assert_called_once_with("us-1")
+
+    def test_pull_succeeds_when_the_library_fetch_fails(self):
+        """A failing model-list route doesn't stop the pull itself."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        project.library = None
+        original_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (original_resources, [], {})
+        self.mock_api_handler.get_asr_models.side_effect = RuntimeError("list route down")
+
+        with self.assertLogs("poly.project", level="WARNING"):
+            files_with_conflicts, _ = project.pull_project(force=False)
+
+        self.assertEqual(files_with_conflicts, [])
+        self.assertEqual(project.resources, original_resources)
+        self.assertIsNone(project.library)
+
+    def test_pull_from_a_projection_leaves_the_library_alone(self):
+        """A pull from a supplied projection makes no list calls."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        project.library = None
+        self.mock_api_handler.pull_resources.return_value = (deepcopy(project.resources), [], {})
+
+        project.pull_project(force=False, projection_json={"supplied": True})
+
+        self.assertIsNone(project.library)
+        self.mock_api_handler.get_asr_models.assert_not_called()
+        self.mock_api_handler.get_llm_models.assert_not_called()
+
     def test_pull_project_not_loaded_resources_force_save(self):
         """When a resource type was not in the loaded dict, pull incorporates the incoming
         resources via the file-level merge without reporting conflicts.  Prevents spurious
@@ -4392,6 +4434,101 @@ class ResolveTestsTest(unittest.TestCase):
         """A file path that matches nothing raises ValueError."""
         with self.assertRaises(ValueError, msg="No tests found"):
             self.project.resolve_tests(files=["no_such_test.yaml"])
+
+
+
+class RefreshLibraryTest(unittest.TestCase):
+    """Tests for AgentStudioProject.refresh_library: when the project refetches its library."""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_api_handler.get_asr_models.return_value = ASR_RESPONSE
+        self.mock_api_handler.get_llm_models.return_value = LLM_RESPONSE
+        self.mock_asr = self.mock_api_handler.get_asr_models
+        self.mock_llm = self.mock_api_handler.get_llm_models
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.project.library = None
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _set_library_age(self, age: timedelta) -> None:
+        library = make_library(self.project.region)
+        library.last_refreshed = datetime.now(UTC) - age
+        self.project.library = library
+
+    def test_missing_library_is_fetched_for_the_project_region(self):
+        """With no library loaded, the project fetches its region's lists through its handler."""
+        library = self.project.refresh_library()
+
+        self.assertIs(self.project.library, library)
+        self.mock_asr.assert_called_once_with(self.project.region)
+        self.assertEqual(len(library.asr_models), len(ASR_RESPONSE))
+
+    def test_recent_library_is_not_refetched(self):
+        """A library refreshed less than a day ago is reused without calling the API."""
+        self._set_library_age(timedelta(hours=23))
+        current = self.project.library
+
+        self.assertIs(self.project.refresh_library(), current)
+        self.mock_asr.assert_not_called()
+        self.mock_llm.assert_not_called()
+
+    def test_day_old_library_is_refetched(self):
+        """A library older than a day is replaced with fresh lists."""
+        self._set_library_age(timedelta(days=1, minutes=1))
+
+        library = self.project.refresh_library()
+
+        self.mock_asr.assert_called_once_with(self.project.region)
+        self.assertFalse(library.is_stale)
+
+    def test_force_refresh_refetches_a_recent_library(self):
+        """force_refresh fetches the lists even when the library is fresh."""
+        self._set_library_age(timedelta(minutes=5))
+
+        self.project.refresh_library(force_refresh=True)
+
+        self.mock_asr.assert_called_once()
+        self.mock_llm.assert_called_once()
+
+    def test_failed_refresh_keeps_the_old_library_and_warns(self):
+        """When a due refresh fails, the stale library is kept and a warning is logged."""
+        self._set_library_age(timedelta(days=2))
+        stale = self.project.library
+        self.mock_asr.side_effect = RuntimeError("list route down")
+
+        with self.assertLogs("poly.project", level="WARNING") as logs:
+            library = self.project.refresh_library()
+
+        self.assertIs(library, stale)
+        self.assertIs(self.project.library, stale)
+        self.assertIn("list route down", logs.output[0])
+
+    def test_failed_first_fetch_leaves_no_library(self):
+        """With nothing saved, a failed fetch leaves the project without a library."""
+        self.mock_llm.side_effect = RuntimeError("list route down")
+
+        with self.assertLogs("poly.project", level="WARNING"):
+            self.assertIsNone(self.project.refresh_library())
+
+    def test_failed_forced_refresh_raises(self):
+        """A forced refresh reports the failure instead of keeping the old library."""
+        self._set_library_age(timedelta(minutes=5))
+        self.mock_asr.side_effect = RuntimeError("list route down")
+
+        with self.assertRaisesRegex(RuntimeError, "list route down"):
+            self.project.refresh_library(force_refresh=True)
+
+    def test_saved_library_is_loaded_with_the_project(self):
+        """A project loaded after a refresh picks up the saved library for its region."""
+        self.project.refresh_library()
+
+        reloaded = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        self.assertEqual(reloaded.library, self.project.library)
 
 
 class FetchProjectTest(unittest.TestCase):

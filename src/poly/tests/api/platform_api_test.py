@@ -1036,5 +1036,30 @@ class ExperimentCalls(unittest.TestCase):
         self.assertEqual(version["traffic_percentage"], 70)
 
 
+
+class ModelLists(unittest.TestCase):
+    """Tests for the language model and ASR model list calls."""
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_get_llm_models_gets_llm_models_route(self, mock_make_request):
+        """The language model list is a GET on /v1/llm-models in the given region."""
+        mock_make_request.return_value = [{"id": "MODEL-1"}]
+
+        result = PlatformAPIHandler.get_llm_models("us-1")
+
+        self.assertEqual(result, [{"id": "MODEL-1"}])
+        mock_make_request.assert_called_once_with("us-1", "/v1/llm-models", "GET")
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_get_asr_models_gets_asr_models_route(self, mock_make_request):
+        """The ASR model list is a GET on /v1/asr-models in the given region."""
+        mock_make_request.return_value = [{"id": "ASR-1"}]
+
+        result = PlatformAPIHandler.get_asr_models("euw-1")
+
+        self.assertEqual(result, [{"id": "ASR-1"}])
+        mock_make_request.assert_called_once_with("euw-1", "/v1/asr-models", "GET")
+
+
 if __name__ == "__main__":
     unittest.main()

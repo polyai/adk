@@ -46,6 +46,7 @@ from poly.handlers.interface import (
     AgentStudioInterface,
 )
 from poly.handlers.sdk import SourcererAPIError
+from poly.library import Library
 from poly.migration_utils import (
     MigrationFlag,
     get_all_migration_flags,
@@ -407,6 +408,7 @@ class AgentStudioProject:
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
     _deployment_mode: Optional[DeploymentMode] = None
+    library: Library = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -520,8 +522,18 @@ class AgentStudioProject:
         else:
             last_updated = datetime.now()
 
+        # Load library
+        region = config_dict.get("region", "")
+        try:
+            library = Library.load_library_from_file(region=region)
+        except ValueError as e:
+            logger.error(f"Error loading library for region '{region}': {e}")
+            library = None
+        except FileNotFoundError:
+            library = None
+
         return cls(
-            region=config_dict.get("region", ""),
+            region=region,
             account_id=config_dict.get("account_id", ""),
             project_id=config_dict.get("project_id", ""),
             resources=resources,
@@ -535,6 +547,7 @@ class AgentStudioProject:
             _not_loaded_resources=not_loaded_resources,
             _migration_flags=migration_flags,
             rtc_metadata=status_dict.get("rtc_metadata"),
+            library=library,
         )
 
     def to_dict(self) -> dict:
@@ -571,6 +584,16 @@ class AgentStudioProject:
 
         file_structure_info = cls.compute_file_structure_info(resources)
 
+        # Load library
+        region = data.get("region", "")
+        try:
+            library = Library.load_library_from_file(region=region)
+        except ValueError as e:
+            logger.error(f"Error loading library for region '{region}': {e}")
+            library = None
+        except FileNotFoundError:
+            library = None
+
         return cls(
             region=data.get("region", ""),
             account_id=data.get("account_id", ""),
@@ -586,6 +609,7 @@ class AgentStudioProject:
             _not_loaded_resources=not_loaded_resources,
             slim_resources=slim_resources,
             rtc_metadata=data.get("rtc_metadata"),
+            library=library,
         )
 
     @staticmethod
@@ -675,6 +699,8 @@ class AgentStudioProject:
                 shutil.rmtree(account_path)
             raise
 
+        library = project.refresh_library()
+
         project._check_no_duplicate_resource_paths(project.resources)
 
         resource_mappings: list[ResourceMapping] = (
@@ -693,6 +719,7 @@ class AgentStudioProject:
             resource.save(
                 project_path,
                 resource_mappings=resource_mappings,
+                library=library,
                 resource_name=resource.name,
                 format=format,
                 save_to_cache=is_multi,
@@ -766,6 +793,7 @@ class AgentStudioProject:
 
         if projection_json is None:
             self.branch_id = self.api_handler.branch_id
+            self.refresh_library()
 
         self.save_config()
         return resources, projection
@@ -877,9 +905,10 @@ class AgentStudioProject:
         incoming_resources, slim_resources, projection = self.api_handler.pull_resources(
             projection_json=projection_json
         )
-        # Only update branch id if we used the API to pull the resources
+        # Only update branch id and library if we used the API to pull the resources
         if projection_json is None:
             self.branch_id = self.api_handler.branch_id
+            self.refresh_library()
 
         self._check_no_duplicate_resource_paths(incoming_resources)
         # -------
@@ -1161,6 +1190,7 @@ class AgentStudioProject:
                         self.root_path,
                         resource_name=resource.name,
                         resource_mappings=original_resource_mappings,
+                        library=self.library,
                         format=format,
                         save_to_cache=True,
                     )
@@ -1195,6 +1225,7 @@ class AgentStudioProject:
                     self.root_path,
                     resource_name=resource.name,
                     resource_mappings=incoming_resource_mappings,
+                    library=self.library,
                     format=format,
                     save_to_cache=True,
                 )
@@ -1243,6 +1274,7 @@ class AgentStudioProject:
                             self.root_path,
                             resource_name=local_resource.name,
                             resource_mappings=incoming_resource_mappings,
+                            library=self.library,
                             format=format,
                             save_to_cache=True,
                         )
@@ -1415,6 +1447,7 @@ class AgentStudioProject:
                         self.root_path,
                         resource_name=incoming_resource.name,
                         resource_mappings=incoming_resource_mappings,
+                        library=self.library,
                         format=format,
                     )
                     continue
@@ -1431,6 +1464,7 @@ class AgentStudioProject:
                     original_content = original_resource.to_pretty(
                         resource_name=original_resource.name,
                         resource_mappings=original_resource_mappings,
+                        library=self.library,
                     )
                     local_file_path = original_resource.get_path(self.root_path)
                 else:
@@ -1444,6 +1478,7 @@ class AgentStudioProject:
                     local_content = local_resource.to_pretty(
                         resource_name=incoming_resource.name,
                         resource_mappings=incoming_resource_mappings,
+                        library=self.library,
                     )
                 except FileNotFoundError:
                     # If local file doesn't exist:
@@ -1458,6 +1493,7 @@ class AgentStudioProject:
                             self.root_path,
                             resource_name=incoming_resource.name,
                             resource_mappings=incoming_resource_mappings,
+                            library=self.library,
                             format=format,
                         )
                     continue
@@ -1468,6 +1504,7 @@ class AgentStudioProject:
                 incoming_content = incoming_resource.to_pretty(
                     resource_name=incoming_resource.name,
                     resource_mappings=incoming_resource_mappings,
+                    library=self.library,
                 )
 
                 # If formatting is requested, format the original and incoming contents
@@ -2158,6 +2195,7 @@ class AgentStudioProject:
                 resource.save(
                     self.root_path,
                     resource_mappings=resource_mappings,
+                    library=self.library,
                     save_to_cache=isinstance(resource, MultiResourceYamlResource),
                 )
                 reverted_files.append(resource.get_path(self.root_path))
@@ -2230,6 +2268,7 @@ class AgentStudioProject:
                     resource.get_path(self.root_path),
                     resource_name=resource.name,
                     resource_mappings=local_resources_mappings,
+                    library=self.library,
                 ),
             )
 
@@ -2432,20 +2471,27 @@ class AgentStudioProject:
 
             if before_resource and after_resource:
                 before_pretty = before_resource.to_pretty(
-                    resource_mappings=before_resource_mappings
+                    resource_mappings=before_resource_mappings,
+                    library=self.library,
                 )
-                after_pretty = after_resource.to_pretty(resource_mappings=after_resource_mappings)
+                after_pretty = after_resource.to_pretty(
+                    resource_mappings=after_resource_mappings,
+                    library=self.library,
+                )
                 if before_pretty != after_pretty:
                     diffs[before_resource.file_path] = resource_utils.get_diff(
                         before_pretty, after_pretty
                     )
             elif before_resource and not after_resource:
                 before_pretty = before_resource.to_pretty(
-                    resource_mappings=before_resource_mappings
+                    resource_mappings=before_resource_mappings,
+                    library=self.library,
                 )
                 diffs[before_resource.file_path] = resource_utils.get_diff(before_pretty, "")
             elif not before_resource and after_resource:
-                after_pretty = after_resource.to_pretty(resource_mappings=after_resource_mappings)
+                after_pretty = after_resource.to_pretty(
+                    resource_mappings=after_resource_mappings, library=self.library
+                )
                 diffs[after_resource.file_path] = resource_utils.get_diff("", after_pretty)
 
         if not diffs:
@@ -2593,8 +2639,11 @@ class AgentStudioProject:
 
             if parent_r and branch_r:
                 if parent_r.to_pretty(
-                    resource_mappings=before_resource_mappings
-                ) != branch_r.to_pretty(resource_mappings=after_resource_mappings):
+                    resource_mappings=before_resource_mappings,
+                    library=self.library,
+                ) != branch_r.to_pretty(
+                    resource_mappings=after_resource_mappings, library=self.library
+                ):
                     modified_files.append(branch_r.file_path)
             elif branch_r and not parent_r:
                 new_files.append(branch_r.file_path)
@@ -2730,6 +2779,7 @@ class AgentStudioProject:
                 resource_id=resource.resource_id,
                 resource_name=resource.resource_name,
                 resource_mappings=resource_mappings,
+                library=self.library,
                 **additional_kwargs,
             )
         except FileNotFoundError as e:
@@ -5368,3 +5418,44 @@ class AgentStudioProject:
             return datetime.strptime(deployment["created_at"], "%a, %d %b %Y %H:%M:%S %Z")
 
         return max(deployments, key=created_at, default=None)
+
+    def get_llm_models(self) -> list[dict]:
+        """Get the list of available LLM models.
+
+        Returns:
+            list[dict]: The available LLM models.
+        """
+        return self.api_handler.get_llm_models(self.region)
+
+    def get_asr_models(self) -> list[dict]:
+        """Get the list of available ASR models.
+
+        Returns:
+            list[dict]: The available ASR models.
+        """
+        return self.api_handler.get_asr_models(self.region)
+
+    def refresh_library(self, force_refresh: bool = False) -> Library:
+        """Load the library for the current region.
+
+        The library will be refreshed if:
+        - No library has been loaded
+        - The force_refresh flag is set to True
+        - The library was last refreshed more than a day ago
+
+        Args:
+            force_refresh (bool): Whether to force a refresh of the library.
+
+        Returns:
+            Library: The refreshed library object.
+        """
+        if not self.library or force_refresh or self.library.is_stale:
+            try:
+                library = Library.load_library_from_api(self.region, self.api_handler)
+                self.library = library
+            except Exception as e:
+                if not force_refresh:
+                    logger.warning(f"Failed to refresh library: {e}")
+                else:
+                    raise
+        return self.library

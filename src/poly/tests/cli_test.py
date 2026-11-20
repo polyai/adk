@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from argparse import ArgumentParser, _SubParsersAction
+from datetime import UTC, datetime, timedelta
 from importlib.metadata import PackageNotFoundError
 from io import StringIO
 from pathlib import Path
@@ -45,6 +46,7 @@ from poly.cli_commands.functions import (
     FUNCTIONS_SUBCOMMAND_GROUPS,
     FunctionsCommand,
 )
+from poly.cli_commands.library import LibraryCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import (
     compute_diff,
@@ -71,6 +73,8 @@ from poly.cli_commands.update import (
     display_update_message,
 )
 from poly.cli_commands.utils import CompletionCommand
+from poly.library import Library
+from poly.output.console import console
 from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
 
@@ -5417,7 +5421,7 @@ class GroupedHelpOutputTest(unittest.TestCase):
         section = self.help_text.split(f"\n{BUILDER_API_GROUP}:")[1]
         section = section.split(f"\n{OTHER_GROUP}:")[0]
 
-        for command in ["functions", "conversations", "audio-cache", "deployments"]:
+        for command in ["functions", "conversations", "audio-cache", "deployments", "library"]:
             self.assertIn(command, section)
         self.assertNotIn("pull", section)
         # rtc/test/chat operate on local project/branch state, not pure remote
@@ -7038,3 +7042,244 @@ class UpdateCheckStampTest(unittest.TestCase):
         _record_update_check()
 
         self.assertFalse(self.stamp_file.exists())
+
+
+class LibraryCommandTest(unittest.TestCase):
+    """Tests for `poly library refresh`, `poly library asr` and `poly library llm`."""
+
+    LLM_MODELS = [
+        {"name": "GPT-4.1 mini", "providerModelId": "azure-oai-gpt-41-mini", "polyaiModel": False},
+        {"name": "PolyAI Raven 3.5", "providerModelId": "polywhirl-3-5", "polyaiModel": True},
+        {"name": "Anthropic Claude 4.5 Haiku", "providerModelId": "aws-claude-45-haiku"},
+        {"name": "Dialog-RSN-1", "providerModelId": "raven-omni", "polyaiModel": True},
+    ]
+
+    ASR_MODELS = [
+        {"name": "Soniox STT RT v5", "provider": "soniox", "model": "stt-rt-v5"},
+        {"name": "Raven ASR", "provider": "raven", "model": "raven-asr-1"},
+        {"name": "Deepgram Nova 3", "provider": "deepgram", "model": "nova-3"},
+        {"name": "Auto", "provider": "default", "model": "poly-latency"},
+        {"name": "PolyAI ASR", "provider": "Poly", "model": "asr-1"},
+    ]
+
+    def setUp(self):
+        self.library = Library.build_library("us-1", self.ASR_MODELS, self.LLM_MODELS)
+        self.mock_load = patch("poly.cli_commands.library.load_project").start()
+        self.proj = MagicMock()
+        self.proj.region = "us-1"
+        self.proj.library = self.library
+        self.proj.refresh_library.return_value = self.library
+        self.mock_load.return_value = self.proj
+        self.mock_get_asr = patch(
+            "poly.handlers.interface.AgentStudioInterface.get_asr_models",
+            return_value=self.ASR_MODELS,
+        ).start()
+        self.mock_get_llm = patch(
+            "poly.handlers.interface.AgentStudioInterface.get_llm_models",
+            return_value=self.LLM_MODELS,
+        ).start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _json_output(self, method, *args, **kwargs):
+        """Run a command method with --json and return the one JSON document it printed."""
+        with patch("sys.stdout", new_callable=StringIO) as stdout:
+            method(TEST_DIR, *args, output_json=True, **kwargs)
+        return json.loads(stdout.getvalue())
+
+    @patch("poly.cli_commands.library.LibraryCommand.list_llm_models")
+    def test_llm_subcommand_dispatches_with_path_and_json(self, mock_list):
+        """`poly library llm --json --path` reaches list_llm_models with both flags."""
+        AgentStudioCLI().main(["library", "llm", "--json", "--path", TEST_DIR])
+
+        mock_list.assert_called_once_with(TEST_DIR, None, refresh=False, output_json=True)
+
+    @patch("poly.cli_commands.library.LibraryCommand.list_asr_models")
+    def test_asr_subcommand_dispatches_region_and_refresh(self, mock_list):
+        """`poly library asr --region --refresh` passes both through."""
+        AgentStudioCLI().main(
+            ["library", "asr", "--region", "euw-1", "--refresh", "--path", TEST_DIR]
+        )
+
+        mock_list.assert_called_once_with(TEST_DIR, "euw-1", refresh=True, output_json=False)
+
+    @patch("poly.cli_commands.library.LibraryCommand.refresh_library")
+    def test_refresh_subcommand_dispatches_with_path_and_json(self, mock_refresh):
+        """`poly library refresh --json --path` reaches refresh_library with both flags."""
+        AgentStudioCLI().main(["library", "refresh", "--json", "--path", TEST_DIR])
+
+        mock_refresh.assert_called_once_with(TEST_DIR, None, output_json=True)
+
+    def test_unknown_region_is_rejected(self):
+        """--region only takes the regions the CLI knows."""
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI().main(["library", "llm", "--region", "mars-1"])
+
+    def test_library_without_subcommand_is_rejected(self):
+        """`poly library` on its own needs a subcommand."""
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI().main(["library"])
+
+    def test_refresh_refetches_the_project_region_even_when_recent(self):
+        """`poly library refresh` refetches the project's region even when it's recent."""
+        output = self._json_output(LibraryCommand.refresh_library, None)
+
+        self.mock_get_asr.assert_called_once_with("us-1")
+        self.mock_get_llm.assert_called_once_with("us-1")
+        self.assertEqual(
+            output,
+            {"success": True, "number_of_asr_models": 5, "number_of_llm_models": 4},
+        )
+
+    def test_refresh_with_region_fetches_and_saves_without_a_project(self):
+        """`poly library refresh --region` needs no project and saves that region's library."""
+        self._json_output(LibraryCommand.refresh_library, "euw-1")
+
+        self.mock_load.assert_not_called()
+        self.mock_get_asr.assert_called_once_with("euw-1")
+        saved = Library.load_library_from_file("euw-1")
+        self.assertEqual(len(saved.llm_models), len(self.LLM_MODELS))
+
+    def test_refresh_prints_counts_without_json(self):
+        """Without --json, refresh reports how many models it found."""
+        with console.capture() as capture:
+            LibraryCommand.refresh_library(TEST_DIR, None)
+
+        self.assertIn("5 asr models and 4 language models", capture.get().lower())
+
+    def test_llm_json_lists_polyai_models_first_then_by_name(self):
+        """Models flagged polyaiModel come first, and each group is sorted by name."""
+        names = [m["name"] for m in self._json_output(LibraryCommand.list_llm_models, None)]
+
+        self.assertEqual(
+            names,
+            ["Dialog-RSN-1", "PolyAI Raven 3.5", "Anthropic Claude 4.5 Haiku", "GPT-4.1 mini"],
+        )
+
+    def test_asr_json_lists_polyai_models_first_then_by_name(self):
+        """ASR models from a PolyAI provider or with a poly- model come first, by name."""
+        names = [m["name"] for m in self._json_output(LibraryCommand.list_asr_models, None)]
+
+        self.assertEqual(
+            names,
+            ["Auto", "PolyAI ASR", "Raven ASR", "Deepgram Nova 3", "Soniox STT RT v5"],
+        )
+
+    def test_list_reads_the_saved_library_without_calling_the_api(self):
+        """With a library loaded, listing makes no API calls and no refresh."""
+        self._json_output(LibraryCommand.list_llm_models, None)
+
+        self.proj.refresh_library.assert_not_called()
+        self.mock_get_llm.assert_not_called()
+
+    def test_list_fetches_the_library_when_the_project_has_none(self):
+        """A project with no saved library fetches one before listing."""
+        self.proj.library = None
+
+        output = self._json_output(LibraryCommand.list_asr_models, None)
+
+        self.mock_get_asr.assert_called_once_with("us-1")
+        self.assertEqual(len(output), len(self.ASR_MODELS))
+
+    def test_list_refetches_a_stale_project_library(self):
+        """A project library past the refresh interval is refetched before listing."""
+        self.library.last_refreshed = datetime.now(UTC) - timedelta(days=2)
+
+        self._json_output(LibraryCommand.list_llm_models, None)
+
+        self.mock_get_llm.assert_called_once_with("us-1")
+
+    def test_list_refetches_a_stale_saved_region(self):
+        """A saved --region library past the refresh interval is refetched before listing."""
+        stale = Library.build_library("uk-1", [], [])
+        stale.last_refreshed = datetime.now(UTC) - timedelta(days=2)
+        stale.save_library()
+
+        output = self._json_output(LibraryCommand.list_asr_models, "uk-1")
+
+        self.mock_get_asr.assert_called_once_with("uk-1")
+        self.assertEqual(len(output), len(self.ASR_MODELS))
+
+    def test_list_with_new_region_fetches_and_saves_it(self):
+        """--region for a region with no saved library fetches and saves it."""
+        output = self._json_output(LibraryCommand.list_llm_models, "uk-1")
+
+        self.mock_get_llm.assert_called_once_with("uk-1")
+        self.assertEqual(len(output), len(self.LLM_MODELS))
+        self.assertEqual(Library.load_library_from_file("uk-1").region, "uk-1")
+
+    def test_list_with_saved_region_reads_it_from_disk(self):
+        """--region for a region already saved reads it without calling the API."""
+        Library.build_library("uk-1", self.ASR_MODELS[:1], self.LLM_MODELS[:1]).save_library()
+
+        output = self._json_output(LibraryCommand.list_asr_models, "uk-1")
+
+        self.mock_get_asr.assert_not_called()
+        self.assertEqual([m["name"] for m in output], ["Soniox STT RT v5"])
+
+    def _save_stale_region(self, region: str) -> None:
+        stale = Library.build_library(region, self.ASR_MODELS[:1], self.LLM_MODELS[:1])
+        stale.last_refreshed = datetime.now(UTC) - timedelta(days=2)
+        stale.save_library()
+
+    def test_failed_refresh_lists_the_stale_copy_with_a_warning(self):
+        """If a stale library can't be refreshed, its saved models are listed with a warning."""
+        self._save_stale_region("uk-1")
+        self.mock_get_asr.side_effect = RuntimeError("list route down")
+
+        with console.capture() as capture:
+            LibraryCommand.list_asr_models(TEST_DIR, "uk-1")
+        output = capture.get()
+
+        self.assertIn("Warning", output)
+        self.assertIn("list route down", output)
+        self.assertIn("Soniox STT RT v5", output)
+
+    def test_failed_refresh_with_json_prints_only_the_stale_list(self):
+        """With --json, the stale fallback still prints exactly one JSON document."""
+        self._save_stale_region("uk-1")
+        self.mock_get_llm.side_effect = RuntimeError("list route down")
+
+        output = self._json_output(LibraryCommand.list_llm_models, "uk-1")
+
+        self.assertEqual([m["name"] for m in output], ["GPT-4.1 mini"])
+
+    def test_failed_fetch_with_nothing_saved_raises(self):
+        """With no saved library to fall back on, the fetch error reaches the user."""
+        self.mock_get_asr.side_effect = RuntimeError("list route down")
+
+        with self.assertRaisesRegex(RuntimeError, "list route down"):
+            LibraryCommand.list_asr_models(TEST_DIR, "euw-1")
+
+    def test_refresh_flag_refetches_and_prints_one_json_document(self):
+        """--refresh refetches before listing, and --json still prints only the list."""
+        Library.build_library("uk-1", [], []).save_library()
+
+        for method in (LibraryCommand.list_asr_models, LibraryCommand.list_llm_models):
+            with self.subTest(method.__name__):
+                output = self._json_output(method, "uk-1", refresh=True)
+
+                self.assertIsInstance(output, list)
+                self.assertTrue(output)
+
+    def test_llm_table_tags_polyai_models(self):
+        """The table lists PolyAI's models first, with the PolyAI tag."""
+        with console.capture() as capture:
+            LibraryCommand.list_llm_models(TEST_DIR, None)
+        rows = [line for line in capture.get().splitlines() if "-" in line]
+
+        self.assertIn("Dialog-RSN-1", rows[0])
+        self.assertIn("PolyAI", rows[0])
+        self.assertNotIn("PolyAI", rows[-1])
+
+    def test_asr_table_tags_polyai_models(self):
+        """The table tags ASR models that Agent Studio counts as PolyAI's."""
+        with console.capture() as capture:
+            LibraryCommand.list_asr_models(TEST_DIR, None)
+        output = capture.get()
+        auto_row = next(line for line in output.splitlines() if "poly-latency" in line)
+        soniox_row = next(line for line in output.splitlines() if "stt-rt-v5" in line)
+
+        self.assertIn("PolyAI", auto_row)
+        self.assertNotIn("PolyAI", soniox_row)

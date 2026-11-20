@@ -2001,3 +2001,27 @@ class AgentStudioInterface:
     def get_transcript(region: str, conversation_id: str, project_id: str) -> dict:
         """Fetch one conversation's full transcript."""
         return PlatformAPIHandler.get_transcript(region, conversation_id, project_id)
+
+    @staticmethod
+    def get_llm_models(region: str) -> list[dict]:
+        """Get the list of available LLM models.
+
+        Args:
+            region: The region name.
+
+        Returns:
+            list[dict]: The available LLM models.
+        """
+        return PlatformAPIHandler.get_llm_models(region)
+
+    @staticmethod
+    def get_asr_models(region: str) -> list[dict]:
+        """Get the list of available ASR models.
+
+        Args:
+            region: The region name.
+
+        Returns:
+            list[dict]: The available ASR models.
+        """
+        return PlatformAPIHandler.get_asr_models(region)

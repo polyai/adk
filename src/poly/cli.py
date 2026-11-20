@@ -28,6 +28,7 @@ from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
 from poly.cli_commands.functions import FunctionsCommand
+from poly.cli_commands.library import LibraryCommand
 from poly.cli_commands.metrics import MetricsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
@@ -77,6 +78,7 @@ COMMANDS = [
     TranscriptsCommand,
     AudioCacheCommand,
     FunctionsCommand,
+    LibraryCommand,
     TestingCommand,
     RTCCommand,
     ChatCommand,

@@ -2128,3 +2128,80 @@ def print_transcript(
     for turn in turns:
         _print_turn(turn, english=english)
     console.print()
+
+
+# ── Model library ─────────────────────────────────────────────────────
+
+
+def _flag(value: Any) -> str:
+    return "[success]✓[/success]" if value else "[muted]✗[/muted]"
+
+
+def _poly_tag(is_poly: bool) -> str:
+    return "[magenta]PolyAI[/magenta]" if is_poly else ""
+
+
+def print_llm_models(
+    llm_models: list[dict[str, Any]], is_poly: Callable[[dict[str, Any]], bool]
+) -> None:
+    """Print a table of the language models available in the region.
+
+    Args:
+        llm_models: List of language model dicts from the API.
+        is_poly: Whether a model is PolyAI's own, which tags its row.
+    """
+    if not llm_models:
+        plain("No language models available.")
+        return
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Name", style="bold yellow", no_wrap=True)
+    table.add_column("", no_wrap=True)
+    table.add_column("Model ID", style="muted", no_wrap=True)
+    table.add_column("Provider model ID", style="muted", no_wrap=True)
+    table.add_column("Speech-native", justify="center")
+    table.add_column("Web chat", justify="center")
+
+    for m in llm_models:
+        table.add_row(
+            m.get("name") or "—",
+            _poly_tag(is_poly(m)),
+            m.get("id") or "—",
+            m.get("providerModelId") or "—",
+            _flag(m.get("endToEnd")),
+            _flag(m.get("supportsWebchat")),
+        )
+
+    console.print(table)
+    console.print(f"\n{len(llm_models)} language models")
+
+
+def print_asr_models(
+    asr_models: list[dict[str, Any]], is_poly: Callable[[dict[str, Any]], bool]
+) -> None:
+    """Print a table of the ASR models available in the region.
+
+    Args:
+        asr_models: List of ASR model dicts from the API.
+        is_poly: Whether a model is PolyAI's own, which tags its row.
+    """
+    if not asr_models:
+        plain("No ASR models available.")
+        return
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Name", style="bold yellow", no_wrap=True)
+    table.add_column("", no_wrap=True)
+    table.add_column("Provider", style="cyan", no_wrap=True)
+    table.add_column("Model", no_wrap=True)
+
+    for m in asr_models:
+        table.add_row(
+            m.get("name") or "—",
+            _poly_tag(is_poly(m)),
+            m.get("provider") or "—",
+            m.get("model") or "—",
+        )
+
+    console.print(table)
+    console.print(f"\n{len(asr_models)} ASR models")
