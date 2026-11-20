@@ -224,14 +224,18 @@ Steps can also define DTMF behavior, including:
 
 ### ASR override
 
-Override the speech recognition provider or model for this step.
+Override the speech recognition model for this step.
 
 | Field | Description |
 |---|---|
-| `provider` | ASR provider to use for this step |
-| `model` | ASR model to use for this step |
+| `name` | Model to use, by the name [`poly library asr`](../cli/library.md#poly-library-asr) lists |
 
-[`poly library asr`](../cli/library.md#poly-library-asr) lists the providers and models available in the project's region.
+~~~yaml
+asr:
+  name: Deepgram Nova 3
+~~~
+
+If a model's name can't be resolved by that region's list, `poly pull` writes its `provider` and `model` IDs instead, and those keep working.
 
 ### VAD
 
@@ -262,14 +266,16 @@ Override the model or its reasoning effort for a single step.
 
 | Field | Description |
 |---|---|
-| `provider_model_id` | Model to use for this step, as listed by [`poly library llm`](../cli/library.md#poly-library-llm) |
+| `name` | Model to use, by the name [`poly library llm`](../cli/library.md#poly-library-llm) lists |
 | `reasoning_effort` | One of `unspecified`, `minimal`, `low`, `medium`, `high`, `auto` |
 
 ~~~yaml
 llm:
-  provider_model_id: <model-id>
+  name: PolyAI Raven 3.5
   reasoning_effort: high
 ~~~
+
+If a model's name can't be resolved by that region's list, `poly pull` writes its `provider_model_id` instead, and that keeps working.
 
 Raising reasoning effort on a step that has to weigh several conditions can improve reliability; lowering it on a simple collection step reduces latency.
 
@@ -392,6 +398,9 @@ Logic reused across flows is usually better placed in global functions.
 - A condition's `child_step` must be a step in the same flow.
 - `inter_digit_timeout` and `max_digits` (DTMF configuration) cannot be negative.
 - `vad_start` and `vad_end` (VAD) must be finite and non-negative — `poly validate` rejects a negative or infinite value.
+- A model `name` in an `asr` or `llm` override must be in the region's list, which [`poly library`](../cli/library.md) shows. With no saved list, `poly validate` warns that it can't check the name, and `poly push` refuses it.
+- An override gives either a `name` or the model's IDs, not both.
+- IDs that aren't in the list only warn, since the list leaves out deprecated and internal models that can still be used.
 
 ## Best practices
 

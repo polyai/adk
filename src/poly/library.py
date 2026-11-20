@@ -182,14 +182,21 @@ class Library:
         return None
 
     def get_asr_model_by_name(self, name: str) -> ASRModel | None:
+        if not name:
+            return None
         for asr_model in self.asr_models:
-            if asr_model.name == name:
+            if asr_model.name.strip().lower() == name.strip().lower():
                 return asr_model
         return None
 
     def get_asr_model_by_provider_and_model(self, provider: str, model: str) -> ASRModel | None:
+        if not provider or not model:
+            return None
         for asr_model in self.asr_models:
-            if asr_model.provider == provider and asr_model.model == model:
+            if (
+                asr_model.provider.strip().lower() == provider.strip().lower()
+                and asr_model.model.strip().lower() == model.strip().lower()
+            ):
                 return asr_model
         return None
 
@@ -200,13 +207,17 @@ class Library:
         return None
 
     def get_llm_model_by_provider_model_id(self, provider_model_id: str) -> LLMModel | None:
+        if not provider_model_id:
+            return None
         for llm_model in self.llm_models:
-            if llm_model.provider_model_id == provider_model_id:
+            if llm_model.provider_model_id.strip().lower() == provider_model_id.strip().lower():
                 return llm_model
         return None
 
     def get_llm_model_by_name(self, name: str) -> LLMModel | None:
+        if not name:
+            return None
         for llm_model in self.llm_models:
-            if llm_model.name == name:
+            if llm_model.name.strip().lower() == name.strip().lower():
                 return llm_model
         return None

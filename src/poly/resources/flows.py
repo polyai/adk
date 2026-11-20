@@ -52,6 +52,7 @@ from poly.handlers.protobuf.flows_pb2 import (
     UpdateNoCodeStep,
     UpdateStep,
 )
+from poly.library import Library
 from poly.resources.entities import Entity
 from poly.resources.function import Function, FunctionType, parse_latency_control
 from poly.resources.resource import (
@@ -573,6 +574,7 @@ class FlowStep(BaseFlowStep, YamlResource):
         d: dict,
         file_path: str = None,
         resource_mappings: list[ResourceMapping] = None,
+        library: Library = None,
         **kwargs,
     ) -> dict:
         """Return dict with resource IDs replaced by names."""
@@ -618,6 +620,26 @@ class FlowStep(BaseFlowStep, YamlResource):
                     condition["required_entities"] = [
                         entity_mappings.get(entity_id, entity_id) for entity_id in required_entities
                     ]
+
+        # Replace library resource IDs with names
+        if library:
+            if asr_settings := d.get("asr"):
+                asr_model_name = library.get_asr_model_by_provider_and_model(
+                    asr_settings.get("provider"), asr_settings.get("model")
+                )
+                if asr_model_name:
+                    d["asr"] = {"name": asr_model_name.name}
+
+            if llm_settings := d.get("llm"):
+                llm_model_name = library.get_llm_model_by_provider_model_id(
+                    llm_settings.get("provider_model_id")
+                )
+                if llm_model_name:
+                    d["llm"] = {
+                        "name": llm_model_name.name,
+                        **{k: v for k, v in d["llm"].items() if k != "provider_model_id"},
+                    }
+
         return d
 
     @classmethod
@@ -626,6 +648,7 @@ class FlowStep(BaseFlowStep, YamlResource):
         yaml_dict: dict,
         resource_mappings: list[ResourceMapping] = None,
         file_path: str = None,
+        library: Library = None,
         **kwargs,
     ) -> dict:
         """Replace resource names with IDs in a parsed YAML dict."""
@@ -673,6 +696,22 @@ class FlowStep(BaseFlowStep, YamlResource):
                         for entity_name in required_entities
                     ]
                     condition["required_entities"] = new_required_entities
+
+        if asr_settings := yaml_dict.get("asr"):
+            name = asr_settings.get("name")
+            has_ids = "provider" in asr_settings or "model" in asr_settings
+            if name and not has_ids and library:
+                if asr_model := library.get_asr_model_by_name(name):
+                    del asr_settings["name"]
+                    asr_settings["provider"] = asr_model.provider
+                    asr_settings["model"] = asr_model.model
+
+        if llm_settings := yaml_dict.get("llm"):
+            name = llm_settings.get("name")
+            if name and "provider_model_id" not in llm_settings and library:
+                if llm_model := library.get_llm_model_by_name(name):
+                    del llm_settings["name"]
+                    llm_settings["provider_model_id"] = llm_model.provider_model_id
 
         return yaml_dict
 
@@ -727,7 +766,7 @@ class FlowStep(BaseFlowStep, YamlResource):
             raise ValueError(f"Error loading YAML file: {file_path}") from e
 
         yaml_dict = cls.from_pretty_dict(
-            yaml_dict, resource_mappings=resource_mappings, file_path=file_path
+            yaml_dict, resource_mappings=resource_mappings, file_path=file_path, **kwargs
         )
 
         # Get file name from file_path
@@ -746,7 +785,9 @@ class FlowStep(BaseFlowStep, YamlResource):
         utils.check_yaml_field_types(instance)
         return instance
 
-    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
+    def validate(
+        self, resource_mappings: list[ResourceMapping] = None, library: Library = None, **kwargs
+    ):
         """Validate the flow step resource."""
         if not self.name:
             raise ValueError("Name cannot be empty.")
@@ -821,7 +862,7 @@ class FlowStep(BaseFlowStep, YamlResource):
                 if entity_id not in entity_ids:
                     raise ValueError(f"Requested entity '{entity_id}' not found.")
 
-        self.settings.validate()
+        self.settings.validate(library=library)
 
     def build_update_proto(
         self,
@@ -1146,17 +1187,34 @@ class ASRConfig:
     # Every field is an optional override, so a step may set only some of them.
     provider: Optional[str] = None
     model: Optional[str] = None
+    # A model name from the file that the library couldn't turn into a provider and model.
+    name: Optional[str] = None
 
-    def validate(self):
-        """Validate the ASR configuration."""
-        pass
+    def validate(self, library: Optional[Library] = None):
+        """Validate the ASR configuration against the model library, when there is one."""
+        if self.name and (self.provider or self.model):
+            raise ValueError("ASR override takes either name, or provider and model, not both.")
+        if self.name:
+            if library is None:
+                logger.warning(f"Can't check ASR model '{self.name}' without the model library.")
+                return
+            raise ValueError(f"Unknown ASR model '{self.name}'.")
+        if library and self.provider and self.model:
+            if not library.get_asr_model_by_provider_and_model(self.provider, self.model):
+                logger.warning(
+                    f"ASR model {self.model} from '{self.provider}' isn't in the model library.",
+                )
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
-        return utils.drop_unset({"provider": self.provider, "model": self.model})
+        return utils.drop_unset({"name": self.name, "provider": self.provider, "model": self.model})
 
     def to_proto(self) -> FlowASRConfig:
         """Convert to proto representation."""
+        if self.name:
+            raise ValueError(
+                f"Unknown ASR model '{self.name}'. Use a known model name, or a provider and model."
+            )
         return FlowASRConfig(provider=self.provider, model=self.model)
 
 
@@ -1275,15 +1333,31 @@ class LLMConfig:
     # Both fields are optional overrides, so a step may set only one of them.
     provider_model_id: Optional[str] = None
     reasoning_effort: ReasoningEffort = ReasoningEffort.UNSPECIFIED
+    # A model name from the file that the library couldn't turn into a provider model ID.
+    name: Optional[str] = None
 
-    def validate(self):
-        """Validate the LLM configuration."""
-        pass
+    def validate(self, library: Optional[Library] = None):
+        """Validate the LLM configuration against the model library, when there is one."""
+        if self.name and self.provider_model_id:
+            raise ValueError("LLM override takes either name or provider_model_id, not both.")
+        if self.name:
+            if library is None:
+                logger.warning(
+                    f"Can't check language model '{self.name}' without the model library."
+                )
+                return
+            raise ValueError(f"Unknown language model '{self.name}'.")
+        if library and self.provider_model_id:
+            if not library.get_llm_model_by_provider_model_id(self.provider_model_id):
+                logger.warning(
+                    f"Language model '{self.provider_model_id}' isn't in the model library."
+                )
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
         return utils.drop_unset(
             {
+                "name": self.name,
                 "provider_model_id": self.provider_model_id,
                 "reasoning_effort": self.reasoning_effort.value,
             }
@@ -1291,6 +1365,11 @@ class LLMConfig:
 
     def to_proto(self) -> FlowLLMConfig:
         """Convert to proto representation."""
+        if self.name:
+            raise ValueError(
+                f"Unknown language model '{self.name}'. "
+                "Use a known model name, or a provider_model_id."
+            )
         return FlowLLMConfig(
             provider_model_id=self.provider_model_id,
             reasoning_effort=REASONING_EFFORT_TO_PROTO_INT[self.reasoning_effort],
@@ -1436,18 +1515,18 @@ class FlowSettings(SubResource):
             llm=llm_data or None,
         )
 
-    def validate(self, **kwargs):
+    def validate(self, library: Library = None, **kwargs):
         """Validate the flow settings resource."""
         self.asr_biasing.validate()
         self.dtmf.validate()
         if self.asr:
-            self.asr.validate()
+            self.asr.validate(library=library)
         if self.vad:
             self.vad.validate()
         if self.barge_in:
             self.barge_in.validate()
         if self.llm:
-            self.llm.validate()
+            self.llm.validate(library=library)
 
     def build_update_proto(self) -> Flow_UpdateStepSettings:
         """Create a proto for updating the flow settings."""

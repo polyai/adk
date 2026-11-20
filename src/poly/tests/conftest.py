@@ -3,15 +3,25 @@
 Copyright PolyAI Limited
 """
 
+import os
+import shutil
 from unittest.mock import patch
 
 import pytest
 
+# A saved model library for the test project's region, so its files can use model names.
+TEST_LIBRARY_DIR = os.path.join(os.path.dirname(__file__), "test_projects", "library")
+
 
 @pytest.fixture(autouse=True)
 def _isolated_library_dir(tmp_path, monkeypatch):
-    """Keep the model library cache out of the real ~/.poly while tests run."""
-    monkeypatch.setattr("poly.library.LIBRARY_DIR", str(tmp_path / "library"))
+    """Point the model library at a temp copy of the test library, never the real ~/.poly.
+
+    A copy, so a test that refreshes the library can't change the one in the repo.
+    """
+    library_dir = tmp_path / "library"
+    shutil.copytree(TEST_LIBRARY_DIR, library_dir)
+    monkeypatch.setattr("poly.library.LIBRARY_DIR", str(library_dir))
 
 
 @pytest.fixture(autouse=True)

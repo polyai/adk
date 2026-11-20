@@ -99,15 +99,14 @@ dtmf_config:
   max_digits: 4
   end_key: '#'
 asr:
-  provider: deepgram
-  model: nova-3
+  name: Deepgram Nova 3
 vad:
   vad_start: 0.2
   vad_end: 0.8
 barge_in:
   is_enabled: false
 llm:
-  provider_model_id: polywhirl-3-5
+  name: PolyAI Raven 3.5
   reasoning_effort: medium
 prompt: Please read out your card number.
 ```
@@ -125,8 +124,8 @@ prompt: Please read out your card number.
   - **end_key** (str) When this key is pressed, end collection
   - **collect_while_agent_speaking** (bool) Allow collection during the agent's speech
   - **is_pii** (bool) Does user input count as PII
-- **asr**: Speech recognition provider override
-  - **provider** (str), **model** (str). `poly library asr` lists them
+- **asr**: Speech recognition model override
+  - **name** (str) The model's name, as `poly library asr` lists it
 - **vad**: Voice activity detection override
   - **provider** (str)
   - **vad_start** / **vad_end** (float) Seconds. Must be zero or greater
@@ -134,8 +133,12 @@ prompt: Please read out your card number.
 - **barge_in**: Whether the caller can interrupt the agent
   - **is_enabled** (bool)
 - **llm**: Model override for the turn
-  - **provider_model_id** (str). `poly library llm` lists them
+  - **name** (str) The model's name, as `poly library llm` lists it
   - **reasoning_effort** (str) One of `unspecified`, `minimal`, `low`, `medium`, `high`, `auto`
+
+A model name not in the region's list fails `poly validate`. A model whose name can't be
+resolved by that region's list is pulled as its IDs instead (`provider` and `model` for `asr`,
+`provider_model_id` for `llm`), and those keep working.
 
 #### Removing settings
 
