@@ -144,7 +144,7 @@ poly deployments list             # what is deployed where
 
 ## Account secrets
 
-Use `poly secrets list` to discover account secret names and project access without reading values. `--project` filters the list to secrets the current project can use. Create or update a secret with `poly secrets set <name>`; values come from hidden prompts or stdin, never command arguments or project files.
+Use `poly secrets list` to discover account secret names and project access without reading values. `--project` filters the list to secrets the current project can use. Create or update a secret with `poly secrets set <secret_name>`; values come from hidden prompts or stdin, never command arguments or project files.
 
 Description and access changes preserve the stored value. New secrets default to the current project's access; use repeatable `--project`, `--no-projects`, or `--grant` / `--revoke` to change it. Existing key-value secrets update only the supplied keys and preserve omitted keys. A JSON `null` or repeatable `--delete-key KEY` deletes a key; at least one key must remain. New key-value secrets require string values. `--json` never prompts and requires stdin when supplying values; metadata-only updates and `--delete-key` need no value.
 

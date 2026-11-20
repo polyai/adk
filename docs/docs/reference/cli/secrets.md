@@ -5,14 +5,14 @@ description: Reference for the `poly secrets` command.
 
 # `poly secrets`
 
-Manage secrets stored in the current project's account without revealing their values. `poly secrets` requires a subcommand.
+Manage secrets stored in the current project's account without revealing their values. `poly secrets` requires a subcommand. Replace `<secret_name>` with the secret's display name, omitting the angle brackets.
 
 Examples:
 
 ```bash
 poly secrets list
-poly secrets set service-token
-poly secrets delete service-token --yes
+poly secrets set <secret_name>
+poly secrets delete <secret_name> --yes
 ```
 
 These commands update account secrets directly, across branches and environments including live. They do not write values to project files or require `poly push`.
@@ -39,7 +39,7 @@ poly secrets list --project --json
   "success": true,
   "secrets": [
     {
-      "display_name": "service-token",
+      "display_name": "<secret_name>",
       "description": "Service authentication",
       "value_type": "single",
       "access_config": ["project-a"],
@@ -57,15 +57,15 @@ Create a secret or update an existing one. A new secret is single-value by defau
 Examples:
 
 ```bash
-poly secrets set service-token
-poly secrets set credentials --key-value
-poly secrets set credentials --delete-key obsolete
-poly secrets set service-token --description 'Service authentication'
-poly secrets set service-token --grant project-b --revoke project-a
-poly secrets set service-token --no-projects
-poly secrets set service-token --description 'Updated' --replace-value
-poly secrets set service-token --json < /secure/path/token
-poly secrets set credentials --key-value --json < /secure/path/credentials.json
+poly secrets set <secret_name>
+poly secrets set <secret_name> --key-value
+poly secrets set <secret_name> --delete-key obsolete
+poly secrets set <secret_name> --description 'Service authentication'
+poly secrets set <secret_name> --grant project-b --revoke project-a
+poly secrets set <secret_name> --no-projects
+poly secrets set <secret_name> --description 'Updated' --replace-value
+poly secrets set <secret_name> --json < /secure/path/token
+poly secrets set <secret_name> --key-value --json < /secure/path/credentials.json
 ```
 
 Values come from hidden prompts or stdin, never a command argument. Interactive key-value input prompts separately for each key and hides each value. A single value read from stdin is used verbatim, including any trailing newline. Key-value stdin must contain a nonempty JSON object: strings add or update keys, and `null` deletes a key from an existing secret. New secrets require string values for every key.
@@ -76,7 +76,7 @@ When changing only description or project access, the stored value is preserved 
 
 | Argument | Description |
 |---|---|
-| `name` | The secret's display name. |
+| `<secret_name>` | The secret's display name. |
 
 | Flag | Description |
 |---|---|
@@ -101,7 +101,7 @@ When changing only description or project access, the stored value is preserved 
 {
   "success": true,
   "secret": {
-    "display_name": "service-token",
+    "display_name": "<secret_name>",
     "description": "Service authentication",
     "value_type": "single",
     "access_config": ["project-a"]
@@ -116,14 +116,14 @@ Delete one or more secrets from the account. Interactive deletion asks for confi
 Examples:
 
 ```bash
-poly secrets delete service-token
-poly secrets delete service-token credentials --yes
-poly secrets delete service-token --json
+poly secrets delete <secret_name>
+poly secrets delete <secret_name> <another_secret_name> --yes
+poly secrets delete <secret_name> --json
 ```
 
 | Argument | Description |
 |---|---|
-| `names` | One or more secret display names. |
+| `<secret_name>` | One or more secret display names. |
 
 | Flag | Description |
 |---|---|
@@ -137,6 +137,6 @@ poly secrets delete service-token --json
 ```json
 {
   "success": true,
-  "deleted": ["service-token"]
+  "deleted": ["<secret_name>"]
 }
 ```

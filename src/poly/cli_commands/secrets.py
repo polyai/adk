@@ -30,9 +30,9 @@ class SecretsCommand(BaseCommand):
                 "Changes take effect immediately for projects with access, including live.\n\n"
                 "Examples:\n"
                 "  poly secrets list\n"
-                "  poly secrets set service-token\n"
-                "  poly secrets set service-token --description 'Updated description'\n"
-                "  poly secrets delete service-token --yes"
+                "  poly secrets set <secret_name>\n"
+                "  poly secrets set <secret_name> --description 'Updated description'\n"
+                "  poly secrets delete <secret_name> --yes"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -55,7 +55,7 @@ class SecretsCommand(BaseCommand):
                 "Key-value updates preserve omitted keys; null deletes a key from an existing secret."
             ),
         )
-        set_parser.add_argument("name", help="Secret display name.")
+        set_parser.add_argument("name", metavar="<secret_name>", help="Secret display name.")
         set_parser.add_argument("--description", default=None, help="Set the description.")
         set_parser.add_argument(
             "--key-value",
@@ -97,7 +97,9 @@ class SecretsCommand(BaseCommand):
             parents=[parents.path, parents.json],
             help="Delete account secrets immediately for every project with access, including live.",
         )
-        delete_parser.add_argument("names", nargs="+", help="Secret display names.")
+        delete_parser.add_argument(
+            "names", metavar="<secret_name>", nargs="+", help="One or more secret display names."
+        )
         delete_parser.add_argument("--yes", action="store_true", help="Skip confirmation.")
 
     @classmethod
