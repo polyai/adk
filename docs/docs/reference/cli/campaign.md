@@ -127,10 +127,6 @@ poly campaign test 'Appointment reminders' --phone +15550100 --start-node 'Remin
 
     `poly campaign test` runs the live campaign and calls or texts the number you give it.
 
-!!! warning "A start that is not confirmed may still call"
-
-    If the platform does not confirm the start, for example because the connection dropped, the step may still have started. The error says so, and `--json` adds `"unconfirmed": true`. Check the campaign's tests in Agent Studio before you run `test` again.
-
 `--json` output shape:
 
 ~~~json
@@ -267,10 +263,4 @@ poly campaign archive 'Appointment reminders'
 
 !!! warning "These commands act on live"
 
-    `publish`, `pause`, `resume` and `archive` change what the live campaign does straight away. Each asks for confirmation unless you pass `--force` or `--json`. If the platform does not confirm the change, for example because the connection dropped, it may still have gone through, even if Agent Studio still shows the old status: the error says so, and `--json` adds `"unconfirmed": true`. To settle it:
-
-    - `publish` and `pause`: send the same command again. That is safe, since a campaign already in the state asked for counts as done.
-    - `resume`: run it again. If it says the campaign is active, the first resume went through.
-    - `archive`: run it again. If it says the campaign is not on main or is already archived, the first archive went through.
-
-    If you didn't want the change, send the opposite command instead, such as `pause` after an unconfirmed `resume`. Archiving can't be undone.
+    `publish`, `pause`, `resume` and `archive` change what the live campaign does straight away. Each asks for confirmation unless you pass `--force` or `--json`. If one fails, the error is the platform's; running the command again shows where the campaign is.

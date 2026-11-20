@@ -12,31 +12,6 @@ from poly.cli_commands.shared import load_project, require_outbound_campaigns_en
 from poly.handlers.sdk import SourcererAPIError
 from poly.output.json_output import json_print, json_progress
 
-LIFECYCLE_ACTIONS = {
-    "publish": (
-        "Publish the campaign's draft to live. It starts contacting people unless the "
-        "campaign is paused.",
-        "Publish campaign '{name}' to live? It starts contacting people unless the campaign is "
-        "paused.",
-        "Published campaign '{name}'.",
-    ),
-    "pause": (
-        "Pause the live campaign.",
-        "Pause live campaign '{name}'?",
-        "Paused campaign '{name}'.",
-    ),
-    "resume": (
-        "Resume the paused live campaign.",
-        "Resume live campaign '{name}'? It starts contacting people again.",
-        "Resumed campaign '{name}'.",
-    ),
-    "archive": (
-        "Archive the campaign. It must be a draft or paused; archiving cannot be undone.",
-        "Archive campaign '{name}'? This cannot be undone.",
-        "Archived campaign '{name}'.",
-    ),
-}
-
 
 class CampaignCommand(BaseCommand):
     """`poly campaign`: check, preview, test and run outbound campaigns."""
@@ -190,24 +165,48 @@ class CampaignCommand(BaseCommand):
         )
         cls._add_force(test_parser, "Run the test without confirmation.")
 
-        for action, (help_text, _, _) in LIFECYCLE_ACTIONS.items():
-            lifecycle_parser = campaign_subparsers.add_parser(
-                action,
-                parents=common,
-                help=f"{help_text} Acts on live.",
-                description=(
-                    f"{help_text}\n\n"
-                    "Acts on the live campaign, on main, whatever branch you are on: a\n"
-                    "campaign made on a branch must be merged first. Asks for confirmation\n"
-                    "unless --force or --json is given. If the change is not confirmed,\n"
-                    "the error says how to settle it.\n\n"
-                    "Examples:\n"
-                    f"  poly campaign {action} 'Appointment reminders'\n"
-                ),
-                formatter_class=RawTextHelpFormatter,
-            )
-            cls._add_name(lifecycle_parser)
-            cls._add_force(lifecycle_parser, f"{action.capitalize()} without confirmation.")
+        cls._add_lifecycle_parser(
+            campaign_subparsers,
+            common,
+            "publish",
+            "Publish the campaign's draft to live. It starts contacting people unless the "
+            "campaign is paused.",
+        )
+        cls._add_lifecycle_parser(campaign_subparsers, common, "pause", "Pause the live campaign.")
+        cls._add_lifecycle_parser(
+            campaign_subparsers, common, "resume", "Resume the paused live campaign."
+        )
+        cls._add_lifecycle_parser(
+            campaign_subparsers,
+            common,
+            "archive",
+            "Archive the campaign. It must be a draft or paused; archiving cannot be undone.",
+        )
+
+    @classmethod
+    def _add_lifecycle_parser(
+        cls,
+        campaign_subparsers: _SubParsersAction[ArgumentParser],
+        common: list[ArgumentParser],
+        action: str,
+        help_text: str,
+    ) -> None:
+        lifecycle_parser = campaign_subparsers.add_parser(
+            action,
+            parents=common,
+            help=f"{help_text} Acts on live.",
+            description=(
+                f"{help_text}\n\n"
+                "Acts on the live campaign, on main, whatever branch you are on: a\n"
+                "campaign made on a branch must be merged first. Asks for confirmation\n"
+                "unless --force or --json is given.\n\n"
+                "Examples:\n"
+                f"  poly campaign {action} 'Appointment reminders'\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        cls._add_name(lifecycle_parser)
+        cls._add_force(lifecycle_parser, f"{action.capitalize()} without confirmation.")
 
     @staticmethod
     def _add_name(parser: ArgumentParser) -> None:
@@ -250,10 +249,8 @@ class CampaignCommand(BaseCommand):
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the chosen `campaign` subcommand; a failure prints its error and exits 1."""
-        from poly.project import CampaignOutcomeUnconfirmed
-
         details: dict[str, Any] = {"campaign": args.name}
-        if args.campaign_subcommand in LIFECYCLE_ACTIONS:
+        if args.campaign_subcommand in ("publish", "pause", "resume", "archive"):
             details["action"] = args.campaign_subcommand
         try:
             if args.campaign_subcommand == "validate":
@@ -292,17 +289,15 @@ class CampaignCommand(BaseCommand):
                     force=args.force,
                     output_json=args.json,
                 )
-            else:
-                cls.campaign_lifecycle(
-                    args.path,
-                    args.campaign_subcommand,
-                    args.name,
-                    force=args.force,
-                    output_json=args.json,
-                )
+            elif args.campaign_subcommand == "publish":
+                cls.campaign_publish(args.path, args.name, force=args.force, output_json=args.json)
+            elif args.campaign_subcommand == "pause":
+                cls.campaign_pause(args.path, args.name, force=args.force, output_json=args.json)
+            elif args.campaign_subcommand == "resume":
+                cls.campaign_resume(args.path, args.name, force=args.force, output_json=args.json)
+            elif args.campaign_subcommand == "archive":
+                cls.campaign_archive(args.path, args.name, force=args.force, output_json=args.json)
         except (ValueError, SourcererAPIError, TimeoutError) as e:
-            if isinstance(e, CampaignOutcomeUnconfirmed):
-                details["unconfirmed"] = True
             cls._fail(str(e), args.json, **details)
 
     @staticmethod
@@ -342,14 +337,6 @@ class CampaignCommand(BaseCommand):
             except json.JSONDecodeError:
                 parsed[key] = value
         return parsed
-
-    @staticmethod
-    def _node_labels(project: Any, name: str, live: bool = False) -> dict[str, str]:
-        try:
-            campaign = project.get_live_campaign(name) if live else project.get_campaign(name)
-            return project.campaign_node_names(campaign, live=live)
-        except (ValueError, SourcererAPIError):
-            return {}
 
     @staticmethod
     def _describe(issue: dict[str, Any]) -> str:
@@ -547,7 +534,7 @@ class CampaignCommand(BaseCommand):
             json_print(outcome)
         else:
             cls._print_steps(
-                cls._node_labels(project, name),
+                project.campaign_node_names(project.get_campaign(name)),
                 result,
                 {
                     "last-send": result.get("last_send"),
@@ -611,8 +598,10 @@ class CampaignCommand(BaseCommand):
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json, campaign=name)
         campaign = project.get_live_campaign(name)
+        labels = project.live_campaign_node_names(campaign)
         body = project.check_campaign_test(
-            name,
+            campaign,
+            labels,
             contact,
             start_node=start_node,
             run=previous_run,
@@ -630,7 +619,7 @@ class CampaignCommand(BaseCommand):
                 warning("Aborted.")
                 sys.exit(0)
 
-        started = project.start_campaign_test(name, body)
+        started = project.start_campaign_test(campaign, body)
         step_id, run_started = started.get("step_id"), started.get("run")
         if output_json:
             json_progress({"step_id": step_id, "run": run_started})
@@ -647,7 +636,7 @@ class CampaignCommand(BaseCommand):
             )
         try:
             step = project.wait_for_campaign_test_step(
-                name, step_id, timeout=timeout, phone=contact.get("phone")
+                campaign, step_id, timeout=timeout, phone=contact.get("phone")
             )
         except (SourcererAPIError, TimeoutError) as e:
             cls._fail(str(e), output_json, campaign=name, step_id=step_id, run=run_started)
@@ -661,7 +650,7 @@ class CampaignCommand(BaseCommand):
         else:
             if step.get("result"):
                 cls._print_steps(
-                    cls._node_labels(project, name, live=True),
+                    labels,
                     step["result"],
                     {"run": step.get("run") or run_started},
                     conditions=False,
@@ -673,33 +662,80 @@ class CampaignCommand(BaseCommand):
         if not done:
             sys.exit(1)
 
-    @classmethod
-    def campaign_lifecycle(
-        cls,
-        base_path: str,
-        action: str,
-        name: str,
-        force: bool = False,
-        output_json: bool = False,
-    ) -> None:
-        """Publish, pause, resume or archive a live campaign after confirming."""
-        import questionary
-
-        from poly.output.console import success, warning
-
-        _, prompt, done_message = LIFECYCLE_ACTIONS[action]
+    @staticmethod
+    def _live_campaign(base_path: str, name: str, output_json: bool):
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json, campaign=name)
-        campaign = project.get_live_campaign(name)
-        if not output_json and not force:
-            if not questionary.confirm(
-                prompt.format(name=campaign.name), default=False, auto_enter=False
-            ).ask():
-                warning("Aborted.")
-                sys.exit(0)
+        return project, project.get_live_campaign(name)
 
-        getattr(project, f"{action}_campaign")(name)
+    @staticmethod
+    def _confirm(prompt: str, force: bool, output_json: bool) -> None:
+        import questionary
+
+        from poly.output.console import warning
+
+        if output_json or force:
+            return
+        if not questionary.confirm(prompt, default=False, auto_enter=False).ask():
+            warning("Aborted.")
+            sys.exit(0)
+
+    @staticmethod
+    def _report_done(message: str, name: str, action: str, output_json: bool) -> None:
+        from poly.output.console import success
+
         if output_json:
             json_print({"success": True, "campaign": name, "action": action})
         else:
-            success(done_message.format(name=campaign.name))
+            success(message)
+
+    @classmethod
+    def campaign_publish(
+        cls, base_path: str, name: str, force: bool = False, output_json: bool = False
+    ) -> None:
+        """Publish a campaign's draft to live after confirming."""
+        project, campaign = cls._live_campaign(base_path, name, output_json)
+        cls._confirm(
+            f"Publish campaign '{campaign.name}' to live? It starts contacting people unless the "
+            "campaign is paused.",
+            force,
+            output_json,
+        )
+        project.publish_campaign(campaign)
+        cls._report_done(f"Published campaign '{campaign.name}'.", name, "publish", output_json)
+
+    @classmethod
+    def campaign_pause(
+        cls, base_path: str, name: str, force: bool = False, output_json: bool = False
+    ) -> None:
+        """Pause a live campaign after confirming."""
+        project, campaign = cls._live_campaign(base_path, name, output_json)
+        cls._confirm(f"Pause live campaign '{campaign.name}'?", force, output_json)
+        project.pause_campaign(campaign)
+        cls._report_done(f"Paused campaign '{campaign.name}'.", name, "pause", output_json)
+
+    @classmethod
+    def campaign_resume(
+        cls, base_path: str, name: str, force: bool = False, output_json: bool = False
+    ) -> None:
+        """Resume a paused live campaign after confirming."""
+        project, campaign = cls._live_campaign(base_path, name, output_json)
+        cls._confirm(
+            f"Resume live campaign '{campaign.name}'? It starts contacting people again.",
+            force,
+            output_json,
+        )
+        project.resume_campaign(campaign)
+        cls._report_done(f"Resumed campaign '{campaign.name}'.", name, "resume", output_json)
+
+    @classmethod
+    def campaign_archive(
+        cls, base_path: str, name: str, force: bool = False, output_json: bool = False
+    ) -> None:
+        """Archive a campaign after confirming."""
+        project, campaign = cls._live_campaign(base_path, name, output_json)
+        cls._confirm(
+            f"Archive campaign '{campaign.name}'? This cannot be undone.", force, output_json
+        )
+        project.archive_campaign(campaign)
+        cls._report_done(f"Archived campaign '{campaign.name}'.", name, "archive", output_json)
