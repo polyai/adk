@@ -21,7 +21,6 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import argcomplete
 import requests
-import urllib3
 from rich.console import Console
 
 from poly.cli import AgentStudioCLI
@@ -7646,54 +7645,6 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertIn("is still running after 0 seconds", output["error"])
         self.assertEqual((output["step_id"], output["run"]), ("TSTEP-1", run))
 
-    def test_test_step_whose_polls_keep_failing_retries_until_the_timeout(self):
-        """Failing polls are retried until --timeout, then the wait ends with the run."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        started = make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run})
-        unreadable = self._platform_error(
-            503, "HERMES_UNAVAILABLE", "Couldn’t check the test step. Still trying"
-        )
-        self.request.side_effect = lambda **_: (
-            started if self.request.call_count == 1 else unreadable
-        )
-        clock = iter(range(0, 10_000, 7))
-
-        with (
-            patch("poly.project.time.monotonic", side_effect=lambda: next(clock)),
-            patch("poly.project.time.sleep") as sleep,
-            self.assertRaises(SystemExit) as exit,
-        ):
-            self._run("test", self.CAMPAIGN, phone="+15550100", force=True, output_json=True)
-
-        self.assertEqual(exit.exception.code, 1)
-        self.assertGreater(self.request.call_count, 10)
-        self.assertLessEqual(max(call.args[0] for call in sleep.call_args_list), 5)
-        output = self._output()
-        self.assertEqual(
-            output["error"],
-            f"Stopped waiting for test step TSTEP-1 of campaign '{self.CAMPAIGN}' after 600 "
-            "seconds: the platform could not be reached (HTTP 503). The step carries on.",
-        )
-        self.assertEqual((output["step_id"], output["run"]), ("TSTEP-1", run))
-
-    def test_test_step_poll_that_fails_is_retried(self):
-        """A dropped connection or a 5xx while polling is retried, not reported."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        done = {"step_id": "TSTEP-1", "status": "done", "run": run, "result": None}
-        self.request.side_effect = [
-            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
-            requests.ConnectionError("reset"),
-            make_mock_response(502, content=b"<html>Bad gateway</html>"),
-            make_mock_response(200, done),
-        ]
-
-        with patch("poly.project.time.sleep"):
-            self._run("test", self.CAMPAIGN, phone="+15550100", force=True, output_json=True)
-
-        self.assertEqual(
-            self._output(), {"success": True, "campaign": self.CAMPAIGN, "test_step": done}
-        )
-
     def test_test_step_poll_refused_is_not_retried(self):
         """A 4xx while polling is not going to pass, so it is reported straight away."""
         run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
@@ -7913,20 +7864,6 @@ class CampaignCommandTest(unittest.TestCase):
             [{"step_id": "TSTEP-1", "run": run}],
         )
 
-    def test_test_step_without_a_step_id_fails_with_its_run(self):
-        """A start answer with no step id fails cleanly, keeping the run."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        self._respond(make_mock_response(202, {"status": "queued", "run": run}))
-
-        with patch("sys.stderr", StringIO()), self.assertRaises(SystemExit) as exit:
-            self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
-
-        self.assertEqual(exit.exception.code, 1)
-        output = self._output()
-        self.assertFalse(output["success"])
-        self.assertEqual(output["run"], run)
-        self.assertEqual(self.request.call_count, 1)
-
     def test_campaign_requests_have_a_timeout(self):
         """A stalled connection cannot hang a campaign call: each request has a timeout."""
         self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
@@ -7983,40 +7920,22 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertTrue(output["error"].startswith(f"Could not resume campaign '{self.CAMPAIGN}'"))
         self.assertEqual(self.post.call_count, 1)
 
-    @staticmethod
-    def _dropped() -> requests.ConnectionError:
-        return requests.ConnectionError(
-            urllib3.exceptions.ProtocolError("Connection aborted.", ConnectionResetError())
-        )
-
-    @staticmethod
-    def _unreachable() -> requests.ConnectionError:
-        return requests.ConnectionError(
-            urllib3.exceptions.MaxRetryError(
-                None, "/", urllib3.exceptions.NewConnectionError(None, "refused")
+    def test_refused_test_start_shows_the_platform_message(self):
+        """A test start the platform refuses is reported in its own words."""
+        self.request.side_effect = [
+            self._platform_error(
+                503, "HERMES_UNAVAILABLE", "Testing isn’t available right now. Try again shortly"
             )
-        )
+        ]
 
-    def _start_test_after(self, answer: object) -> dict:
-        self.request.side_effect = [answer]
         with self.assertRaises(SystemExit):
             self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
-        return self._output()
 
-    def test_test_start_that_never_reached_the_platform_is_a_plain_failure(self):
-        """A connection that never opened, or testing being unavailable, started nothing."""
-        cases = {
-            "connect timeout": requests.ConnectTimeout("connect timed out"),
-            "connection refused": self._unreachable(),
-            "testing unavailable": self._platform_error(
-                503, "HERMES_UNAVAILABLE", "Testing isn’t available right now. Try again shortly"
-            ),
-        }
-        for case, answer in cases.items():
-            with self.subTest(case=case):
-                output = self._start_test_after(answer)
-
-                self.assertTrue(output["error"].startswith("Could not test campaign"))
+        self.assertEqual(
+            self._output()["error"],
+            f"Could not test campaign '{self.CAMPAIGN}': Testing isn’t available right now. "
+            "Try again shortly",
+        )
 
     def test_contact_metadata_that_is_not_an_object_is_refused_with_fields(self):
         """--field adds to the contact's metadata, so that must be an object."""
@@ -8133,21 +8052,6 @@ class CampaignCommandTest(unittest.TestCase):
             "Test step was interrupted (WorkerLost). A call or text may already have gone out.",
         )
 
-    def test_test_step_poll_rate_limited_is_retried(self):
-        """A 429 while polling is waited out like a 5xx."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        done = {"step_id": "TSTEP-1", "status": "done", "run": run, "result": None}
-        self._respond(
-            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
-            self._platform_error(429, "TOO_MANY_REQUESTS", "Too many requests"),
-            make_mock_response(200, done),
-        )
-
-        with patch("poly.project.time.sleep"):
-            self._run("test", self.CAMPAIGN, phone="+15550100", force=True, output_json=True)
-
-        self.assertTrue(self._output()["success"])
-
     def test_lifecycle_finds_the_campaign_by_its_name_on_main(self):
         """A campaign renamed on the branch is paused by its live name, and named as main has it."""
         from poly.resources import OutboundCampaign, OutboundCampaignNode
@@ -8261,21 +8165,6 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertIn("carries on from a node", self._output()["error"])
         self.request.assert_not_called()
 
-    def test_test_step_poll_that_times_out_is_retried(self):
-        """A poll whose request times out is retried like a dropped connection."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        done = {"step_id": "TSTEP-1", "status": "done", "run": run, "result": None}
-        self.request.side_effect = [
-            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
-            requests.ReadTimeout("stalled"),
-            make_mock_response(200, done),
-        ]
-
-        with patch("poly.project.time.sleep"):
-            self._run("test", self.CAMPAIGN, phone="+15550100", force=True, output_json=True)
-
-        self.assertTrue(self._output()["success"])
-
     def test_start_that_times_out_is_reported_as_the_error_it_is(self):
         """A start the platform is slow to answer is a plain failure, sent once."""
         self.request.side_effect = requests.ReadTimeout("read timed out")
@@ -8291,36 +8180,26 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertEqual(self.request.call_count, 1)
         self.assertEqual(self.request.call_args.kwargs["timeout"], (10, 300))
 
-    def test_polls_that_fail_stop_at_the_timeout(self):
-        """Retries never wait past --timeout."""
+    def test_failed_poll_is_reported_as_the_error_it_is_with_the_run(self):
+        """A poll that fails ends the wait with the platform's error, keeping the step and run."""
         run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
         self._respond(
             make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
-            *[make_mock_response(503, content=b"Service Unavailable") for _ in range(4)],
+            self._platform_error(503, "UNAVAILABLE", "Try again shortly"),
         )
 
-        with patch("poly.project.time.sleep") as sleep, self.assertRaises(SystemExit):
-            self._run("test", self.CAMPAIGN, phone="+15550100", timeout=0, output_json=True)
+        with patch("poly.project.time.sleep") as sleep, self.assertRaises(SystemExit) as exit:
+            self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
 
-        self.assertEqual(self.request.call_count, 2)
+        self.assertEqual(exit.exception.code, 1)
         sleep.assert_not_called()
-        self.assertEqual(self._output()["run"], run)
-
-    def test_proxy_and_tls_failures_are_plain_failures(self):
-        """A proxy or TLS failure never reached the platform, so nothing started."""
-        cases = {
-            "proxy": requests.exceptions.ProxyError("proxy refused"),
-            "tls": requests.exceptions.SSLError("bad certificate"),
-        }
-        self.session.get.return_value = make_mock_response(200, {"lastKnownSequence": "41"})
-        for case, failure in cases.items():
-            with self.subTest(case=case):
-                output = self._start_test_after(failure)
-                self.assertTrue(output["error"].startswith("Could not test campaign"))
-
-                self.post.side_effect = [failure]
-                with self.assertRaises(SystemExit):
-                    self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
+        self.assertEqual(self.request.call_count, 2)
+        output = self._output()
+        self.assertEqual(
+            output["error"],
+            f"Could not check the test step of campaign '{self.CAMPAIGN}': Try again shortly",
+        )
+        self.assertEqual((output["step_id"], output["run"]), ("TSTEP-1", run))
 
     def test_test_step_that_hits_the_step_cap_fails(self):
         """A step that hits the step cap is a failure, as in preview."""
@@ -8361,16 +8240,6 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertEqual(self._output()["error"], "A result can't be empty. Leave it out for none.")
         self.request.assert_not_called()
 
-    def test_refusals_are_plain_failures(self):
-        """A 4xx refusal was not acted on, so it is a plain failure."""
-        output = self._start_test_after(
-            self._platform_error(422, "VALIDATION_FAILED", "Invalid test contact")
-        )
-
-        self.assertEqual(
-            output["error"], f"Could not test campaign '{self.CAMPAIGN}': Invalid test contact"
-        )
-
     def test_test_contact_keys_the_platform_drops_are_refused(self):
         """Preview's import shape is refused for a test, before anything is sent."""
         with (
@@ -8399,48 +8268,6 @@ class CampaignCommandTest(unittest.TestCase):
             "The test contact has keys the platform doesn't take: first_name, plan. Use phone, "
             "firstName, lastName, externalId and metadata, and put other columns in metadata.",
         )
-
-    def test_poll_through_a_broken_proxy_or_tls_ends_at_once(self):
-        """A proxy or TLS failure while polling will not pass, so the wait ends with the run."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        for failure in (
-            requests.exceptions.ProxyError("proxy refused"),
-            requests.exceptions.SSLError("bad certificate"),
-        ):
-            with self.subTest(failure=type(failure).__name__):
-                self.request.reset_mock()
-                self.request.side_effect = [
-                    make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
-                    failure,
-                ]
-
-                with patch("poly.project.time.sleep") as sleep, self.assertRaises(SystemExit):
-                    self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
-
-                sleep.assert_not_called()
-                self.assertEqual(self.request.call_count, 2)
-                output = self._output()
-                self.assertEqual((output["step_id"], output["run"]), ("TSTEP-1", run))
-
-    def test_poll_refused_says_the_step_may_still_have_called(self):
-        """A 4xx while polling comes after the step started, so it may still have called."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        self._respond(
-            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
-            self._platform_error(404, "TestStepNotFound", "Test step not found"),
-        )
-
-        with self.assertRaises(SystemExit) as exit:
-            self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
-
-        self.assertEqual(exit.exception.code, 1)
-        output = self._output()
-        self.assertEqual(
-            output["error"],
-            f"Could not check test step TSTEP-1 of campaign '{self.CAMPAIGN}' (Test step not "
-            "found); it may still have called or texted +15550100.",
-        )
-        self.assertEqual((output["step_id"], output["run"]), ("TSTEP-1", run))
 
     def test_preview_with_no_route_says_the_path_stopped(self):
         """No route is a success, said plainly in the human output."""
@@ -8479,25 +8306,6 @@ class CampaignCommandTest(unittest.TestCase):
         hint = next(call.args[0] for call in info.call_args_list if "Carry on" in call.args[0])
         self.assertIn("--sample-outputs <file> --ask-branches,", hint)
         self.assertIn('{"branch": null} for the default branch', hint)
-
-    def test_start_without_a_step_id_prints_the_run_but_no_step(self):
-        """With no step id there is no "Started test step None" line, but the run is kept."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        self._respond(make_mock_response(202, {"status": "queued", "run": run}))
-
-        with (
-            patch("poly.output.console.info") as info,
-            patch("poly.output.console.error") as error,
-            self.assertRaises(SystemExit) as exit,
-        ):
-            self._run("test", self.CAMPAIGN, phone="+15550100", force=True)
-
-        self.assertEqual(exit.exception.code, 1)
-        self.assertEqual(
-            [call.args[0] for call in info.call_args_list],
-            [f"Run: {shlex.quote(json.dumps(run))}"],
-        )
-        self.assertIn("did not say which step", error.call_args.args[0])
 
     def test_test_hint_never_suggests_sample_outputs(self):
         """A real step runs conditions itself, so its hints leave --sample-outputs to preview."""

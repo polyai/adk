@@ -4471,65 +4471,27 @@ class AgentStudioProject:
         step_id: str,
         timeout: float = 600,
         poll_interval: float = 5,
-        phone: Optional[str] = None,
     ) -> dict[str, Any]:
         """Poll a test step until it stops running and return it.
-
-        A poll that fails for a reason that may pass (no response, a 5xx or a 429) is retried
-        until `timeout`, with a pause that grows up to `poll_interval`.
 
         Args:
             campaign: The campaign as main has it, from `get_live_campaign`.
             step_id: The step `start_campaign_test` returned.
             timeout: Seconds to wait for the step to stop running.
             poll_interval: Seconds between polls.
-            phone: The number the step calls or texts, named if a poll is refused.
 
         Raises:
-            TimeoutError: if it is still queued or running after `timeout` seconds, or polls
-                kept failing until then.
-            SourcererAPIError: if a poll is refused. The step may still have called or texted.
+            TimeoutError: if it is still queued or running after `timeout` seconds.
+            SourcererAPIError: if a poll fails.
         """
-        import requests
-
         deadline = time.monotonic() + timeout
-        failures = 0
         while True:
             try:
                 step = self.api_handler.get_outbound_campaign_test_step(
                     campaign.resource_id, step_id
                 )
             except SourcererAPIError as e:
-                refused = not (
-                    e.status_code is None or e.status_code >= 500 or e.status_code == 429
-                )
-                if refused or isinstance(
-                    e.__cause__, (requests.exceptions.ProxyError, requests.exceptions.SSLError)
-                ):
-                    reason = e.server_message or (
-                        f"HTTP {e.status_code}" if e.status_code else str(e)
-                    )
-                    raise SourcererAPIError(
-                        f"Could not check test step {step_id} of campaign '{campaign.name}' "
-                        f"({reason}); it may still have called or texted "
-                        f"{phone or 'the contact'}.",
-                        status_code=e.status_code,
-                        error_code=e.error_code,
-                        server_message=e.server_message,
-                    ) from e
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    unreachable = f"HTTP {e.status_code}" if e.status_code else "no answer"
-                    raise TimeoutError(
-                        f"Stopped waiting for test step {step_id} of campaign '{campaign.name}' "
-                        f"after {timeout:g} seconds: the platform could not be reached "
-                        f"({unreachable}). The step carries on."
-                    ) from e
-                failures += 1
-                logger.info(f"Polling test step {step_id} failed, retrying: {e}")
-                time.sleep(min(2 ** (failures - 1), poll_interval, remaining))
-                continue
-            failures = 0
+                raise self._campaign_error("check the test step of", campaign, e) from e
             if step.get("status") not in ("queued", "running"):
                 return step
             if time.monotonic() >= deadline:

@@ -1903,11 +1903,7 @@ class PlatformAPIHandler:
     def start_outbound_campaign_test_step(
         region: str, account_id: str, project_id: str, campaign_id: str, body: dict
     ) -> dict:
-        """Start a real test step of the live campaign, on main.
-
-        Raises:
-            requests.ReadTimeout: the step may have started.
-        """
+        """Start a real test step of the live campaign, on main."""
         endpoint = OUTBOUND_CAMPAIGN_URL.format(
             account_id=account_id,
             project_id=project_id,

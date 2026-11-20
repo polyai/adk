@@ -620,24 +620,14 @@ class CampaignCommand(BaseCommand):
                 sys.exit(0)
 
         started = project.start_campaign_test(campaign, body)
-        step_id, run_started = started.get("step_id"), started.get("run")
+        step_id, run_started = started["step_id"], started.get("run")
         if output_json:
             json_progress({"step_id": step_id, "run": run_started})
         else:
-            if step_id:
-                info(f"Started test step {step_id} of campaign '{campaign.name}'.")
+            info(f"Started test step {step_id} of campaign '{campaign.name}'.")
             info(f"Run: {shlex.quote(json.dumps(run_started))}")
-        if not step_id:
-            cls._fail(
-                "The test step started, but the platform did not say which step it is.",
-                output_json,
-                campaign=name,
-                run=run_started,
-            )
         try:
-            step = project.wait_for_campaign_test_step(
-                campaign, step_id, timeout=timeout, phone=contact.get("phone")
-            )
+            step = project.wait_for_campaign_test_step(campaign, step_id, timeout=timeout)
         except (SourcererAPIError, TimeoutError) as e:
             cls._fail(str(e), output_json, campaign=name, step_id=step_id, run=run_started)
         failure = cls._test_failure(step)
