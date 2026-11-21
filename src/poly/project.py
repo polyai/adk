@@ -85,6 +85,7 @@ from poly.resources.resource import (
 )
 from poly.utils import prepush
 from poly.utils.commands import queue_set_default_commands
+from poly.utils.locked_file import open_locked, read_locked
 
 logger = logging.getLogger(__name__)
 
@@ -500,10 +501,7 @@ class AgentStudioProject:
                 f"Status file not found at {status_file_path}, initialising with no resources"
             )
         else:
-            with open(status_file_path, "rb") as f:
-                encoded = f.read()
-
-            json_bytes = base64.b64decode(encoded)
+            json_bytes = base64.b64decode(read_locked(status_file_path))
             status_dict = json.loads(json_bytes.decode("utf-8"))
 
         migration_flags = load_migration_flags(status_dict.get("migration_flags", []))
@@ -723,8 +721,9 @@ class AgentStudioProject:
         encoded = base64.b64encode(json_bytes)
         os.makedirs(os.path.dirname(status_file_path), exist_ok=True)
 
-        with open(status_file_path, "wb") as f:
+        with open_locked(status_file_path) as f:
             f.write(encoded)
+            f.truncate()
 
         if write_project_yaml:
             config_file_path = os.path.join(self.root_path, PROJECT_CONFIG_FILE)

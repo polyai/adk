@@ -25,6 +25,7 @@ from poly.constants import (
 from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
+from poly.utils.locked_file import read_locked
 
 if TYPE_CHECKING:
     import requests
@@ -90,10 +91,7 @@ def read_project_config(base_path: str) -> AgentStudioProject | None:
     # If not, read all info from status file
     status_path = os.path.join(base_path, STATUS_FILE)
     if os.path.exists(status_path):
-        with open(status_path, "rb") as f:
-            encoded_config_data = f.read()
-
-        json_bytes = base64.b64decode(encoded_config_data)
+        json_bytes = base64.b64decode(read_locked(status_path))
         config_data = json.loads(json_bytes.decode("utf-8"))
         return AgentStudioProject.from_dict(config_data, root_path=base_path)
 
