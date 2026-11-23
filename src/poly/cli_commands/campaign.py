@@ -1,7 +1,6 @@
 """Copyright PolyAI Limited"""
 
 import json
-import os
 import shlex
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
@@ -10,7 +9,7 @@ from typing import Any, Optional
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project, require_outbound_campaigns_enabled
 from poly.handlers.sdk import SourcererAPIError
-from poly.output.json_output import json_print, json_progress
+from poly.output.json_output import json_print
 
 
 class CampaignCommand(BaseCommand):
@@ -69,8 +68,7 @@ class CampaignCommand(BaseCommand):
                 "or stored, and node functions are not run: give what each returns\n"
                 "with --sample-outputs.\n\n"
                 "Examples:\n"
-                "  poly campaign preview 'Appointment reminders' --phone +15550100 \\\n"
-                "      --field first_name=Ada\n"
+                "  poly campaign preview 'Appointment reminders' --phone +15550100\n"
                 "  poly campaign preview 'Appointment reminders' --contact contact.json \\\n"
                 "      --sample-outputs outputs.json --start-node 'Reminder call' \\\n"
                 "      --result no_answer\n"
@@ -86,14 +84,6 @@ class CampaignCommand(BaseCommand):
         )
         preview_parser.add_argument("--phone", type=str, default=None, help="Contact's phone.")
         preview_parser.add_argument(
-            "--first-name", type=str, default=None, help="Contact's first name."
-        )
-        cls._add_field(
-            preview_parser,
-            "Another contact column, as KEY=VALUE, the value read as JSON when it parses. "
-            "Repeatable.",
-        )
-        preview_parser.add_argument(
             "--sample-outputs",
             type=str,
             default=None,
@@ -104,7 +94,7 @@ class CampaignCommand(BaseCommand):
             "--last-send",
             type=str,
             default=None,
-            help="The last_send the previous step printed: a JSON object or a JSON file.",
+            help="The last_send the previous step printed, as JSON.",
         )
         preview_parser.add_argument(
             "--ask-branches",
@@ -128,7 +118,7 @@ class CampaignCommand(BaseCommand):
                 "Examples:\n"
                 "  poly campaign test 'Appointment reminders' --phone +15550100\n"
                 "  poly campaign test 'Appointment reminders' --phone +15550100 \\\n"
-                "      --start-node 'Reminder call' --run run.json --result no_answer\n"
+                "      --start-node 'Reminder call' --run '<run>' --result no_answer\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -141,21 +131,12 @@ class CampaignCommand(BaseCommand):
             "metadata. Other keys are refused; put other columns in metadata.",
         )
         test_parser.add_argument("--phone", type=str, default=None, help="Number to call/text.")
-        test_parser.add_argument("--first-name", type=str, default=None, help="First name.")
-        test_parser.add_argument("--last-name", type=str, default=None, help="Last name.")
-        test_parser.add_argument(
-            "--external-id", type=str, default=None, help="Contact's id in your own system."
-        )
-        cls._add_field(
-            test_parser,
-            "A metadata column, as KEY=VALUE, the value read as JSON when it parses. Repeatable.",
-        )
         cls._add_continue_flags(test_parser)
         test_parser.add_argument(
             "--run",
             type=str,
             default=None,
-            help="The run the previous step printed: a JSON object or a JSON file.",
+            help="The run the previous step printed, as JSON.",
         )
         test_parser.add_argument(
             "--timeout",
@@ -213,12 +194,6 @@ class CampaignCommand(BaseCommand):
         parser.add_argument("name", type=str, help="The campaign's name or folder.")
 
     @staticmethod
-    def _add_field(parser: ArgumentParser, help_text: str) -> None:
-        parser.add_argument(
-            "--field", action="append", default=[], metavar="KEY=VALUE", help=help_text
-        )
-
-    @staticmethod
     def _add_force(parser: ArgumentParser, help_text: str) -> None:
         parser.add_argument(
             "--force",
@@ -261,8 +236,6 @@ class CampaignCommand(BaseCommand):
                     args.name,
                     contact_file=args.contact,
                     phone=args.phone,
-                    first_name=args.first_name,
-                    fields=args.field,
                     sample_outputs_file=args.sample_outputs,
                     start_node=args.start_node,
                     send_result=args.result,
@@ -277,10 +250,6 @@ class CampaignCommand(BaseCommand):
                     args.name,
                     contact_file=args.contact,
                     phone=args.phone,
-                    first_name=args.first_name,
-                    last_name=args.last_name,
-                    external_id=args.external_id,
-                    fields=args.field,
                     start_node=args.start_node,
                     run=args.run,
                     send_result=args.result,
@@ -311,27 +280,29 @@ class CampaignCommand(BaseCommand):
         sys.exit(1)
 
     @staticmethod
-    def _read_json(value: str, what: str) -> Any:
-        text = value
-        if os.path.isfile(value):
-            with open(value, encoding="utf-8") as file:
-                text = file.read()
-        elif not value.lstrip().startswith(("{", "[")) and (
-            "/" in value or value.endswith(".json")
-        ):
-            raise ValueError(f"No file at {value} for {what}.")
+    def _read_json_file(path: str, flag: str) -> Any:
         try:
-            return json.loads(text)
+            with open(path, encoding="utf-8") as file:
+                return json.load(file)
+        except OSError as e:
+            raise ValueError(f"Could not read {flag} file {path}: {e.strerror}.") from e
         except json.JSONDecodeError as e:
-            raise ValueError(f"{what} is not valid JSON: {e}") from e
+            raise ValueError(f"{flag} file {path} is not valid JSON: {e}") from e
 
     @staticmethod
-    def _parse_fields(fields: list[str]) -> dict[str, Any]:
+    def _parse_json(value: str, flag: str) -> Any:
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"{flag} is not valid JSON: {e}") from e
+
+    @staticmethod
+    def _parse_state(values: list[str]) -> dict[str, Any]:
         parsed: dict[str, Any] = {}
-        for item in fields:
+        for item in values:
             key, separator, value = item.partition("=")
             if not separator or not key:
-                raise ValueError(f"--field expects KEY=VALUE, got '{item}'.")
+                raise ValueError(f"--state expects KEY=VALUE, got '{item}'.")
             try:
                 parsed[key] = json.loads(value)
             except json.JSONDecodeError:
@@ -377,7 +348,6 @@ class CampaignCommand(BaseCommand):
     @classmethod
     def _print_steps(
         cls,
-        labels: dict[str, str],
         result: dict,
         carry_on_values: dict[str, Any],
         conditions: bool = True,
@@ -385,14 +355,13 @@ class CampaignCommand(BaseCommand):
         from poly.output.console import error, info, plain
 
         for number, step in enumerate(result.get("steps") or [], start=1):
-            node = labels.get(step.get("node_id"), step.get("node_id"))
-            line = f"{number}. {node} ({step.get('node_type')})"
+            line = f"{number}. {step.get('node')} ({step.get('node_type')})"
             if step.get("dispatch_channel"):
                 line += f" via {step['dispatch_channel']}"
             if step.get("branch_taken"):
                 line += f", branch {step['branch_taken']}"
-            if step.get("next_node_id"):
-                line += f" -> {labels.get(step['next_node_id'], step['next_node_id'])}"
+            if step.get("next_node"):
+                line += f" -> {step['next_node']}"
             plain(line)
             if step.get("resolved_message"):
                 plain(f"   message: {step['resolved_message']}")
@@ -400,16 +369,16 @@ class CampaignCommand(BaseCommand):
                 plain(f"   skipped a wait of {step['skipped_wait_seconds']}s")
             if step.get("exit_reason"):
                 plain(f"   exit reason: {step['exit_reason']}")
-        stopped_at = labels.get(result.get("stopped_at"), result.get("stopped_at"))
+        stopped_at = result.get("stopped_at_node")
         info(f"Stopped: {result.get('stop_reason')}" + (f" at {stopped_at}" if stopped_at else ""))
         if result.get("stop_reason") == "no_route":
             info("No route matched the outcome, so the path stopped there.")
-        carry_on = cls._carry_on_flags(result, labels, carry_on_values, conditions=conditions)
+        carry_on = cls._carry_on_flags(result, carry_on_values, conditions=conditions)
         if carry_on:
             info(f"Carry on with: {carry_on}")
         if result.get("error"):
             failure = result["error"]
-            where = labels.get(failure.get("node_id"), failure.get("node_id"))
+            where = failure.get("node")
             error(f"{failure.get('error')}" + (f" at {where}" if where else ""))
         for note in result.get("notes") or []:
             plain(f"note: {note}")
@@ -449,26 +418,22 @@ class CampaignCommand(BaseCommand):
     @staticmethod
     def _carry_on_flags(
         result: dict[str, Any],
-        labels: dict[str, str],
         values: Optional[dict[str, Any]] = None,
         conditions: bool = True,
     ) -> Optional[str]:
-        def node(node_id: str) -> str:
-            return shlex.quote(labels.get(node_id, node_id))
-
         stop_reason = result.get("stop_reason")
-        stopped_at = result.get("stopped_at")
+        stopped_at = result.get("stopped_at_node")
         if stop_reason in ("call", "reply") and stopped_at:
-            flags, after = [f"--start-node {node(stopped_at)}", "--result <how it went>"], ""
+            flags = [f"--start-node {shlex.quote(stopped_at)}", "--result <how it went>"]
+            after = ""
         elif stop_reason == "condition" and stopped_at and conditions:
-            label = json.dumps(labels.get(stopped_at, stopped_at))
-            flags, after = (
-                [f"--start-node {node(stopped_at)}", "--sample-outputs <file>"],
-                f', with {{{label}: {{"branch": "<value>"}}}} in that file, or '
-                '{"branch": null} for the default branch',
+            flags = [f"--start-node {shlex.quote(stopped_at)}", "--sample-outputs <file>"]
+            after = (
+                f', with {{{json.dumps(stopped_at)}: {{"branch": "<value>"}}}} in that file, or '
+                '{"branch": null} for the default branch'
             )
-        elif stop_reason == "wait" and result.get("resume_node_id"):
-            flags, after = [f"--start-node {node(result['resume_node_id'])}"], ""
+        elif stop_reason == "wait" and result.get("resume_node"):
+            flags, after = [f"--start-node {shlex.quote(result['resume_node'])}"], ""
         else:
             return None
         for flag, value in (values or {}).items():
@@ -485,8 +450,6 @@ class CampaignCommand(BaseCommand):
         name: str,
         contact_file: Optional[str] = None,
         phone: Optional[str] = None,
-        first_name: Optional[str] = None,
-        fields: Optional[list[str]] = None,
         sample_outputs_file: Optional[str] = None,
         start_node: Optional[str] = None,
         send_result: Optional[str] = None,
@@ -498,22 +461,18 @@ class CampaignCommand(BaseCommand):
         """Dry-run a made-up contact through a campaign and print the steps. Nothing is sent."""
         from poly.output.console import error
 
-        def build_inputs() -> tuple[dict, Optional[dict], dict, Optional[dict]]:
-            contact = cls._read_json(contact_file, "--contact") if contact_file else {}
-            if not isinstance(contact, dict):
-                raise ValueError("--contact must hold a JSON object.")
-            contact.update({"phone": phone} if phone else {})
-            contact.update({"first_name": first_name} if first_name else {})
-            contact.update(cls._parse_fields(fields or []))
-            outputs = (
-                cls._read_json(sample_outputs_file, "--sample-outputs")
-                if sample_outputs_file
-                else None
-            )
-            previous_send = cls._read_json(last_send, "--last-send") if last_send else None
-            return contact, outputs, cls._parse_fields(send_state or []), previous_send
+        contact = cls._read_json_file(contact_file, "--contact") if contact_file else {}
+        if not isinstance(contact, dict):
+            raise ValueError("--contact must hold a JSON object.")
+        if phone:
+            contact["phone"] = phone
+        outputs = (
+            cls._read_json_file(sample_outputs_file, "--sample-outputs")
+            if sample_outputs_file
+            else None
+        )
+        previous_send = cls._parse_json(last_send, "--last-send") if last_send else None
 
-        contact, outputs, state, previous_send = build_inputs()
         project = load_project(base_path, output_json=output_json)
         require_outbound_campaigns_enabled(project, output_json=output_json, campaign=name)
         result = project.preview_campaign(
@@ -522,7 +481,7 @@ class CampaignCommand(BaseCommand):
             sample_outputs=outputs,
             start_node=start_node,
             send_result=send_result,
-            send_state=state,
+            send_state=cls._parse_state(send_state or []),
             ask_branches=ask_branches,
             last_send=previous_send,
         )
@@ -534,7 +493,6 @@ class CampaignCommand(BaseCommand):
             json_print(outcome)
         else:
             cls._print_steps(
-                project.campaign_node_names(project.get_campaign(name)),
                 result,
                 {
                     "last-send": result.get("last_send"),
@@ -553,10 +511,6 @@ class CampaignCommand(BaseCommand):
         name: str,
         contact_file: Optional[str] = None,
         phone: Optional[str] = None,
-        first_name: Optional[str] = None,
-        last_name: Optional[str] = None,
-        external_id: Optional[str] = None,
-        fields: Optional[list[str]] = None,
         start_node: Optional[str] = None,
         run: Optional[str] = None,
         send_result: Optional[str] = None,
@@ -566,64 +520,31 @@ class CampaignCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Run one real test step on the live campaign and wait for its result."""
-        import questionary
+        from poly.output.console import error, info, success
 
-        from poly.output.console import error, info, success, warning
+        contact = cls._read_json_file(contact_file, "--contact") if contact_file else {}
+        if not isinstance(contact, dict):
+            raise ValueError("--contact must hold a JSON object.")
+        if phone:
+            contact["phone"] = phone
+        step_inputs = {
+            "start_node": start_node,
+            "run": cls._parse_json(run, "--run") if run else None,
+            "send_result": send_result,
+            "send_state": cls._parse_state(send_state or []),
+        }
 
-        def build_inputs() -> tuple[dict, Optional[dict], dict]:
-            contact = cls._read_json(contact_file, "--contact") if contact_file else {}
-            if not isinstance(contact, dict):
-                raise ValueError("--contact must hold a JSON object.")
-            for key, value in (
-                ("phone", phone),
-                ("firstName", first_name),
-                ("lastName", last_name),
-                ("externalId", external_id),
-            ):
-                if value:
-                    contact[key] = value
-            if fields:
-                if not isinstance(contact.get("metadata") or {}, dict):
-                    raise ValueError("--contact's metadata must be a JSON object to add --field.")
-                contact["metadata"] = {
-                    **(contact.get("metadata") or {}),
-                    **cls._parse_fields(fields),
-                }
-            previous_run = cls._read_json(run, "--run") if run else None
-            if previous_run is not None and not isinstance(previous_run, dict):
-                raise ValueError("--run must be a JSON object.")
-            return contact, previous_run, cls._parse_fields(send_state or [])
-
-        contact, previous_run, state = build_inputs()
-        project = load_project(base_path, output_json=output_json)
-        require_outbound_campaigns_enabled(project, output_json=output_json, campaign=name)
-        campaign = project.get_live_campaign(name)
-        labels = project.live_campaign_node_names(campaign)
-        body = project.check_campaign_test(
-            campaign,
-            labels,
-            contact,
-            start_node=start_node,
-            run=previous_run,
-            send_result=send_result,
-            send_state=state,
+        project, campaign = cls._live_campaign(base_path, name, output_json)
+        project.check_campaign_test(campaign, contact, **step_inputs)
+        cls._confirm(
+            f"Test live campaign '{campaign.name}'? This calls and texts {contact.get('phone')}.",
+            force,
+            output_json,
         )
 
-        if not output_json and not force:
-            if not questionary.confirm(
-                f"Test live campaign '{campaign.name}'? "
-                f"This calls and texts {contact.get('phone')}.",
-                default=False,
-                auto_enter=False,
-            ).ask():
-                warning("Aborted.")
-                sys.exit(0)
-
-        started = project.start_campaign_test(campaign, body)
+        started = project.start_campaign_test(campaign, contact, **step_inputs)
         step_id, run_started = started["step_id"], started.get("run")
-        if output_json:
-            json_progress({"step_id": step_id, "run": run_started})
-        else:
+        if not output_json:
             info(f"Started test step {step_id} of campaign '{campaign.name}'.")
             info(f"Run: {shlex.quote(json.dumps(run_started))}")
         try:
@@ -640,7 +561,6 @@ class CampaignCommand(BaseCommand):
         else:
             if step.get("result"):
                 cls._print_steps(
-                    labels,
                     step["result"],
                     {"run": step.get("run") or run_started},
                     conditions=False,

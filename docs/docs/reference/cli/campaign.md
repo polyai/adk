@@ -23,7 +23,7 @@ With `--json`, every `"success": false` result carries a short `error`. Once the
 
 Agent Studio lets two campaigns share a name, and a pull renames the newer one `{name} (1)` until a push sends that name. Until then, the shared name matches both: name the campaign by its new name or its folder.
 
-`--field` and `--state` values are read as JSON when they parse as JSON, so `age=30`, `booked=true` and `note=null` give a number, a boolean and `null`. Any other value, such as `plan=gold`, is kept as a string. `--contact`, `--run`, `--last-send` and `--sample-outputs` take a JSON file or JSON written inline.
+`--state` values are read as JSON when they parse as JSON, so `attempts=2`, `booked=true` and `note=null` give a number, a boolean and `null`. Any other value, such as `plan=gold`, is kept as a string. `--contact` and `--sample-outputs` take a JSON file. `--run` and `--last-send` take the JSON the previous step printed.
 
 | Argument | Description |
 |---|---|
@@ -66,7 +66,7 @@ Walk a made-up contact through the campaign to the next call, condition or end. 
 Examples:
 
 ~~~bash
-poly campaign preview 'Appointment reminders' --phone +15550100 --field first_name=Ada
+poly campaign preview 'Appointment reminders' --phone +15550100
 poly campaign preview 'Appointment reminders' --contact contact.json --sample-outputs outputs.json
 poly campaign preview 'Appointment reminders' --phone +15550100 --start-node 'Reminder call' --result no_answer
 ~~~
@@ -77,13 +77,11 @@ A preview exits `1` when the path stops at a failed node (`stop_reason` is `erro
 |---|---|
 | `--contact` | JSON file with the contact's data, as an import would carry it. |
 | `--phone` | The contact's phone number. |
-| `--first-name` | The contact's first name. |
-| `--field` | Another contact column, as `KEY=VALUE`. Repeatable. |
 | `--sample-outputs` | JSON file of what each node's function returns, keyed by node name. For a condition node, give the branch to take: `{"Check reply": {"branch": "confirmed"}}`, or `{"branch": null}` for its default branch. |
 | `--start-node` | Name of the node to carry on from. Defaults to the trigger. |
 | `--result` | How the call or text at `--start-node` went, e.g. `no_answer` or `replied`. |
 | `--state` | A value that call or text reported back, as `KEY=VALUE`. Repeatable. |
-| `--last-send` | The `last_send` the previous step printed, as JSON or a JSON file. Only with `--start-node`. |
+| `--last-send` | The `last_send` the previous step printed, as JSON. Only with `--start-node`. |
 | `--ask-branches` | Stop at a condition with no sample output instead of taking its default branch. |
 
 `--json` output shape:
@@ -92,32 +90,31 @@ A preview exits `1` when the path stops at a failed node (`stop_reason` is `erro
 {
   "success": true,
   "campaign": "Appointment reminders",
-  "result": {"steps": [], "stopped_at": "call-1", "stop_reason": "call", "error": null, "notes": [], "last_send": null}
+  "result": {"steps": [], "stopped_at": "call-1", "stopped_at_node": "Reminder call", "stop_reason": "call", "error": null, "notes": [], "last_send": null}
 }
 ~~~
+
+The `result` is the platform's, with each node named next to its id: `node` and `next_node` on each step, and `stopped_at_node`, `resume_node` and the error's `node`.
 
 ## `poly campaign test`
 
 Run one step of a test of the live campaign, and wait for it to finish. It calls and texts the test contact for real. The first step starts at the trigger. To carry on, pass the `--start-node` and the run it printed. After a call or a text, also say how it went with `--result`; after a wait, carry on from the node it printed.
 
-The run is printed as soon as the step starts; the step carries on if you stop waiting. Node names are matched as they are on `main`, which the test runs, even from another branch. A step that fails, is interrupted, stops at a failed node or hits the step cap exits `1`. An interrupted step may already have called or texted.
+Without `--json`, the run is printed as soon as the step starts; the step carries on if you stop waiting. Node names are matched as they are on `main`, which the test runs, even from another branch. A step that fails, is interrupted, stops at a failed node or hits the step cap exits `1`. An interrupted step may already have called or texted.
 
 Examples:
 
 ~~~bash
 poly campaign test 'Appointment reminders' --phone +15550100
-poly campaign test 'Appointment reminders' --phone +15550100 --start-node 'Reminder call' --run run.json --result no_answer
+poly campaign test 'Appointment reminders' --phone +15550100 --start-node 'Reminder call' --run '<run>' --result no_answer
 ~~~
 
 | Flag | Description |
 |---|---|
 | `--contact` | JSON file with the test contact: `phone`, `firstName`, `lastName`, `externalId`, `metadata`. Other keys are refused; put other columns in `metadata`. |
 | `--phone` | Number to call and text. |
-| `--first-name`, `--last-name` | The contact's name. |
-| `--external-id` | The contact's id in your own system. |
-| `--field` | A metadata column, as `KEY=VALUE`. Repeatable. |
 | `--start-node` | Name of the node to carry on from. |
-| `--run` | The run the previous step printed, as JSON or a JSON file. |
+| `--run` | The run the previous step printed, as JSON. |
 | `--result` | How the call or text at `--start-node` went. |
 | `--state` | A value that call or text reported back, as `KEY=VALUE`. Repeatable. |
 | `--timeout` | Seconds to wait for the step. Defaults to `600`. |
@@ -137,19 +134,13 @@ poly campaign test 'Appointment reminders' --phone +15550100 --start-node 'Remin
     "step_id": "TSTEP-...",
     "status": "done",
     "run": {"contact_id": "...", "enrolment_id": "...", "graph_hash": "..."},
-    "result": {"steps": [], "stopped_at": "call-1", "stop_reason": "call", "resume_node_id": null, "error": null, "notes": []},
+    "result": {"steps": [], "stopped_at": "call-1", "stopped_at_node": "Reminder call", "stop_reason": "call", "resume_node_id": null, "error": null, "notes": []},
     "error": null
   }
 }
 ~~~
 
-With `--json`, as soon as the step starts, one line goes to stderr with the step and its run, so a caller that is stopped before the step finishes still has them:
-
-~~~json
-{"step_id": "TSTEP-...", "run": {"contact_id": "...", "enrolment_id": "...", "graph_hash": "..."}}
-~~~
-
-The result goes to stdout once the step stops, with an `error` when `success` is `false`. If waiting for the step fails or times out, the error carries the step and its run:
+Its `result` names the nodes as `preview`'s does, as they are on `main`. The result is printed once the step stops, with an `error` when `success` is `false`. If waiting for the step fails or times out, the error carries the step and its run:
 
 ~~~json
 {

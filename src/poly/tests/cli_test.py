@@ -7092,22 +7092,23 @@ class CampaignCommandTest(unittest.TestCase):
     def _output(self) -> dict:
         return self.json_print.call_args.args[0]
 
+    def _json_file(self, data: Any) -> str:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as file:
+            json.dump(data, file)
+        self.addCleanup(os.remove, file.name)
+        return file.name
+
     def _run(self, subcommand: str, name: str, **kwargs: Any) -> None:
         renamed = {
             "contact_file": "contact",
             "sample_outputs_file": "sample_outputs",
             "send_result": "result",
             "send_state": "state",
-            "fields": "field",
             "output_json": "json",
         }
         values = {
             "contact": None,
             "phone": None,
-            "first_name": None,
-            "last_name": None,
-            "external_id": None,
-            "field": [],
             "sample_outputs": None,
             "start_node": None,
             "run": None,
@@ -7199,17 +7200,13 @@ class CampaignCommandTest(unittest.TestCase):
             "notes": [],
         }
         self._respond(make_mock_response(200, result))
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as outputs:
-            json.dump({"Import contacts": {"contacts": []}}, outputs)
-        self.addCleanup(os.remove, outputs.name)
 
         self._run(
             "preview",
             self.CAMPAIGN,
+            contact_file=self._json_file({"first_name": "Ada", "age": 30, "plan": "gold"}),
             phone="+15550100",
-            first_name="Ada",
-            fields=["age=30", "plan=gold"],
-            sample_outputs_file=outputs.name,
+            sample_outputs_file=self._json_file({"Import contacts": {"contacts": []}}),
             start_node="Reminder call",
             send_result="no_answer",
             output_json=True,
@@ -7223,10 +7220,10 @@ class CampaignCommandTest(unittest.TestCase):
             body,
             {
                 "contactData": {
-                    "phone": "+15550100",
                     "first_name": "Ada",
                     "age": 30,
                     "plan": "gold",
+                    "phone": "+15550100",
                 },
                 "sampleOutputs": {"trigger-1": {"contacts": []}},
                 "startNodeId": "call-1",
@@ -7234,7 +7231,12 @@ class CampaignCommandTest(unittest.TestCase):
             },
         )
         self.assertEqual(
-            self._output(), {"success": True, "campaign": self.CAMPAIGN, "result": result}
+            self._output(),
+            {
+                "success": True,
+                "campaign": self.CAMPAIGN,
+                "result": {**result, "stopped_at_node": "Reminder call"},
+            },
         )
 
     def test_preview_of_a_node_the_campaign_lacks_fails_before_sending(self):
@@ -7260,7 +7262,13 @@ class CampaignCommandTest(unittest.TestCase):
         )
 
         with patch("poly.project.time.sleep"):
-            self._run("test", self.CAMPAIGN, phone="+15550100", first_name="Ada", output_json=True)
+            self._run(
+                "test",
+                self.CAMPAIGN,
+                contact_file=self._json_file({"firstName": "Ada"}),
+                phone="+15550100",
+                output_json=True,
+            )
 
         main_url = self.CAMPAIGN_URL.format(branch="main")
         self.assertEqual(
@@ -7268,7 +7276,7 @@ class CampaignCommandTest(unittest.TestCase):
             (
                 "POST",
                 main_url + "/test-steps",
-                {"contact": {"phone": "+15550100", "firstName": "Ada"}},
+                {"contact": {"firstName": "Ada", "phone": "+15550100"}},
             ),
         )
         self.assertEqual(self._request(2), ("GET", main_url + "/test-steps/TSTEP-1", None))
@@ -7321,24 +7329,19 @@ class CampaignCommandTest(unittest.TestCase):
                 result = {
                     "stop_reason": stop_reason,
                     "stopped_at": "sms-1",
+                    "stopped_at_node": "Reminder text",
                     "resume_node_id": "wait-1",
+                    "resume_node": "Wait",
                 }
 
-                self.assertEqual(
-                    CampaignCommand._carry_on_flags(
-                        result, {"sms-1": "Reminder text", "wait-1": "Wait"}
-                    ),
-                    expected,
-                )
+                self.assertEqual(CampaignCommand._carry_on_flags(result), expected)
 
     def test_carry_on_hint_adds_the_values_to_pass_back(self):
         """The run, or the last send, goes in the hint as quoted JSON; an unset one is left out."""
         run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        result = {"stop_reason": "call", "stopped_at": "call-1"}
+        result = {"stop_reason": "call", "stopped_at": "call-1", "stopped_at_node": "Reminder call"}
 
-        hint = CampaignCommand._carry_on_flags(
-            result, {"call-1": "Reminder call"}, {"run": run, "last-send": None}
-        )
+        hint = CampaignCommand._carry_on_flags(result, {"run": run, "last-send": None})
 
         self.assertEqual(
             hint,
@@ -7702,14 +7705,56 @@ class CampaignCommandTest(unittest.TestCase):
                 confirm.assert_not_called()
         self.request.assert_not_called()
 
-    def test_path_that_does_not_exist_says_so(self):
-        """A value that looks like a path but isn't a file is reported as missing."""
-        for value in ("contacts/ada.json", "ada.json"):
-            with self.subTest(value=value):
-                with self.assertRaises(SystemExit):
-                    self._run("preview", self.CAMPAIGN, contact_file=value, output_json=True)
+    def test_start_campaign_test_checks_its_inputs(self):
+        """Called directly, the project refuses bad step inputs before anything is sent."""
+        campaign = self.project.get_live_campaign(self.CAMPAIGN)
 
-                self.assertEqual(self._output()["error"], f"No file at {value} for --contact.")
+        with self.assertRaisesRegex(ValueError, "needs a phone number"):
+            self.project.start_campaign_test(campaign, {"firstName": "Ada"})
+
+        self.request.assert_not_called()
+
+    def test_run_takes_json_not_a_file(self):
+        """--run is the JSON the previous step printed, never a file to look for."""
+        with self.assertRaises(SystemExit):
+            self._run(
+                "test",
+                self.CAMPAIGN,
+                phone="+15550100",
+                start_node="Reminder call",
+                run="run.json",
+                output_json=True,
+            )
+
+        self.assertTrue(self._output()["error"].startswith("--run is not valid JSON"))
+        self.request.assert_not_called()
+
+    def test_preview_names_the_nodes_in_its_steps(self):
+        """Each step names its node and the next one, next to their ids."""
+        step = {"node_id": "trigger-1", "node_type": "trigger", "next_node_id": "call-1"}
+        self._respond(
+            make_mock_response(
+                200, {"steps": [step], "stopped_at": "call-1", "stop_reason": "call"}
+            )
+        )
+
+        self._run("preview", self.CAMPAIGN, phone="+15550100", output_json=True)
+
+        result = self._output()["result"]
+        self.assertEqual(
+            result["steps"], [{**step, "node": "Import contacts", "next_node": "Reminder call"}]
+        )
+        self.assertEqual(result["stopped_at_node"], "Reminder call")
+
+    def test_missing_contact_file_says_so(self):
+        """--contact takes a file, and one that isn't there is reported as missing."""
+        with self.assertRaises(SystemExit):
+            self._run("preview", self.CAMPAIGN, contact_file="ada.json", output_json=True)
+
+        self.assertEqual(
+            self._output()["error"],
+            "Could not read --contact file ada.json: No such file or directory.",
+        )
 
     def _on_branch(self, main_resources: dict | None = None) -> MagicMock:
         self.project.branch_id = "BRANCH-1"
@@ -7823,7 +7868,18 @@ class CampaignCommandTest(unittest.TestCase):
             {
                 "success": False,
                 "campaign": self.CAMPAIGN,
-                "test_step": step,
+                "test_step": {
+                    **step,
+                    "result": {
+                        **step["result"],
+                        "stopped_at_node": "Reminder call",
+                        "error": {
+                            "error": "FunctionFailed",
+                            "node_id": "call-1",
+                            "node": "Reminder call",
+                        },
+                    },
+                },
                 "error": "Test step stopped at an error: FunctionFailed.",
             },
         )
@@ -7839,30 +7895,6 @@ class CampaignCommandTest(unittest.TestCase):
         success.assert_not_called()
         messages = [call.args[0] for call in error.call_args_list]
         self.assertEqual(messages, ["FunctionFailed at Reminder call"])
-
-    def test_json_test_writes_the_run_to_stderr_when_the_step_starts(self):
-        """With --json, the step and run reach stderr before waiting, in case the wait is cut."""
-        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
-        self._respond(
-            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run})
-        )
-        stderr = StringIO()
-
-        with (
-            patch("sys.stderr", stderr),
-            patch.object(
-                self.project,
-                "wait_for_campaign_test_step",
-                side_effect=lambda *_, **__: self.assertTrue(stderr.getvalue()) or {},
-            ),
-            self.assertRaises(SystemExit),
-        ):
-            self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
-
-        self.assertEqual(
-            [json.loads(line) for line in stderr.getvalue().splitlines()],
-            [{"step_id": "TSTEP-1", "run": run}],
-        )
 
     def test_campaign_requests_have_a_timeout(self):
         """A stalled connection cannot hang a campaign call: each request has a timeout."""
@@ -7935,27 +7967,6 @@ class CampaignCommandTest(unittest.TestCase):
             self._output()["error"],
             f"Could not test campaign '{self.CAMPAIGN}': Testing isn’t available right now. "
             "Try again shortly",
-        )
-
-    def test_contact_metadata_that_is_not_an_object_is_refused_with_fields(self):
-        """--field adds to the contact's metadata, so that must be an object."""
-        with self.assertRaises(SystemExit) as exit:
-            self._run(
-                "test",
-                self.CAMPAIGN,
-                contact_file='{"phone": "+15550100", "metadata": ["a"]}',
-                fields=["plan=gold"],
-                output_json=True,
-            )
-
-        self.assertEqual(exit.exception.code, 1)
-        self.assertEqual(
-            self._output(),
-            {
-                "success": False,
-                "error": "--contact's metadata must be a JSON object to add --field.",
-                "campaign": self.CAMPAIGN,
-            },
         )
 
     def test_preview_refuses_a_result_without_a_start_node(self):
@@ -8249,7 +8260,9 @@ class CampaignCommandTest(unittest.TestCase):
             self._run(
                 "test",
                 self.CAMPAIGN,
-                contact_file='{"phone": "+15550100", "first_name": "Ada", "plan": "gold"}',
+                contact_file=self._json_file(
+                    {"phone": "+15550100", "first_name": "Ada", "plan": "gold"}
+                ),
             )
 
         self.assertEqual(exit.exception.code, 1)
@@ -8260,7 +8273,9 @@ class CampaignCommandTest(unittest.TestCase):
             self._run(
                 "test",
                 self.CAMPAIGN,
-                contact_file='{"phone": "+15550100", "first_name": "Ada", "plan": "gold"}',
+                contact_file=self._json_file(
+                    {"phone": "+15550100", "first_name": "Ada", "plan": "gold"}
+                ),
                 output_json=True,
             )
         self.assertEqual(
@@ -8309,14 +8324,10 @@ class CampaignCommandTest(unittest.TestCase):
 
     def test_test_hint_never_suggests_sample_outputs(self):
         """A real step runs conditions itself, so its hints leave --sample-outputs to preview."""
-        result = {"stop_reason": "condition", "stopped_at": "cond-1"}
+        result = {"stop_reason": "condition", "stopped_at": "cond-1", "stopped_at_node": "Check"}
 
-        self.assertIsNone(
-            CampaignCommand._carry_on_flags(result, {}, {"run": {}}, conditions=False)
-        )
-        self.assertIn(
-            "--sample-outputs", CampaignCommand._carry_on_flags(result, {}, {"run": None})
-        )
+        self.assertIsNone(CampaignCommand._carry_on_flags(result, {"run": {}}, conditions=False))
+        self.assertIn("--sample-outputs", CampaignCommand._carry_on_flags(result, {"run": None}))
 
     def test_parsed_command_line_reaches_validate(self):
         """`poly campaign validate <name> --json` is wired through the parser to the handler."""
