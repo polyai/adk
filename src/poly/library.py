@@ -109,6 +109,24 @@ class TTSVoice:
         )
 
     @property
+    def language(self) -> str | None:
+        """The voice's language code, such as ``en-GB``: its accent, else its language code."""
+        metadata = self.metadata or {}
+        return metadata.get("accent") or metadata.get("language_code") or None
+
+    @property
+    def is_archived(self) -> bool:
+        """Whether the voice has been archived in the library."""
+        return bool((self.metadata or {}).get("archived"))
+
+    def speaks(self, language: str) -> bool:
+        """Whether the voice's language starts with ``language``, ignoring case.
+
+        ``en`` matches ``en-US`` and ``en-GB``; ``en-GB`` matches only ``en-GB``.
+        """
+        return (self.language or "").lower().startswith(language.strip().lower())
+
+    @property
     def featured_rank(self) -> int | None:
         """The voice's place on Agent Studio's Recommended shelf (1 leads), if it's curated."""
         rank = (self.metadata or {}).get("featured_rank")
@@ -379,3 +397,61 @@ class Library:
             if tts_voice.voice_id.strip().lower() == voice_id.strip().lower():
                 return tts_voice
         return None
+
+    def find_tts_voice(self, name_or_id: str, language: Optional[str] = None) -> TTSVoice:
+        """Find one voice by its ``VOICE-…`` ID or its name.
+
+        Names are matched ignoring case and surrounding spaces. ``language`` narrows the
+        match the way ``voice list --language`` does, so ``fr`` covers ``fr-FR`` and
+        ``fr-CA``. A name is unique within a language among live voices, so live voices
+        win over archived ones with the same name, and archived voices are only matched
+        when no live voice is.
+
+        Args:
+            name_or_id: A voice name, or a voice ID.
+            language: A language code or prefix that the voice must speak.
+
+        Returns:
+            The voice.
+
+        Raises:
+            ValueError: If no voice matches, or more than one does.
+        """
+        if not name_or_id or not name_or_id.strip():
+            raise ValueError("Give a voice name or ID.")
+
+        by_id = self.get_tts_voice_by_id(name_or_id)
+        if by_id is not None:
+            if language and not by_id.speaks(language):
+                raise ValueError(
+                    f"{by_id.voice_id} ({by_id.name}) is in {by_id.language or 'no language'}, "
+                    f"not {language}."
+                )
+            return by_id
+
+        name = name_or_id.strip().lower()
+        matches = [
+            tts_voice
+            for tts_voice in self.tts_voices
+            if (tts_voice.name or "").strip().lower() == name
+            and (not language or tts_voice.speaks(language))
+        ]
+        live = [tts_voice for tts_voice in matches if not tts_voice.is_archived]
+        candidates = live or matches
+
+        if not candidates:
+            where = f" in {language}" if language else ""
+            raise ValueError(
+                f'No voice called "{name_or_id.strip()}"{where}. Find one with '
+                f"`poly library voice list --name {name_or_id.strip()}`."
+            )
+        if len(candidates) > 1:
+            options = ", ".join(
+                f"{tts_voice.language or 'no language'} ({tts_voice.voice_id})"
+                for tts_voice in sorted(candidates, key=lambda v: (v.language or "", v.voice_id))
+            )
+            raise ValueError(
+                f'More than one voice is called "{candidates[0].name}": {options}. '
+                "Pick one with --language, or give the voice ID."
+            )
+        return candidates[0]

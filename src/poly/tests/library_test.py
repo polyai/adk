@@ -311,3 +311,97 @@ class TTSVoiceTest(unittest.TestCase):
         ordered = [v.name for v in sorted(voices, key=TTSVoice.rank_key)]
 
         self.assertEqual(ordered, ["First", "Second", "Popular", "Bob", "Zed", "Amy"])
+
+
+def voice_library(*voices: TTSVoice) -> Library:
+    """A library holding only the given voices."""
+    library = Library.build_library("us-1", [], [], [])
+    library.tts_voices = list(voices)
+    return library
+
+
+def voice_in(name: str, voice_id: str, accent: str, **metadata) -> TTSVoice:
+    """A voice with an ID and an accent."""
+    tts_voice = voice(name, accent=accent, **metadata)
+    tts_voice.voice_id = voice_id
+    return tts_voice
+
+
+class FindTTSVoiceTest(unittest.TestCase):
+    """Tests for Library.find_tts_voice, which `voice show` and `voice play` use."""
+
+    def setUp(self):
+        self.anne = voice_in("Anne", "VOICE-anne", "en-US")
+        self.pierre_fr = voice_in("Pierre", "VOICE-pierre-fr", "fr-FR")
+        self.pierre_ca = voice_in("Pierre", "VOICE-pierre-ca", "fr-CA")
+        self.old_anne = voice_in("Anne", "VOICE-old-anne", "en-US", archived=True)
+        self.library = voice_library(self.anne, self.old_anne, self.pierre_fr, self.pierre_ca)
+
+    def test_finds_a_voice_by_id(self):
+        """A voice ID finds that voice, ignoring case and spaces."""
+        self.assertIs(self.library.find_tts_voice(" voice-pierre-ca "), self.pierre_ca)
+
+    def test_finds_a_voice_by_name(self):
+        """A name finds the voice, ignoring case and spaces."""
+        self.assertIs(self.library.find_tts_voice("  anne "), self.anne)
+
+    def test_live_voice_wins_over_an_archived_one_with_the_same_name(self):
+        """An archived voice sharing a live voice's name and language doesn't make it ambiguous."""
+        self.assertIs(self.library.find_tts_voice("Anne"), self.anne)
+
+    def test_archived_voice_is_found_when_no_live_voice_matches(self):
+        """An archived voice is still found by name when it's the only match."""
+        retired = voice_in("Retired", "VOICE-retired", "en-GB", archived=True)
+        library = voice_library(retired)
+
+        self.assertIs(library.find_tts_voice("Retired"), retired)
+
+    def test_archived_voice_is_found_by_its_id(self):
+        """An ID always finds its voice, archived or not."""
+        self.assertIs(self.library.find_tts_voice("VOICE-old-anne"), self.old_anne)
+
+    def test_name_in_several_languages_lists_them(self):
+        """A name used in more than one language fails, listing each language and ID."""
+        with self.assertRaises(ValueError) as ctx:
+            self.library.find_tts_voice("Pierre")
+
+        message = str(ctx.exception)
+        self.assertIn("fr-CA (VOICE-pierre-ca)", message)
+        self.assertIn("fr-FR (VOICE-pierre-fr)", message)
+        self.assertIn("--language", message)
+
+    def test_language_picks_one_of_several(self):
+        """--language chooses between voices that share a name."""
+        self.assertIs(self.library.find_tts_voice("Pierre", language="fr-ca"), self.pierre_ca)
+
+    def test_language_prefix_can_still_be_ambiguous(self):
+        """A base language like fr matches both regions, so it still fails."""
+        with self.assertRaises(ValueError):
+            self.library.find_tts_voice("Pierre", language="fr")
+
+    def test_unknown_name_suggests_voice_list(self):
+        """A name no voice has fails and points at `voice list --name`."""
+        with self.assertRaises(ValueError) as ctx:
+            self.library.find_tts_voice("Nobody")
+
+        self.assertIn('No voice called "Nobody"', str(ctx.exception))
+        self.assertIn("poly library voice list --name Nobody", str(ctx.exception))
+
+    def test_name_in_the_wrong_language_is_not_found(self):
+        """A name that exists only in another language says so for the language asked."""
+        with self.assertRaises(ValueError) as ctx:
+            self.library.find_tts_voice("Anne", language="de")
+
+        self.assertIn("in de", str(ctx.exception))
+
+    def test_id_in_the_wrong_language_fails(self):
+        """An ID given with a --language the voice doesn't speak fails, naming its language."""
+        with self.assertRaises(ValueError) as ctx:
+            self.library.find_tts_voice("VOICE-anne", language="fr")
+
+        self.assertIn("en-US", str(ctx.exception))
+
+    def test_empty_input_fails(self):
+        """A blank name is refused."""
+        with self.assertRaises(ValueError):
+            self.library.find_tts_voice("  ")
