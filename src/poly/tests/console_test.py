@@ -1213,11 +1213,11 @@ class PrintTtsVoiceTest(unittest.TestCase):
             }
         )
 
-        output = self._render(archived)
+        # The time zone's name varies by machine and moves where the row wraps, so compare words.
+        words = " ".join(self._render(archived).replace("│", " ").split())
 
-        self.assertIn("Archived", output)
-        self.assertIn("by someone@example.com: Internal", output)
-        self.assertIn("test voice", output)
+        self.assertIn("Archived", words)
+        self.assertIn("by someone@example.com: Internal test voice", words)
         self.assertNotIn("Archived", self._render(_voice()))
 
     def test_missing_fields_show_a_dash(self):

@@ -7067,6 +7067,7 @@ class LibraryCommandTest(unittest.TestCase):
         self.mock_load = patch("poly.cli_commands.library.load_project").start()
         self.proj = MagicMock()
         self.proj.region = "us-1"
+        self.proj.account_id = "acct"
         self.proj.library = self.library
         self.proj.refresh_library.return_value = self.library
         self.mock_load.return_value = self.proj
