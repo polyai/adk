@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.89.0 (2026-11-23)
+
+### Features
+
+- Add poly campaign publish, pause, resume and archive
+  ([#439](https://github.com/polyai/adk/pull/439),
+  [`cc0f7af`](https://github.com/polyai/adk/commit/cc0f7af0fbfecaf4564e669bcbc6faff0e90697e))
+
+
 ## v0.88.0 (2026-11-23)
 
 ### Features
