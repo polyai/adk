@@ -18,10 +18,6 @@ _POLY_ASR_PROVIDERS = ("poly", "raven")
 _POLY_ASR_MODEL_PREFIX = "poly-"
 
 
-def _is_poly_tts(model: dict[str, Any]) -> bool:
-    return bool(model.get("isPolyVoice"))
-
-
 def _is_poly_llm(model: dict[str, Any]) -> bool:
     return bool(model.get("polyaiModel"))
 
@@ -171,7 +167,7 @@ class LibraryCommand(BaseCommand):
         library_voice_list_subparser.add_argument(
             "--archived",
             action="store_true",
-            help="Include archived TTS voices.",
+            help="Include archived voices, and internal ones (dev-only or tagged Test).",
         )
         library_voice_list_subparser.add_argument(
             "--refresh",
@@ -466,7 +462,7 @@ class LibraryCommand(BaseCommand):
             library = cls._load_library(base_path, output_json=output_json)
 
         tts_voices = [
-            tts_voice.to_dict()
+            tts_voice
             for tts_voice in library.tts_voices
             if (name is None or name.lower() in tts_voice.name.lower())
             and (
@@ -475,17 +471,19 @@ class LibraryCommand(BaseCommand):
             )
             and (gender is None or tts_voice.metadata.get("gender") == gender)
             and (archived or not tts_voice.metadata.get("archived"))
+            and (archived or not tts_voice.is_internal)
             and (not is_poly_voice or tts_voice.poly_ai_voice)
         ]
 
-        sorted_tts_voices = _poly_first(tts_voices, _is_poly_tts)
+        # Agent Studio's order, so the first voices are the ones its Recommended shelf shows.
+        sorted_tts_voices = sorted(tts_voices, key=lambda tts_voice: tts_voice.rank_key())
 
         if output_json:
-            json_print(sorted_tts_voices)
+            json_print([tts_voice.to_dict() for tts_voice in sorted_tts_voices])
 
         else:
             with paged_output(title="TTS voices", header_lines=1):
-                print_tts_voices(sorted_tts_voices, is_poly=_is_poly_tts)
+                print_tts_voices(sorted_tts_voices)
 
     @classmethod
     def show_tts_voice(

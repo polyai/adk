@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import poly.library
-from poly.library import REFRESH_INTERVAL, ASRModel, Library, LLMModel
+from poly.library import REFRESH_INTERVAL, ASRModel, Library, LLMModel, TTSVoice
 
 ASR_RESPONSE = [
     {"id": "ASR-1", "name": "Deepgram Nova 3", "provider": "deepgram", "model": "nova-3"},
@@ -140,9 +140,7 @@ class LibraryLookupTest(unittest.TestCase):
 
         self.assertEqual(by_id.name, "Deepgram Nova 3")
         self.assertIs(self.library.get_asr_model_by_name("Deepgram Nova 3"), by_id)
-        self.assertIs(
-            self.library.get_asr_model_by_provider_and_model("deepgram", "nova-3"), by_id
-        )
+        self.assertIs(self.library.get_asr_model_by_provider_and_model("deepgram", "nova-3"), by_id)
 
     def test_llm_lookups_find_the_same_model(self):
         """A language model is found by its ID, its name, and its provider model ID."""
@@ -251,3 +249,65 @@ class LLMModelTest(unittest.TestCase):
         model = LLMModel.from_api_response(LLM_RESPONSE[0])
 
         self.assertEqual(model.name, "PolyAI Raven 3.5")
+
+
+def voice(name: str = "Anne", **metadata) -> TTSVoice:
+    """A TTS voice with the given metadata."""
+    return TTSVoice(
+        voice_id=f"VOICE-{name.lower()}",
+        name=name,
+        provider="ELEVEN_LABS",
+        provider_voice_id="abc123",
+        config={},
+        metadata=metadata,
+        poly_ai_voice=False,
+    )
+
+
+class TTSVoiceTest(unittest.TestCase):
+    """Tests for the fields TTSVoice reads out of a voice's metadata."""
+
+    def test_featured_rank_must_be_a_positive_whole_number(self):
+        """Only a positive int is a rank; anything else leaves the voice unranked."""
+        self.assertEqual(voice(featured_rank=2).featured_rank, 2)
+        for bad in (0, -1, 1.5, "1", True, None):
+            with self.subTest(rank=bad):
+                self.assertIsNone(voice(featured_rank=bad).featured_rank)
+
+    def test_live_projects_defaults_to_zero(self):
+        """A missing or invalid count reads as no live projects."""
+        self.assertEqual(voice(live_projects=40).live_projects, 40)
+        self.assertEqual(voice().live_projects, 0)
+        self.assertEqual(voice(live_projects=-3).live_projects, 0)
+
+    def test_sample_url_is_the_first_recording(self):
+        """The first sample_voice entry is the recording; none gives None."""
+        self.assertEqual(voice(sample_voice=["a.mp3", "b.mp3"]).sample_url, "a.mp3")
+        self.assertIsNone(voice(sample_voice=[]).sample_url)
+
+    def test_dev_only_and_test_voices_are_internal(self):
+        """A voice marked dev_only or tagged Test, in any case, is internal."""
+        self.assertTrue(voice(dev_only=True).is_internal)
+        self.assertTrue(voice(tags=["Calm", " test "]).is_internal)
+        self.assertFalse(voice(tags=["Calm", "Testing"]).is_internal)
+
+    def test_display_tags_leave_out_internal_and_training_tags(self):
+        """PolyVoice, Test, Live, ?, and training notes like 10h are dropped."""
+        tags = ["Calm", "PolyVoice", "test", "Live", "?", "10h", "100 epochs", "Warm"]
+
+        self.assertEqual(voice(tags=tags).display_tags, ["Calm", "Warm"])
+
+    def test_rank_key_orders_like_agent_studio(self):
+        """Ranked voices lead by rank, then most live projects, then a recording, then name."""
+        voices = [
+            voice("Zed", sample_voice=["z.mp3"]),
+            voice("Amy"),
+            voice("Bob", sample_voice=["b.mp3"]),
+            voice("Popular", live_projects=40),
+            voice("Second", featured_rank=2),
+            voice("First", featured_rank=1, live_projects=0),
+        ]
+
+        ordered = [v.name for v in sorted(voices, key=TTSVoice.rank_key)]
+
+        self.assertEqual(ordered, ["First", "Second", "Popular", "Bob", "Zed", "Amy"])

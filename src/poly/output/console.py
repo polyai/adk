@@ -2298,29 +2298,25 @@ def _voice_language(voice: dict[str, Any]) -> str:
     return metadata.get("accent") or metadata.get("language_code") or "—"
 
 
-def print_tts_voices(
-    tts_voices: list[dict[str, Any]], is_poly: Callable[[dict[str, Any]], bool]
-) -> None:
-    """Print a table of the TTS voices the project can use.
+def print_tts_voices(tts_voices: "list[TTSVoice]") -> None:
+    """Print a table of the TTS voices the project can use, in the order given.
 
     A voice is picked by its name, provider and language. When those three are shared by
     more than one voice, its vendor voice ID is shown too, since that's what tells them
-    apart.
+    apart. Tags leave out the ones Agent Studio hides.
 
     Args:
-        tts_voices: List of voice dicts, as TTSVoice.to_dict returns them.
-        is_poly: Whether a voice is PolyAI's own, which tags its row.
+        tts_voices: The voices, as the library holds them.
     """
     if not tts_voices:
         plain("No voices available.")
         return
 
-    def identity(voice: dict[str, Any]) -> tuple:
-        return (
-            (voice.get("name") or "").lower(),
-            voice.get("provider"),
-            _voice_language(voice).lower(),
-        )
+    def language(voice: "TTSVoice") -> str:
+        return _voice_language({"metadata": voice.metadata})
+
+    def identity(voice: "TTSVoice") -> tuple:
+        return ((voice.name or "").lower(), voice.provider, language(voice).lower())
 
     identity_counts: dict[tuple, int] = {}
     for voice in tts_voices:
@@ -2330,11 +2326,11 @@ def print_tts_voices(
     def widest(values: list[str], header: str) -> int:
         return max([len(header), *(len(value) for value in values)])
 
-    names = [voice.get("name") or "—" for voice in tts_voices]
-    providers = [_tts_provider_name(voice.get("provider")) for voice in tts_voices]
-    voice_ids = [voice.get("id") or "—" for voice in tts_voices]
+    names = [voice.name or "—" for voice in tts_voices]
+    providers = [_tts_provider_name(voice.provider) for voice in tts_voices]
+    voice_ids = [voice.voice_id or "—" for voice in tts_voices]
 
-    shows_poly_tag = any(map(is_poly, tts_voices))
+    shows_poly_tag = any(voice.poly_ai_voice for voice in tts_voices)
     fixed_columns = [
         ("Name", "bold yellow", widest(names, "Name")),
         ("", None, 6 if shows_poly_tag else 0),
@@ -2367,20 +2363,20 @@ def print_tts_voices(
         )
 
     for voice in tts_voices:
-        metadata = voice.get("metadata") or {}
+        metadata = voice.metadata or {}
         row = [
-            voice.get("name") or "—",
-            _poly_tag(is_poly(voice)),
-            _voice_language(voice),
+            voice.name or "—",
+            _poly_tag(voice.poly_ai_voice),
+            language(voice),
             (metadata.get("gender") or "—").capitalize(),
-            _tts_provider_name(voice.get("provider")),
-            voice.get("id") or "—",
+            _tts_provider_name(voice.provider),
+            voice.voice_id or "—",
         ]
         if shows_vendor_id:
             shared = identity_counts[identity(voice)] > 1
-            row.append(voice.get("providerVoiceId") or "—" if shared else "")
+            row.append(voice.provider_voice_id or "—" if shared else "")
         if shows_tags:
-            row.append(", ".join(metadata.get("tags") or []))
+            row.append(", ".join(voice.display_tags))
         table.add_row(*row)
 
     console.print(table)
@@ -2424,8 +2420,8 @@ def print_tts_voice(voice: "TTSVoice") -> None:
     table.add_row("Language", language)
     table.add_row("Gender", (metadata.get("gender") or "—").capitalize())
 
-    if metadata.get("tags"):
-        table.add_row("Tags", ", ".join(metadata["tags"]))
+    if voice.display_tags:
+        table.add_row("Tags", ", ".join(voice.display_tags))
     if metadata.get("suggested_use"):
         table.add_row("Suggested use", _humanise(metadata["suggested_use"]))
     if metadata.get("live_projects") is not None:

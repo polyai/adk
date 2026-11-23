@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -79,6 +80,10 @@ class LLMModel:
         }
 
 
+# Tags Agent Studio never shows: PolyAI's own markers, and ones left over from training a voice.
+_HIDDEN_TAG = re.compile(r"^(polyvoice|\d+h|\d+ epochs|\?|test|live)$", re.IGNORECASE)
+
+
 @dataclass
 class TTSVoice:
     """Library model for TTS voices."""
@@ -101,6 +106,55 @@ class TTSVoice:
             config=api_response.get("config", {}),
             metadata=api_response.get("metadata", {}),
             poly_ai_voice=api_response.get("isPolyVoice", False),
+        )
+
+    @property
+    def featured_rank(self) -> int | None:
+        """The voice's place on Agent Studio's Recommended shelf (1 leads), if it's curated."""
+        rank = (self.metadata or {}).get("featured_rank")
+        if isinstance(rank, int) and not isinstance(rank, bool) and rank > 0:
+            return rank
+        return None
+
+    @property
+    def live_projects(self) -> int:
+        """How many live customer projects use the voice, as the library last counted."""
+        count = (self.metadata or {}).get("live_projects")
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            return count
+        return 0
+
+    @property
+    def sample_url(self) -> str | None:
+        """The voice's recording, if it has one."""
+        samples = (self.metadata or {}).get("sample_voice") or []
+        return samples[0] if samples else None
+
+    @property
+    def is_internal(self) -> bool:
+        """Whether the voice is for PolyAI's own use: marked dev-only, or tagged Test."""
+        metadata = self.metadata or {}
+        tags = metadata.get("tags") or []
+        return bool(metadata.get("dev_only")) or any(tag.strip().lower() == "test" for tag in tags)
+
+    @property
+    def display_tags(self) -> list[str]:
+        """The voice's tags, without the ones Agent Studio hides."""
+        tags = (self.metadata or {}).get("tags") or []
+        return [tag for tag in tags if not _HIDDEN_TAG.match(tag.strip())]
+
+    def rank_key(self) -> tuple:
+        """Sort key for Agent Studio's voice order.
+
+        Curated rank first (unranked voices after ranked ones), then the most live projects,
+        then voices with a recording, then name.
+        """
+        return (
+            self.featured_rank is None,
+            self.featured_rank or 0,
+            -self.live_projects,
+            self.sample_url is None,
+            (self.name or "").lower(),
         )
 
     def to_dict(self) -> dict:

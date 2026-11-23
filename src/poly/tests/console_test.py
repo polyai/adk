@@ -33,6 +33,7 @@ from poly.output.console import (
     print_transcript,
     print_transcript_matches,
     print_tts_voice,
+    print_tts_voices,
     resolve_parent_branch_label,
 )
 
@@ -1226,3 +1227,49 @@ class PrintTtsVoiceTest(unittest.TestCase):
 
         self.assertIn("Vendor voice ID  —", output)
         self.assertIn("Gender           —", output)
+
+
+class PrintTtsVoicesTest(unittest.TestCase):
+    """Tests for print_tts_voices, the table `poly library voice list` prints."""
+
+    def _render(self, voices: list[TTSVoice]) -> str:
+        with console.capture() as capture:
+            print_tts_voices(voices)
+        return capture.get()
+
+    def test_no_voices_says_so(self):
+        """An empty list prints a message instead of an empty table."""
+        self.assertIn("No voices available.", self._render([]))
+
+    def test_rows_follow_the_given_order(self):
+        """The table keeps the caller's order, which is Agent Studio's ranking."""
+        output = self._render([_voice(name="Zed"), _voice(name="Amy")])
+
+        self.assertLess(output.index("Zed"), output.index("Amy"))
+
+    def test_hidden_tags_are_left_out(self):
+        """Tags Agent Studio hides, such as PolyVoice, don't appear in the table."""
+        voice = _voice(metadata={"accent": "en-US", "tags": ["Calm", "PolyVoice"]})
+
+        output = self._render([voice])
+
+        self.assertIn("Calm", output)
+        self.assertNotIn("PolyVoice", output)
+
+    def test_polyai_voices_are_tagged(self):
+        """A PolyAI voice's row carries the PolyAI tag."""
+        self.assertIn("PolyAI", self._render([_voice(poly_ai_voice=True)]))
+
+    def test_vendor_id_is_shown_only_where_voices_clash(self):
+        """Voices sharing a name, provider and language show their vendor voice IDs."""
+        voices = [
+            _voice(provider_voice_id="first-vendor-id"),
+            _voice(voice_id="VOICE-2", provider_voice_id="second-vendor-id"),
+            _voice(name="Ben", provider_voice_id="ben-vendor-id"),
+        ]
+
+        output = self._render(voices)
+
+        self.assertIn("first-vendor-id", output)
+        self.assertIn("second-vendor-id", output)
+        self.assertNotIn("ben-vendor-id", output)
