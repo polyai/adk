@@ -11,7 +11,7 @@ An outbound campaign contacts people for you: it imports contacts, then calls an
 
 !!! note "Drafts only"
 
-    Your files hold the campaign's draft. What is live changes only when the campaign is published. Archived campaigns are not pulled.
+    Your files hold the campaign's draft. What is live changes only when you publish with [`poly campaign publish`](../cli/campaign.md#poly-campaign-publish). Archived campaigns are not pulled.
 
 ## Location
 
@@ -183,7 +183,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 
     ---
 
-    Check a campaign's graph with the platform.
+    Validate, publish, pause, resume and archive a campaign.
     [Open `poly campaign`](../cli/campaign.md)
 
 </div>

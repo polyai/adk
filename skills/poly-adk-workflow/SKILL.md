@@ -143,6 +143,8 @@ poly deployments list             # what is deployed where
 
 **Never promote to `pre-release` or `live` unless the user explicitly asks** — `live` is production. Use `--dry-run` first to preview, and re-run tests against each environment after promoting. See `poly deployments --help` for the full surface, including rollback.
 
+**Never run `poly campaign publish`, `pause`, `resume` or `archive` unless the user explicitly asks** — they act on the live campaign, and `--json` skips the confirmation. `poly campaign validate` is safe: nothing is sent.
+
 ## Rules and gotchas
 
 - Never edit anything under `_gen/` — generated stubs.

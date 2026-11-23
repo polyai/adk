@@ -109,4 +109,4 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 
 ## Running a campaign
 
-Use `poly campaign validate` after you push to check the whole graph, such as every node being reachable; see `poly campaign --help`.
+Use `poly campaign` (`validate`, `publish`, `pause`, `resume`, `archive`); see `poly campaign --help`. Run `poly campaign validate` after you push to check the whole graph, such as every node being reachable. `publish`, `pause`, `resume` and `archive` act on the live campaign on `main`.
