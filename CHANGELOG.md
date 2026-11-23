@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.87.1 (2026-11-19)
+
+### Bug Fixes
+
+- Stop poly login failing for users who already have a personal access token
+  ([#442](https://github.com/polyai/adk/pull/442),
+  [`01c6c94`](https://github.com/polyai/adk/commit/01c6c946ca172084c9691a5a5fb010530f123f7a))
+
+
 ## v0.87.0 (2026-11-17)
 
 ### Features

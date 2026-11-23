@@ -1142,7 +1142,9 @@ class AgentStudioInterface:
             jwt_token: The user's JWT access token
 
         Returns:
-            list[dict]: List of PAT records.
+            list[dict]: List of PAT records. Each has the PAT's `id`, `name`, `created_at`,
+                and the first and last four characters of its secret as `key_prefix` and
+                `key_suffix`. The secret itself is only returned when the PAT is created.
         """
         return PlatformAPIHandler.get_pats_internal(region, jwt_token)
 
