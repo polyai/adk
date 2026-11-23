@@ -164,7 +164,10 @@ poly audio-cache synthesize <entry_id> --text "Hello" --json
 poly functions execute <function_name> --args '{"x": 1}' --json
 poly functions validate --json
 poly campaign validate 'Appointment reminders' --json
-poly campaign pause 'Appointment reminders' --json
+poly campaign publish 'Appointment reminders' --force --json
+poly campaign pause 'Appointment reminders' --force --json
+poly campaign resume 'Appointment reminders' --force --json
+poly campaign archive 'Appointment reminders' --force --json
 poly apikey --region studio --json
 ~~~
 
@@ -186,6 +189,10 @@ The exact top-level keys vary by command — each command's page documents its o
 !!! info "`--json` implies `--force` for deployments commands"
 
     When `--json` is used with `poly deployments promote` or `poly deployments rollback`, the confirmation prompt is automatically skipped (equivalent to passing `--force`).
+
+!!! info "`--json` implies `--force` for campaign lifecycle commands"
+
+    When `--json` is used with `poly campaign publish`, `pause`, `resume`, or `archive`, the confirmation prompt is automatically skipped (equivalent to passing `--force`).
 
 ### Advanced JSON-driven workflows
 
