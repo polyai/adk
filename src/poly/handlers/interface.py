@@ -5,7 +5,7 @@ Copyright PolyAI Limited"""
 import json
 import uuid
 from datetime import datetime
-from typing import Any, NoReturn, Optional
+from typing import Any, Literal, NoReturn, Optional
 
 from google.protobuf.message import Message
 
@@ -2023,3 +2023,31 @@ class AgentStudioInterface:
             list[dict]: The available ASR models.
         """
         return PlatformAPIHandler.get_asr_models(region)
+
+    @staticmethod
+    def get_tts_voices(
+        region: str,
+        account_id: str,
+        language: Optional[str] = None,
+        gender: Optional[Literal["male", "female", "neutral"]] = None,
+        is_poly_voice: Optional[bool] = None,
+    ) -> list[dict]:
+        """Get the list of available TTS voices.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            language (Optional[str]): The language of the TTS voice.
+            gender (Optional[Literal["male", "female", "neutral"]]): The gender of the TTS voice.
+            is_poly_voice (Optional[bool]): Whether the voice is a PolyAI voice.
+
+        Returns:
+            list[dict]: The available TTS voices.
+        """
+        return PlatformAPIHandler.get_tts_voices(
+            region,
+            account_id,
+            language=language,
+            gender=gender,
+            is_poly_voice=is_poly_voice,
+        )

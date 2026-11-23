@@ -80,6 +80,42 @@ class LLMModel:
 
 
 @dataclass
+class TTSVoice:
+    """Library model for TTS voices."""
+
+    voice_id: str
+    name: str
+    provider: str
+    provider_voice_id: str
+    config: dict
+    metadata: dict
+    poly_ai_voice: bool
+
+    @classmethod
+    def from_api_response(cls, api_response: dict) -> "TTSVoice":
+        return cls(
+            voice_id=api_response.get("id"),
+            name=api_response.get("name"),
+            provider=api_response.get("provider"),
+            provider_voice_id=api_response.get("providerVoiceId"),
+            config=api_response.get("config", {}),
+            metadata=api_response.get("metadata", {}),
+            poly_ai_voice=api_response.get("isPolyVoice", False),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.voice_id,
+            "name": self.name,
+            "provider": self.provider,
+            "providerVoiceId": self.provider_voice_id,
+            "config": self.config,
+            "metadata": self.metadata,
+            "isPolyVoice": self.poly_ai_voice,
+        }
+
+
+@dataclass
 class Library:
     """Library model for PolyAI models."""
 
@@ -87,6 +123,8 @@ class Library:
     region: str
     asr_models: list[ASRModel]
     llm_models: list[LLMModel]
+    tts_voices: list[TTSVoice]
+    account_id: Optional[str] = None
 
     @property
     def is_stale(self) -> bool:
@@ -95,12 +133,16 @@ class Library:
 
     @classmethod
     def load_library_from_api(
-        cls, region: str, api_handler: Optional["AgentStudioInterface"] = None
+        cls,
+        region: str,
+        account_id: Optional[str] = None,
+        api_handler: Optional["AgentStudioInterface"] = None,
     ) -> "Library":
         """Load the library of models for the specified region from the API
 
         Args:
             region (str): The region to refresh the library for.
+            account_id (Optional[str], optional): The account ID to use for fetching models. Defaults to None. If not provided, will not load TTS voices.
             api_handler (optional): The API handler to use for fetching models.
             Defaults to None, which uses AgentStudioInterface.
 
@@ -113,19 +155,34 @@ class Library:
             api_handler = AgentStudioInterface
 
         # Load the latest ASR and LLM async models and build the library
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             asr_future = executor.submit(api_handler.get_asr_models, region)
             llm_future = executor.submit(api_handler.get_llm_models, region)
+            if account_id is not None:
+                tts_future = executor.submit(api_handler.get_tts_voices, region, account_id)
             asr_models = asr_future.result()
             llm_models = llm_future.result()
+            if account_id is not None:
+                tts_voices = tts_future.result()
 
-        library = cls.build_library(region, asr_models, llm_models)
+        library = cls.build_library(
+            region,
+            asr_models,
+            llm_models,
+            tts_voices if account_id is not None else [],
+            account_id=account_id,
+        )
         library.save_library()
         return library
 
     @classmethod
     def build_library(
-        cls, region: str, asr_models: list[dict], llm_models: list[dict]
+        cls,
+        region: str,
+        asr_models: list[dict],
+        llm_models: list[dict],
+        tts_voices: list[dict],
+        account_id: Optional[str] = None,
     ) -> "Library":
         # Load a library object from API responses
         return cls(
@@ -133,31 +190,51 @@ class Library:
             region=region,
             asr_models=[ASRModel.from_api_response(asr) for asr in asr_models],
             llm_models=[LLMModel.from_api_response(llm) for llm in llm_models],
+            tts_voices=[TTSVoice.from_api_response(tts) for tts in tts_voices],
+            account_id=account_id,
         )
 
     @classmethod
-    def load_library_from_file(cls, region: str) -> "Library":
+    def load_library_from_file(cls, region: str, account_id: Optional[str] = None) -> "Library":
         # Load library in ~/.poly/library/{region}.json
 
         library_path = os.path.join(LIBRARY_DIR, f"{region}.json")
+        tts_voices: list[TTSVoice] = []
+        tts_last_refreshed: Optional[datetime] = None
+        if account_id is not None:
+            tts_library_path = os.path.join(LIBRARY_DIR, f"{region}-{account_id}.json")
+            if os.path.exists(tts_library_path):
+                try:
+                    with open(tts_library_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        tts_last_refreshed = datetime.fromisoformat(data.get("last_refreshed"))
+                        tts_voices = [TTSVoice(**tts) for tts in data.get("tts_voices", [])]
+                except Exception as e:
+                    raise ValueError(f"Error loading TTS library file: {tts_library_path}") from e
         if os.path.exists(library_path):
             try:
                 with open(library_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     asr_models = [ASRModel(**asr) for asr in data.get("asr_models", [])]
                     llm_models = [LLMModel(**llm) for llm in data.get("llm_models", [])]
+                    last_refreshed = datetime.fromisoformat(data.get("last_refreshed"))
+                    if tts_last_refreshed is not None:
+                        last_refreshed = max(last_refreshed, tts_last_refreshed)
                     return cls(
-                        last_refreshed=datetime.fromisoformat(data.get("last_refreshed")),
+                        last_refreshed=last_refreshed,
                         region=region,
                         asr_models=asr_models,
                         llm_models=llm_models,
+                        tts_voices=tts_voices,
+                        account_id=account_id,
                     )
             except Exception as e:
                 raise ValueError(f"Error loading library file: {library_path}") from e
         raise FileNotFoundError(f"Library for region '{region}' not found.")
 
     def save_library(self) -> None:
-        # Save library in ~/.poly/library/{region}.json
+        # Save ASR, LLM library in ~/.poly/library/{region}.json
+        # Save TTS voices in ~/.poly/library/{region}-{account_id}.json
         import json
         import os
 
@@ -174,6 +251,17 @@ class Library:
                 f,
                 indent=4,
             )
+        if self.account_id is not None:
+            tts_library_path = os.path.join(LIBRARY_DIR, f"{self.region}-{self.account_id}.json")
+            with open(tts_library_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "last_refreshed": self.last_refreshed.isoformat(),
+                        "tts_voices": [asdict(tts_voice) for tts_voice in self.tts_voices],
+                    },
+                    f,
+                    indent=4,
+                )
 
     def get_asr_model_by_id(self, model_id: str) -> ASRModel | None:
         for asr_model in self.asr_models:

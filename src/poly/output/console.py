@@ -2205,3 +2205,118 @@ def print_asr_models(
 
     console.print(table)
     console.print(f"\n{len(asr_models)} ASR models")
+
+
+_TTS_PROVIDER_NAMES = {
+    "CARTESIA": "Cartesia",
+    "ELEVEN_LABS": "ElevenLabs",
+    "GOOGLE_GEMINI": "Gemini",
+    "HUME": "Hume",
+}
+
+
+def _tts_provider_name(provider: str | None) -> str:
+    if not provider:
+        return "—"
+    return _TTS_PROVIDER_NAMES.get(provider, provider.replace("_", " ").title())
+
+
+def _voice_language(voice: dict[str, Any]) -> str:
+    metadata = voice.get("metadata") or {}
+    return metadata.get("accent") or metadata.get("language_code") or "—"
+
+
+def print_tts_voices(
+    tts_voices: list[dict[str, Any]], is_poly: Callable[[dict[str, Any]], bool]
+) -> None:
+    """Print a table of the TTS voices the project can use.
+
+    A voice is picked by its name, provider and language. When those three are shared by
+    more than one voice, its vendor voice ID is shown too, since that's what tells them
+    apart. Archived voices are left out.
+
+    Args:
+        tts_voices: List of voice dicts, as TTSVoice.to_dict returns them.
+        is_poly: Whether a voice is PolyAI's own, which tags its row.
+    """
+    tts_voices = [
+        voice for voice in tts_voices if not (voice.get("metadata") or {}).get("archived")
+    ]
+    if not tts_voices:
+        plain("No voices available.")
+        return
+
+    def identity(voice: dict[str, Any]) -> tuple:
+        return (
+            (voice.get("name") or "").lower(),
+            voice.get("provider"),
+            _voice_language(voice).lower(),
+        )
+
+    identity_counts: dict[tuple, int] = {}
+    for voice in tts_voices:
+        identity_counts[identity(voice)] = identity_counts.get(identity(voice), 0) + 1
+    shows_vendor_id = any(count > 1 for count in identity_counts.values())
+
+    def widest(values: list[str], header: str) -> int:
+        return max([len(header), *(len(value) for value in values)])
+
+    names = [voice.get("name") or "—" for voice in tts_voices]
+    providers = [_tts_provider_name(voice.get("provider")) for voice in tts_voices]
+    voice_ids = [voice.get("id") or "—" for voice in tts_voices]
+
+    shows_poly_tag = any(map(is_poly, tts_voices))
+    fixed_columns = [
+        ("Name", "bold yellow", widest(names, "Name")),
+        ("", None, 6 if shows_poly_tag else 0),
+        ("Language", None, 8),
+        ("Gender", None, 6),
+        ("Provider", "cyan", widest(providers, "Provider")),
+        ("Voice ID", "muted", widest(voice_ids, "Voice ID")),
+    ]
+    if shows_vendor_id:
+        fixed_columns.append(("Vendor voice ID", "muted", 20))
+
+    # The columns that identify a voice keep their full width; tags get what's left, and are
+    # left out when that's too little to read.
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    for header, style, width in fixed_columns:
+        table.add_column(
+            header,
+            style=style,
+            no_wrap=header != "Vendor voice ID",
+            overflow="fold",
+            min_width=width,
+            max_width=width,
+        )
+    tags_width = console.width - sum(width + 2 for _, _, width in fixed_columns) - 2
+    shows_tags = tags_width >= 10
+    if shows_tags:
+        table.add_column(
+            "Tags", style="muted", no_wrap=True, overflow="ellipsis", max_width=tags_width
+        )
+
+    for voice in tts_voices:
+        metadata = voice.get("metadata") or {}
+        row = [
+            voice.get("name") or "—",
+            _poly_tag(is_poly(voice)),
+            _voice_language(voice),
+            (metadata.get("gender") or "—").capitalize(),
+            _tts_provider_name(voice.get("provider")),
+            voice.get("id") or "—",
+        ]
+        if shows_vendor_id:
+            shared = identity_counts[identity(voice)] > 1
+            row.append(voice.get("providerVoiceId") or "—" if shared else "")
+        if shows_tags:
+            row.append(", ".join(metadata.get("tags") or []))
+        table.add_row(*row)
+
+    console.print(table)
+    console.print(f"\n{len(tts_voices)} voices")
+    if shows_vendor_id:
+        console.print(
+            "[muted]A vendor voice ID is shown where voices share a name, provider and "
+            "language.[/muted]"
+        )

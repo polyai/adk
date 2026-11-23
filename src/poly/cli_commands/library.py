@@ -17,6 +17,10 @@ _POLY_ASR_PROVIDERS = ("poly", "raven")
 _POLY_ASR_MODEL_PREFIX = "poly-"
 
 
+def _is_poly_tts(model: dict[str, Any]) -> bool:
+    return bool(model.get("isPolyVoice"))
+
+
 def _is_poly_llm(model: dict[str, Any]) -> bool:
     return bool(model.get("polyaiModel"))
 
@@ -119,6 +123,41 @@ class LibraryCommand(BaseCommand):
             help="Refresh the language models before listing them.",
         )
 
+        library_voice_parser = library_subparsers.add_parser(
+            "voice",
+            parents=[parents.verbose, parents.debug],
+            help="Manage the TTS voices available in the project's region.",
+            description=(
+                "Manage the TTS voices available in the project's region.\n\n"
+                "Examples:\n  poly library voice list\n  poly library voice list --json\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        library_voice_subparsers = library_voice_parser.add_subparsers(
+            dest="library_voice_subcommand", required=True
+        )
+        library_voice_list_subparser = library_voice_subparsers.add_parser(
+            "list",
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
+            help="List the TTS voices available in the project's region.",
+            description=(
+                "List the TTS voices available in the project's region.\n\n"
+                "Examples:\n  poly library voice list\n  poly library voice list --json\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        library_voice_list_subparser.add_argument(
+            "--region",
+            type=region_type,
+            choices=REGION_CHOICES,
+            help="Specify the region to list TTS voices for. Without this option, will read from the project's configuration.",
+        )
+        library_voice_list_subparser.add_argument(
+            "--refresh",
+            action="store_true",
+            help="Refresh the TTS voices before listing them.",
+        )
+
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Execute the ``library`` command."""
@@ -128,9 +167,14 @@ class LibraryCommand(BaseCommand):
             cls.list_asr_models(args.path, args.region, refresh=args.refresh, output_json=args.json)
         elif args.library_subcommand == "llm":
             cls.list_llm_models(args.path, args.region, refresh=args.refresh, output_json=args.json)
+        elif args.library_subcommand == "voice":
+            if args.library_voice_subcommand == "list":
+                cls.list_tts_voices(args.path, refresh=args.refresh, output_json=args.json)
 
     @classmethod
-    def _refresh_library(cls, base_path: str, region: str, output_json: bool = False) -> Library:
+    def _refresh_library(
+        cls, base_path: str, region: Optional[str] = None, output_json: bool = False
+    ) -> Library:
         """Internal method to refresh the library and return it.
 
         Args:
@@ -141,17 +185,20 @@ class LibraryCommand(BaseCommand):
         Returns:
             Library: The refreshed library of models.
         """
+        account_id: Optional[str] = None
+
         if region is None:
             project = load_project(base_path, output_json=output_json)
             region = project.region
+            account_id = project.account_id
 
-        return Library.load_library_from_api(region)
+        return Library.load_library_from_api(region, account_id)
 
     @classmethod
     def refresh_library(
         cls,
         base_path: str,
-        region: str,
+        region: Optional[str] = None,
         output_json: bool = False,
     ) -> None:
         """Refresh the library of models available in the project's region.
@@ -185,7 +232,7 @@ class LibraryCommand(BaseCommand):
 
     @classmethod
     def _load_library(
-        cls, base_path: str, region: Optional[str], output_json: bool = False
+        cls, base_path: str, region: Optional[str] = None, output_json: bool = False
     ) -> Library:
         """Load the library of models for the project's region, refreshing if necessary.
 
@@ -197,10 +244,12 @@ class LibraryCommand(BaseCommand):
         Returns:
             Library: The loaded library of models.
         """
+        account_id: Optional[str] = None
         try:
             if region is None:
                 project = load_project(base_path, output_json=output_json)
                 library = project.library
+                account_id = project.account_id
             else:
                 library = Library.load_library_from_file(region)
         except Exception:
@@ -208,7 +257,9 @@ class LibraryCommand(BaseCommand):
 
         if library is None or library.is_stale:
             try:
-                library = cls._refresh_library(base_path, region, output_json=output_json)
+                library = cls._refresh_library(
+                    base_path, region, account_id=account_id, output_json=output_json
+                )
             except Exception as e:
                 if library is None:
                     raise
@@ -220,7 +271,11 @@ class LibraryCommand(BaseCommand):
 
     @classmethod
     def list_asr_models(
-        cls, base_path: str, region: Optional[str], refresh: bool = False, output_json: bool = False
+        cls,
+        base_path: str,
+        region: Optional[str] = None,
+        refresh: bool = False,
+        output_json: bool = False,
     ) -> None:
         """List the ASR models available in the project's region.
 
@@ -255,7 +310,11 @@ class LibraryCommand(BaseCommand):
 
     @classmethod
     def list_llm_models(
-        cls, base_path: str, region: Optional[str], refresh: bool = False, output_json: bool = False
+        cls,
+        base_path: str,
+        region: Optional[str] = None,
+        refresh: bool = False,
+        output_json: bool = False,
     ) -> None:
         """List the language models available in the project's region.
 
@@ -287,3 +346,55 @@ class LibraryCommand(BaseCommand):
         else:
             with paged_output():
                 print_llm_models(sorted_llm_models, is_poly=_is_poly_llm)
+
+    @classmethod
+    def list_tts_voices(
+        cls,
+        base_path: str,
+        refresh: bool = False,
+        output_json: bool = False,
+        language: Optional[str] = None,
+        gender: Optional[str] = None,
+        is_poly_voice: Optional[bool] = None,
+        archived: bool = False,
+    ) -> None:
+        """List the TTS voices available in the project's region.
+
+        Args:
+            base_path (str): The base path of the project.
+            refresh (bool, optional): Whether to refresh the library before listing. Defaults to False.
+            language (Optional[str]): The language of the TTS voice.
+            gender (Optional[str]): The gender of the TTS voice.
+            archived (Optional[bool]): Whether to include archived voices.
+            is_poly_voice (Optional[bool]): Whether the voice is a PolyAI voice.
+            output_json (bool, optional): Whether to output the result in JSON format. Defaults to False.
+
+        Returns:
+            None
+        """
+        from poly.output.console import paged_output, print_tts_voices, success
+
+        if refresh:
+            library = cls._refresh_library(base_path, output_json=output_json)
+            if not output_json:
+                success("Library refreshed successfully.")
+        else:
+            library = cls._load_library(base_path, output_json=output_json)
+
+        tts_voices = [
+            tts_voice.to_dict()
+            for tts_voice in library.tts_voices
+            if (language is None or tts_voice.metadata.get("accent") == language)
+            and (gender is None or tts_voice.metadata.get("gender") == gender)
+            and (is_poly_voice is None or tts_voice.is_poly_voice == is_poly_voice)
+            and (not (archived is True and (tts_voice.metadata.get("archived") == archived)))
+        ]
+
+        sorted_tts_voices = _poly_first(tts_voices, _is_poly_tts)
+
+        if output_json:
+            json_print(sorted_tts_voices)
+
+        else:
+            with paged_output():
+                print_tts_voices(sorted_tts_voices, is_poly=_is_poly_tts)
