@@ -67,7 +67,7 @@ A reason is always available to the agent. There is no setting for this yet.
 
 The file is the whole list: a push deletes reasons that aren't in `reasons`, and a file without `reasons` has none.
 
-If a destination is deleted while a reason still transfers to it, a pull keeps the destination id the platform has and `poly validate` reports it until you pick another destination.
+To delete a destination that a reason transfers to, point the reason at another destination in the same push; `poly validate` refuses a `transfer_to` that names no destination. A destination deleted in Agent Studio moves its reasons to the default destination, and the next pull shows that. If no destination is left, the reason keeps the deleted destination's id, and `poly validate` reports it until you add one.
 
 ## Default transfer message
 

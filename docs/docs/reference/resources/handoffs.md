@@ -112,7 +112,7 @@ Without a `transfer_message` section (or with an empty one) the project has no d
 - A reason `key` is capital letters, digits and underscores, starts with a letter, and is at most 64 characters.
 - Reason names and keys are unique.
 - An outcome is `not_offered`, `{transfer_to, wording?}` or `{message}`; any other shape or key is refused.
-- `transfer_to` must name a destination in `handoffs`, including one added in the same push. If a destination is deleted while a reason still transfers to it, a pull keeps the destination id the platform has, and `poly validate` reports it until you choose another destination.
+- `transfer_to` must name a destination in `handoffs`, including one added in the same push. To delete a destination that a reason transfers to, point the reason at another destination in the same push. A destination deleted in Agent Studio moves its reasons to the default destination, and the next pull shows that. If no destination is left, the reason keeps the deleted destination's id, and `poly validate` reports it until you add one.
 - A `chat` outcome can't be a transfer.
 - Messages are not empty. Messages and wording are at most 300 characters.
 - Wording, messages and `transfer_message.call` only take `{{vrbl:}}` references, to variables the project has.
