@@ -53,7 +53,7 @@ A reason tells the agent when to hand off and what to do on each channel. When a
 
 Each reason has:
 - **name** (string): Up to 100 characters, unique within the file.
-- **key** (string, optional): The analytics key recorded when the agent hands off for this reason. Capital letters, digits and underscores, starting with a letter, up to 64 characters, unique. Leave it out on a new reason and the platform derives one. It is fixed once the reason exists: renaming the reason keeps it, and changing it has no effect (the next pull restores it). To use a different key, add a new reason.
+- **key** (string, optional): The analytics key recorded when the agent hands off for this reason. Capital letters, digits and underscores, starting with a letter, up to 64 characters, unique. Leave it out on a new reason and the platform derives one. It is fixed once the reason exists: changing it has no effect (the next pull restores it). Renaming a reason replaces it with a new one; keep its `key` line and the new reason takes the same key.
 - **description** (string): When the agent should use this reason, up to 500 characters.
 - **call** (required): What happens on a call. One of:
   - `{transfer_to: <destination name>, wording: <text>}`: transfer to a destination in `handoffs`. `wording` is optional and is said before the transfer; without it, the agent says the default transfer message.
@@ -61,11 +61,15 @@ Each reason has:
   - `not_offered`: the reason isn't offered on calls.
 - **chat** (optional): What happens on chat: `{message: <text>}` or `not_offered`. Chat can't transfer.
 
-Wording and messages are up to 300 characters and may reference conversation state as `$state_<key>`.
+Wording and messages are up to 300 characters and may reference a state variable as `{{vrbl:variable_name}}`. `poly validate` checks each variable exists; no other reference type is allowed.
 
 A reason is always available to the agent. There is no setting for this yet.
 
-If the file has no `reasons` key, a push leaves the project's reasons as they are. `reasons: []` deletes them all. Once the project supports reasons, a pull writes `reasons:` even when there are none, so you can add them.
+The file is the whole list: a push deletes reasons that aren't in `reasons`, and a file without `reasons` has none.
+
+New projects start with five suggested reasons, created when the project gets its first destination; a pull writes them like any other reason. A reason pushed with the same `key` as one of them takes its place.
+
+If a destination is deleted while a reason still transfers to it, a pull keeps the destination id the platform has and `poly validate` reports it until you pick another destination.
 
 ## Default transfer message
 
@@ -74,9 +78,9 @@ transfer_message:
   call: Let me put you through to someone who can help.
 ```
 
-- `call` is said before a call transfer when the reason has no `wording`. `call: ""` transfers without a line; `call: null` means no default line.
+- `call` is said before a call transfer when the reason has no `wording`, and may reference `{{vrbl:variable_name}}`. `call: ""` transfers without a line.
+- Without a `transfer_message` section (or with an empty one) there is no default transfer message, and a push removes it.
 - Chat has no default transfer message; a `chat` key is refused.
-- If the file has no `transfer_message` key, a push leaves the project's message as it is.
 
 ## Example with reasons
 ```yaml

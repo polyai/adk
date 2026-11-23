@@ -1060,7 +1060,7 @@
         "call": {
           "kind": "transfer",
           "destination_id": "handoff-3",
-          "wording": "I'll put you through to our urgent support team.",
+          "wording": "I'll put you through to our urgent support team, {{vrbl:VAR-customer_name}}.",
           "message": ""
         },
         "chat": {
@@ -1075,8 +1075,7 @@
       "handoff_transfer_message": {
         "resource_id": "handoff_transfer_message",
         "name": "transfer_message",
-        "call": "Let me put you through to someone who can help.",
-        "unsupported_keys": []
+        "call": "Let me put you through to someone who can help."
       }
     },
     "phrase_filtering": {

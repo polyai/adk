@@ -79,25 +79,24 @@ Each outcome takes one of these shapes:
 | Message | `{message: <text>}` | No transfer. The message is guidance the agent puts in its own words, not a script read out verbatim. |
 | Not offered | `not_offered` | The reason isn't offered on this channel. |
 
-Wording and messages may reference conversation state as `$state_<key>`.
+Wording and messages may reference a state variable as `{{vrbl:variable_name}}`, as prompts do. `poly validate` checks that each variable exists.
 
 !!! info "The key is fixed once a reason exists"
 
-    Renaming a reason keeps its key, so analytics carry on. Changing the key of an existing reason has no effect, and the next pull restores it. To use a different key, add a new reason.
+    Changing the key of an existing reason has no effect, and the next pull restores it. Renaming a reason replaces it with a new reason of the new name; keep its `key` line and the new reason takes the same key, so analytics carry on.
 
-!!! note "Reasons the file doesn't mention are left alone"
+As with other resources, the file is the whole list: a push deletes reasons that aren't in `reasons`, and a file without `reasons` has none.
 
-    If `config/handoffs.yaml` has no `reasons` key, a push leaves the project's reasons as they are. `reasons: []` deletes them all. Once a project supports reasons, a pull writes the `reasons` key even when there are none. The same applies to `transfer_message`.
+New projects start with five suggested reasons, created when the project gets its first destination. A pull writes them like any other reason. A reason you push with the same `key` as one of them takes its place.
 
 ## Default transfer message
 
 `transfer_message` takes a single `call` field:
 
-- `call: <text>`: said before a call transfer when the reason has no `wording`.
+- `call: <text>`: said before a call transfer when the reason has no `wording`. It may reference `{{vrbl:variable_name}}`.
 - `call: ""`: transfer without a line.
-- `call: null`: no default line.
 
-Chat has no default transfer message.
+Without a `transfer_message` section (or with an empty one) the project has no default transfer message, and a push removes it. Chat has no default transfer message, so a `chat` key is refused.
 
 ## Validation
 
@@ -115,9 +114,10 @@ Chat has no default transfer message.
 - A reason `key` is capital letters, digits and underscores, starts with a letter, and is at most 64 characters.
 - Reason names and keys are unique.
 - An outcome is `not_offered`, `{transfer_to, wording?}` or `{message}`; any other shape or key is refused.
-- `transfer_to` must name a destination in `handoffs`, including one added in the same push.
+- `transfer_to` must name a destination in `handoffs`, including one added in the same push. If a destination is deleted while a reason still transfers to it, a pull keeps the destination id the platform has, and `poly validate` reports it until you choose another destination.
 - A `chat` outcome can't be a transfer.
 - Messages are not empty. Messages and wording are at most 300 characters.
+- Wording, messages and `transfer_message.call` only take `{{vrbl:}}` references, to variables the project has.
 - `transfer_message` only takes `call`, at most 300 characters.
 
 ## Example
@@ -165,7 +165,7 @@ reasons:
     description: The caller disputes a charge on their bill.
     call:
       transfer_to: Billing
-      wording: I'll put you through to our billing team.
+      wording: I'll put you through to our billing team, {{vrbl:caller_name}}.
     chat:
       message: Explain that billing disputes are handled by phone and give the billing number.
   - name: Opening hours

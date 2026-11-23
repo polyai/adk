@@ -11140,5 +11140,321 @@ class ApiIntegrationSyncTest(unittest.TestCase):
         self.assertEqual(commands, [])
 
 
+def _handoff_destination(name: str, *, is_default: bool = False, skip_test_calls=None) -> dict:
+    state = {
+        "id": name,
+        "name": name,
+        "description": f"{name} team",
+        "active": True,
+        "isDefault": is_default,
+        "sipConfig": {"config": {"$case": "refer", "value": {"phoneNumber": "+441234567890"}}},
+        "sipHeaders": {"headers": []},
+    }
+    if skip_test_calls is not None:
+        state["skipTestCallTransfers"] = skip_test_calls
+    return state
+
+
+def _reason_outcome(case: str, value: Optional[dict] = None) -> dict:
+    return {"outcome": {"$case": case, "value": value or {}}}
+
+
+def _reason_state(reason_id: str, key: str, name: str, description: str, **outcomes) -> dict:
+    return {
+        "id": reason_id,
+        "key": key,
+        "name": name,
+        "description": description,
+        "active": True,
+        "outcomes": outcomes,
+    }
+
+
+class HandoffReasonsPullPushTest(unittest.TestCase):
+    """Reasons, the transfer message and transfer_test_calls through a real pull and push.
+
+    Each test renders a projection to files, edits config/handoffs.yaml, then dry-run pushes
+    it back against the same projection, entirely offline.
+    """
+
+    HANDOFFS = os.path.join("config", "handoffs.yaml")
+
+    @staticmethod
+    def _projection() -> dict:
+        return {
+            "specialFunctions": {
+                "startFunction": {
+                    "id": "FUNCTION-start",
+                    "name": "start_function",
+                    "description": "",
+                    "code": (
+                        "def start_function(conv: Conversation):\n"
+                        "    conv.state.caller_name = 'Sam'\n"
+                    ),
+                }
+            },
+            "variables": {
+                "variables": {"ids": ["VAR-1"], "entities": {"VAR-1": {"name": "caller_name"}}}
+            },
+            "handoff": {
+                "handoffs": {
+                    "ids": ["HANDOFF-1", "HANDOFF-2"],
+                    "entities": {
+                        "HANDOFF-1": _handoff_destination("Front desk", is_default=True),
+                        "HANDOFF-2": _handoff_destination("Billing", skip_test_calls=True),
+                    },
+                },
+                "reasons": {
+                    "ids": ["REASON-1", "REASON-2", "REASON-3"],
+                    "entities": {
+                        "REASON-1": _reason_state(
+                            "REASON-1",
+                            "BILLING",
+                            "Billing dispute",
+                            "The caller disputes a charge.",
+                            call=_reason_outcome(
+                                "transfer",
+                                {"destinationId": "HANDOFF-2", "wording": "One moment."},
+                            ),
+                            chat=_reason_outcome(
+                                "message", {"message": "Point them to the billing page."}
+                            ),
+                        ),
+                        "REASON-2": _reason_state(
+                            "REASON-2",
+                            "SPEAK_TO",
+                            "Speak to a person",
+                            "The caller asks for a person.",
+                            call=_reason_outcome("transfer", {"destinationId": "HANDOFF-1"}),
+                            chat=_reason_outcome("notOffered"),
+                        ),
+                        "REASON-3": _reason_state(
+                            "REASON-3",
+                            "OPENING_HOURS",
+                            "Opening hours",
+                            "The caller asks when you are open.",
+                            call=_reason_outcome(
+                                "message", {"message": "Open 9 to 5, {{vrbl:VAR-1}}."}
+                            ),
+                        ),
+                    },
+                },
+                "settings": {"callTransferMessage": "One moment, {{vrbl:VAR-1}}."},
+            },
+        }
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        config = {"region": "dev", "account_id": "dummy", "project_id": "dummy"}
+        with open(os.path.join(self.root, "project.yaml"), "w", encoding="utf-8") as f:
+            f.write(resource_utils.dump_yaml({**config, "branch_id": "main"}))
+        self.projection = self._projection()
+
+    def _pull(self) -> dict:
+        project = AgentStudioProject.from_file_path(self.root)
+        conflicts, _ = project.pull_project(projection_json=self.projection, force=True)
+        self.assertEqual(conflicts, [])
+        MultiResourceYamlResource._file_cache.clear()
+        return self._read()
+
+    def _read(self) -> dict:
+        with open(os.path.join(self.root, self.HANDOFFS), encoding="utf-8") as f:
+            return resource_utils.load_yaml(f.read()) or {}
+
+    def _write(self, data: dict) -> None:
+        with open(os.path.join(self.root, self.HANDOFFS), "w", encoding="utf-8") as f:
+            f.write(resource_utils.dump_yaml(data))
+        MultiResourceYamlResource._file_cache.clear()
+
+    def _push(self) -> tuple[bool, str, list[Command]]:
+        project = AgentStudioProject.from_file_path(self.root)
+        return project.push_project(projection_json=self.projection, dry_run=True)
+
+    def _edit_and_push(self, change) -> list[Command]:
+        data = self._pull()
+        change(data)
+        self._write(data)
+        success, message, commands = self._push()
+        self.assertTrue(success, message)
+        return commands
+
+    def test_pull_writes_destinations_reasons_and_message_by_name(self):
+        """Destinations and variables appear by name, and test-call transfers only when off."""
+        data = self._pull()
+        self.assertEqual(list(data), ["handoffs", "reasons", "transfer_message"])
+        front_desk, billing = data["handoffs"]
+        self.assertNotIn("transfer_test_calls", front_desk)
+        self.assertIs(billing["transfer_test_calls"], False)
+        self.assertEqual(
+            data["reasons"][0],
+            {
+                "name": "Billing dispute",
+                "key": "BILLING",
+                "description": "The caller disputes a charge.",
+                "call": {"transfer_to": "Billing", "wording": "One moment."},
+                "chat": {"message": "Point them to the billing page."},
+            },
+        )
+        self.assertEqual(data["reasons"][1]["call"], {"transfer_to": "Front desk"})
+        self.assertEqual(data["reasons"][1]["chat"], "not_offered")
+        self.assertEqual(data["reasons"][2]["call"], {"message": "Open 9 to 5, {{vrbl:caller_name}}."})
+        self.assertNotIn("chat", data["reasons"][2])
+        self.assertEqual(data["transfer_message"], {"call": "One moment, {{vrbl:caller_name}}."})
+
+    def test_pull_then_push_changes_nothing(self):
+        """A pulled file pushes back with no commands."""
+        self._pull()
+        success, message, commands = self._push()
+        self.assertTrue(success, message)
+        self.assertEqual(commands, [])
+
+    def test_project_without_reasons_writes_no_reasons(self):
+        """No reasons and no message on the platform means neither section in the file."""
+        del self.projection["handoff"]["reasons"]
+        del self.projection["handoff"]["settings"]
+        self.projection["handoff"]["handoffs"]["entities"]["HANDOFF-2"].pop(
+            "skipTestCallTransfers"
+        )
+        data = self._pull()
+        self.assertEqual(list(data), ["handoffs"])
+        self.assertTrue(all("transfer_test_calls" not in h for h in data["handoffs"]))
+
+    def test_missing_sections_delete_the_reasons_and_unset_the_message(self):
+        """A file without `reasons` or `transfer_message` has none, like any other resource."""
+
+        def drop(data):
+            del data["reasons"]
+            del data["transfer_message"]
+
+        commands = self._edit_and_push(drop)
+        self.assertEqual(
+            sorted(c.handoff_reason_delete.id for c in commands if c.type == "handoff_reason_delete"),
+            ["REASON-1", "REASON-2", "REASON-3"],
+        )
+        (unset,) = [c for c in commands if c.type == "handoff_settings_set_transfer_message"]
+        self.assertFalse(unset.handoff_settings_set_transfer_message.HasField("message"))
+
+    def test_transfer_test_calls_round_trips(self):
+        """Turning test-call transfers off and on updates each destination."""
+
+        def flip(data):
+            data["handoffs"][0]["transfer_test_calls"] = False
+            del data["handoffs"][1]["transfer_test_calls"]
+
+        commands = self._edit_and_push(flip)
+        updates = {c.handoff_update.id: c.handoff_update for c in commands}
+        self.assertIs(updates["HANDOFF-1"].skip_test_call_transfers, True)
+        self.assertIs(updates["HANDOFF-2"].skip_test_call_transfers, False)
+
+    def test_new_reason_and_destination_in_one_push(self):
+        """A reason can transfer to a destination created in the same push."""
+
+        def add(data):
+            data["handoffs"].append(
+                {
+                    "name": "Sales",
+                    "description": "Sales team",
+                    "is_default": False,
+                    "sip_config": {"method": "bye"},
+                }
+            )
+            data["reasons"].append(
+                {
+                    "name": "Buy something",
+                    "description": "The caller wants to buy.",
+                    "call": {"transfer_to": "Sales", "wording": "Hold on, {{vrbl:caller_name}}."},
+                    "chat": "not_offered",
+                }
+            )
+
+        commands = self._edit_and_push(add)
+        self.assertEqual([c.type for c in commands], ["handoff_create", "handoff_reason_create"])
+        create = commands[1].handoff_reason_create
+        self.assertEqual(create.outcomes.call.transfer.destination_id, commands[0].handoff_create.id)
+        self.assertEqual(create.outcomes.call.transfer.wording, "Hold on, {{vrbl:VAR-1}}.")
+        self.assertTrue(create.outcomes.chat.HasField("not_offered"))
+        self.assertFalse(create.HasField("key"))
+
+    def test_unknown_variable_stops_the_push(self):
+        """A `{{vrbl:}}` the project doesn't have fails validation before anything is sent."""
+        data = self._pull()
+        data["reasons"][0]["call"]["wording"] = "Hold on, {{vrbl:nobody}}."
+        self._write(data)
+        success, message, commands = self._push()
+        self.assertFalse(success)
+        self.assertIn("invalid references", message)
+        self.assertEqual(commands, [])
+
+    def test_edited_reason_and_message_are_updated(self):
+        """Changes to a reason and the message are sent as updates."""
+
+        def edit(data):
+            data["reasons"][0]["description"] = "The caller disputes a charge on their bill."
+            data["reasons"][0]["call"] = {"transfer_to": "Front desk"}
+            data["transfer_message"]["call"] = ""
+
+        commands = self._edit_and_push(edit)
+        by_type = {c.type: c for c in commands}
+        self.assertEqual(
+            set(by_type), {"handoff_reason_update", "handoff_settings_set_transfer_message"}
+        )
+        update = by_type["handoff_reason_update"].handoff_reason_update
+        self.assertEqual(update.id, "REASON-1")
+        self.assertEqual(update.description, "The caller disputes a charge on their bill.")
+        self.assertEqual(update.outcomes.call.transfer.destination_id, "HANDOFF-1")
+        self.assertFalse(update.outcomes.call.transfer.HasField("wording"))
+        message = by_type["handoff_settings_set_transfer_message"]
+        self.assertEqual(message.handoff_settings_set_transfer_message.message, "")
+        self.assertTrue(message.handoff_settings_set_transfer_message.HasField("message"))
+
+    def test_reasons_are_deleted_before_their_destination(self):
+        """The platform refuses to delete a destination a reason still transfers to."""
+
+        def remove(data):
+            del data["handoffs"][1]
+            data["reasons"] = [r for r in data["reasons"] if r["name"] != "Billing dispute"]
+
+        commands = self._edit_and_push(remove)
+        self.assertEqual([c.type for c in commands], ["handoff_reason_delete", "handoff_delete"])
+        self.assertEqual(commands[0].handoff_reason_delete.id, "REASON-1")
+        self.assertEqual(commands[1].handoff_delete.id, "HANDOFF-2")
+
+    def test_deleting_a_destination_a_reason_uses_fails_validation(self):
+        """A reason left pointing at a removed destination is caught locally."""
+        commands_data = self._pull()
+        del commands_data["handoffs"][1]
+        self._write(commands_data)
+        success, message, commands = self._push()
+        self.assertFalse(success)
+        self.assertIn("not a destination", message)
+        self.assertEqual(commands, [])
+
+    def test_renamed_reason_is_replaced_and_keeps_its_key(self):
+        """A rename is a delete and a create; the create carries the key from the file."""
+        commands = self._edit_and_push(
+            lambda data: data["reasons"][1].update(name="Talk to a human")
+        )
+        self.assertEqual(
+            [c.type for c in commands], ["handoff_reason_delete", "handoff_reason_create"]
+        )
+        self.assertEqual(commands[0].handoff_reason_delete.id, "REASON-2")
+        self.assertEqual(commands[1].handoff_reason_create.name, "Talk to a human")
+        self.assertEqual(commands[1].handoff_reason_create.key, "SPEAK_TO")
+
+    def test_pull_keeps_a_reason_whose_destination_is_gone(self):
+        """The platform's id is written as-is: a pull then push sends nothing, validate flags it."""
+        reason = self.projection["handoff"]["reasons"]["entities"]["REASON-1"]
+        reason["outcomes"]["call"]["outcome"]["value"]["destinationId"] = "HANDOFF-GONE"
+        data = self._pull()
+        self.assertEqual(data["reasons"][0]["call"]["transfer_to"], "HANDOFF-GONE")
+        success, message, commands = self._push()
+        self.assertTrue(success, message)
+        self.assertEqual(commands, [])
+        errors = AgentStudioProject.from_file_path(self.root).validate_project()
+        self.assertTrue(any("HANDOFF-GONE" in e and "not a destination" in e for e in errors))
+
+
 if __name__ == "__main__":
     unittest.main()

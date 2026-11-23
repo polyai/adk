@@ -64,7 +64,7 @@ The three that overlap most are rules, topics, and functions. The test: if an in
 
 Resources reference each other by name with `{{prefix:name}}` placeholders (`{{fn:}}` functions, `{{entity:}}` entities, `{{ho:}}` handoffs, `{{attr:}}` variant attributes, `{{vrbl:}}` state variables, `{{twilio_sms:}}` SMS templates, `{{tn:}}` translations). `poly validate` checks every reference resolves.
 
-Handoffs live in `config/handoffs.yaml`: destinations (`handoffs`), reasons (`reasons`) and the default transfer message (`transfer_message`). When a project has reasons, the agent hands off by reason and the platform says the line and transfers, so describe *when* to hand off in each reason's `description` rather than in rules with `{{ho:}}`. Map each reason to a destination with `call: {transfer_to: ...}`, or give it a `message` or `not_offered` outcome; chat never transfers. Projects without reasons keep using `{{ho:}}` and `conv.call_handoff`. Run `poly docs handoffs` for the full shape.
+Handoffs live in `config/handoffs.yaml`: destinations (`handoffs`), reasons (`reasons`) and the default transfer message (`transfer_message`). When a project has reasons, the agent hands off by reason and the platform says the line and transfers, so describe *when* to hand off in each reason's `description` rather than in rules with `{{ho:}}`. Map each reason to a destination with `call: {transfer_to: ...}`, or give it a `message` or `not_offered` outcome; chat never transfers. Wording, messages and `transfer_message.call` reference state with `{{vrbl:}}`, like prompts. Projects without reasons keep using `{{ho:}}` and `conv.call_handoff`. Run `poly docs handoffs` for the full shape.
 
 ## 4. Set up or connect a project
 

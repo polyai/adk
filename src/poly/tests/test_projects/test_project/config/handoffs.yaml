@@ -30,7 +30,7 @@ reasons:
   description: The caller has an urgent problem that can't wait.
   call:
     transfer_to: urgent support
-    wording: I'll put you through to our urgent support team.
+    wording: I'll put you through to our urgent support team, {{vrbl:customer_name}}.
   chat:
     message: Tell them to call us, as urgent issues are handled by phone.
 transfer_message:

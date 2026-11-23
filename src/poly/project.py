@@ -11,7 +11,7 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from functools import cached_property
@@ -60,7 +60,6 @@ from poly.resources import (
     FlowStep,
     Function,
     FunctionStep,
-    HandoffReason,
     MCPServer,
     MultiResourceYamlResource,
     OutboundCampaign,
@@ -73,10 +72,6 @@ from poly.resources import (
     SubResourceMap,
     TestCase,
     Topic,
-)
-from poly.resources.handoff import (
-    declare_handoff_reasons,
-    projection_supports_handoff_reasons,
 )
 from poly.resources.outbound_campaign import (
     campaign_folder_of,
@@ -703,8 +698,6 @@ class AgentStudioProject:
                 save_to_cache=is_multi,
             )
 
-        if projection_supports_handoff_reasons(projection or {}):
-            declare_handoff_reasons(project._snapshot_multi_resource_file_cache())
         MultiResourceYamlResource.write_cache_to_file()
         MultiResourceYamlResource._file_cache.clear()
 
@@ -884,7 +877,6 @@ class AgentStudioProject:
         incoming_resources, slim_resources, projection = self.api_handler.pull_resources(
             projection_json=projection_json
         )
-        self._handoff_reasons_supported = projection_supports_handoff_reasons(projection or {})
         # Only update branch id if we used the API to pull the resources
         if projection_json is None:
             self.branch_id = self.api_handler.branch_id
@@ -1073,15 +1065,6 @@ class AgentStudioProject:
             for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
         }
 
-    def _declare_handoff_reasons(self, file_data: dict[str, dict]) -> None:
-        """Keep `reasons:` in a pulled handoffs file once the platform has reasons.
-
-        Tools that edit the file only add reasons where the key is already there. All
-        three sides of the merge get it, so it never conflicts with an incoming reason.
-        """
-        if getattr(self, "_handoff_reasons_supported", False):
-            declare_handoff_reasons(file_data)
-
     def _follow_moved_multi_resources(
         self, original_resources: ResourceMap, incoming_resources: ResourceMap
     ) -> tuple[ResourceMap, dict[tuple[type[Resource], str], Resource]]:
@@ -1192,7 +1175,6 @@ class AgentStudioProject:
                 local_file_paths[resource_type] = local_resources_file_paths
 
             original_file_data = self._snapshot_multi_resource_file_cache()
-            self._declare_handoff_reasons(original_file_data)
 
         # Compute incoming file data
         MultiResourceYamlResource._file_cache.clear()
@@ -1234,7 +1216,6 @@ class AgentStudioProject:
                 on_save(progress_offset, progress_total)
 
         incoming_file_data = self._snapshot_multi_resource_file_cache()
-        self._declare_handoff_reasons(incoming_file_data)
 
         # Normalise local resources through resource classes to ensure
         # serialization differences don't cause merge conflicts
@@ -1269,7 +1250,6 @@ class AgentStudioProject:
                         continue
 
             local_file_data = self._snapshot_multi_resource_file_cache()
-            self._declare_handoff_reasons(local_file_data)
 
             for file in incoming_file_data:
                 if file not in local_file_data:
@@ -2996,12 +2976,6 @@ class AgentStudioProject:
             ):
                 continue
 
-            # Handoff reasons and the transfer message are only deleted when the file
-            # still has their key; a file without it says nothing about them.
-            left_alone = getattr(resource_type, "left_alone_when_undeclared", None)
-            if left_alone is not None and left_alone(self.root_path):
-                continue
-
             resource_id = resource_info["resource_id"]
             resource_mapping = ResourceMapping(
                 resource_id=resource_id,
@@ -3018,40 +2992,7 @@ class AgentStudioProject:
             )
             deleted_resource_mappings.append(resource_mapping)
 
-        self._match_handoff_reasons_by_key(
-            new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
-        )
         return new_resource_mappings, kept_resource_mappings, deleted_resource_mappings
-
-    def _match_handoff_reasons_by_key(
-        self,
-        new_resource_mappings: list[ResourceMapping],
-        kept_resource_mappings: list[ResourceMapping],
-        deleted_resource_mappings: list[ResourceMapping],
-    ) -> None:
-        """Treat a renamed reason as the same reason when its key is unchanged.
-
-        By path a rename is a delete plus a create, and the create would carry a key
-        the project already has.
-        """
-        by_key: dict[str, ResourceMapping] = {}
-        for mapping in deleted_resource_mappings:
-            if mapping.resource_type is not HandoffReason:
-                continue
-            original = self.resources.get(HandoffReason, {}).get(mapping.resource_id)
-            if original is not None and original.key:
-                by_key[original.key] = mapping
-        if not by_key:
-            return
-        for mapping in list(new_resource_mappings):
-            if mapping.resource_type is not HandoffReason:
-                continue
-            deleted = by_key.pop(HandoffReason.read_key(mapping.file_path), None)
-            if deleted is None:
-                continue
-            new_resource_mappings.remove(mapping)
-            deleted_resource_mappings.remove(deleted)
-            kept_resource_mappings.append(replace(mapping, resource_id=deleted.resource_id))
 
     @staticmethod
     def generate_uuid(resource_type: type[Resource]) -> str:

@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import logging
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import ClassVar, Optional
 
@@ -202,7 +203,7 @@ class Handoff(MultiResourceYamlResource):
         if self.sip_headers:
             result["sip_headers"] = self.sip_headers
         # Written only when off, so files pulled before the field existed don't change.
-        if self.transfer_test_calls is not True:
+        if not self.transfer_test_calls:
             result["transfer_test_calls"] = self.transfer_test_calls
         return result
 
@@ -359,36 +360,28 @@ class Handoff(MultiResourceYamlResource):
         return discovered_handoffs
 
 
-def _file_declares(base_path: str, top_level_name: str) -> bool:
-    """Whether the local config/handoffs.yaml has `top_level_name` at all."""
-    true_file_path = os.path.join(base_path, HANDOFFS_FILE)
-    if not os.path.isfile(true_file_path):
-        return False
-    yaml_dict = MultiResourceYamlResource._get_top_level_data(true_file_path)
-    return top_level_name in (yaml_dict or {})
-
-
-def projection_supports_handoff_reasons(projection: dict) -> bool:
-    """Whether the project's handoff state has reasons at all.
-
-    Projections written before reasons existed have neither `reasons` nor
-    `settings` under `handoff`.
-    """
-    handoff_state = projection.get("handoff") or {}
-    return "reasons" in handoff_state or "settings" in handoff_state
-
-
-def declare_handoff_reasons(file_data: dict[str, dict]) -> None:
-    """Give a handoffs file that has destinations an empty `reasons` list.
+def validate_variable_references(
+    text: str, where: str, resource_mappings: list[ResourceMapping] | None
+) -> None:
+    """Refuse references other than `{{vrbl:}}`, and variables the project doesn't have.
 
     Args:
-        file_data: Top-level YAML data by true file path, changed in place.
+        text: Wording or a message, with references already resolved to ids.
+        where: Start of the error message, naming the field.
+        resource_mappings: The project's mappings; None skips the existence check.
+
+    Raises:
+        ValueError: If the text has another reference type or an unknown variable.
     """
-    for true_file_path, top_level_yaml_dict in file_data.items():
-        if not os.path.normpath(true_file_path).endswith(HANDOFFS_FILE):
-            continue
-        if Handoff.top_level_name in top_level_yaml_dict:
-            top_level_yaml_dict.setdefault(HandoffReason.top_level_name, [])
+    try:
+        references = utils.get_references_from_prompt(text, ["variables"], raise_on_invalid=True)
+    except ValueError as e:
+        raise ValueError(f"{where}: {e}") from e
+    if resource_mappings is None:
+        return
+    valid, invalid_references = utils.validate_references(references, resource_mappings)
+    if not valid:
+        raise ValueError(f"{where} has invalid references: {invalid_references}")
 
 
 OUTCOME_TRANSFER = "transfer"
@@ -442,29 +435,19 @@ class ReasonOutcome:
         )
 
     @classmethod
-    def from_projection(
-        cls, outcome_state: dict | None, destinations: dict[str, dict]
-    ) -> Optional["ReasonOutcome"]:
+    def from_projection(cls, outcome_state: dict | None) -> Optional["ReasonOutcome"]:
         """Read one channel's outcome; None when it has none.
 
-        A transfer to a destination that's gone is read as the default
-        destination, as the artifact does, so the next push isn't refused.
+        A transfer keeps its destination id even when that destination is gone, so the
+        file shows what the platform has and `validate` reports it.
         """
         outcome = (outcome_state or {}).get("outcome") or {}
         case = outcome.get("$case")
         value = outcome.get("value") or {}
         if case == "transfer":
-            destination_id = value.get("destinationId", "")
-            if destination_id not in destinations:
-                destination_id = next(
-                    (i for i, d in destinations.items() if d.get("isDefault")), ""
-                )
-                if not destination_id:
-                    logger.warning("A handoff reason transfers to a missing destination; skipped.")
-                    return None
             return cls(
                 kind=OUTCOME_TRANSFER,
-                destination_id=destination_id,
+                destination_id=value.get("destinationId", ""),
                 wording=value.get("wording"),
             )
         if case == "message":
@@ -512,12 +495,19 @@ class ReasonOutcome:
                     f"Reason '{reason_name}': the {channel} message is longer than "
                     f"{WORDING_MAX} characters."
                 )
+            validate_variable_references(
+                self.message, f"Reason '{reason_name}': the {channel} message", resource_mappings
+            )
         if self.kind != OUTCOME_TRANSFER:
             return
-        if self.wording is not None and len(self.wording) > WORDING_MAX:
-            raise ValueError(
-                f"Reason '{reason_name}': {channel} wording is longer than "
-                f"{WORDING_MAX} characters."
+        if self.wording is not None:
+            if len(self.wording) > WORDING_MAX:
+                raise ValueError(
+                    f"Reason '{reason_name}': {channel} wording is longer than "
+                    f"{WORDING_MAX} characters."
+                )
+            validate_variable_references(
+                self.wording, f"Reason '{reason_name}': {channel} wording", resource_mappings
             )
         if resource_mappings is None:
             return
@@ -572,19 +562,12 @@ class HandoffReason(MultiResourceYamlResource):
     def from_projection(cls, projection: dict) -> dict[str, "HandoffReason"]:
         """Parse active reasons from a projection dict."""
         handoff_state = projection.get("handoff") or {}
-        destinations = {
-            handoff_id: data
-            for handoff_id, data in (
-                (handoff_state.get("handoffs") or {}).get("entities") or {}
-            ).items()
-            if data.get("active", False)
-        }
         reasons = {}
         for reason_id, data in ((handoff_state.get("reasons") or {}).get("entities") or {}).items():
             if not data.get("active", False):
                 continue
             outcomes = data.get("outcomes") or {}
-            call = ReasonOutcome.from_projection(outcomes.get("call"), destinations)
+            call = ReasonOutcome.from_projection(outcomes.get("call"))
             if call is None:
                 logger.warning(f"Handoff reason {data.get('name')!r} has no call outcome; skipped.")
                 continue
@@ -594,7 +577,7 @@ class HandoffReason(MultiResourceYamlResource):
                 key=data.get("key", ""),
                 description=data.get("description", ""),
                 call=call,
-                chat=ReasonOutcome.from_projection(outcomes.get("chat"), destinations),
+                chat=ReasonOutcome.from_projection(outcomes.get("chat")),
             )
         return reasons
 
@@ -622,39 +605,58 @@ class HandoffReason(MultiResourceYamlResource):
         return result
 
     @classmethod
-    def _map_destinations(cls, d: dict, lookup: dict[str, str]) -> dict:
+    def _map_outcomes(
+        cls, d: dict, destinations: dict[str, str], swap_references: Callable[[str], str]
+    ) -> dict:
         d = dict(d)
         for channel in ("call", "chat"):
             outcome = d.get(channel)
-            if isinstance(outcome, dict) and "transfer_to" in outcome:
-                outcome = dict(outcome)
-                outcome["transfer_to"] = lookup.get(outcome["transfer_to"], outcome["transfer_to"])
-                d[channel] = outcome
+            if not isinstance(outcome, dict):
+                continue
+            outcome = dict(outcome)
+            if "transfer_to" in outcome:
+                outcome["transfer_to"] = destinations.get(
+                    outcome["transfer_to"], outcome["transfer_to"]
+                )
+            for text_field in ("wording", "message"):
+                if isinstance(outcome.get(text_field), str):
+                    outcome[text_field] = swap_references(outcome[text_field])
+            d[channel] = outcome
         return d
 
     @classmethod
     def to_pretty_dict(
         cls, d: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
-        """Show destinations by name."""
-        lookup = {
-            m.resource_id: m.resource_name
-            for m in resource_mappings or []
-            if m.resource_type is Handoff
+        """Show destinations and `{{vrbl:}}` references by name."""
+        resource_mappings = resource_mappings or []
+        destinations = {
+            m.resource_id: m.resource_name for m in resource_mappings if m.resource_type is Handoff
         }
-        return cls._map_destinations(d, lookup)
+        return cls._map_outcomes(
+            d,
+            destinations,
+            lambda text: utils.replace_resource_ids_with_names(text, resource_mappings),
+        )
 
     @classmethod
     def from_pretty_dict(
         cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
-        """Resolve destination names to ids; an unknown name is left for validate()."""
-        lookup: dict[str, str] = {}
-        for m in resource_mappings or []:
+        """Resolve destination and variable names to ids; unknown names are left for validate."""
+        resource_mappings = resource_mappings or []
+        destinations: dict[str, str] = {}
+        for m in resource_mappings:
             if m.resource_type is Handoff:
-                lookup.setdefault(m.resource_name, m.resource_id)
-                lookup.setdefault(utils.clean_name(m.resource_name, lowercase=False), m.resource_id)
-        return cls._map_destinations(yaml_dict, lookup)
+                destinations.setdefault(m.resource_name, m.resource_id)
+                destinations.setdefault(
+                    utils.clean_name(m.resource_name, lowercase=False), m.resource_id
+                )
+        return cls._map_outcomes(
+            yaml_dict,
+            destinations,
+            lambda text: utils.replace_resource_names_with_ids(text, resource_mappings),
+        )
 
     @classmethod
     def from_yaml_dict(
@@ -673,16 +675,6 @@ class HandoffReason(MultiResourceYamlResource):
             call=ReasonOutcome.from_yaml_value(yaml_dict["call"], "call", reason_name),
             chat=None if chat is None else ReasonOutcome.from_yaml_value(chat, "chat", reason_name),
         )
-
-    @classmethod
-    def read_key(cls, file_path: str) -> str:
-        """The `key` an entry on disk sets, or ""."""
-        return str(cls._get_matching(file_path).get("key") or "")
-
-    @classmethod
-    def left_alone_when_undeclared(cls, base_path: str) -> bool:
-        """A file without `reasons:` says nothing about them, so a push mustn't delete them."""
-        return not _file_declares(base_path, cls.top_level_name)
 
     @property
     def command_type(self) -> str:
@@ -798,12 +790,12 @@ class HandoffReason(MultiResourceYamlResource):
 class HandoffTransferMessage(MultiResourceYamlResource):
     """The default call transfer message (`transfer_message: {call: ...}`).
 
-    `call: null` means no default line; `call: ""` means transfer without a
-    line. Chat has no default transfer message, so `chat` is refused.
+    `call: ""` transfers without a line. A file without the section, with an empty
+    section or with `call: null` has no default message. Chat has no default transfer
+    message, so `chat` is refused.
     """
 
-    call: Optional[str]
-    unsupported_keys: list[str]
+    call: str
     top_level_name: ClassVar[str] = "transfer_message"
     _singleton: ClassVar[bool] = True
     RESOURCE_ID: ClassVar[str] = "handoff_transfer_message"
@@ -813,13 +805,11 @@ class HandoffTransferMessage(MultiResourceYamlResource):
         *,
         resource_id: str = RESOURCE_ID,
         name: str = "transfer_message",
-        call: Optional[str] = None,
-        unsupported_keys: list[str] | None = None,
+        call: str = "",
     ):
         self.resource_id = resource_id
         self.name = name
         self.call = call
-        self.unsupported_keys = unsupported_keys or []
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "HandoffTransferMessage"]:
@@ -845,22 +835,31 @@ class HandoffTransferMessage(MultiResourceYamlResource):
         return {"call": self.call}
 
     @classmethod
+    def to_pretty_dict(
+        cls, d: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> dict:
+        """Show `{{vrbl:}}` references by name."""
+        d = dict(d)
+        if isinstance(d.get("call"), str):
+            d["call"] = utils.replace_resource_ids_with_names(d["call"], resource_mappings or [])
+        return d
+
+    @classmethod
     def from_yaml_dict(
         cls, yaml_dict: dict, resource_id: str, name: str = "", **kwargs
     ) -> "HandoffTransferMessage":
         """Create the message from the file section."""
-        call = yaml_dict.get("call")
+        unsupported = sorted(k for k in yaml_dict if k != "call")
+        if unsupported:
+            raise ValueError(
+                f"transfer_message only takes `call`, got {unsupported}. "
+                "Chat has no default transfer message."
+            )
         return cls(
             resource_id=resource_id,
             name=name or "transfer_message",
-            call=None if call is None else str(call),
-            unsupported_keys=sorted(k for k in yaml_dict if k != "call"),
+            call=str(yaml_dict.get("call") or ""),
         )
-
-    @classmethod
-    def left_alone_when_undeclared(cls, base_path: str) -> bool:
-        """A file without `transfer_message:` leaves the project's message as it is."""
-        return not _file_declares(base_path, cls.top_level_name)
 
     @property
     def command_type(self) -> str:
@@ -879,48 +878,37 @@ class HandoffTransferMessage(MultiResourceYamlResource):
 
     @property
     def delete_command_type(self) -> str:
-        """Removing the section with `call` in it unsets the message."""
+        """Removing the section unsets the message."""
         return self.command_type
-
-    def _proto(self, call: Optional[str]) -> HandoffSettings_SetTransferMessage:
-        proto = HandoffSettings_SetTransferMessage(channel=HANDOFF_CHANNEL_CALL)
-        if call is not None:
-            proto.message = call
-        return proto
 
     def build_create_proto(self) -> HandoffSettings_SetTransferMessage:
         """Set the call message."""
-        return self._proto(self.call)
+        return HandoffSettings_SetTransferMessage(channel=HANDOFF_CHANNEL_CALL, message=self.call)
 
     def build_update_proto(self) -> HandoffSettings_SetTransferMessage:
         """Set the call message."""
-        return self._proto(self.call)
+        return HandoffSettings_SetTransferMessage(channel=HANDOFF_CHANNEL_CALL, message=self.call)
 
     def build_delete_proto(self) -> HandoffSettings_SetTransferMessage:
         """Unset the call message."""
-        return self._proto(None)
+        return HandoffSettings_SetTransferMessage(channel=HANDOFF_CHANNEL_CALL)
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
-        """Only `call` is supported, at most 300 characters."""
-        if self.unsupported_keys:
-            raise ValueError(
-                f"transfer_message only takes `call`, got {self.unsupported_keys}. "
-                "Chat has no default transfer message."
-            )
-        if self.call is not None and len(self.call) > TRANSFER_MESSAGE_MAX:
+        """At most 300 characters, and only `{{vrbl:}}` references to known variables."""
+        if len(self.call) > TRANSFER_MESSAGE_MAX:
             raise ValueError(
                 f"transfer_message.call is longer than {TRANSFER_MESSAGE_MAX} characters."
             )
+        validate_variable_references(self.call, "transfer_message.call", resource_mappings)
 
     @staticmethod
     def discover_resources(base_path: str) -> list[str]:
-        """The section's virtual path, when the file has it."""
+        """The section's virtual path, unless the file has no message."""
         true_file_path = os.path.join(base_path, HANDOFFS_FILE)
         if not os.path.exists(true_file_path):
             return []
         yaml_dict = HandoffTransferMessage._get_top_level_data(true_file_path)
         section = (yaml_dict or {}).get(HandoffTransferMessage.top_level_name)
-        if not isinstance(section, dict) or not section:
-            # An empty `transfer_message:` is a deleted section, which unsets the message.
+        if section is None or section == {} or section == {"call": None}:
             return []
         return [os.path.join(true_file_path, HandoffTransferMessage.top_level_name)]
