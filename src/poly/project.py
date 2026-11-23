@@ -8,7 +8,6 @@ import copy
 import json
 import logging
 import os
-import re
 import shutil
 import time
 import uuid
@@ -410,6 +409,7 @@ class AgentStudioProject:
     project_name: Optional[str] = None
     account_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
+    _campaign_handler: CampaignHandler = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
@@ -427,6 +427,13 @@ class AgentStudioProject:
         for resources_dict in self.resources.values():
             all_resources.extend(resources_dict.values())
         return all_resources
+
+    @property
+    def campaign_handler(self) -> CampaignHandler:
+        """Get the handler that sends live campaign changes to main"""
+        if self._campaign_handler is None:
+            self._campaign_handler = CampaignHandler(self.region, self.account_id, self.project_id)
+        return self._campaign_handler
 
     @property
     def api_handler(self) -> AgentStudioInterface:
@@ -4204,7 +4211,7 @@ class AgentStudioProject:
     def _campaign_error(
         action: str, campaign: OutboundCampaign, error: SourcererAPIError
     ) -> SourcererAPIError:
-        reason = re.sub(r"^\[command [^\]]*\] ", "", error.server_message or "") or str(error)
+        reason = error.server_message or str(error)
         if not error.server_message and error.status_code:
             try:
                 reason = f"HTTP {error.status_code} {HTTPStatus(error.status_code).phrase}"
@@ -4418,9 +4425,6 @@ class AgentStudioProject:
         except SourcererAPIError as e:
             raise self._campaign_error("test", campaign, e) from e
 
-    def _campaign_handler(self) -> CampaignHandler:
-        return CampaignHandler(self.region, self.account_id, self.project_id)
-
     def publish_campaign(self, campaign: OutboundCampaign) -> None:
         """Publish the campaign's draft to live, so it starts contacting people.
 
@@ -4428,7 +4432,7 @@ class AgentStudioProject:
             campaign: The campaign as main has it, from `get_live_campaign`.
         """
         try:
-            self._campaign_handler().publish(campaign.resource_id)
+            self.campaign_handler.publish(campaign.resource_id)
         except SourcererAPIError as e:
             raise self._campaign_error("publish", campaign, e) from e
 
@@ -4439,7 +4443,7 @@ class AgentStudioProject:
             campaign: The campaign as main has it, from `get_live_campaign`.
         """
         try:
-            self._campaign_handler().pause(campaign.resource_id)
+            self.campaign_handler.pause(campaign.resource_id)
         except SourcererAPIError as e:
             raise self._campaign_error("pause", campaign, e) from e
 
@@ -4450,7 +4454,7 @@ class AgentStudioProject:
             campaign: The campaign as main has it, from `get_live_campaign`.
         """
         try:
-            self._campaign_handler().resume(campaign.resource_id)
+            self.campaign_handler.resume(campaign.resource_id)
         except SourcererAPIError as e:
             raise self._campaign_error("resume", campaign, e) from e
 
@@ -4461,7 +4465,7 @@ class AgentStudioProject:
             campaign: The campaign as main has it, from `get_live_campaign`.
         """
         try:
-            self._campaign_handler().archive(campaign.resource_id)
+            self.campaign_handler.archive(campaign.resource_id)
         except SourcererAPIError as e:
             raise self._campaign_error("archive", campaign, e) from e
 
