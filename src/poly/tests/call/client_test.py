@@ -1,115 +1,105 @@
-"""Tests for the WebRTC call driver's pure helpers.
+"""Tests for the WebRTC call driver.
 
-aiortc ships with ADK as a core dependency; the importorskip guard below trips only on a
-broken/partial native install.
+The audio devices and the bridge transport are mocked, so these run without a
+microphone, a speaker or a network.
 
 Copyright PolyAI Limited
 """
 
 import asyncio
-import json
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 pytest.importorskip("aiortc")
 
-from poly.call.client import (  # noqa: E402
-    CallError,
-    _ice_candidate_from_message,
-    _run_until_done,
-)
-from poly.call.signaling import IceCandidateMessage  # noqa: E402
+from poly.call.bridge import BridgeError  # noqa: E402
+from poly.call.client import CallError, run_call  # noqa: E402
+from poly.call.session import CallSession  # noqa: E402
 
 
-class _BlockingWs:
-    """An async-iterable websocket stub that never yields a message."""
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        await asyncio.Event().wait()  # never set → blocks forever
-
-
-class _ScriptedWs:
-    """An async-iterable websocket stub that yields the given raw messages."""
-
-    def __init__(self, messages):
-        self._messages = list(messages)
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if not self._messages:
-            raise StopAsyncIteration
-        return self._messages.pop(0)
+def _session() -> CallSession:
+    return CallSession(
+        account_id="acc-1",
+        project_id="proj-1",
+        variant_id="",
+        auth_token="t",
+        bridge_url="https://api.test.poly.ai/webrtc-bridge",
+    )
 
 
-class IceCandidateFromMessageTest(unittest.TestCase):
-    """Tests for _ice_candidate_from_message."""
+@patch("poly.call.client.SpeakerPlayer")
+@patch("poly.call.client.MicrophoneTrack")
+class RunCallTest(unittest.TestCase):
+    """Tests for run_call."""
 
-    def test_parses_a_real_candidate_line(self):
-        message = IceCandidateMessage(
-            session_id="s",
-            candidate={
-                "candidate": "candidate:1 1 udp 2130706431 192.168.1.5 54321 typ host",
-                "sdpMid": "0",
-                "sdpMLineIndex": 0,
-            },
+    @patch("poly.call.client.run_bridge_call", new_callable=AsyncMock)
+    def test_places_the_call_with_the_microphone_and_speaker(
+        self, mock_bridge, mock_mic, mock_speaker
+    ):
+        mock_bridge.return_value = "LOCAL-1"
+        on_started = MagicMock()
+
+        result = asyncio.run(run_call(_session(), "caller", on_started=on_started))
+
+        self.assertEqual(result, "LOCAL-1")
+        args, kwargs = mock_bridge.call_args
+        self.assertEqual(args, (_session(), "caller"))
+        self.assertIs(kwargs["source"], mock_mic.return_value)
+        self.assertEqual(kwargs["on_agent_track"], mock_speaker.return_value.start)
+        self.assertIs(kwargs["on_started"], on_started)
+        self.assertIsInstance(kwargs["stop"], asyncio.Event)
+
+    @patch("poly.call.client.run_bridge_call", new_callable=AsyncMock)
+    def test_releases_the_audio_devices_when_the_call_ends(
+        self, mock_bridge, mock_mic, mock_speaker
+    ):
+        mock_bridge.return_value = "LOCAL-1"
+
+        asyncio.run(run_call(_session(), "caller"))
+
+        mock_mic.return_value.stop.assert_called_once()
+        mock_speaker.return_value.stop.assert_called_once()
+
+    @patch("poly.call.client.run_bridge_call", new_callable=AsyncMock)
+    def test_a_failed_call_is_a_call_error_and_still_releases_the_devices(
+        self, mock_bridge, mock_mic, mock_speaker
+    ):
+        mock_bridge.side_effect = BridgeError("Could not start the call (503)")
+
+        with self.assertRaises(CallError) as ctx:
+            asyncio.run(run_call(_session(), "caller"))
+
+        self.assertIn("503", str(ctx.exception))
+        mock_mic.return_value.stop.assert_called_once()
+        mock_speaker.return_value.stop.assert_called_once()
+
+    @patch("poly.call.client.run_bridge_call", new_callable=AsyncMock)
+    def test_without_echo_cancellation_the_devices_get_no_reference(
+        self, mock_bridge, mock_mic, mock_speaker
+    ):
+        mock_bridge.return_value = "LOCAL-1"
+
+        asyncio.run(run_call(_session(), "caller", aec=False))
+
+        mock_mic.assert_called_once_with(echo_canceller=None, reference=None)
+        mock_speaker.assert_called_once_with(reference=None)
+
+    @patch("poly.call.aec.FarEndReference")
+    @patch("poly.call.aec.EchoCanceller")
+    @patch("poly.call.client.run_bridge_call", new_callable=AsyncMock)
+    def test_echo_cancellation_shares_one_reference_between_the_devices(
+        self, mock_bridge, mock_canceller, mock_reference, mock_mic, mock_speaker
+    ):
+        mock_bridge.return_value = "LOCAL-1"
+
+        asyncio.run(run_call(_session(), "caller", aec=True))
+
+        mock_mic.assert_called_once_with(
+            echo_canceller=mock_canceller.return_value, reference=mock_reference.return_value
         )
-
-        candidate = _ice_candidate_from_message(message)
-
-        self.assertIsNotNone(candidate)
-        self.assertEqual(candidate.ip, "192.168.1.5")
-        self.assertEqual(candidate.port, 54321)
-        self.assertEqual(candidate.type, "host")
-        self.assertEqual(candidate.sdpMid, "0")
-        self.assertEqual(candidate.sdpMLineIndex, 0)
-
-    def test_strips_candidate_prefix_or_not(self):
-        without_prefix = IceCandidateMessage(
-            session_id="s",
-            candidate={"candidate": "1 1 udp 2130706431 192.168.1.5 54321 typ host"},
-        )
-        self.assertEqual(_ice_candidate_from_message(without_prefix).ip, "192.168.1.5")
-
-    def test_empty_candidate_returns_none(self):
-        message = IceCandidateMessage(session_id="s", candidate={"candidate": ""})
-        self.assertIsNone(_ice_candidate_from_message(message))
-
-
-class RunUntilDoneTest(unittest.TestCase):
-    """Tests for _run_until_done (signaling loop vs connection-failure race)."""
-
-    def test_connection_failure_raises_call_error(self):
-        async def scenario():
-            failed = asyncio.Event()
-            failed.set()  # connection already failed
-            await _run_until_done(MagicMock(), _BlockingWs(), failed, asyncio.Event())
-
-        with self.assertRaises(CallError):
-            asyncio.run(scenario())
-
-    def test_close_message_returns_normally(self):
-        async def scenario():
-            ws = _ScriptedWs([json.dumps({"type": "close", "sessionId": "s"})])
-            await _run_until_done(MagicMock(), ws, asyncio.Event(), asyncio.Event())
-
-        asyncio.run(scenario())  # must not raise
-
-    def test_stop_event_returns_normally(self):
-        # User hangs up (Ctrl+C): the stop event fires while signaling is still blocked,
-        # and the call ends cleanly rather than raising.
-        async def scenario():
-            stop = asyncio.Event()
-            stop.set()
-            await _run_until_done(MagicMock(), _BlockingWs(), asyncio.Event(), stop)
-
-        asyncio.run(scenario())  # must not raise
+        mock_speaker.assert_called_once_with(reference=mock_reference.return_value)
 
 
 if __name__ == "__main__":

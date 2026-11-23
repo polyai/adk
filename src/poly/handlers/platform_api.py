@@ -89,6 +89,8 @@ DATA_METRICS_AGGREGATE_URL = "/api/v1/metrics/aggregate"
 DATA_CONVERSATIONS_SEARCH_URL = "/api/v1/conversations/search"
 DATA_TRANSCRIPTS_SEARCH_URL = "/api/v1/transcripts/search"
 DATA_TRANSCRIPT_URL = "/api/v1/transcripts/conversation/{conversation_id}"
+# Voice calls (`poly call`), served on the regional api.<region>.poly.ai hosts.
+CALL_BRIDGE_URL = "/webrtc-bridge"
 
 
 class PlatformAPIHandler:
@@ -129,6 +131,17 @@ class PlatformAPIHandler:
             if base_url := PlatformAPIHandler.region_to_base_url.get(region):
                 return base_url
         raise ValueError(f"Unknown region: {region}")
+
+    @staticmethod
+    def get_call_bridge_url(region: str) -> str:
+        """Get the base URL of the WebRTC bridge that places voice calls in a region.
+
+        Args:
+            region (str): The region name
+        Returns:
+            str: The bridge base URL
+        """
+        return PlatformAPIHandler.get_base_url(region) + CALL_BRIDGE_URL
 
     @staticmethod
     def make_request(

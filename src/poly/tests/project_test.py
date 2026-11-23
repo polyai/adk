@@ -19,7 +19,6 @@ from unittest.mock import MagicMock, patch
 from google.protobuf.json_format import MessageToDict
 
 import poly.resources.resource_utils as resource_utils
-from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
@@ -8775,12 +8774,14 @@ class CreateCallSessionTest(unittest.TestCase):
             "artifactVersion": "artifact-v1",
             "lambdaDeploymentVersion": "lambda-v1",
             "authToken": "studio-token",
-            "gatewayWsUrl": "wss://webrtc-gateway.test.polyai.app",
         }
 
     def test_draft_returns_call_session(self):
         """A draft call maps the deploy response onto a CallSession."""
         self.mock_api_handler.get_branch_call_info.return_value = self._valid_call_info()
+        self.mock_api_handler.get_call_bridge_url.return_value = (
+            "https://api.test.poly.ai/webrtc-bridge"
+        )
 
         session = self.project.create_call_session("draft", variant="VARIANT-x")
 
@@ -8788,11 +8789,8 @@ class CreateCallSessionTest(unittest.TestCase):
         self.assertEqual(session.account_id, self.project.account_id)
         self.assertEqual(session.project_id, self.project.project_id)
         self.assertEqual(session.variant_id, "VARIANT-x")
-        self.assertEqual(session.artifact_version, "artifact-v1")
-        self.assertEqual(session.lambda_deployment_version, "lambda-v1")
         self.assertEqual(session.auth_token, "studio-token")
-        self.assertEqual(session.gateway_ws_url, "wss://webrtc-gateway.test.polyai.app")
-        self.assertEqual(session.mode, DEFAULT_CALL_MODE)
+        self.assertEqual(session.bridge_url, "https://api.test.poly.ai/webrtc-bridge")
 
     def test_draft_defaults_empty_variant(self):
         """A missing variant is normalised to an empty string."""
@@ -8809,30 +8807,15 @@ class CreateCallSessionTest(unittest.TestCase):
 
         self.mock_api_handler.get_branch_call_info.assert_not_called()
 
-    def test_incomplete_response_raises_value_error(self):
-        """A response missing any required field is rejected, naming the field."""
-        for missing in (
-            "artifactVersion",
-            "lambdaDeploymentVersion",
-            "authToken",
-            "gatewayWsUrl",
-        ):
+    def test_response_without_a_token_raises_value_error(self):
+        """A response with no studio token is rejected, naming the field."""
+        for token in ("", None):
             info = self._valid_call_info()
-            info[missing] = ""
+            info["authToken"] = token
             self.mock_api_handler.get_branch_call_info.return_value = info
             with self.assertRaises(ValueError) as ctx:
                 self.project.create_call_session("draft")
-            self.assertIn(missing, str(ctx.exception))
-
-    def test_incomplete_response_does_not_leak_auth_token(self):
-        """The validation error must never echo the authToken credential."""
-        info = self._valid_call_info()
-        info["authToken"] = "super-secret-token"
-        info["gatewayWsUrl"] = ""  # trigger the error with the token still present
-        self.mock_api_handler.get_branch_call_info.return_value = info
-        with self.assertRaises(ValueError) as ctx:
-            self.project.create_call_session("draft")
-        self.assertNotIn("super-secret-token", str(ctx.exception))
+            self.assertIn("authToken", str(ctx.exception))
 
 
 class PullRemoteRenameTest(unittest.TestCase):

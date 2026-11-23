@@ -169,6 +169,14 @@ class GetBaseUrl(unittest.TestCase):
         with self.assertRaises(ValueError):
             PlatformAPIHandler.get_base_url("mars-1", use_jupiter_api=True)
 
+    def test_call_bridge_url_is_on_the_regional_api_host(self):
+        self.assertEqual(
+            PlatformAPIHandler.get_call_bridge_url("us-1"),
+            "https://api.us.poly.ai/webrtc-bridge",
+        )
+        with self.assertRaises(ValueError):
+            PlatformAPIHandler.get_call_bridge_url("mars-1")
+
 
 class CreateChat(unittest.TestCase):
     """Tests for chat creation request payloads."""

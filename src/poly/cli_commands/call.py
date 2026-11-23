@@ -5,7 +5,6 @@ Copyright PolyAI Limited
 
 import os
 import sys
-import uuid
 from argparse import (
     ArgumentParser,
     BooleanOptionalAction,
@@ -38,11 +37,6 @@ def voice_deps_hint() -> str:
         "`poly call` needs the voice calling dependencies, which are installed with the "
         f"`call` extra. Install them with:\n    {command}"
     )
-
-
-def new_call_sid() -> str:
-    """Generate a unique call SID."""
-    return f"ADK-{uuid.uuid4()}"
 
 
 class CallCommand(BaseCommand):
@@ -179,8 +173,9 @@ class CallCommand(BaseCommand):
             sys.exit(1)
 
         caller = os.environ.get("ADK_COMMAND_USER_OVERRIDE") or "adk-user"
-        call_sid = new_call_sid()
-        call_url = project.get_conversation_url(call_sid)
+        # The call service assigns the conversation ID once the call connects, so a call
+        # that never connected has nothing to review.
+        conversation_ids: list[str] = []
         info(
             f"Calling [bold]{project.account_id}/{project.project_id}[/bold] "
             f"on branch [bold]{branch_label}[/bold]. "
@@ -188,7 +183,7 @@ class CallCommand(BaseCommand):
         )
 
         try:
-            asyncio.run(run_call(session, caller, aec=aec, call_sid=call_sid))
+            asyncio.run(run_call(session, caller, aec=aec, on_started=conversation_ids.append))
         except CallError as exc:
             error(f"Call failed: {exc}")
             sys.exit(1)
@@ -197,4 +192,6 @@ class CallCommand(BaseCommand):
             pass
 
         success("Call ended.")
-        info(f"Review this call in Agent Studio: [link={call_url}]{call_url}[/link]")
+        if conversation_ids:
+            call_url = project.get_conversation_url(conversation_ids[-1])
+            info(f"Review this call in Agent Studio: [link={call_url}]{call_url}[/link]")

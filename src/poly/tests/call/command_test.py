@@ -33,24 +33,28 @@ def make_project(branch: str = "feature-x") -> MagicMock:
         account_id="acc-1",
         project_id="proj-1",
         variant_id="",
-        artifact_version="a",
-        lambda_deployment_version="l",
         auth_token="t",
-        gateway_ws_url="wss://gw",
-        mode="end-to-end",
+        bridge_url="https://api.test.poly.ai/webrtc-bridge",
     )
     return project
 
 
-def fake_client_module(recorder: list) -> types.ModuleType:
-    """A stand-in for poly.call.client that records run_call invocations."""
+def fake_client_module(recorder: list, started_as: str = "LOCAL-1") -> types.ModuleType:
+    """A stand-in for poly.call.client that records run_call invocations.
+
+    ``started_as`` is the conversation ID the call reports once connected; pass an
+    empty string for a call that ends before it connects.
+    """
     module = types.ModuleType("poly.call.client")
 
     class CallError(Exception):
         pass
 
-    async def run_call(session, caller, *, aec=False, call_sid=None):
-        recorder.append((session, caller, aec, call_sid))
+    async def run_call(session, caller, *, aec=False, on_started=None):
+        recorder.append((session, caller, aec))
+        if started_as and on_started is not None:
+            on_started(started_as)
+        return started_as
 
     module.CallError = CallError
     module.run_call = run_call
@@ -81,10 +85,30 @@ class CallCommandTest(unittest.TestCase):
 
         project.create_call_session.assert_called_once_with("draft", variant="v1")
         self.assertEqual(len(recorder), 1)
-        session, _caller, aec, call_sid = recorder[0]
+        session, _caller, aec = recorder[0]
         self.assertEqual(session.project_id, "proj-1")
         self.assertFalse(aec)
-        self.assertTrue(call_sid.startswith("ADK-"))
+
+    @patch("poly.cli_commands.call.load_project")
+    def test_review_link_uses_the_conversation_id_the_call_reports(self, mock_load):
+        project = make_project(branch="feature-x")
+        mock_load.return_value = project
+        client = fake_client_module([], started_as="LOCAL-assigned")
+
+        with patch.dict(sys.modules, {"poly.call.client": client}):
+            CallCommand.call("/path", aec=False)
+
+        project.get_conversation_url.assert_called_once_with("LOCAL-assigned")
+
+    @patch("poly.cli_commands.call.load_project")
+    def test_a_call_that_never_connected_prints_no_review_link(self, mock_load):
+        project = make_project(branch="feature-x")
+        mock_load.return_value = project
+
+        with patch.dict(sys.modules, {"poly.call.client": fake_client_module([], started_as="")}):
+            CallCommand.call("/path", aec=False)
+
+        project.get_conversation_url.assert_not_called()
 
     @patch("poly.call.aec.EchoCanceller")
     @patch("poly.cli_commands.call.load_project")

@@ -867,6 +867,10 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
+    def get_call_bridge_url(self) -> str:
+        """Get the base URL of the WebRTC bridge that places this region's voice calls."""
+        return PlatformAPIHandler.get_call_bridge_url(self.region)
+
     @staticmethod
     def create_draft_chat(
         region: str,
