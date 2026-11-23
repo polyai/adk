@@ -147,10 +147,30 @@ class LibraryCommand(BaseCommand):
             formatter_class=RawTextHelpFormatter,
         )
         library_voice_list_subparser.add_argument(
-            "--region",
-            type=region_type,
-            choices=REGION_CHOICES,
-            help="Specify the region to list TTS voices for. Without this option, will read from the project's configuration.",
+            "--name",
+            type=str,
+            help="Filter TTS voices by name.",
+        )
+        library_voice_list_subparser.add_argument(
+            "--language",
+            type=str,
+            help="Filter TTS voices by language/accent.",
+        )
+        library_voice_list_subparser.add_argument(
+            "--gender",
+            type=str,
+            choices=["male", "female", "neutral"],
+            help="Filter TTS voices by gender.",
+        )
+        library_voice_list_subparser.add_argument(
+            "--poly",
+            action="store_true",
+            help="Filter TTS voices to only include PolyAI voices.",
+        )
+        library_voice_list_subparser.add_argument(
+            "--archived",
+            action="store_true",
+            help="Include archived TTS voices.",
         )
         library_voice_list_subparser.add_argument(
             "--refresh",
@@ -169,7 +189,16 @@ class LibraryCommand(BaseCommand):
             cls.list_llm_models(args.path, args.region, refresh=args.refresh, output_json=args.json)
         elif args.library_subcommand == "voice":
             if args.library_voice_subcommand == "list":
-                cls.list_tts_voices(args.path, refresh=args.refresh, output_json=args.json)
+                cls.list_tts_voices(
+                    args.path,
+                    refresh=args.refresh,
+                    output_json=args.json,
+                    name=args.name,
+                    language=args.language,
+                    gender=args.gender,
+                    is_poly_voice=args.poly,
+                    archived=args.archived,
+                )
 
     @classmethod
     def _refresh_library(
@@ -244,12 +273,10 @@ class LibraryCommand(BaseCommand):
         Returns:
             Library: The loaded library of models.
         """
-        account_id: Optional[str] = None
         try:
             if region is None:
                 project = load_project(base_path, output_json=output_json)
                 library = project.library
-                account_id = project.account_id
             else:
                 library = Library.load_library_from_file(region)
         except Exception:
@@ -257,9 +284,7 @@ class LibraryCommand(BaseCommand):
 
         if library is None or library.is_stale:
             try:
-                library = cls._refresh_library(
-                    base_path, region, account_id=account_id, output_json=output_json
-                )
+                library = cls._refresh_library(base_path, region, output_json=output_json)
             except Exception as e:
                 if library is None:
                     raise
@@ -353,6 +378,7 @@ class LibraryCommand(BaseCommand):
         base_path: str,
         refresh: bool = False,
         output_json: bool = False,
+        name: Optional[str] = None,
         language: Optional[str] = None,
         gender: Optional[str] = None,
         is_poly_voice: Optional[bool] = None,
@@ -363,6 +389,7 @@ class LibraryCommand(BaseCommand):
         Args:
             base_path (str): The base path of the project.
             refresh (bool, optional): Whether to refresh the library before listing. Defaults to False.
+            name (Optional[str]): The name of the TTS voice.
             language (Optional[str]): The language of the TTS voice.
             gender (Optional[str]): The gender of the TTS voice.
             archived (Optional[bool]): Whether to include archived voices.
@@ -384,10 +411,14 @@ class LibraryCommand(BaseCommand):
         tts_voices = [
             tts_voice.to_dict()
             for tts_voice in library.tts_voices
-            if (language is None or tts_voice.metadata.get("accent") == language)
+            if (name is None or name.lower() in tts_voice.name.lower())
+            and (
+                language is None
+                or (tts_voice.metadata.get("accent") or "").lower().startswith(language.lower())
+            )
             and (gender is None or tts_voice.metadata.get("gender") == gender)
-            and (is_poly_voice is None or tts_voice.is_poly_voice == is_poly_voice)
-            and (not (archived is True and (tts_voice.metadata.get("archived") == archived)))
+            and (archived or not tts_voice.metadata.get("archived"))
+            and (not is_poly_voice or tts_voice.poly_ai_voice)
         ]
 
         sorted_tts_voices = _poly_first(tts_voices, _is_poly_tts)
@@ -396,5 +427,5 @@ class LibraryCommand(BaseCommand):
             json_print(sorted_tts_voices)
 
         else:
-            with paged_output():
+            with paged_output(title="TTS voices", header_lines=1):
                 print_tts_voices(sorted_tts_voices, is_poly=_is_poly_tts)

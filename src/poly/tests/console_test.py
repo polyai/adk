@@ -3,12 +3,14 @@
 Copyright PolyAI Limited
 """
 
+import os
 import unittest
 from unittest.mock import MagicMock, PropertyMock, patch
 
 from rich.console import Console, ConsoleDimensions
 
 from poly.output.console import (
+    _less_command,
     _merge_leaf_diffs,
     _OverflowPager,
     console,
@@ -431,8 +433,11 @@ class OverflowPagerTest(unittest.TestCase):
         size_patcher.start()
         self.addCleanup(size_patcher.stop)
 
-    def _show(self, content: str):
-        """Run the pager over content, returning (written_directly, system_pager)."""
+    def _show(self, content: str, less_command: str | None = None, **pager_kwargs):
+        """Run the pager over content, returning (written_directly, system_pager, pipe_pager).
+
+        less_command is what the reader's pager resolves to; None means it isn't less.
+        """
         written = []
         with (
             patch.object(
@@ -442,35 +447,116 @@ class OverflowPagerTest(unittest.TestCase):
                 return_value=MagicMock(write=written.append),
             ),
             patch("poly.output.console.SystemPager") as mock_system_pager,
+            patch("poly.output.console._less_command", return_value=less_command),
+            patch("poly.output.console.pydoc.pipe_pager") as mock_pipe_pager,
         ):
-            _OverflowPager().show(content)
-        return "".join(written), mock_system_pager
+            _OverflowPager(**pager_kwargs).show(content)
+        return "".join(written), mock_system_pager, mock_pipe_pager
 
     def test_content_shorter_than_screen_is_written_directly(self):
         """Output that fits on one screen bypasses the pager entirely."""
         content = "row\n" * (self.SCREEN_HEIGHT - 1)
 
-        written, mock_system_pager = self._show(content)
+        written, mock_system_pager, mock_pipe_pager = self._show(content, "less -i")
 
         self.assertEqual(written, content)
         mock_system_pager.assert_not_called()
+        mock_pipe_pager.assert_not_called()
 
     def test_content_longer_than_screen_is_handed_to_the_pager(self):
-        """Output that overflows the screen goes to the pager, not stdout."""
+        """Output that overflows the screen goes to a pager other than less, not stdout."""
         content = "row\n" * (self.SCREEN_HEIGHT + 10)
 
-        written, mock_system_pager = self._show(content)
+        written, mock_system_pager, mock_pipe_pager = self._show(content)
 
         self.assertEqual(written, "")
         mock_system_pager.return_value.show.assert_called_once_with(content)
+        mock_pipe_pager.assert_not_called()
+
+    def test_less_is_run_with_its_search_options_and_a_hint(self):
+        """With less, the content goes to the resolved command, with the title and a hint."""
+        content = "row\n" * (self.SCREEN_HEIGHT + 10)
+
+        written, mock_system_pager, mock_pipe_pager = self._show(
+            content, "less -i --header=1", title="TTS voices", header_lines=1
+        )
+
+        self.assertEqual(written, "")
+        mock_system_pager.assert_not_called()
+        mock_pipe_pager.assert_called_once_with(
+            content, "less -i --header=1", "TTS voices · / to search, & to filter ·"
+        )
+
+    def test_less_without_a_title_shows_only_the_hint(self):
+        """A caller that gives no title still gets the search hint in the prompt."""
+        content = "row\n" * (self.SCREEN_HEIGHT + 10)
+
+        _, _, mock_pipe_pager = self._show(content, "less -i")
+
+        self.assertEqual(mock_pipe_pager.call_args.args[2], "/ to search, & to filter ·")
 
     def test_content_exactly_filling_the_screen_is_not_paged(self):
         """The boundary case stays inline rather than opening the pager."""
         content = "row\n" * (self.SCREEN_HEIGHT - 1)
 
-        _, mock_system_pager = self._show(content)
+        _, mock_system_pager, mock_pipe_pager = self._show(content, "less -i")
 
         mock_system_pager.assert_not_called()
+        mock_pipe_pager.assert_not_called()
+
+
+class LessCommandTest(unittest.TestCase):
+    """Tests for _less_command, which adds search options when the pager is less."""
+
+    def _command(self, header_lines=1, env=None, version=668, which="/usr/bin/less"):
+        environ = {key: value for key, value in os.environ.items()}
+        for key in ("PAGER", "MANPAGER", "TERM"):
+            environ.pop(key, None)
+        environ.update(env or {})
+        with (
+            patch.dict(os.environ, environ, clear=True),
+            patch("poly.output.console.sys.platform", "darwin"),
+            patch("poly.output.console.shutil.which", return_value=which),
+            patch("poly.output.console._less_version", return_value=version),
+        ):
+            return _less_command(header_lines)
+
+    def test_default_less_gets_case_insensitive_search_and_a_pinned_header(self):
+        """With no PAGER set, the less on the PATH runs with -i and --header."""
+        self.assertEqual(self._command(), "/usr/bin/less -i --header=1")
+
+    def test_pager_set_to_less_keeps_its_own_options(self):
+        """A PAGER of less with options keeps them, with the search options added."""
+        self.assertEqual(self._command(env={"PAGER": "less -R"}), "less -R -i --header=1")
+
+    def test_manpager_wins_over_pager(self):
+        """MANPAGER is read first, matching pydoc."""
+        self.assertIsNone(self._command(env={"MANPAGER": "bat", "PAGER": "less"}))
+
+    def test_other_pagers_are_left_to_pydoc(self):
+        """A pager that isn't less gets no options added."""
+        self.assertIsNone(self._command(env={"PAGER": "bat"}))
+        self.assertIsNone(self._command(env={"PAGER": "more"}))
+
+    def test_no_header_without_header_lines(self):
+        """Output with no header row only gets case-insensitive search."""
+        self.assertEqual(self._command(header_lines=0), "/usr/bin/less -i")
+
+    def test_less_older_than_600_gets_no_header_option(self):
+        """--header needs less 600, so older versions run without it."""
+        self.assertEqual(self._command(version=581), "/usr/bin/less -i")
+
+    def test_no_less_on_the_path(self):
+        """Without less installed, the pager is left to pydoc."""
+        self.assertIsNone(self._command(which=None))
+
+    def test_dumb_terminal_is_left_to_pydoc(self):
+        """pydoc strips styles on dumb and emacs terminals, so it keeps those."""
+        self.assertIsNone(self._command(env={"TERM": "dumb"}))
+
+    def test_command_that_is_not_really_less(self):
+        """A pager named less that doesn't report a less version gets no options."""
+        self.assertIsNone(self._command(version=None))
 
 
 class PagedOutputTest(unittest.TestCase):
@@ -510,6 +596,18 @@ class PagedOutputTest(unittest.TestCase):
         mock_pager.assert_called_once()
         self.assertIsInstance(mock_pager.call_args.kwargs["pager"], _OverflowPager)
         self.assertTrue(mock_pager.call_args.kwargs["styles"])
+
+    def test_title_and_header_lines_reach_the_pager(self):
+        """The prompt title and pinned header rows are passed through to the pager."""
+        with (
+            patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True),
+            patch.object(console, "pager") as mock_pager,
+        ):
+            with paged_output(title="TTS voices", header_lines=1):
+                pass
+
+        pager = mock_pager.call_args.kwargs["pager"]
+        self.assertEqual((pager.title, pager.header_lines), ("TTS voices", 1))
 
 
 def _topic(content: str, timestamp: str) -> dict:

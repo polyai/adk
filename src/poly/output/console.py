@@ -5,9 +5,15 @@ Provides consistent, colorful terminal output with clean error formatting.
 Copyright PolyAI Limited
 """
 
+import functools
 import json
 import logging
 import os
+import pydoc
+import re
+import shlex
+import shutil
+import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -59,6 +65,49 @@ def set_verbose(verbose: bool) -> None:
     _verbose = verbose
 
 
+@functools.cache
+def _less_version(command: str) -> int | None:
+    """The version of ``less`` that ``command`` runs, or None if it doesn't run ``less``."""
+    try:
+        result = subprocess.run(
+            [command, "--version"], capture_output=True, text=True, timeout=2, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.match(r"less (\d+)", result.stdout)
+    return int(match.group(1)) if match else None
+
+
+def _less_command(header_lines: int) -> str | None:
+    """The command that runs the reader's pager as ``less`` with search options added.
+
+    Returns None when the pager isn't ``less``, so the caller leaves it to pydoc. Searches
+    ignore case unless they contain a capital letter (``-i``), and the first
+    ``header_lines`` lines stay on screen while scrolling and filtering (``--header``,
+    less 600 and later).
+    """
+    if sys.platform == "win32" or os.environ.get("TERM") in ("dumb", "emacs"):
+        return None
+    pager = os.environ.get("MANPAGER") or os.environ.get("PAGER")
+    if pager:
+        words = shlex.split(pager)
+        if not words or os.path.basename(words[0]) != "less":
+            return None
+        executable = words[0]
+    else:
+        executable = shutil.which("less")
+        if executable is None:
+            return None
+        pager = shlex.quote(executable)
+    version = _less_version(executable)
+    if version is None:
+        return None
+    command = f"{pager} -i"
+    if header_lines and version >= 600:
+        command += f" --header={header_lines}"
+    return command
+
+
 class _OverflowPager(Pager):
     """Pager that only engages when the content overflows the screen.
 
@@ -68,22 +117,42 @@ class _OverflowPager(Pager):
     reader whose ``PAGER`` is ``bat`` or ``more``, or whose ``LESS`` has no
     ``F``. Spawning the pager, colour passthrough, ctrl-c and quitting early are
     all left to Rich and pydoc, which already handle them.
+
+    When the pager is ``less``, the prompt says how to search and filter, searches
+    ignore case, and the first ``header_lines`` lines (a table's column names) stay
+    on screen. pydoc sets ``LESS`` itself, so these go on the command line.
     """
+
+    def __init__(self, title: str = "", header_lines: int = 0) -> None:
+        self.title = title
+        self.header_lines = header_lines
 
     def show(self, content: str) -> None:
         """Write content straight out if it fits, otherwise hand it to the pager."""
         # Rich has already wrapped to the console width, so newlines are rows.
         if content.count("\n") < console.size.height:
             console.file.write(content)
-        else:
+            return
+        command = _less_command(self.header_lines)
+        if command is None:
             SystemPager().show(content)
+            return
+        hint = "/ to search, & to filter ·"
+        pydoc.pipe_pager(content, command, f"{self.title} · {hint}" if self.title else hint)
 
 
 @contextmanager
-def paged_output(enabled: bool = True) -> Iterator[None]:
-    """Pipe output through the system pager when enabled and stdout is a TTY."""
+def paged_output(enabled: bool = True, title: str = "", header_lines: int = 0) -> Iterator[None]:
+    """Pipe output through the system pager when enabled and stdout is a TTY.
+
+    Args:
+        enabled: Whether to page at all.
+        title: Shown in the pager's prompt.
+        header_lines: How many lines at the top stay on screen while scrolling.
+    """
     if enabled and console.is_terminal:
-        with console.pager(pager=_OverflowPager(), styles=True):
+        pager = _OverflowPager(title=title, header_lines=header_lines)
+        with console.pager(pager=pager, styles=True):
             yield
     else:
         yield
@@ -2233,15 +2302,12 @@ def print_tts_voices(
 
     A voice is picked by its name, provider and language. When those three are shared by
     more than one voice, its vendor voice ID is shown too, since that's what tells them
-    apart. Archived voices are left out.
+    apart.
 
     Args:
         tts_voices: List of voice dicts, as TTSVoice.to_dict returns them.
         is_poly: Whether a voice is PolyAI's own, which tags its row.
     """
-    tts_voices = [
-        voice for voice in tts_voices if not (voice.get("metadata") or {}).get("archived")
-    ]
     if not tts_voices:
         plain("No voices available.")
         return
@@ -2278,8 +2344,9 @@ def print_tts_voices(
         fixed_columns.append(("Vendor voice ID", "muted", 20))
 
     # The columns that identify a voice keep their full width; tags get what's left, and are
-    # left out when that's too little to read.
-    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    # left out when that's too little to read. The header is underlined to match how less
+    # draws it once it's pinned at the top of the pager.
+    table = Table(box=None, show_header=True, header_style="bold underline", padding=(0, 1))
     for header, style, width in fixed_columns:
         table.add_column(
             header,
