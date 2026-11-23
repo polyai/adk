@@ -87,8 +87,6 @@ Wording and messages may reference a state variable as `{{vrbl:variable_name}}`,
 
 As with other resources, the file is the whole list: a push deletes reasons that aren't in `reasons`, and a file without `reasons` has none.
 
-New projects start with five suggested reasons, created when the project gets its first destination. A pull writes them like any other reason. A reason you push with the same `key` as one of them takes its place.
-
 ## Default transfer message
 
 `transfer_message` takes a single `call` field:

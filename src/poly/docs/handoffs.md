@@ -67,8 +67,6 @@ A reason is always available to the agent. There is no setting for this yet.
 
 The file is the whole list: a push deletes reasons that aren't in `reasons`, and a file without `reasons` has none.
 
-New projects start with five suggested reasons, created when the project gets its first destination; a pull writes them like any other reason. A reason pushed with the same `key` as one of them takes its place.
-
 If a destination is deleted while a reason still transfers to it, a pull keeps the destination id the platform has and `poly validate` reports it until you pick another destination.
 
 ## Default transfer message
