@@ -50,7 +50,9 @@ from poly.resources.function import (
 from poly.resources.guardrails import CustomGuardrail, PlatformGuardrail
 from poly.resources.handoff import (
     Handoff,
+    HandoffReason,
     HandoffSipConfig,
+    HandoffTransferMessage,
 )
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage

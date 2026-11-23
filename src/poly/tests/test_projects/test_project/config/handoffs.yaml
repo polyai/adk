@@ -24,3 +24,14 @@ handoffs:
     method: refer
     phone_number: '+1987654321'
   sip_headers: []
+reasons:
+- name: Urgent issue
+  key: URGENT_ISSUE
+  description: The caller has an urgent problem that can't wait.
+  call:
+    transfer_to: urgent support
+    wording: I'll put you through to our urgent support team.
+  chat:
+    message: Tell them to call us, as urgent issues are handled by phone.
+transfer_message:
+  call: Let me put you through to someone who can help.
