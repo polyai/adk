@@ -28,10 +28,11 @@ def _isolated_library_dir(tmp_path, monkeypatch):
 def _no_live_model_list_calls():
     """Stop library refreshes during pulls and fetches from calling the real API.
 
-    Tests that need model lists patch these again with their own return values.
+    Tests that need model or voice lists patch these again with their own return values.
     """
     with (
         patch("poly.handlers.interface.AgentStudioInterface.get_asr_models", return_value=[]),
         patch("poly.handlers.interface.AgentStudioInterface.get_llm_models", return_value=[]),
+        patch("poly.handlers.interface.AgentStudioInterface.get_tts_voices", return_value=[]),
     ):
         yield

@@ -7063,7 +7063,7 @@ class LibraryCommandTest(unittest.TestCase):
     ]
 
     def setUp(self):
-        self.library = Library.build_library("us-1", self.ASR_MODELS, self.LLM_MODELS)
+        self.library = Library.build_library("us-1", self.ASR_MODELS, self.LLM_MODELS, [])
         self.mock_load = patch("poly.cli_commands.library.load_project").start()
         self.proj = MagicMock()
         self.proj.region = "us-1"
@@ -7204,7 +7204,7 @@ class LibraryCommandTest(unittest.TestCase):
 
     def test_list_refetches_a_stale_saved_region(self):
         """A saved --region library past the refresh interval is refetched before listing."""
-        stale = Library.build_library("uk-1", [], [])
+        stale = Library.build_library("uk-1", [], [], [])
         stale.last_refreshed = datetime.now(UTC) - timedelta(days=2)
         stale.save_library()
 
@@ -7223,7 +7223,7 @@ class LibraryCommandTest(unittest.TestCase):
 
     def test_list_with_saved_region_reads_it_from_disk(self):
         """--region for a region already saved reads it without calling the API."""
-        Library.build_library("uk-1", self.ASR_MODELS[:1], self.LLM_MODELS[:1]).save_library()
+        Library.build_library("uk-1", self.ASR_MODELS[:1], self.LLM_MODELS[:1], []).save_library()
 
         output = self._json_output(LibraryCommand.list_asr_models, "uk-1")["asr_models"]
 
@@ -7231,7 +7231,7 @@ class LibraryCommandTest(unittest.TestCase):
         self.assertEqual([m["name"] for m in output], ["Soniox STT RT v5"])
 
     def _save_stale_region(self, region: str) -> None:
-        stale = Library.build_library(region, self.ASR_MODELS[:1], self.LLM_MODELS[:1])
+        stale = Library.build_library(region, self.ASR_MODELS[:1], self.LLM_MODELS[:1], [])
         stale.last_refreshed = datetime.now(UTC) - timedelta(days=2)
         stale.save_library()
 
@@ -7266,7 +7266,7 @@ class LibraryCommandTest(unittest.TestCase):
 
     def test_refresh_flag_refetches_and_prints_one_json_document(self):
         """--refresh refetches before listing, and --json still prints only the one object."""
-        Library.build_library("uk-1", [], []).save_library()
+        Library.build_library("uk-1", [], [], []).save_library()
 
         for method, key in (
             (LibraryCommand.list_asr_models, "asr_models"),

@@ -49,7 +49,7 @@ def patch_model_lists(asr_models=None, llm_models=None):
 
 def make_library(region: str = "us-1") -> Library:
     """Build a library from sample API responses."""
-    return Library.build_library(region, ASR_RESPONSE, LLM_RESPONSE)
+    return Library.build_library(region, ASR_RESPONSE, LLM_RESPONSE, [])
 
 
 class BuildLibraryTest(unittest.TestCase):
@@ -215,7 +215,7 @@ class RefreshLibraryTest(unittest.TestCase):
         handler.get_asr_models.return_value = ASR_RESPONSE[:1]
         handler.get_llm_models.return_value = []
 
-        library = Library.load_library_from_api("euw-1", handler)
+        library = Library.load_library_from_api("euw-1", api_handler=handler)
 
         handler.get_asr_models.assert_called_once_with("euw-1")
         self.mock_asr.assert_not_called()
@@ -223,7 +223,7 @@ class RefreshLibraryTest(unittest.TestCase):
 
     def test_overwrites_an_older_saved_library(self):
         """Refreshing replaces what was saved before for that region."""
-        Library.build_library("euw-1", [], []).save_library()
+        Library.build_library("euw-1", [], [], []).save_library()
 
         Library.load_library_from_api("euw-1")
 
