@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 from rich.console import Console, ConsoleDimensions
 
+from poly.library import TTSVoice
 from poly.output.console import (
     _less_command,
     _merge_leaf_diffs,
@@ -31,6 +32,7 @@ from poly.output.console import (
     print_releases_branches,
     print_transcript,
     print_transcript_matches,
+    print_tts_voice,
     resolve_parent_branch_label,
 )
 
@@ -1110,3 +1112,117 @@ class PrintAsrModelsTest(unittest.TestCase):
 
         self.assertIn("PolyAI  default", poly_row)
         self.assertNotIn("PolyAI", other_row)
+
+
+def _voice(**overrides) -> TTSVoice:
+    """A TTS voice as the library holds it, with any field overridden."""
+    fields = {
+        "voice_id": "VOICE-1a2b3c4d",
+        "name": "Anne",
+        "provider": "ELEVEN_LABS",
+        "provider_voice_id": "DAgjOaO8Ats7",
+        "config": {"stability": 0.3, "model_id": "eleven_multilingual_v2"},
+        "metadata": {
+            "accent": "en-US",
+            "language": "English (United States)",
+            "gender": "female",
+            "tags": ["Sophisticated", "Clear"],
+            "description": "English, Sophisticated, Clear",
+            "suggested_use": "informative_educational",
+            "live_projects": 3,
+            "sample_voice": ["https://example.com/anne.mp3"],
+        },
+        "poly_ai_voice": False,
+    }
+    fields.update(overrides)
+    return TTSVoice(**fields)
+
+
+class PrintTtsVoiceTest(unittest.TestCase):
+    """Tests for print_tts_voice, the panel `poly library voice show` prints."""
+
+    def _render(self, voice: TTSVoice) -> str:
+        with console.capture() as capture:
+            print_tts_voice(voice)
+        return capture.get()
+
+    def test_identifying_fields_are_shown(self):
+        """The panel shows the voice's ID, provider name and vendor voice ID."""
+        output = self._render(_voice())
+
+        self.assertIn("Anne", output)
+        self.assertIn("VOICE-1a2b3c4d", output)
+        self.assertIn("ElevenLabs", output)
+        self.assertIn("DAgjOaO8Ats7", output)
+
+    def test_language_shows_the_code_and_its_name(self):
+        """The accent is followed by the language's name when the voice has one."""
+        self.assertIn("en-US (English (United States))", self._render(_voice()))
+
+    def test_descriptive_fields_are_readable(self):
+        """Gender is capitalised, tags are joined and the suggested use loses its underscores."""
+        output = self._render(_voice())
+
+        self.assertIn("Female", output)
+        self.assertIn("Sophisticated, Clear", output)
+        self.assertIn("Informative educational", output)
+        self.assertIn("Live projects", output)
+
+    def test_description_is_left_out(self):
+        """The description only repeats the language and tags, so it isn't shown."""
+        self.assertNotIn("Description", self._render(_voice()))
+
+    def test_sample_url_is_shown(self):
+        """The first recording's URL is shown so it can be opened."""
+        self.assertIn("https://example.com/anne.mp3", self._render(_voice()))
+
+    def test_voice_without_a_recording_says_so(self):
+        """A voice with no sample_voice says it has no recording."""
+        voice = _voice(metadata={"accent": "en-US", "gender": "male"})
+
+        self.assertIn("No recording", self._render(voice))
+
+    def test_default_settings_are_listed_in_order(self):
+        """The library's settings are listed under their own heading, sorted by name."""
+        output = self._render(_voice())
+
+        self.assertIn("Default settings", output)
+        self.assertLess(output.index("model_id"), output.index("stability"))
+        self.assertIn("eleven_multilingual_v2", output)
+
+    def test_voice_without_settings_has_no_settings_section(self):
+        """A voice with an empty config doesn't show the settings heading."""
+        self.assertNotIn("Default settings", self._render(_voice(config={})))
+
+    def test_polyai_voice_is_tagged_in_the_title(self):
+        """A PolyAI voice carries the PolyAI tag next to its name."""
+        self.assertIn("Anne PolyAI", self._render(_voice(poly_ai_voice=True)))
+        self.assertNotIn("PolyAI", self._render(_voice()))
+
+    def test_archived_voice_shows_when_who_and_why(self):
+        """An archived voice shows who archived it and why; others have no Archived row."""
+        archived = _voice(
+            metadata={
+                "accent": "en-GB",
+                "archived": True,
+                "archived_at": "2026-07-27T12:15:00+00:00",
+                "archived_by": "someone@example.com",
+                "archive_reason": "Internal test voice",
+            }
+        )
+
+        output = self._render(archived)
+
+        self.assertIn("Archived", output)
+        self.assertIn("by someone@example.com: Internal", output)
+        self.assertIn("test voice", output)
+        self.assertNotIn("Archived", self._render(_voice()))
+
+    def test_missing_fields_show_a_dash(self):
+        """A voice missing its gender and vendor ID shows a dash for each."""
+        voice = _voice(provider_voice_id=None, metadata={"accent": "en-US"})
+
+        output = self._render(voice)
+
+        self.assertIn("Vendor voice ID  —", output)
+        self.assertIn("Gender           —", output)

@@ -309,3 +309,19 @@ class Library:
             if llm_model.name.strip().lower() == name.strip().lower():
                 return llm_model
         return None
+
+    def get_tts_voice_by_name(self, name: str) -> TTSVoice | None:
+        if not name:
+            return None
+        for tts_voice in self.tts_voices:
+            if tts_voice.name.strip().lower() == name.strip().lower():
+                return tts_voice
+        return None
+
+    def get_tts_voice_by_id(self, voice_id: str) -> TTSVoice | None:
+        if not voice_id:
+            return None
+        for tts_voice in self.tts_voices:
+            if tts_voice.voice_id.strip().lower() == voice_id.strip().lower():
+                return tts_voice
+        return None

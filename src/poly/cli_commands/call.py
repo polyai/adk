@@ -29,14 +29,18 @@ _CALL_EXTRA_INSTALL_COMMANDS = {
 }
 
 
-def voice_deps_hint() -> str:
-    """Explain how to install the voice calling dependencies for this install method."""
+def voice_deps_hint(command: str = "poly call") -> str:
+    """Explain how to install the voice calling dependencies for this install method.
+
+    Args:
+        command: The command that needs them, named in the message.
+    """
     from poly.cli_commands.update import UpdateCommand
 
-    command = _CALL_EXTRA_INSTALL_COMMANDS[UpdateCommand._detect_install_method()]
+    install = _CALL_EXTRA_INSTALL_COMMANDS[UpdateCommand._detect_install_method()]
     return (
-        "`poly call` needs the voice calling dependencies, which are installed with the "
-        f"`call` extra. Install them with:\n    {command}"
+        f"`{command}` needs the voice calling dependencies, which are installed with the "
+        f"`call` extra. Install them with:\n    {install}"
     )
 
 

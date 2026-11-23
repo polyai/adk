@@ -18,7 +18,7 @@ import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rich import box
@@ -34,6 +34,9 @@ from rich.theme import Theme
 from rich.tree import Tree
 
 from poly.constants import DATA_AGGS
+
+if TYPE_CHECKING:
+    from poly.library import TTSVoice
 
 # Global verbose flag — set by CLI before commands run
 _verbose = False
@@ -2387,3 +2390,73 @@ def print_tts_voices(
             "[muted]A vendor voice ID is shown where voices share a name, provider and "
             "language.[/muted]"
         )
+
+
+def _humanise(value: str) -> str:
+    """Turn an API value such as ``informative_educational`` into ``Informative educational``."""
+    return value.replace("_", " ").capitalize()
+
+
+def print_tts_voice(voice: "TTSVoice") -> None:
+    """Print one TTS voice's details in a panel.
+
+    Shows what identifies the voice (its ID, provider, vendor voice ID and language), its tags,
+    the recording to listen to, and the default settings the library gives it. A project's own
+    tuning overrides those settings field by field.
+
+    Args:
+        voice: The voice, as the library holds it.
+    """
+    metadata = voice.metadata or {}
+
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("Key", style="label", no_wrap=True)
+    table.add_column("Value", overflow="fold")
+
+    table.add_row("Voice ID", voice.voice_id or "—")
+    table.add_row("Provider", _tts_provider_name(voice.provider))
+    table.add_row("Vendor voice ID", voice.provider_voice_id or "—")
+
+    language = _voice_language({"metadata": metadata})
+    language_name = metadata.get("language")
+    if language_name and language_name != language:
+        language = f"{language} ({language_name})"
+    table.add_row("Language", language)
+    table.add_row("Gender", (metadata.get("gender") or "—").capitalize())
+
+    if metadata.get("tags"):
+        table.add_row("Tags", ", ".join(metadata["tags"]))
+    if metadata.get("suggested_use"):
+        table.add_row("Suggested use", _humanise(metadata["suggested_use"]))
+    if metadata.get("live_projects") is not None:
+        table.add_row("Live projects", str(metadata["live_projects"]))
+
+    samples = metadata.get("sample_voice") or []
+    table.add_row("Sample", samples[0] if samples else "[muted]No recording[/muted]")
+
+    if metadata.get("archived"):
+        archived = "[warning]Yes[/warning]"
+        details = [
+            _format_iso_timestamp(metadata["archived_at"]) if metadata.get("archived_at") else "",
+            f"by {metadata['archived_by']}" if metadata.get("archived_by") else "",
+        ]
+        details_text = " ".join(detail for detail in details if detail)
+        if details_text:
+            archived += f", {details_text}"
+        if metadata.get("archive_reason"):
+            archived += f": {metadata['archive_reason']}"
+        table.add_row("Archived", archived)
+
+    body: list[Any] = [table]
+    if voice.config:
+        settings = Table(show_header=False, box=None, padding=(0, 1))
+        settings.add_column("Setting", style="muted", no_wrap=True)
+        settings.add_column("Value")
+        for key in sorted(voice.config):
+            settings.add_row(key, str(voice.config[key]))
+        body += [Text(""), Text(" Default settings", style="label"), settings]
+
+    title = f"[bold]{voice.name or voice.voice_id}[/bold]"
+    if voice.poly_ai_voice:
+        title += f" {_poly_tag(True)}"
+    console.print(Panel(Group(*body), title=title, title_align="left", border_style="cyan"))

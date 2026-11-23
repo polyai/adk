@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from collections.abc import Callable
 from typing import Any, Optional
@@ -178,6 +179,48 @@ class LibraryCommand(BaseCommand):
             help="Refresh the TTS voices before listing them.",
         )
 
+        library_voice_show_subparser = library_voice_subparsers.add_parser(
+            "show",
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
+            help="Get details of a specific TTS voice in the project's region.",
+            description=(
+                "Get details of a specific TTS voice in the project's region.\n\n"
+                "Examples:\n  poly library voice show\n  poly library voice show --json\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        library_voice_show_subparser.add_argument(
+            "voice_id",
+            type=str,
+            help="The ID of the TTS voice to get details for.",
+        )
+        library_voice_show_subparser.add_argument(
+            "--refresh",
+            action="store_true",
+            help="Refresh the TTS voice details before retrieving them.",
+        )
+
+        library_voice_play_subparser = library_voice_subparsers.add_parser(
+            "play",
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
+            help="Play a specific TTS voice in the project's region.",
+            description=(
+                "Play a specific TTS voice in the project's region.\n\n"
+                "Examples:\n  poly library voice play\n  poly library voice play --json\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        library_voice_play_subparser.add_argument(
+            "voice_id",
+            type=str,
+            help="The ID of the TTS voice to play.",
+        )
+        library_voice_play_subparser.add_argument(
+            "--refresh",
+            action="store_true",
+            help="Refresh the TTS voice details before playing it.",
+        )
+
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Execute the ``library`` command."""
@@ -198,6 +241,20 @@ class LibraryCommand(BaseCommand):
                     gender=args.gender,
                     is_poly_voice=args.poly,
                     archived=args.archived,
+                )
+            elif args.library_voice_subcommand == "show":
+                cls.show_tts_voice(
+                    args.path,
+                    args.voice_id,
+                    refresh=args.refresh,
+                    output_json=args.json,
+                )
+            elif args.library_voice_subcommand == "play":
+                cls.play_tts_voice(
+                    args.path,
+                    args.voice_id,
+                    refresh=args.refresh,
+                    output_json=args.json,
                 )
 
     @classmethod
@@ -429,3 +486,127 @@ class LibraryCommand(BaseCommand):
         else:
             with paged_output(title="TTS voices", header_lines=1):
                 print_tts_voices(sorted_tts_voices, is_poly=_is_poly_tts)
+
+    @classmethod
+    def show_tts_voice(
+        cls,
+        base_path: str,
+        voice_id: str,
+        refresh: bool = False,
+        output_json: bool = False,
+    ) -> None:
+        """Get a TTS voice available in the project's region.
+
+        Args:
+            base_path (str): The base path of the project.
+            voice_id (str): The ID of the TTS voice to retrieve.
+            refresh (bool, optional): Whether to refresh the library before listing. Defaults to False.
+            output_json (bool, optional): Whether to output the result in JSON format. Defaults to False.
+
+        Returns:
+            None
+        """
+        from poly.output.console import print_tts_voice, success
+
+        if refresh:
+            library = cls._refresh_library(base_path, output_json=output_json)
+            if not output_json:
+                success("Library refreshed successfully.")
+        else:
+            library = cls._load_library(base_path, output_json=output_json)
+
+        voice = library.get_tts_voice_by_id(voice_id)
+
+        if not voice:
+            if not output_json:
+                from poly.output.console import error
+
+                error(f"TTS voice with ID '{voice_id}' not found.")
+            else:
+                json_print(
+                    {"success": False, "message": f"TTS voice with ID '{voice_id}' not found."}
+                )
+            sys.exit(1)
+
+        if output_json:
+            json_print(voice.to_dict() if voice else None)
+
+        else:
+            print_tts_voice(voice)
+
+    @classmethod
+    def play_tts_voice(
+        cls,
+        base_path: str,
+        voice_id: str,
+        refresh: bool = False,
+        output_json: bool = False,
+    ) -> None:
+        """Play a TTS voice available in the project's region.
+
+        Args:
+            base_path (str): The base path of the project.
+            voice_id (str): The ID of the TTS voice to play.
+            refresh (bool, optional): Whether to refresh the library before playing. Defaults to False.
+            output_json (bool, optional): Whether to output the result in JSON format. Defaults to False.
+
+        Returns:
+            None
+        """
+        from poly.output.console import error, info, success, warning
+
+        if refresh:
+            library = cls._refresh_library(base_path, output_json=output_json)
+            if not output_json:
+                success("Library refreshed successfully.")
+        else:
+            library = cls._load_library(base_path, output_json=output_json)
+
+        voice = library.get_tts_voice_by_id(voice_id)
+
+        if not voice:
+            if not output_json:
+                error(f"TTS voice with ID '{voice_id}' not found.")
+            else:
+                json_print(
+                    {"success": False, "message": f"TTS voice with ID '{voice_id}' not found."}
+                )
+            sys.exit(1)
+
+        samples = voice.metadata.get("sample_voice") or []
+        sample_url = samples[0] if samples else None
+
+        if output_json:
+            json_print(
+                {
+                    "success": sample_url is not None,
+                    "voice_id": voice.voice_id,
+                    "name": voice.name,
+                    "sample_voice_url": sample_url,
+                }
+            )
+            if sample_url is None:
+                sys.exit(1)
+            return
+
+        if sample_url is None:
+            warning(f"{voice.name} has no recording to play.")
+            sys.exit(1)
+
+        # The audio stack ships in the optional [call] extra; import it only when playing.
+        try:
+            from poly.call.playback import PlaybackError, play_audio_url
+        except (ImportError, OSError):
+            from rich.markup import escape
+
+            from poly.cli_commands.call import voice_deps_hint
+
+            error(escape(voice_deps_hint("poly library voice play")))
+            sys.exit(1)
+
+        info(f"Playing {voice.name}. Press Ctrl+C to stop.")
+        try:
+            play_audio_url(sample_url)
+        except PlaybackError as e:
+            error(str(e))
+            sys.exit(1)
