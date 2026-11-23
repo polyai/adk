@@ -11,6 +11,7 @@ import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from urllib.parse import quote
 
 from ruamel.yaml import YAML
 
@@ -76,6 +77,12 @@ FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT = 30
+OUTBOUND_CAMPAIGN_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/branches/{branch_id}"
+    "/outbound-campaigns/{path}"
+)
+
 # Data API routes, served on the regional api.<region>.poly.ai hosts.
 DATA_METRICS_URL = "/api/v1/metrics"
 DATA_METRICS_AGGREGATE_URL = "/api/v1/metrics/aggregate"
@@ -134,6 +141,7 @@ class PlatformAPIHandler:
         files: ty.Optional[dict] = None,
         response_format: str = "json",
         use_jupiter_api: bool = False,
+        timeout: ty.Optional[ty.Union[float, tuple[float, float]]] = None,
     ) -> dict:
         """Make a request to the Platform API.
 
@@ -150,6 +158,8 @@ class PlatformAPIHandler:
             response_format (str): How to parse the response. "json" (default)
                 or "yaml".
             use_jupiter_api (bool): Whether to use the Jupiter API.
+            timeout (float | tuple[float, float] | None): Seconds to wait for the server to
+                connect and to send data, or a (connect, read) pair. None waits forever.
 
         Returns:
             dict: The parsed response.
@@ -182,6 +192,7 @@ class PlatformAPIHandler:
             allow_redirects=False,
             files=files,
             data=json.dumps(data) if data and not files else None,
+            timeout=timeout,
         )
 
         logger.debug(
@@ -1840,6 +1851,32 @@ class PlatformAPIHandler:
         """
         endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    @staticmethod
+    def validate_outbound_campaign(
+        region: str, account_id: str, project_id: str, branch_id: str, campaign_id: str
+    ) -> dict:
+        """Validate a campaign as it is on `branch_id`.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            campaign_id: The campaign ID.
+
+        Returns:
+            dict: {"valid": bool, "errors": [...], "warnings": [...]}.
+        """
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id=quote(branch_id, safe=""),
+            path=f"{quote(campaign_id, safe='')}/validate",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "POST", timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
+        )
 
     @staticmethod
     def get_available_metrics(region: str, project_id: ty.Optional[str] = None) -> dict:
