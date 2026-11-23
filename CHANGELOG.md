@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.88.0 (2026-11-23)
+
+### Features
+
+- Add poly campaign validate ([#438](https://github.com/polyai/adk/pull/438),
+  [`23a43ff`](https://github.com/polyai/adk/commit/23a43ff474679da1aac0949df9e51ab1868b8eec))
+
+
 ## v0.87.1 (2026-11-19)
 
 ### Bug Fixes
