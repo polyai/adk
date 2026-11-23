@@ -7415,6 +7415,14 @@ class HandoffTests(unittest.TestCase):
         defaults.update(kwargs)
         return Handoff(**defaults)
 
+    def test_validate_refuses_a_non_bool_transfer_test_calls(self):
+        """A quoted or empty value would silently change whether test calls transfer."""
+        self._handoff(transfer_test_calls=False).validate()
+        for value in ("false", None, 0):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "transfer_test_calls"):
+                    self._handoff(transfer_test_calls=value).validate()
+
     def test_validate_fields_at_their_length_limits_pass(self):
         """Name, description, phone number and outbound endpoint at their limits are valid."""
         self._handoff(

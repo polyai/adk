@@ -461,7 +461,7 @@ class AgentStudioInterface:
     PRIORITY_DELETE_TYPES = [
         Variable,
         Condition,
-        # A destination's delete must not find a reason still transferring to it.
+        # The platform refuses to delete the default destination while reasons exist.
         HandoffReason,
     ]
 

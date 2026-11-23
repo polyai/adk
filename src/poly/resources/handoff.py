@@ -53,7 +53,7 @@ SIP_HEADER_VALUE_PATTERN = re.compile(r"[\x20-\x7E]{0,1000}")
 
 HANDOFFS_FILE = os.path.join("config", "handoffs.yaml")
 
-# The platform applies the same limits to handoff reasons.
+# Limits the platform enforces on reasons.
 REASON_KEY_PATTERN = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 REASON_NAME_MAX = 100
 REASON_DESCRIPTION_MAX = 500
@@ -281,6 +281,11 @@ class Handoff(MultiResourceYamlResource):
     def validate(self, **kwargs) -> None:
         if not self.name:
             raise ValueError("Handoff name is required")
+        if not isinstance(self.transfer_test_calls, bool):
+            raise ValueError(
+                f"Handoff '{self.name}': invalid value {self.transfer_test_calls!r} for "
+                "'transfer_test_calls'. Must be true or false (unquoted)."
+            )
         if self.sip_config.method not in VALID_SIP_METHODS:
             raise ValueError(
                 f"Invalid SIP method '{self.sip_config.method}'. "
@@ -542,8 +547,8 @@ class HandoffReason(MultiResourceYamlResource):
         resource_id: str,
         name: str,
         key: str = "",
+        call: ReasonOutcome | dict,
         description: str = "",
-        call: ReasonOutcome | dict | None = None,
         chat: ReasonOutcome | dict | None = None,
     ):
         self.resource_id = resource_id
@@ -555,7 +560,7 @@ class HandoffReason(MultiResourceYamlResource):
             call = ReasonOutcome(**call)
         if isinstance(chat, dict):
             chat = ReasonOutcome(**chat)
-        self.call = call or ReasonOutcome(kind=OUTCOME_NOT_OFFERED)
+        self.call = call
         self.chat = chat
 
     @classmethod
@@ -604,9 +609,11 @@ class HandoffReason(MultiResourceYamlResource):
             result["chat"] = self.chat.to_yaml_value()
         return result
 
-    @classmethod
+    @staticmethod
     def _map_outcomes(
-        cls, d: dict, destinations: dict[str, str], swap_references: Callable[[str], str]
+        d: dict,
+        destinations: dict[str, str],
+        swap_references: Callable[[str], str] = lambda text: text,
     ) -> dict:
         d = dict(d)
         for channel in ("call", "chat"):
@@ -644,19 +651,15 @@ class HandoffReason(MultiResourceYamlResource):
         cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
         """Resolve destination and variable names to ids; unknown names are left for validate."""
-        resource_mappings = resource_mappings or []
+        yaml_dict = super().from_pretty_dict(yaml_dict, resource_mappings=resource_mappings)
         destinations: dict[str, str] = {}
-        for m in resource_mappings:
+        for m in resource_mappings or []:
             if m.resource_type is Handoff:
                 destinations.setdefault(m.resource_name, m.resource_id)
                 destinations.setdefault(
                     utils.clean_name(m.resource_name, lowercase=False), m.resource_id
                 )
-        return cls._map_outcomes(
-            yaml_dict,
-            destinations,
-            lambda text: utils.replace_resource_names_with_ids(text, resource_mappings),
-        )
+        return cls._map_outcomes(yaml_dict, destinations)
 
     @classmethod
     def from_yaml_dict(
