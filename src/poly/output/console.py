@@ -2209,6 +2209,15 @@ def _flag(value: Any) -> str:
     return "[success]✓[/success]" if value else "[muted]✗[/muted]"
 
 
+def _voice_tag(voice: "TTSVoice") -> str:
+    """The label beside a voice's name: PolyAI's own, or imported into the account."""
+    if voice.poly_ai_voice:
+        return _poly_tag(True)
+    if voice.is_imported:
+        return "[muted]Imported[/muted]"
+    return ""
+
+
 def _poly_tag(is_poly: bool) -> str:
     return "[magenta]PolyAI[/magenta]" if is_poly else ""
 
@@ -2330,10 +2339,17 @@ def print_tts_voices(tts_voices: "list[TTSVoice]") -> None:
     providers = [_tts_provider_name(voice.provider) for voice in tts_voices]
     voice_ids = [voice.voice_id or "—" for voice in tts_voices]
 
-    shows_poly_tag = any(voice.poly_ai_voice for voice in tts_voices)
+    tag_width = max(
+        (
+            len(label)
+            for voice in tts_voices
+            if (label := Text.from_markup(_voice_tag(voice)).plain)
+        ),
+        default=0,
+    )
     fixed_columns = [
         ("Name", "bold yellow", widest(names, "Name")),
-        ("", None, 6 if shows_poly_tag else 0),
+        ("", None, tag_width),
         ("Language", None, 8),
         ("Gender", None, 6),
         ("Provider", "cyan", widest(providers, "Provider")),
@@ -2366,7 +2382,7 @@ def print_tts_voices(tts_voices: "list[TTSVoice]") -> None:
         metadata = voice.metadata or {}
         row = [
             voice.name or "—",
-            _poly_tag(voice.poly_ai_voice),
+            _voice_tag(voice),
             language(voice),
             (metadata.get("gender") or "—").capitalize(),
             _tts_provider_name(voice.provider),
@@ -2396,7 +2412,7 @@ def _humanise(value: str) -> str:
 def print_tts_voice(voice: "TTSVoice") -> None:
     """Print one TTS voice's details in a panel.
 
-    Shows what identifies the voice (its ID, provider, vendor voice ID and language), its tags,
+    Shows what identifies the voice (its ID, provider, vendor voice ID, owner and language), its tags,
     the recording to listen to, and the default settings the library gives it. A project's own
     tuning overrides those settings field by field.
 
@@ -2412,6 +2428,7 @@ def print_tts_voice(voice: "TTSVoice") -> None:
     table.add_row("Voice ID", voice.voice_id or "—")
     table.add_row("Provider", _tts_provider_name(voice.provider))
     table.add_row("Vendor voice ID", voice.provider_voice_id or "—")
+    table.add_row("Owner", "This account" if voice.is_imported else "Global library")
 
     language = _voice_language({"metadata": metadata})
     language_name = metadata.get("language")
@@ -2453,6 +2470,6 @@ def print_tts_voice(voice: "TTSVoice") -> None:
         body += [Text(""), Text(" Default settings", style="label"), settings]
 
     title = f"[bold]{voice.name or voice.voice_id}[/bold]"
-    if voice.poly_ai_voice:
-        title += f" {_poly_tag(True)}"
+    if _voice_tag(voice):
+        title += f" {_voice_tag(voice)}"
     console.print(Panel(Group(*body), title=title, title_align="left", border_style="cyan"))

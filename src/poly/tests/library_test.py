@@ -261,6 +261,7 @@ def voice(name: str = "Anne", **metadata) -> TTSVoice:
         config={},
         metadata=metadata,
         poly_ai_voice=False,
+        owner="global",
     )
 
 
@@ -405,3 +406,56 @@ class FindTTSVoiceTest(unittest.TestCase):
         """A blank name is refused."""
         with self.assertRaises(ValueError):
             self.library.find_tts_voice("  ")
+
+
+VOICE_RESPONSE = {
+    "id": "VOICE-1",
+    "name": "Cloned CEO",
+    "provider": "ELEVEN_LABS",
+    "providerVoiceId": "abc123",
+    "config": {"speed": 1},
+    "metadata": {"accent": "en-GB"},
+    "isPolyVoice": False,
+    "owner": "account",
+}
+
+
+class TTSVoiceOwnerTest(unittest.TestCase):
+    """Tests for a voice's owner: the shared library's, or the account's own."""
+
+    def test_owner_is_read_from_the_route(self):
+        """The route's owner field says whose voice it is."""
+        tts_voice = TTSVoice.from_api_response(VOICE_RESPONSE)
+
+        self.assertEqual(tts_voice.owner, "account")
+        self.assertTrue(tts_voice.is_imported)
+        self.assertFalse(tts_voice.is_global)
+
+    def test_global_voice(self):
+        """A global voice is neither imported nor the account's to change."""
+        tts_voice = TTSVoice.from_api_response({**VOICE_RESPONSE, "owner": "global"})
+
+        self.assertTrue(tts_voice.is_global)
+        self.assertFalse(tts_voice.is_imported)
+
+    def test_to_dict_returns_the_route_shape(self):
+        """to_dict gives back the route's record, owner included."""
+        self.assertEqual(TTSVoice.from_api_response(VOICE_RESPONSE).to_dict(), VOICE_RESPONSE)
+
+    def test_imported_voices_rank_after_the_shared_library(self):
+        """An account's own voice sorts after library voices, whatever its rank or use."""
+        imported = voice("Imported", featured_rank=1, live_projects=50)
+        imported.owner = "account"
+        library_voice = voice("Library")
+
+        ordered = [v.name for v in sorted([imported, library_voice], key=TTSVoice.rank_key)]
+
+        self.assertEqual(ordered, ["Library", "Imported"])
+
+    def test_owner_survives_saving_and_loading(self):
+        """The saved voice library keeps each voice's owner."""
+        Library.build_library("us-1", [], [], [VOICE_RESPONSE], account_id="acct").save_library()
+
+        loaded = Library.load_library_from_file("us-1", account_id="acct")
+
+        self.assertEqual(loaded.tts_voices[0].owner, "account")

@@ -1134,6 +1134,7 @@ def _voice(**overrides) -> TTSVoice:
             "sample_voice": ["https://example.com/anne.mp3"],
         },
         "poly_ai_voice": False,
+        "owner": "global",
     }
     fields.update(overrides)
     return TTSVoice(**fields)
@@ -1273,3 +1274,36 @@ class PrintTtsVoicesTest(unittest.TestCase):
         self.assertIn("first-vendor-id", output)
         self.assertIn("second-vendor-id", output)
         self.assertNotIn("ben-vendor-id", output)
+
+
+class VoiceOwnerOutputTest(unittest.TestCase):
+    """Tests for how a voice's owner shows in `voice list` and `voice show`."""
+
+    def _list(self, voices: list[TTSVoice]) -> str:
+        with console.capture() as capture:
+            print_tts_voices(voices)
+        return capture.get()
+
+    def _show(self, voice: TTSVoice) -> str:
+        with console.capture() as capture:
+            print_tts_voice(voice)
+        return capture.get()
+
+    def test_imported_voices_are_labelled_in_the_list(self):
+        """An account's own voice is labelled Imported; a global one isn't."""
+        output = self._list([_voice(name="Cloned", owner="account"), _voice(owner="global")])
+
+        self.assertIn("Imported", output)
+        self.assertEqual(output.count("Imported"), 1)
+
+    def test_polyai_label_wins_over_imported(self):
+        """A PolyAI voice keeps its PolyAI label."""
+        output = self._list([_voice(poly_ai_voice=True, owner="global")])
+
+        self.assertIn("PolyAI", output)
+        self.assertNotIn("Imported", output)
+
+    def test_show_says_who_owns_the_voice(self):
+        """The panel has an Owner row when the platform said whose voice it is."""
+        self.assertIn("This account", self._show(_voice(owner="account")))
+        self.assertIn("Global library", self._show(_voice(owner="global")))

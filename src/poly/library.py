@@ -95,6 +95,8 @@ class TTSVoice:
     config: dict
     metadata: dict
     poly_ai_voice: bool
+    # "global" for the shared library, "account" for the account's own voices.
+    owner: str
 
     @classmethod
     def from_api_response(cls, api_response: dict) -> "TTSVoice":
@@ -106,6 +108,7 @@ class TTSVoice:
             config=api_response.get("config", {}),
             metadata=api_response.get("metadata", {}),
             poly_ai_voice=api_response.get("isPolyVoice", False),
+            owner=api_response["owner"],
         )
 
     @property
@@ -113,6 +116,16 @@ class TTSVoice:
         """The voice's language code, such as ``en-GB``: its accent, else its language code."""
         metadata = self.metadata or {}
         return metadata.get("accent") or metadata.get("language_code") or None
+
+    @property
+    def is_imported(self) -> bool:
+        """Whether the voice is the account's own rather than the shared library's."""
+        return self.owner == "account"
+
+    @property
+    def is_global(self) -> bool:
+        """Whether the voice is in the shared library, so the account can't change it."""
+        return self.owner == "global"
 
     @property
     def is_archived(self) -> bool:
@@ -164,10 +177,12 @@ class TTSVoice:
     def rank_key(self) -> tuple:
         """Sort key for Agent Studio's voice order.
 
-        Curated rank first (unranked voices after ranked ones), then the most live projects,
-        then voices with a recording, then name.
+        The shared library's voices before the account's own, then curated rank (unranked
+        voices after ranked ones), then the most live projects, then voices with a recording,
+        then name.
         """
         return (
+            self.is_imported,
             self.featured_rank is None,
             self.featured_rank or 0,
             -self.live_projects,
@@ -184,6 +199,7 @@ class TTSVoice:
             "config": self.config,
             "metadata": self.metadata,
             "isPolyVoice": self.poly_ai_voice,
+            "owner": self.owner,
         }
 
 
