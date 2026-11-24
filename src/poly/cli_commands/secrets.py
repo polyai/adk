@@ -59,6 +59,7 @@ class SecretsCommand(BaseCommand):
                 "Values come from a hidden prompt or stdin, never command arguments. "
                 "Changing type requires a complete replacement value."
             ),
+            epilog="For PROJECT_ID, use the Agent ID shown by 'poly project list'.",
         )
         set_parser.add_argument(
             "name",
