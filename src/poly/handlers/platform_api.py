@@ -78,6 +78,7 @@ FUNCTION_EXECUTE_URL = (
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
 OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT = 30
+OUTBOUND_CAMPAIGN_TEST_START_TIMEOUT = (10, 300)
 OUTBOUND_CAMPAIGN_URL = (
     "/adk/v1/accounts/{account_id}/projects/{project_id}/branches/{branch_id}"
     "/outbound-campaigns/{path}"
@@ -1876,6 +1877,56 @@ class PlatformAPIHandler:
         )
         return PlatformAPIHandler.make_request(
             region, endpoint, "POST", timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
+        )
+
+    @staticmethod
+    def dry_run_outbound_campaign(
+        region: str,
+        account_id: str,
+        project_id: str,
+        branch_id: str,
+        campaign_id: str,
+        body: dict,
+    ) -> dict:
+        """Dry-run a campaign on `branch_id`. Nothing is sent or stored."""
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id=quote(branch_id, safe=""),
+            path=f"{quote(campaign_id, safe='')}/dry-run",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "POST", data=body, timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
+        )
+
+    @staticmethod
+    def start_outbound_campaign_test_step(
+        region: str, account_id: str, project_id: str, campaign_id: str, body: dict
+    ) -> dict:
+        """Start a real test step of the live campaign, on main."""
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id="main",
+            path=f"{quote(campaign_id, safe='')}/test-steps",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "POST", data=body, timeout=OUTBOUND_CAMPAIGN_TEST_START_TIMEOUT
+        )
+
+    @staticmethod
+    def get_outbound_campaign_test_step(
+        region: str, account_id: str, project_id: str, campaign_id: str, step_id: str
+    ) -> dict:
+        """Read a test step of the live campaign, on main."""
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id="main",
+            path=f"{quote(campaign_id, safe='')}/test-steps/{quote(step_id, safe='')}",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "GET", timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
         )
 
     @staticmethod
