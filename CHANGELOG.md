@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.90.0 (2026-11-24)
+
+### Features
+
+- Add poly campaign preview and test ([#376](https://github.com/polyai/adk/pull/376),
+  [`2b4b543`](https://github.com/polyai/adk/commit/2b4b543881b20d7141f159288e551a0c33f61a0b))
+
+
 ## v0.89.0 (2026-11-23)
 
 ### Features
