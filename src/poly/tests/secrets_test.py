@@ -275,9 +275,100 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertEqual(self.state["new"]["access_config"], [])
 
+    def test_convert_single_to_key_value_interactively_replaces_value_and_preserves_metadata(self):
+        self.state["single"]["access_config"] = ["project-b"]
+        prompts = [Mock(), Mock(), Mock()]
+        for prompt, key in zip(prompts, ["first", "second", ""]):
+            prompt.ask.return_value = key
+        with (
+            patch("questionary.text", side_effect=prompts),
+            patch("getpass.getpass", side_effect=[SENTINEL, "null"]),
+        ):
+            code, output, errors = self.run_cli("set", "single", "--type", "key-value", tty=True)
+        self.assertEqual(code, 0, output + errors)
+        self.assertNotIn(SENTINEL, output + errors)
+        self.assertEqual(
+            [call for call in self.calls if call[0] != "GET"],
+            [
+                (
+                    "PUT",
+                    {
+                        "display_name": "single",
+                        "value_type": "key-value",
+                        "secret_value": {"first": SENTINEL, "second": "null"},
+                        "description": "Single value",
+                        "access_config": ["project-b"],
+                    },
+                )
+            ],
+        )
+
+    def test_convert_key_value_to_single_with_metadata_changes(self):
+        code, output, errors = self.run_cli(
+            "set",
+            "credentials",
+            "--type",
+            "single",
+            "--description",
+            "New description",
+            "--grant",
+            "project-c",
+            "--json",
+            stdin=SENTINEL,
+        )
+        self.assertEqual(code, 0, output + errors)
+        self.assertNotIn(SENTINEL, output + errors)
+        self.assertEqual(
+            self.calls[-1],
+            (
+                "PUT",
+                {
+                    "display_name": "credentials",
+                    "value_type": "single",
+                    "secret_value": SENTINEL,
+                    "description": "New description",
+                    "access_config": [self.project.project_id, "project-b", "project-c"],
+                },
+            ),
+        )
+
+    def test_type_change_rejects_missing_or_incomplete_values_without_writing(self):
+        for name, target, raw in (
+            ("single", "key-value", ""),
+            ("credentials", "single", ""),
+            ("single", "key-value", "{}"),
+            ("single", "key-value", '{"keep":"value","remove":null}'),
+        ):
+            with self.subTest(name=name, raw=raw):
+                code, output, _ = self.run_cli(
+                    "set", name, "--type", target, "--description", "Changed", "--json", stdin=raw
+                )
+                self.assertEqual(code, 1, output)
+        with self.assertRaisesRegex(ValueError, "complete replacement value"):
+            self.project.set_secret("single", value_type="key-value", description="Changed")
+        self.assertFalse(any(method != "GET" for method, _ in self.calls))
+
+    def test_type_change_rejects_key_deletion_before_prompting(self):
+        with patch("getpass.getpass") as hidden, patch("questionary.text") as prompt:
+            for name, target in (("single", "key-value"), ("credentials", "single")):
+                with self.subTest(name=name):
+                    code, output, errors = self.run_cli(
+                        "set", name, "--type", target, "--delete-key", "obsolete", tty=True
+                    )
+                    self.assertEqual(code, 1)
+                    self.assertIn("--delete-key", output + errors)
+            hidden.assert_not_called()
+            prompt.assert_not_called()
+        self.assertFalse(any(method != "GET" for method, _ in self.calls))
+
     def test_key_value_update_preserves_omitted_keys_and_sends_only_changes(self):
         code, output, _ = self.run_cli(
-            "set", "credentials", "--json", stdin='{"password":"replacement"}'
+            "set",
+            "credentials",
+            "--type",
+            "key-value",
+            "--json",
+            stdin='{"password":"replacement"}',
         )
         self.assertEqual(code, 0, output)
         self.assertEqual(
@@ -402,7 +493,7 @@ class SecretsCommandTest(unittest.TestCase):
             patch("questionary.text", side_effect=prompts),
             patch("getpass.getpass", side_effect=["user", SENTINEL]) as hidden,
         ):
-            code, output, errors = self.run_cli("set", "new", "--key-value", tty=True)
+            code, output, errors = self.run_cli("set", "new", "--type", "key-value", tty=True)
         self.assertEqual(code, 0, output + errors)
         self.assertEqual(hidden.call_count, 2)
         self.assertEqual(
@@ -440,7 +531,7 @@ class SecretsCommandTest(unittest.TestCase):
             with self.subTest(value_type=type(value)):
                 self.calls.clear()
                 code, output, errors = self.run_cli(
-                    "set", "new", "--key-value", "--json", stdin=value
+                    "set", "new", "--type", "key-value", "--json", stdin=value
                 )
                 self.assertEqual(code, 1)
                 self.assertNotIn(SENTINEL, output + errors)
@@ -494,6 +585,7 @@ class SecretsCommandTest(unittest.TestCase):
 
     def test_programmatic_validation_prevents_invalid_access_and_values(self):
         for kwargs in (
+            {"value_type": "unsupported"},
             {"projects": ["a"], "grant": ["b"]},
             {"grant": ["a"], "revoke": ["a"]},
             {"value": {"token": 123}},

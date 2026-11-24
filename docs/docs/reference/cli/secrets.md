@@ -58,23 +58,26 @@ Examples:
 
 ```bash
 poly secrets set <secret_name>
-poly secrets set <secret_name> --key-value
+poly secrets set <secret_name> --type key-value
+poly secrets set <secret_name> --type single
 poly secrets set <secret_name> --delete-key obsolete
 poly secrets set <secret_name> --description 'Service authentication'
 poly secrets set <secret_name> --grant project-b --revoke project-a
 poly secrets set <secret_name> --no-projects
 poly secrets set <secret_name> --description 'Updated' --replace-value
 poly secrets set <secret_name> --json < /secure/path/token
-poly secrets set <secret_name> --key-value --json < /secure/path/credentials.json
+poly secrets set <secret_name> --type key-value --json < /secure/path/credentials.json
 ```
 
 Values come from hidden prompts or stdin, never a command argument. Interactive key-value input prompts separately for each key and hides each value. At the interactive value prompt, typing `null` stores it as text. A single value read from stdin is used verbatim, including any trailing newline.
 
-For key-value input on stdin, pass a nonempty JSON object. A string value such as `{"status":"value"}` adds or updates the key. An unquoted JSON `null`, as in `{"obsolete":null}`, deletes a key from an existing secret. New secrets require string values for every key.
+To change type, use `--type single` or `--type key-value` and supply the complete replacement value, even when also changing the description or project access. For a conversion to key-value, enter every new key and its string value. Conversions reject `--delete-key` and JSON `null` entries.
+
+For key-value input on stdin, pass a nonempty JSON object. A string value such as `{"status":"value"}` adds or updates the key. An unquoted JSON `null`, as in `{"obsolete":null}`, deletes a key when updating a secret that already has the key-value type. New secrets require string values for every key.
 
 Updates to an existing key-value secret change only the supplied keys. Omitted keys keep their stored values without being read. To delete a key without piping JSON, use `--delete-key KEY`. Repeat the flag to delete multiple keys. A secret must retain at least one key.
 
-When changing only description or project access, the stored value is preserved without requesting it. Use `--replace-value` to also enter a single value or key updates interactively, or pipe them on stdin. An existing secret's type cannot be changed.
+When changing only description or project access, the stored value is preserved without requesting it. Use `--replace-value` to also enter a single value or key updates interactively, or pipe them on stdin.
 
 Use project IDs visible to you in the secret's account. You can also revoke an ID still on the secret's access list after its project has been deleted.
 
@@ -85,7 +88,7 @@ Use project IDs visible to you in the secret's account. You can also revoke an I
 | Flag | Description |
 |---|---|
 | `--description TEXT` | Set or clear the description. |
-| `--key-value` | Create a key-value secret instead of a single-value secret. |
+| `--type {single,key-value}` | Choose the type for a new secret or convert an existing secret with a complete replacement value. |
 | `--project PROJECT_ID` | Replace project access; repeat for multiple projects. |
 | `--no-projects` | Give no projects access. Mutually exclusive with `--project`. |
 | `--grant PROJECT_ID` | Add a project to an existing secret's access; repeat as needed. |

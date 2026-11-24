@@ -4905,13 +4905,30 @@ class AgentStudioProject:
             (secret for secret in self.list_secrets() if secret.get("display_name") == name), None
         )
 
+    @staticmethod
+    def resolve_secret_type(
+        existing: Optional[dict], value_type: Optional[str], delete_keys: Optional[list[str]]
+    ) -> str:
+        """Resolve the requested type and check whether individual keys can be deleted."""
+        stored_type = existing["value_type"] if existing is not None else None
+        if value_type is None:
+            value_type = stored_type or "single"
+        if value_type not in ("single", "key-value"):
+            raise ValueError("Secret type must be single or key-value.")
+        if delete_keys:
+            if stored_type is not None and value_type != stored_type:
+                raise ValueError("--delete-key cannot be used when changing secret type.")
+            if stored_type != "key-value":
+                raise ValueError("--delete-key requires an existing key-value secret.")
+        return value_type
+
     def set_secret(
         self,
         name: str,
         value: Optional[str | dict[str, Optional[str]]] = None,
         *,
         description: Optional[str] = None,
-        key_value: bool = False,
+        value_type: Optional[str] = None,
         projects: Optional[list[str]] = None,
         no_projects: bool = False,
         grant: Optional[list[str]] = None,
@@ -4920,8 +4937,8 @@ class AgentStudioProject:
     ) -> dict:
         """Save an account secret immediately, preserving omitted value and metadata.
 
-        Existing key-value secrets use PATCH: omitted keys stay unchanged and
-        None deletes a key. Values never enter the local project projection.
+        Changing type replaces the entire value. Updates that keep the key-value
+        type preserve omitted keys and accept None to delete a key.
         """
         for project_ids in (projects, grant, revoke):
             if project_ids is not None and (
@@ -4946,14 +4963,12 @@ class AgentStudioProject:
         ):
             raise ValueError("Keys to delete must be a list of nonempty strings.")
 
-        value_type = (
-            existing["value_type"] if existing else ("key-value" if key_value else "single")
-        )
-        if existing and key_value and value_type != "key-value":
-            raise ValueError("An existing secret's type cannot be changed.")
-        if delete_keys and (not existing or value_type != "key-value"):
-            raise ValueError("--delete-key requires an existing key-value secret.")
-        if not existing and value is None:
+        value_type = self.resolve_secret_type(existing, value_type, delete_keys)
+        type_changed = existing is not None and value_type != existing["value_type"]
+        patch_keys = existing is not None and not type_changed and value_type == "key-value"
+        if value is None and type_changed:
+            raise ValueError("Changing secret type requires a complete replacement value.")
+        if value is None and existing is None:
             raise ValueError("A value is required to create a secret.")
         if value is not None:
             if value_type == "key-value":
@@ -4963,13 +4978,13 @@ class AgentStudioProject:
                     or not all(
                         isinstance(key, str)
                         and key
-                        and (isinstance(item, str) or (existing is not None and item is None))
+                        and (isinstance(item, str) or (patch_keys and item is None))
                         for key, item in value.items()
                     )
                 ):
                     raise ValueError(
-                        "Key-value input requires a nonempty object with string keys and values; "
-                        "null may delete keys from an existing secret."
+                        "Key-value input requires a nonempty object with nonempty keys and string "
+                        "values. Use null only to delete keys when updating a key-value secret."
                     )
             elif not isinstance(value, str) or not value:
                 raise ValueError("A single-value secret requires a nonempty string.")
@@ -4995,7 +5010,7 @@ class AgentStudioProject:
             access.extend(grant or [])
         if not all(isinstance(project, str) and project.strip() for project in access):
             raise ValueError("Project IDs must be nonempty strings.")
-        if existing and value_type == "key-value" and (value is not None or delete_keys):
+        if patch_keys and (value is not None or delete_keys):
             changes = dict(value or {})
             if set(changes) & set(delete_keys or []):
                 raise ValueError("A key cannot be supplied in both the value and --delete-key.")

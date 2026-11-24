@@ -52,15 +52,16 @@ class SecretsCommand(BaseCommand):
             description=(
                 "Create or update an account secret immediately for all projects with access, including live. "
                 "Values come from a hidden prompt or stdin, never command arguments. "
-                "Key-value updates preserve omitted keys; null deletes a key from an existing secret."
+                "Changing type requires a complete replacement value."
             ),
         )
         set_parser.add_argument("name", metavar="<secret_name>", help="Secret display name.")
         set_parser.add_argument("--description", default=None, help="Set the description.")
         set_parser.add_argument(
-            "--key-value",
-            action="store_true",
-            help="Create a key-value secret using a JSON object.",
+            "--type",
+            dest="value_type",
+            choices=("single", "key-value"),
+            help="Set the secret type. New secrets default to single.",
         )
         access = set_parser.add_mutually_exclusive_group()
         access.add_argument(
@@ -136,7 +137,8 @@ class SecretsCommand(BaseCommand):
             info(
                 "Account secret changes affect every environment, including live, for projects with access."
             )
-        key_value = args.key_value or bool(existing and existing["value_type"] == "key-value")
+        value_type = project.resolve_secret_type(existing, args.value_type, args.delete_keys)
+        type_changed = existing is not None and existing["value_type"] != value_type
         metadata_change = (
             args.description is not None
             or args.projects is not None
@@ -145,14 +147,17 @@ class SecretsCommand(BaseCommand):
             or args.revoke
         )
         needs_value = (
-            existing is None or args.replace_value or not (metadata_change or args.delete_keys)
+            existing is None
+            or type_changed
+            or args.replace_value
+            or not (metadata_change or args.delete_keys)
         )
-        value = cls._read_value(key_value, needs_value, args.json)
+        value = cls._read_value(value_type == "key-value", needs_value, args.json)
         metadata = project.set_secret(
             args.name,
             value,
             description=args.description,
-            key_value=args.key_value,
+            value_type=args.value_type,
             projects=args.projects,
             no_projects=args.no_projects,
             grant=args.grant,
@@ -199,7 +204,7 @@ class SecretsCommand(BaseCommand):
 
             from poly.output.console import info
 
-            info("Enter keys to create or update. Omitted keys in existing secrets stay unchanged.")
+            info("Enter each key and its value. Leave the key empty to finish.")
             result = {}
             while True:
                 key = questionary.text("Key (leave empty to finish):").ask()

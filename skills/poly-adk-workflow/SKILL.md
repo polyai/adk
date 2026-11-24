@@ -149,7 +149,9 @@ poly deployments list             # what is deployed where
 
 Use `poly secrets list` to discover account secret names and project access without reading values. `--project` filters the list to secrets the current project can use. Create or update a secret with `poly secrets set <secret_name>`; values come from hidden prompts or stdin, never command arguments or project files.
 
-Description and access changes preserve the stored value. New secrets default to the current project's access; use repeatable `--project`, `--no-projects`, or `--grant` / `--revoke` to change it. Existing key-value secrets update only the supplied keys and preserve omitted keys. A JSON `null` or repeatable `--delete-key KEY` deletes a key; at least one key must remain. New key-value secrets require string values. `--json` never prompts and requires stdin when supplying values; metadata-only updates and `--delete-key` need no value.
+New secrets default to `single`. Use `--type single` or `--type key-value` to choose a type. Changing an existing secret’s type requires a complete replacement value. For a conversion to key-value, supply every key with a string value. Conversions reject JSON `null` entries and `--delete-key`, and preserve description and access unless explicitly changed.
+
+Description and access changes alone preserve the stored value. New secrets default to the current project's access; use repeatable `--project`, `--no-projects`, or `--grant` / `--revoke` to change it. Existing key-value secrets update only the supplied keys and preserve omitted keys. A JSON `null` or repeatable `--delete-key KEY` deletes a key; at least one key must remain. New key-value secrets require string values. `--json` never prompts and requires stdin when supplying values; metadata-only updates and `--delete-key` need no value.
 
 These commands change account storage directly across all environments, including live; they do not go through the branch/push/deployment workflow. Only write or delete secrets when the user requests it. Use `poly secrets --help` for the command reference.
 
