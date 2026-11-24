@@ -299,10 +299,10 @@ class SecretsCommand(BaseCommand):
             ).ask():
                 info("Deletion cancelled.")
                 return
-        deleted = project.delete_secrets(args.names)
+        project.delete_secrets(args.names)
         if args.json:
-            json_print({"success": True, "deleted": deleted})
+            json_print({"success": True})
         else:
             from poly.output.console import success
 
-            success(f"Deleted {len(deleted)} account secret(s).")
+            success("Delete request completed.")

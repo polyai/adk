@@ -138,6 +138,8 @@ poly secrets delete <secret_name> <another_secret_name> --yes
 poly secrets delete <secret_name> --json
 ```
 
+A successful response confirms that the delete request completed. Names that are already absent are accepted.
+
 | Argument | Description |
 |---|---|
 | `<secret_name>` | Optional in a terminal. Supply one or more display names to skip the checkbox. |
@@ -153,7 +155,6 @@ poly secrets delete <secret_name> --json
 
 ```json
 {
-  "success": true,
-  "deleted": ["<secret_name>"]
+  "success": true
 }
 ```

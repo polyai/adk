@@ -105,9 +105,12 @@ class SecretsCommandTest(unittest.TestCase):
                     record["keys"] = list(record["secret_value"])
             return make_mock_response(json_body=deepcopy(records))
         if method == "DELETE":
+            before = len(self.state)
             for name in body["display_name"]:
                 self.state.pop(name, None)
-            return make_mock_response(status_code=204)
+            return make_mock_response(
+                json_body={"success": True} if len(self.state) < before else {}
+            )
         name = body["display_name"]
         if method == "POST":
             self.assertNotIn(name, self.state)
@@ -815,6 +818,7 @@ class SecretsCommandTest(unittest.TestCase):
         ):
             code, output, errors = self.run_cli("delete", tty=True)
         self.assertEqual(code, 0, output + errors)
+        self.assertIn("Delete request completed.", output)
         self.assertEqual(self.state, {})
 
     def test_invalid_input_never_writes_or_exposes_the_supplied_value(self):
@@ -863,9 +867,33 @@ class SecretsCommandTest(unittest.TestCase):
             code, output, _ = self.run_cli("delete", "single", "credentials", "single", "--json")
         self.assertEqual(code, 0, output)
         confirm.assert_not_called()
-        self.assertEqual(json.loads(output)["deleted"], ["single", "credentials"])
+        self.assertEqual(json.loads(output), {"success": True})
         self.assertEqual(self.calls, [("DELETE", {"display_name": ["single", "credentials"]})])
         self.assertEqual(self.state, {})
+
+    def test_delete_reports_request_success_for_mixed_and_missing_names(self):
+        for names in (["single", "never-created"], ["never-created"]):
+            with self.subTest(names=names):
+                code, output, errors = self.run_cli("delete", *names, "--json")
+                self.assertEqual(code, 0, output + errors)
+                self.assertEqual(json.loads(output), {"success": True})
+                self.assertEqual(set(self.state), {"credentials"})
+
+    def test_rejected_delete_reports_failure(self):
+        self.http.side_effect = None
+        self.http.return_value = make_mock_response(403, {"error": "Forbidden"})
+        code, output, _ = self.run_cli("delete", "single", "--json")
+        self.assertEqual(code, 1)
+        result = json.loads(output)
+        self.assertFalse(result["success"])
+        self.assertIn("HTTP 403", result["error"])
+
+    def test_delete_with_no_content_reports_request_completion(self):
+        self.http.side_effect = None
+        self.http.return_value = make_mock_response(204)
+        code, output, errors = self.run_cli("delete", "never-created", "--yes")
+        self.assertEqual(code, 0, output + errors)
+        self.assertEqual(output.strip(), "Delete request completed.")
 
     def test_cancelled_delete_does_not_write(self):
         with patch("questionary.confirm") as confirm:

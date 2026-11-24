@@ -5122,8 +5122,8 @@ class AgentStudioProject:
             self.region, self.account_id, body, create=existing is None
         )
 
-    def delete_secrets(self, names: list[str]) -> list[str]:
-        """Delete named account secrets immediately, returning the deleted names."""
+    def delete_secrets(self, names: list[str]) -> None:
+        """Request deletion of the named account secrets in one batch."""
         if (
             not isinstance(names, list)
             or not names
@@ -5132,7 +5132,6 @@ class AgentStudioProject:
             raise ValueError("At least one nonempty secret name is required.")
         unique_names = list(dict.fromkeys(names))
         AgentStudioInterface.delete_secrets(self.region, self.account_id, unique_names)
-        return unique_names
 
     def get_custom_metrics(self) -> list[dict]:
         """List all custom metrics for the project.
