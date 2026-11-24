@@ -250,9 +250,10 @@ class PlatformAPIHandler:
             result = ry.load(content)
             return dict(result) if result else {}
 
+        decode_error = ValueError if sensitive else json.JSONDecodeError
         try:
             parsed = api_response.json()
-        except ValueError as e:
+        except decode_error as e:
             if sensitive:
                 raise ValueError("The API returned invalid secret metadata.") from None
             raise ValueError(f"Failed to parse JSON response: {e}")
