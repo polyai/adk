@@ -70,7 +70,7 @@ poly secrets set <secret_name> --key-value --json < /secure/path/credentials.jso
 
 Values come from hidden prompts or stdin, never a command argument. Interactive key-value input prompts separately for each key and hides each value. At the interactive value prompt, typing `null` stores it as text. A single value read from stdin is used verbatim, including any trailing newline.
 
-For key-value input on stdin, pass a nonempty JSON object. A string value such as `{"status":"null"}` adds or updates the key. An unquoted JSON `null`, as in `{"obsolete":null}`, deletes a key from an existing secret. New secrets require string values for every key.
+For key-value input on stdin, pass a nonempty JSON object. A string value such as `{"status":"value"}` adds or updates the key. An unquoted JSON `null`, as in `{"obsolete":null}`, deletes a key from an existing secret. New secrets require string values for every key.
 
 Updates to an existing key-value secret change only the supplied keys. Omitted keys keep their stored values without being read. To delete a key without piping JSON, use `--delete-key KEY`. Repeat the flag to delete multiple keys. A secret must retain at least one key.
 
