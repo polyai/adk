@@ -256,7 +256,9 @@ class SecretsCommand(BaseCommand):
                 raise ValueError("A secret value is required on stdin.")
             return None
         if value_type == "single":
-            return raw
+            if raw.endswith("\r\n"):
+                return raw[:-2]
+            return raw.removesuffix("\n")
         try:
             value = json.loads(raw)
         except ValueError:

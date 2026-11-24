@@ -204,6 +204,23 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertEqual(code, 0, output + errors)
         self.assertNotIn(SENTINEL, output + errors)
 
+    def test_single_stdin_strips_one_line_ending(self):
+        for raw, expected in (
+            ("token", "token"),
+            ("token\n", "token"),
+            ("token\r\n", "token"),
+            ("token\n\n", "token\n"),
+            ("  first\nsecond  \n", "  first\nsecond  "),
+        ):
+            with self.subTest(raw=raw):
+                code, output, errors = self.run_cli("set", "single", "--json", stdin=raw)
+                self.assertEqual(code, 0, output + errors)
+                self.assertEqual(self.state["single"]["secret_value"], expected)
+        self.calls.clear()
+        code, _, _ = self.run_cli("set", "single", "--json", stdin="\n")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.calls, [("GET", None)])
+
     def test_create_defaults_to_current_project_and_never_echoes_a_value(self):
         with self.assertLogs("poly.handlers.platform_api", level="DEBUG") as logs:
             code, output, errors = self.run_cli("set", "new-token", "--json", stdin=SENTINEL)

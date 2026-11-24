@@ -77,7 +77,7 @@ For an existing secret, select **Value / keys**, **Type**, **Description**, or *
 
 The save summary shows the secret name, type, key names added, updated or removed, and project access before and after. Confirm to apply the changes to every environment, including live. Press Enter at the confirmation to cancel. Scripts must supply a name and use `--yes` or `--json` when piping input.
 
-Values come from hidden prompts or stdin, never a command argument. At the interactive value prompt, typing `null` stores it as text. A single value read from stdin is used verbatim, including any trailing newline.
+Values come from hidden prompts or stdin, never a command argument. At the interactive value prompt, typing `null` stores it as text. For a single value on stdin, the CLI strips one trailing line ending (LF or CRLF). It preserves embedded newlines and surrounding spaces. To store a final newline, supply one extra newline on stdin.
 
 To change type, use `--type single` or `--type key-value` and supply the complete replacement value, even when also changing the description or project access. For a conversion to key-value, enter every new key and its string value. Conversions reject `--delete-key` and JSON `null` entries.
 
