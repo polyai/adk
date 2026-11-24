@@ -241,9 +241,11 @@ class SecretsCommand(BaseCommand):
         if args.json:
             json_print({"success": True, "secret": metadata})
         else:
+            from rich.markup import escape
+
             from poly.output.console import success
 
-            success(f"Saved account secret '{args.name}'.")
+            success(f"Saved account secret '{escape(args.name)}'.")
 
     @staticmethod
     def _read_stdin(value_type: str, required: bool) -> str | dict | None:

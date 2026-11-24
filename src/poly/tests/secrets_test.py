@@ -230,6 +230,14 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertEqual(json.loads(output)["secret"]["display_name"], "new-token")
         self.assertNotIn(SENTINEL, output + errors + "\n".join(logs.output))
 
+    def test_saved_message_prints_rich_markup_in_secret_name_literally(self):
+        name = "sample[/red]"
+        code, output, errors = self.run_cli("set", name, "--yes", stdin=SENTINEL)
+        self.assertEqual(code, 0, output + errors)
+        self.assertEqual(self.state[name]["secret_value"], SENTINEL)
+        self.assertIn(f"Saved account secret '{name}'.", output)
+        self.assertNotIn(SENTINEL, output + errors)
+
     def test_metadata_edit_preserves_value_type_and_inaccessible_project_access(self):
         original = deepcopy(self.state["credentials"])
         code, output, _ = self.run_cli(
