@@ -147,7 +147,7 @@ poly deployments list             # what is deployed where
 
 ## Account secrets
 
-Use `poly secrets list` to discover account secret names and project access without reading values. `--project` filters the list to secrets the current project can use. The human list shows project names and IDs. Scripts receive IDs in JSON.
+Use `poly secrets list` to discover account secret names and project access without reading values. `--current-project` filters the list to secrets the current project can use. The human list shows project names and IDs. Scripts receive IDs in JSON.
 
 In a terminal, `poly secrets set` opens a picker. Supply a name to skip it. For a new secret, choose the type, optional description and projects with access. For an existing secret, select the fields to edit. The key editor lists stored key names and supports adding, updating and deleting keys. Values come from hidden prompts or stdin. Review the key names and access changes before confirming the live save. Use `poly secrets delete` without names for a multi-select picker. Scripts must supply names and pass `--yes` or `--json` to confirm writes.
 

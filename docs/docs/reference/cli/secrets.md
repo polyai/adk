@@ -25,12 +25,12 @@ Examples:
 
 ```bash
 poly secrets list
-poly secrets list --project --json
+poly secrets list --current-project --json
 ```
 
 | Flag | Description |
 |---|---|
-| `--project` | Only list secrets the current project can use. |
+| `--current-project` | Only list secrets the current project can use. |
 
 `--json` output shape:
 

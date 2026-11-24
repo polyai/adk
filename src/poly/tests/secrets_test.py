@@ -168,7 +168,7 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertIsNone(next(pending, None))
 
     def test_list_returns_metadata_and_filters_current_project(self):
-        code, output, _ = self.run_cli("list", "--project", "--json")
+        code, output, _ = self.run_cli("list", "--current-project", "--json")
         self.assertEqual(code, 0, output)
         records = json.loads(output)["secrets"]
         self.assertEqual([record["display_name"] for record in records], ["credentials"])

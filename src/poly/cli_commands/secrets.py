@@ -47,7 +47,7 @@ class SecretsCommand(BaseCommand):
             help="List metadata for account secrets; values are never shown.",
         )
         list_parser.add_argument(
-            "--project", action="store_true", help="Only show secrets this project can use."
+            "--current-project", action="store_true", help="Only show secrets this project can use."
         )
         set_parser = actions.add_parser(
             "set",
@@ -147,7 +147,7 @@ class SecretsCommand(BaseCommand):
     def secrets_list(cls, args: Namespace) -> None:
         """List metadata in human or JSON form."""
         project = load_project(args.path, output_json=args.json)
-        secrets = project.list_secrets(project_only=args.project)
+        secrets = project.list_secrets(project_only=args.current_project)
         if args.json:
             json_print({"success": True, "secrets": secrets})
         else:
