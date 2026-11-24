@@ -126,18 +126,21 @@ Voices are in Agent Studio's order: the shared library before imported voices, t
 `--json` output shape:
 
 ~~~json
-[
-  {
-    "id": "VOICE-1a2b3c4d",
-    "name": "Anne",
-    "provider": "elevenlabs",
-    "providerVoiceId": "abc123",
-    "config": {},
-    "metadata": {"accent": "en-GB", "gender": "female"},
-    "isPolyVoice": true,
-    "owner": "global"
-  }
-]
+{
+  "success": true,
+  "voices": [
+    {
+      "id": "VOICE-1a2b3c4d",
+      "name": "Anne",
+      "provider": "elevenlabs",
+      "providerVoiceId": "abc123",
+      "config": {},
+      "metadata": {"accent": "en-GB", "gender": "female"},
+      "isPolyVoice": true,
+      "owner": "global"
+    }
+  ]
+}
 ~~~
 
 `owner` is `global` for the shared library and `account` for the account's own voices.
@@ -165,7 +168,17 @@ A name matches whatever its case and spacing. When more than one language has a 
 | `--language` | The voice's language, for a name more than one language uses. |
 | `--refresh` | Fetch the voices first, even if the saved copy is recent. |
 
-`--json` returns the voice in the same shape as one entry of [`poly library voice list`](#poly-library-voice-list).
+`--json` output shape, with the voice in the same shape as one entry of [`poly library voice list`](#poly-library-voice-list):
+
+~~~json
+{
+  "success": true,
+  "voice": {
+    "id": "VOICE-1a2b3c4d",
+    "name": "Anne"
+  }
+}
+~~~
 
 ## `poly library voice play`
 

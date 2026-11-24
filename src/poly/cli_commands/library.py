@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Any, Optional
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
-from poly.cli_commands.shared import REGION_CHOICES, load_project, region_type
+from poly.cli_commands.shared import REGION_CHOICES, fail, load_project, region_type
 from poly.library import Library, TTSVoice
 from poly.output.json_output import json_print
 
@@ -495,7 +495,9 @@ class LibraryCommand(BaseCommand):
         sorted_tts_voices = sorted(tts_voices, key=lambda tts_voice: tts_voice.rank_key())
 
         if output_json:
-            json_print([tts_voice.to_dict() for tts_voice in sorted_tts_voices])
+            json_print(
+                {"success": True, "voices": [voice.to_dict() for voice in sorted_tts_voices]}
+            )
 
         else:
             with paged_output(title="TTS voices", header_lines=1):
@@ -509,13 +511,7 @@ class LibraryCommand(BaseCommand):
         try:
             return library.find_tts_voice(voice, language=language)
         except ValueError as e:
-            if output_json:
-                json_print({"success": False, "message": str(e)})
-            else:
-                from poly.output.console import error
-
-                error(str(e))
-            sys.exit(1)
+            fail(str(e), output_json)
 
     @classmethod
     def show_tts_voice(
@@ -550,7 +546,7 @@ class LibraryCommand(BaseCommand):
         tts_voice = cls._find_tts_voice(library, voice, language, output_json=output_json)
 
         if output_json:
-            json_print(tts_voice.to_dict())
+            json_print({"success": True, "voice": tts_voice.to_dict()})
         else:
             print_tts_voice(tts_voice)
 
@@ -575,7 +571,7 @@ class LibraryCommand(BaseCommand):
         Returns:
             None
         """
-        from poly.output.console import error, info, success, warning
+        from poly.output.console import error, info, success
 
         if refresh:
             library = cls._refresh_library(base_path, output_json=output_json)
@@ -588,23 +584,19 @@ class LibraryCommand(BaseCommand):
 
         samples = tts_voice.metadata.get("sample_voice") or []
         sample_url = samples[0] if samples else None
+        if sample_url is None:
+            fail(f"{tts_voice.name} has no recording to play.", output_json)
 
         if output_json:
             json_print(
                 {
-                    "success": sample_url is not None,
+                    "success": True,
                     "voice_id": tts_voice.voice_id,
                     "name": tts_voice.name,
                     "sample_voice_url": sample_url,
                 }
             )
-            if sample_url is None:
-                sys.exit(1)
             return
-
-        if sample_url is None:
-            warning(f"{tts_voice.name} has no recording to play.")
-            sys.exit(1)
 
         # The audio stack ships in the optional [call] extra; import it only when playing.
         try:
