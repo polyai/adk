@@ -714,6 +714,7 @@ class SecretsCommandTest(unittest.TestCase):
         with self.prompts(
             (("select", "Secret"), "credentials"),
             (("checkbox", "What do you want to change?"), ["value"]),
+            (("select", "How do you want to change the value?"), "edit"),
             (("select", "Keys"), edit_username),
             (("password", "Value for username"), "new-user"),
             (("select", "Keys"), "add"),
@@ -736,14 +737,22 @@ class SecretsCommandTest(unittest.TestCase):
             self.assertNotIn(value, output + errors)
 
     def test_picking_conversion_prompts_directly_for_the_replacement(self):
+        def select_value(kwargs):
+            self.assertEqual(
+                [c.title for c in kwargs["choices"]],
+                ["Value or type", "Description", "Project access"],
+            )
+            return ["value"]
+
         def convert(kwargs):
-            choice = next(c for c in kwargs["choices"] if c.value == "type")
+            choice = next(c for c in kwargs["choices"] if c.value == "convert")
             self.assertEqual(choice.title, "Convert to key-value (replaces the stored value)")
-            return [choice.value]
+            return choice.value
 
         with self.prompts(
             (("select", "Secret"), "single"),
-            (("checkbox", "What do you want to change?"), convert),
+            (("checkbox", "What do you want to change?"), select_value),
+            (("select", "How do you want to change the value?"), convert),
             (("text", "Key (leave empty to finish)"), "primary"),
             (("password", "Value for primary"), SENTINEL),
             (("text", "Key (leave empty to finish)"), ""),
@@ -757,13 +766,14 @@ class SecretsCommandTest(unittest.TestCase):
 
     def test_declining_conversion_does_not_write(self):
         def convert(kwargs):
-            choice = next(c for c in kwargs["choices"] if c.value == "type")
+            choice = next(c for c in kwargs["choices"] if c.value == "convert")
             self.assertEqual(choice.title, "Convert to single (replaces keys username, password)")
-            return [choice.value, "access"]
+            return choice.value
 
         original = deepcopy(self.state)
         with self.prompts(
-            (("checkbox", "What do you want to change?"), convert),
+            (("checkbox", "What do you want to change?"), ["value", "access"]),
+            (("select", "How do you want to change the value?"), convert),
             (("checkbox", "Projects with access"), []),
             (("password", "Secret value"), SENTINEL),
             (("confirm", "Save to every environment, including live?"), False),
@@ -802,6 +812,7 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertEqual(code, 0, output + errors)
         with self.prompts(
             (("checkbox", "What do you want to change?"), ["value"]),
+            (("select", "How do you want to change the value?"), "edit"),
             (("password", "Secret value"), None),
         ):
             code, output, errors = self.run_cli("set", "single", tty=True)

@@ -91,22 +91,34 @@ def prompt_fields(
         or args.delete_keys
     ):
         return True
-    target = "single" if existing["value_type"] == "key-value" else "key-value"
-    keys = ", ".join(existing.get("keys") or [])
-    replaced = f"keys {keys}" if keys else "the stored value"
     fields = _ask(
         questionary.checkbox(
             "What do you want to change?",
             choices=[
-                Choice("Value / keys", "value"),
-                Choice(f"Convert to {target} (replaces {replaced})", "type"),
+                Choice("Value or type", "value"),
                 Choice("Description", "description"),
                 Choice("Project access", "access"),
             ],
         )
     )
-    if "type" in fields:
-        args.value_type = target
+    if "value" in fields:
+        has_keys = existing["value_type"] == "key-value"
+        target = "single" if has_keys else "key-value"
+        keys = ", ".join(existing.get("keys") or [])
+        replaced = f"keys {keys}" if keys else "the stored value"
+        action = _ask(
+            questionary.select(
+                "How do you want to change the value?",
+                choices=[
+                    Choice("Edit keys" if has_keys else "Replace single value", "edit"),
+                    Choice(f"Convert to {target} (replaces {replaced})", "convert"),
+                ],
+            )
+        )
+        if action == "convert":
+            args.value_type = target
+        else:
+            args.replace_value = True
     if "description" in fields:
         args.description = _ask(
             questionary.text("Description", default=existing.get("description") or "")
@@ -117,14 +129,7 @@ def prompt_fields(
         # Deltas leave existing grants to inaccessible or deleted projects intact.
         args.grant = [pid for pid in selected if pid not in current]
         args.revoke = [pid for pid in current if pid not in selected]
-    args.replace_value = "value" in fields
-    return bool(
-        args.replace_value
-        or args.description is not None
-        or args.grant
-        or args.revoke
-        or "type" in fields
-    )
+    return bool("value" in fields or args.description is not None or args.grant or args.revoke)
 
 
 def _new_key_values() -> dict:
