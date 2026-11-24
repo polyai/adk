@@ -56,7 +56,6 @@ from poly.output.json_output import json_print
 logger = logging.getLogger(__name__)
 
 COMMANDS = [
-    SecretsCommand,
     InitCommand,
     SetupCommand,
     LoginCommand,
@@ -81,6 +80,7 @@ COMMANDS = [
     AudioCacheCommand,
     FunctionsCommand,
     CampaignCommand,
+    SecretsCommand,
     TestingCommand,
     RTCCommand,
     ChatCommand,
