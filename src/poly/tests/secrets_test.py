@@ -734,16 +734,35 @@ class SecretsCommandTest(unittest.TestCase):
         for value in (SENTINEL, "new-user", "null"):
             self.assertNotIn(value, output + errors)
 
+    def test_picking_conversion_prompts_directly_for_the_replacement(self):
+        def convert(kwargs):
+            choice = next(c for c in kwargs["choices"] if c.value == "type")
+            self.assertEqual(choice.title, "Convert to key-value (replaces the stored value)")
+            return [choice.value]
+
+        with self.prompts(
+            (("select", "Secret"), "single"),
+            (("checkbox", "What do you want to change?"), convert),
+            (("text", "Key (leave empty to finish)"), "primary"),
+            (("password", "Value for primary"), SENTINEL),
+            (("text", "Key (leave empty to finish)"), ""),
+            (("confirm", "Save to every environment, including live?"), True),
+        ):
+            code, output, errors = self.run_cli("set", tty=True)
+        self.assertEqual(code, 0, output + errors)
+        self.assertEqual(self.state["single"]["value_type"], "key-value")
+        self.assertEqual(self.state["single"]["secret_value"], {"primary": SENTINEL})
+        self.assertNotIn(SENTINEL, output + errors)
+
     def test_declining_conversion_does_not_write(self):
         def convert(kwargs):
-            choice = kwargs["choices"][1]
-            self.assertIn("replaces keys username, password", choice.title)
-            return choice.value
+            choice = next(c for c in kwargs["choices"] if c.value == "type")
+            self.assertEqual(choice.title, "Convert to single (replaces keys username, password)")
+            return [choice.value, "access"]
 
         original = deepcopy(self.state)
         with self.prompts(
-            (("checkbox", "What do you want to change?"), ["type", "access"]),
-            (("select", "Type"), convert),
+            (("checkbox", "What do you want to change?"), convert),
             (("checkbox", "Projects with access"), []),
             (("password", "Secret value"), SENTINEL),
             (("confirm", "Save to every environment, including live?"), False),

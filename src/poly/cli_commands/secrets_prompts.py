@@ -91,31 +91,22 @@ def prompt_fields(
         or args.delete_keys
     ):
         return True
+    target = "single" if existing["value_type"] == "key-value" else "key-value"
+    keys = ", ".join(existing.get("keys") or [])
+    replaced = f"keys {keys}" if keys else "the stored value"
     fields = _ask(
         questionary.checkbox(
             "What do you want to change?",
             choices=[
                 Choice("Value / keys", "value"),
-                Choice("Type", "type"),
+                Choice(f"Convert to {target} (replaces {replaced})", "type"),
                 Choice("Description", "description"),
                 Choice("Project access", "access"),
             ],
         )
     )
     if "type" in fields:
-        current = existing["value_type"]
-        target = "single" if current == "key-value" else "key-value"
-        keys = ", ".join(existing.get("keys") or [])
-        replaced = f"keys {keys}" if keys else "the stored value"
-        args.value_type = _ask(
-            questionary.select(
-                "Type",
-                choices=[
-                    Choice(f"Keep {current}", current),
-                    Choice(f"Convert to {target} (replaces {replaced})", target),
-                ],
-            )
-        )
+        args.value_type = target
     if "description" in fields:
         args.description = _ask(
             questionary.text("Description", default=existing.get("description") or "")
@@ -132,7 +123,7 @@ def prompt_fields(
         or args.description is not None
         or args.grant
         or args.revoke
-        or (args.value_type and args.value_type != existing["value_type"])
+        or "type" in fields
     )
 
 
