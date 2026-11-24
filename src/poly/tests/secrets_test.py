@@ -797,6 +797,47 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertEqual(code, 0, output + errors)
         self.assertEqual(self.state["credentials"]["access_config"], ["deleted", "project-c"])
 
+    def test_accepting_current_description_skips_confirmation_and_write(self):
+        for stored in ("Single value", "", None):
+            with self.subTest(stored=stored):
+                self.state["single"]["description"] = stored
+                self.calls.clear()
+                with self.prompts(
+                    (("checkbox", "What do you want to change?"), ["description"]),
+                    (("text", "Description"), lambda prompt: prompt["default"]),
+                ):
+                    code, output, errors = self.run_cli("set", "single", tty=True)
+                self.assertEqual(code, 0, output + errors)
+                self.assertIn("No changes selected.", output)
+                self.assertEqual(self.calls, [("GET", None)])
+
+    def test_unchanged_description_is_omitted_from_key_patch(self):
+        with self.prompts(
+            (("checkbox", "What do you want to change?"), ["value", "description"]),
+            (("select", "How do you want to change the value?"), "edit"),
+            (("text", "Description"), lambda prompt: prompt["default"]),
+            (("select", "Keys"), ("update", "username")),
+            (("password", "Value for username"), "updated"),
+            (("select", "Keys"), "done"),
+            (("confirm", "Save to every environment, including live?"), True),
+        ):
+            code, output, errors = self.run_cli("set", "credentials", tty=True)
+        self.assertEqual(code, 0, output + errors)
+        self.assertEqual(
+            self.calls[-1],
+            ("PATCH", {"display_name": "credentials", "secret_value": {"username": "updated"}}),
+        )
+
+    def test_clearing_an_existing_description_is_saved(self):
+        with self.prompts(
+            (("checkbox", "What do you want to change?"), ["description"]),
+            (("text", "Description"), ""),
+            (("confirm", "Save to every environment, including live?"), True),
+        ):
+            code, output, errors = self.run_cli("set", "single", tty=True)
+        self.assertEqual(code, 0, output + errors)
+        self.assertEqual(self.state["single"]["description"], "")
+
     def test_metadata_and_value_can_be_changed_together(self):
         with self.prompts((("password", "Secret value"), "replacement")):
             code, output, errors = self.run_cli(

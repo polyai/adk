@@ -120,9 +120,10 @@ def prompt_fields(
         else:
             args.replace_value = True
     if "description" in fields:
-        args.description = _ask(
-            questionary.text("Description", default=existing.get("description") or "")
-        )
+        current_description = existing.get("description") or ""
+        description = _ask(questionary.text("Description", default=current_description))
+        if description != current_description:
+            args.description = description
     if "access" in fields:
         current = existing.get("access_config") or []
         selected = _pick_access(names, current)
