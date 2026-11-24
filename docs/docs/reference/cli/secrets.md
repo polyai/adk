@@ -82,10 +82,10 @@ When changing only description or project access, the stored value is preserved 
 |---|---|
 | `--description TEXT` | Set or clear the description. |
 | `--key-value` | Create a key-value secret instead of a single-value secret. |
-| `--project ID` | Replace project access; repeat for multiple projects. |
+| `--project PROJECT_ID` | Replace project access; repeat for multiple projects. |
 | `--no-projects` | Give no projects access. Mutually exclusive with `--project`. |
-| `--grant ID` | Add a project to an existing secret's access; repeat as needed. |
-| `--revoke ID` | Remove a project from an existing secret's access; repeat as needed. |
+| `--grant PROJECT_ID` | Add a project to an existing secret's access; repeat as needed. |
+| `--revoke PROJECT_ID` | Remove a project from an existing secret's access; repeat as needed. |
 | `--replace-value` | Also prompt for a value or key updates when changing metadata. |
 | `--delete-key KEY` | Delete a key from an existing key-value secret; repeat for multiple keys. |
 

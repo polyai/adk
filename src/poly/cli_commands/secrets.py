@@ -24,9 +24,9 @@ class SecretsCommand(BaseCommand):
         parser = subparsers.add_parser(
             cls.command,
             parents=[parents.verbose],
-            help="Manage account secrets without revealing stored values.",
+            help="Manage account secrets",
             description=(
-                "Manage account secrets without revealing stored values.\n"
+                "Manage account secrets\n"
                 "Changes take effect immediately for projects with access, including live.\n\n"
                 "Examples:\n"
                 "  poly secrets list\n"
@@ -68,17 +68,23 @@ class SecretsCommand(BaseCommand):
             dest="projects",
             action="append",
             default=None,
-            metavar="ID",
+            metavar="PROJECT_ID",
             help="Replace access with these project IDs; repeat for multiple projects.",
         )
         access.add_argument(
             "--no-projects", action="store_true", help="Give no projects access to this secret."
         )
         set_parser.add_argument(
-            "--grant", action="append", metavar="ID", help="Grant access to an existing secret."
+            "--grant",
+            action="append",
+            metavar="PROJECT_ID",
+            help="Grant access to an existing secret.",
         )
         set_parser.add_argument(
-            "--revoke", action="append", metavar="ID", help="Revoke access to an existing secret."
+            "--revoke",
+            action="append",
+            metavar="PROJECT_ID",
+            help="Revoke access to an existing secret.",
         )
         set_parser.add_argument(
             "--replace-value",
