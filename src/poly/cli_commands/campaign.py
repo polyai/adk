@@ -535,7 +535,8 @@ class CampaignCommand(BaseCommand):
         }
 
         project, campaign = cls._live_campaign(base_path, name, output_json)
-        project.check_campaign_test(campaign, contact, **step_inputs)
+        if not (force or output_json):
+            project.check_campaign_test(campaign, contact, **step_inputs)
         cls._confirm(
             f"Test live campaign '{campaign.name}'? This calls and texts {contact.get('phone')}.",
             force,
@@ -549,7 +550,7 @@ class CampaignCommand(BaseCommand):
             info(f"Run: {shlex.quote(json.dumps(run_started))}")
         try:
             step = project.wait_for_campaign_test_step(campaign, step_id, timeout=timeout)
-        except (SourcererAPIError, TimeoutError) as e:
+        except (ValueError, SourcererAPIError, TimeoutError) as e:
             cls._fail(str(e), output_json, campaign=name, step_id=step_id, run=run_started)
         failure = cls._test_failure(step)
         done = failure is None

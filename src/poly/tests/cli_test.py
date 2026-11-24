@@ -8191,6 +8191,57 @@ class CampaignCommandTest(unittest.TestCase):
         self.assertEqual(self.request.call_count, 1)
         self.assertEqual(self.request.call_args.kwargs["timeout"], (10, 300))
 
+    def test_failed_read_of_main_after_the_step_keeps_the_run(self):
+        """The step already called or texted, so a failure naming its nodes keeps the run."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        self._respond(
+            make_mock_response(202, {"step_id": "TSTEP-1", "status": "queued", "run": run}),
+            make_mock_response(
+                200, {"step_id": "TSTEP-1", "status": "done", "run": run, "result": {"steps": []}}
+            ),
+        )
+        reads = iter([(self.project.resources, [])])
+
+        def pull(*_):
+            try:
+                return next(reads)
+            except StopIteration:
+                raise ValueError("API error: Try again shortly") from None
+
+        self.pull_main.side_effect = pull
+
+        with self.assertRaises(SystemExit) as exit:
+            self._run("test", self.CAMPAIGN, phone="+15550100", output_json=True)
+
+        self.assertEqual(exit.exception.code, 1)
+        output = self._output()
+        self.assertEqual(output["error"], "API error: Try again shortly")
+        self.assertEqual((output["step_id"], output["run"]), ("TSTEP-1", run))
+
+    def test_json_test_step_reads_main_once_per_need(self):
+        """Without a prompt there is no separate check: main is read for the lookup, the
+        start node and the result's node names."""
+        run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
+        self._respond(
+            make_mock_response(202, {"step_id": "TSTEP-2", "status": "queued", "run": run}),
+            make_mock_response(
+                200, {"step_id": "TSTEP-2", "status": "done", "run": run, "result": {"steps": []}}
+            ),
+        )
+
+        self._run(
+            "test",
+            self.CAMPAIGN,
+            phone="+15550100",
+            start_node="Reminder call",
+            run=json.dumps(run),
+            send_result="no_answer",
+            output_json=True,
+        )
+
+        self.assertEqual(self.pull_main.call_count, 3)
+        self.assertTrue(self._output()["success"])
+
     def test_failed_poll_is_reported_as_the_error_it_is_with_the_run(self):
         """A poll that fails ends the wait with the platform's error, keeping the step and run."""
         run = {"contact_id": "C1", "enrolment_id": "E1", "graph_hash": "H1"}
