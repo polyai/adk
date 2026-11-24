@@ -104,6 +104,29 @@ ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
 
 
 @dataclass
+class SecretUpdate:
+    """Account secret metadata and requested edits, without stored or pending values."""
+
+    name: str
+    existing: Optional[dict]
+    value_type: str
+    description: Optional[str]
+    access: list[str]
+    access_requested: bool
+    delete_keys: list[str]
+
+    @property
+    def type_changed(self) -> bool:
+        return self.existing is not None and self.value_type != self.existing["value_type"]
+
+    @property
+    def patches_keys(self) -> bool:
+        return (
+            self.existing is not None and not self.type_changed and self.value_type == "key-value"
+        )
+
+
+@dataclass
 class ResourceChangeSet:
     new: ResourceMap
     updated: ResourceMap
@@ -4940,13 +4963,46 @@ class AgentStudioProject:
         Changing type replaces the entire value. Updates that keep the key-value
         type preserve omitted keys and accept None to delete a key.
         """
+        update = self.prepare_secret_update(
+            name,
+            self.get_secret_metadata(name),
+            description=description,
+            value_type=value_type,
+            projects=projects,
+            no_projects=no_projects,
+            grant=grant,
+            revoke=revoke,
+            delete_keys=delete_keys,
+        )
+        return self.save_secret_update(update, value)
+
+    def get_account_projects(self) -> dict[str, str]:
+        """Return visible project names keyed by their IDs."""
+        return AgentStudioInterface.get_projects(self.region, self.account_id)
+
+    def prepare_secret_update(
+        self,
+        name: str,
+        existing: Optional[dict],
+        *,
+        description: Optional[str] = None,
+        value_type: Optional[str] = None,
+        projects: Optional[list[str]] = None,
+        no_projects: bool = False,
+        grant: Optional[list[str]] = None,
+        revoke: Optional[list[str]] = None,
+        delete_keys: Optional[list[str]] = None,
+        account_projects: Optional[dict[str, str]] = None,
+    ) -> SecretUpdate:
+        """Validate metadata edits and resolve the access list before collecting values."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("A nonempty secret name is required.")
         for project_ids in (projects, grant, revoke):
             if project_ids is not None and (
                 not isinstance(project_ids, list)
                 or not all(isinstance(project, str) and project.strip() for project in project_ids)
             ):
                 raise ValueError("Project IDs must be a list of nonempty strings.")
-        existing = self.get_secret_metadata(name)
         if description is not None and not isinstance(description, str):
             raise ValueError("Secret descriptions must be strings.")
         if (projects is not None and no_projects) or (
@@ -4964,37 +5020,13 @@ class AgentStudioProject:
             raise ValueError("Keys to delete must be a list of nonempty strings.")
 
         value_type = self.resolve_secret_type(existing, value_type, delete_keys)
-        type_changed = existing is not None and value_type != existing["value_type"]
-        patch_keys = existing is not None and not type_changed and value_type == "key-value"
-        if value is None and type_changed:
-            raise ValueError("Changing secret type requires a complete replacement value.")
-        if value is None and existing is None:
-            raise ValueError("A value is required to create a secret.")
-        if value is not None:
-            if value_type == "key-value":
-                if (
-                    not isinstance(value, dict)
-                    or not value
-                    or not all(
-                        isinstance(key, str)
-                        and key
-                        and (isinstance(item, str) or (patch_keys and item is None))
-                        for key, item in value.items()
-                    )
-                ):
-                    raise ValueError(
-                        "Key-value input requires a nonempty object with nonempty keys and string "
-                        "values. Use null only to delete keys when updating a key-value secret."
-                    )
-            elif not isinstance(value, str) or not value:
-                raise ValueError("A single-value secret requires a nonempty string.")
-
         access = list(existing.get("access_config") or []) if existing else [self.project_id]
         # Allow revoking stale IDs that are still on the secret's access list.
         requested_projects = set(projects or []) | set(grant or [])
         requested_projects.update(project for project in (revoke or []) if project not in access)
         if requested_projects:
-            account_projects = AgentStudioInterface.get_projects(self.region, self.account_id)
+            if account_projects is None:
+                account_projects = self.get_account_projects()
             unknown_projects = requested_projects.difference(account_projects)
             if unknown_projects:
                 raise ValueError(
@@ -5010,7 +5042,46 @@ class AgentStudioProject:
             access.extend(grant or [])
         if not all(isinstance(project, str) and project.strip() for project in access):
             raise ValueError("Project IDs must be nonempty strings.")
-        if patch_keys and (value is not None or delete_keys):
+        return SecretUpdate(
+            name=name,
+            existing=existing,
+            value_type=value_type,
+            description=description,
+            access=list(dict.fromkeys(access)),
+            access_requested=projects is not None or no_projects or bool(grant or revoke),
+            delete_keys=delete_keys or [],
+        )
+
+    def save_secret_update(
+        self, update: SecretUpdate, value: Optional[str | dict[str, Optional[str]]]
+    ) -> dict:
+        """Validate the supplied value and apply the prepared edits."""
+        existing = update.existing
+        delete_keys = update.delete_keys
+        if value is None and update.type_changed:
+            raise ValueError("Changing secret type requires a complete replacement value.")
+        if value is None and existing is None:
+            raise ValueError("A value is required to create a secret.")
+        if value is not None:
+            if update.value_type == "key-value":
+                if (
+                    not isinstance(value, dict)
+                    or not value
+                    or not all(
+                        isinstance(key, str)
+                        and key
+                        and (isinstance(item, str) or (update.patches_keys and item is None))
+                        for key, item in value.items()
+                    )
+                ):
+                    raise ValueError(
+                        "Key-value input requires a nonempty object with nonempty keys and string "
+                        "values. Use null only to delete keys when updating a key-value secret."
+                    )
+            elif not isinstance(value, str) or not value:
+                raise ValueError("A single-value secret requires a nonempty string.")
+
+        if update.patches_keys and (value is not None or delete_keys):
             changes = dict(value or {})
             if set(changes) & set(delete_keys or []):
                 raise ValueError("A key cannot be supplied in both the value and --delete-key.")
@@ -5024,20 +5095,20 @@ class AgentStudioProject:
                         remaining.add(key)
                 if not remaining:
                     raise ValueError("A key-value secret must retain at least one key.")
-            body = {"display_name": name, "secret_value": changes}
-            if description is not None:
-                body["description"] = description
-            if projects is not None or no_projects or grant or revoke:
-                body["access_config"] = list(dict.fromkeys(access))
+            body = {"display_name": update.name, "secret_value": changes}
+            if update.description is not None:
+                body["description"] = update.description
+            if update.access_requested:
+                body["access_config"] = update.access
             return AgentStudioInterface.patch_secret(self.region, self.account_id, body)
 
         body = {
-            "display_name": name,
-            "description": description
-            if description is not None
+            "display_name": update.name,
+            "description": update.description
+            if update.description is not None
             else ((existing or {}).get("description") or ""),
-            "value_type": value_type,
-            "access_config": list(dict.fromkeys(access)),
+            "value_type": update.value_type,
+            "access_config": update.access,
         }
         if value is not None:
             body["secret_value"] = value

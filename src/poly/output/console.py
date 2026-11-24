@@ -12,7 +12,7 @@ import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rich import box
@@ -28,6 +28,10 @@ from rich.theme import Theme
 from rich.tree import Tree
 
 from poly.constants import DATA_AGGS
+
+if TYPE_CHECKING:
+    from poly.project import SecretUpdate
+
 
 # Global verbose flag — set by CLI before commands run
 _verbose = False
@@ -108,7 +112,13 @@ def info(message: str) -> None:
     console.print(f"[info]{message}[/info]")
 
 
-def print_secrets(secrets: list[dict]) -> None:
+def project_label(project_id: str, projects: dict[str, str]) -> str:
+    """Label a project by name and ID, falling back to the stored ID."""
+    name = projects.get(project_id)
+    return f"{name} ({project_id})" if name and name != project_id else project_id
+
+
+def print_secrets(secrets: list[dict], projects: dict[str, str]) -> None:
     """Display account secret metadata without reading or rendering stored values."""
     if not secrets:
         info("No matching account secrets.")
@@ -125,7 +135,10 @@ def print_secrets(secrets: list[dict]) -> None:
                     secret.get("display_name"),
                     secret.get("description"),
                     secret.get("value_type"),
-                    "\n".join(secret.get("access_config") or []) or "None",
+                    "\n".join(
+                        project_label(pid, projects) for pid in secret.get("access_config") or []
+                    )
+                    or "None",
                     secret.get("created_at"),
                     secret.get("last_updated"),
                 )
@@ -133,6 +146,43 @@ def print_secrets(secrets: list[dict]) -> None:
         )
     with paged_output():
         console.print(table)
+
+
+def print_secret_summary(
+    update: "SecretUpdate", value: str | dict | None, projects: dict[str, str]
+) -> None:
+    """Show pending metadata and key names before saving, without rendering values."""
+    before = update.existing or {}
+    secret_type = update.value_type
+    if update.type_changed:
+        secret_type = f"{before['value_type']} → {secret_type}"
+    lines = [f"Secret: {update.name}", f"Type: {secret_type}"]
+    if update.description is not None:
+        lines.append(f"Description: {update.description or '(empty)'}")
+    old_keys = set(before.get("keys") or [])
+    supplied = {k for k, v in value.items() if v is not None} if isinstance(value, dict) else set()
+    removed = set(update.delete_keys)
+    if isinstance(value, dict):
+        removed.update(k for k, v in value.items() if v is None)
+    if update.type_changed:
+        removed.update(old_keys)
+    if isinstance(value, str):
+        lines.append("Value: supplied")
+    for label, keys in (
+        ("Keys added", supplied - old_keys),
+        ("Keys updated", supplied & old_keys),
+        ("Keys removed", removed),
+    ):
+        if keys:
+            lines.append(f"{label}: {', '.join(sorted(keys))}")
+
+    def labels(ids: list[str]) -> str:
+        return ", ".join(project_label(pid, projects) for pid in ids) or "None"
+
+    lines.append(
+        f"Project access: {labels(before.get('access_config') or [])} → {labels(update.access)}"
+    )
+    console.print(Text("\n".join(lines)))
 
 
 def plain(message: str) -> None:

@@ -7,7 +7,7 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import ExitStack, contextmanager, redirect_stderr, redirect_stdout
 from copy import deepcopy
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -74,7 +74,10 @@ class SecretsCommandTest(unittest.TestCase):
             return make_mock_response(
                 json_body={
                     "projects": [
-                        {"id": project_id, "name": project_id}
+                        {
+                            "id": project_id,
+                            "name": "Bravo" if project_id == "project-b" else project_id,
+                        }
                         for project_id in (
                             self.project.project_id,
                             "project-b",
@@ -137,6 +140,33 @@ class SecretsCommandTest(unittest.TestCase):
                 code = error.code
         return code, stdout.getvalue(), stderr.getvalue()
 
+    @contextmanager
+    def prompts(self, *steps):
+        """Script terminal answers and reject unexpected, repeated, or skipped prompts."""
+        pending = iter(steps)
+        calls = []
+
+        def answer(kind, message, **kwargs):
+            expected, result = next(pending)
+            self.assertEqual(expected, (kind, message))
+            calls.append((kind, message, kwargs))
+            if callable(result):
+                result = result(kwargs)
+            if result is not None and "validate" in kwargs:
+                self.assertIs(kwargs["validate"](result), True)
+            return Mock(ask=Mock(return_value=result))
+
+        with ExitStack() as stack:
+            for kind in ("select", "checkbox", "text", "password", "confirm"):
+                stack.enter_context(
+                    patch(
+                        f"questionary.{kind}",
+                        side_effect=lambda *a, kind=kind, **kw: answer(kind, *a, **kw),
+                    )
+                )
+            yield calls
+        self.assertIsNone(next(pending, None))
+
     def test_list_returns_metadata_and_filters_current_project(self):
         code, output, _ = self.run_cli("list", "--project", "--json")
         self.assertEqual(code, 0, output)
@@ -150,10 +180,29 @@ class SecretsCommandTest(unittest.TestCase):
             code, output, errors = self.run_cli("list")
         self.assertEqual(code, 0, errors)
         self.assertIn("credentials", output)
+        self.assertIn("Bravo", output)
         self.assertNotIn(SENTINEL, output + errors + "\n".join(logs.output))
         for path in Path(self.workspace.name).rglob("*"):
             if path.is_file():
                 self.assertNotIn(SENTINEL.encode(), path.read_bytes())
+
+    def test_project_names_permission_is_optional_for_listing_and_value_updates(self):
+        def request(**kwargs):
+            if kwargs["url"].endswith("/projects"):
+                return make_mock_response(403)
+            return self.request(**kwargs)
+
+        self.http.side_effect = request
+        with patch.dict("os.environ", COLUMNS="160"):
+            code, output, errors = self.run_cli("list")
+        self.assertEqual(code, 0, output + errors)
+        self.assertIn("project-b", output)
+        with self.prompts((("password", "Secret value"), SENTINEL)):
+            code, output, errors = self.run_cli(
+                "set", "single", "--replace-value", "--yes", tty=True
+            )
+        self.assertEqual(code, 0, output + errors)
+        self.assertNotIn(SENTINEL, output + errors)
 
     def test_create_defaults_to_current_project_and_never_echoes_a_value(self):
         with self.assertLogs("poly.handlers.platform_api", level="DEBUG") as logs:
@@ -277,14 +326,16 @@ class SecretsCommandTest(unittest.TestCase):
 
     def test_convert_single_to_key_value_interactively_replaces_value_and_preserves_metadata(self):
         self.state["single"]["access_config"] = ["project-b"]
-        prompts = [Mock(), Mock(), Mock()]
-        for prompt, key in zip(prompts, ["first", "second", ""]):
-            prompt.ask.return_value = key
-        with (
-            patch("questionary.text", side_effect=prompts),
-            patch("getpass.getpass", side_effect=[SENTINEL, "null"]),
+        with self.prompts(
+            (("text", "Key (leave empty to finish)"), "first"),
+            (("password", "Value for first"), SENTINEL),
+            (("text", "Key (leave empty to finish)"), "second"),
+            (("password", "Value for second"), "null"),
+            (("text", "Key (leave empty to finish)"), ""),
         ):
-            code, output, errors = self.run_cli("set", "single", "--type", "key-value", tty=True)
+            code, output, errors = self.run_cli(
+                "set", "single", "--type", "key-value", "--yes", tty=True
+            )
         self.assertEqual(code, 0, output + errors)
         self.assertNotIn(SENTINEL, output + errors)
         self.assertEqual(
@@ -349,7 +400,7 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertFalse(any(method != "GET" for method, _ in self.calls))
 
     def test_type_change_rejects_key_deletion_before_prompting(self):
-        with patch("getpass.getpass") as hidden, patch("questionary.text") as prompt:
+        with patch("questionary.password") as hidden, patch("questionary.text") as prompt:
             for name, target in (("single", "key-value"), ("credentials", "single")):
                 with self.subTest(name=name):
                     code, output, errors = self.run_cli(
@@ -392,7 +443,7 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertNotIn(SENTINEL, output + errors)
 
     def test_delete_key_skips_value_prompt_and_preserves_other_keys(self):
-        with patch("getpass.getpass") as prompt:
+        with patch("questionary.password") as prompt:
             code, output, errors = self.run_cli(
                 "set",
                 "credentials",
@@ -470,61 +521,186 @@ class SecretsCommandTest(unittest.TestCase):
         )
 
     def test_json_value_input_refuses_a_terminal_without_prompting(self):
-        with patch("getpass.getpass") as prompt:
+        with patch("questionary.password") as prompt:
             code, output, _ = self.run_cli("set", "new", "--json", tty=True)
         self.assertEqual(code, 1)
         self.assertFalse(json.loads(output)["success"])
         prompt.assert_not_called()
         self.assertNotIn("new", self.state)
 
-    def test_single_value_prompt_is_hidden(self):
-        with patch("getpass.getpass", return_value=SENTINEL) as prompt:
-            code, output, errors = self.run_cli("set", "new", tty=True)
+    def test_new_secret_picker_prompts_only_once_for_name_and_confirms(self):
+        def choose_new(kwargs):
+            choices = kwargs["choices"]
+            self.assertEqual(
+                [c.title for c in choices],
+                ["New secret…", "credentials (key-value)", "single (single)"],
+            )
+            return choices[0].value
+
+        def choose_projects(kwargs):
+            choices = kwargs["choices"]
+            self.assertEqual([c.value for c in choices if c.checked], [self.project.project_id])
+            self.assertIn("Bravo (project-b)", [c.title for c in choices])
+            return [self.project.project_id, "project-b"]
+
+        with self.prompts(
+            (("select", "Secret"), choose_new),
+            (("text", "New secret name"), "new"),
+            (("select", "Type"), "single"),
+            (("text", "Description (optional)"), "Example"),
+            (("checkbox", "Projects with access"), choose_projects),
+            (("password", "Secret value"), SENTINEL),
+            (("confirm", "Save to every environment, including live?"), True),
+        ) as calls:
+            code, output, errors = self.run_cli("set", tty=True)
         self.assertEqual(code, 0, output + errors)
-        prompt.assert_called_once()
+        self.assertFalse(calls[-1][2]["default"])
+        self.assertEqual([method for method, _ in self.calls], ["GET", "POST"])
         self.assertEqual(self.state["new"]["secret_value"], SENTINEL)
+        self.assertEqual(self.state["new"]["access_config"], [self.project.project_id, "project-b"])
+        self.assertIn("Bravo", output)
         self.assertNotIn(SENTINEL, output + errors)
 
-    def test_key_value_prompt_hides_every_value(self):
-        prompts = [Mock(), Mock(), Mock()]
-        for prompt, key in zip(prompts, ["username", "password", ""]):
-            prompt.ask.return_value = key
-        with (
-            patch("questionary.text", side_effect=prompts),
-            patch("getpass.getpass", side_effect=["user", SENTINEL]) as hidden,
+    def test_named_create_uses_supplied_fields_and_duplicate_key_can_be_corrected(self):
+        def finish(kwargs):
+            validate = kwargs["validate"]
+            self.assertIsInstance(validate("first"), str)
+            return ""
+
+        with self.prompts(
+            (("text", "Key (leave empty to finish)"), "first"),
+            (("password", "Value for first"), SENTINEL),
+            (("text", "Key (leave empty to finish)"), finish),
         ):
-            code, output, errors = self.run_cli("set", "new", "--type", "key-value", tty=True)
-        self.assertEqual(code, 0, output + errors)
-        self.assertEqual(hidden.call_count, 2)
-        self.assertEqual(
-            self.state["new"]["secret_value"], {"username": "user", "password": SENTINEL}
-        )
+            code, output, errors = self.run_cli(
+                "set",
+                "new",
+                "--type",
+                "key-value",
+                "--description",
+                "Example",
+                "--no-projects",
+                "--yes",
+                tty=True,
+            )
+        self.assertEqual(code, 0, errors + output)
+        self.assertEqual(self.state["new"]["secret_value"], {"first": SENTINEL})
         self.assertNotIn(SENTINEL, output + errors)
 
-    def test_existing_key_value_prompt_updates_only_the_supplied_key(self):
-        prompts = [Mock(), Mock()]
-        for prompt, key in zip(prompts, ["username", ""]):
-            prompt.ask.return_value = key
-        with (
-            patch("questionary.text", side_effect=prompts),
-            patch("getpass.getpass", return_value="new-user"),
+    def test_edit_keys_from_picker_reviews_and_applies_one_patch(self):
+        def edit_username(kwargs):
+            self.assertIn("Update password", [choice.title for choice in kwargs["choices"]])
+            return next(c.value for c in kwargs["choices"] if c.title == "Update username")
+
+        with self.prompts(
+            (("select", "Secret"), "credentials"),
+            (("checkbox", "What do you want to change?"), ["value"]),
+            (("select", "Keys"), edit_username),
+            (("password", "Value for username"), "new-user"),
+            (("select", "Keys"), "add"),
+            (("text", "Key name"), "extra"),
+            (("password", "Value for extra"), "null"),
+            (("select", "Keys"), "delete"),
+            (("checkbox", "Keys to delete"), ["password"]),
+            (("select", "Keys"), "done"),
+            (("confirm", "Save to every environment, including live?"), True),
+        ):
+            code, output, errors = self.run_cli("set", tty=True)
+        self.assertEqual(code, 0, output + errors)
+        self.assertEqual(
+            self.state["credentials"]["secret_value"], {"username": "new-user", "extra": "null"}
+        )
+        self.assertEqual([method for method, _ in self.calls], ["GET", "PATCH"])
+        for line in ("Keys added: extra", "Keys updated: username", "Keys removed: password"):
+            self.assertIn(line, output)
+        for value in (SENTINEL, "new-user", "null"):
+            self.assertNotIn(value, output + errors)
+
+    def test_declining_conversion_does_not_write(self):
+        def convert(kwargs):
+            choice = kwargs["choices"][1]
+            self.assertIn("replaces keys username, password", choice.title)
+            return choice.value
+
+        original = deepcopy(self.state)
+        with self.prompts(
+            (("checkbox", "What do you want to change?"), ["type", "access"]),
+            (("select", "Type"), convert),
+            (("checkbox", "Projects with access"), []),
+            (("password", "Secret value"), SENTINEL),
+            (("confirm", "Save to every environment, including live?"), False),
         ):
             code, output, errors = self.run_cli("set", "credentials", tty=True)
         self.assertEqual(code, 0, output + errors)
-        self.assertEqual(
-            self.state["credentials"]["secret_value"],
-            {"username": "new-user", "password": SENTINEL},
-        )
+        self.assertIn("key-value → single", output)
+        self.assertIn("Keys removed: password, username", output)
+        self.assertIn("→ None", output)
         self.assertNotIn(SENTINEL, output + errors)
+        self.assertEqual(self.state, original)
+        self.assertEqual(self.calls, [("GET", None)])
+
+    def test_access_checkbox_retains_stale_grants_and_uses_ids(self):
+        self.state["credentials"]["access_config"].append("deleted")
+        with self.prompts(
+            (("checkbox", "What do you want to change?"), ["access"]),
+            (("checkbox", "Projects with access"), ["deleted", "project-c"]),
+        ):
+            code, output, errors = self.run_cli("set", "credentials", "--yes", tty=True)
+        self.assertEqual(code, 0, output + errors)
+        self.assertEqual(self.state["credentials"]["access_config"], ["deleted", "project-c"])
 
     def test_metadata_and_value_can_be_changed_together(self):
-        with patch("getpass.getpass", return_value="replacement"):
+        with self.prompts((("password", "Secret value"), "replacement")):
             code, output, errors = self.run_cli(
-                "set", "single", "--description", "Updated", "--replace-value", tty=True
+                "set", "single", "--description", "Updated", "--replace-value", "--yes", tty=True
             )
         self.assertEqual(code, 0, output + errors)
         self.assertEqual(self.state["single"]["secret_value"], "replacement")
         self.assertEqual(self.state["single"]["description"], "Updated")
+
+    def test_empty_edit_and_cancelled_password_do_not_save(self):
+        with self.prompts((("checkbox", "What do you want to change?"), [])):
+            code, output, errors = self.run_cli("set", "single", tty=True)
+        self.assertEqual(code, 0, output + errors)
+        with self.prompts(
+            (("checkbox", "What do you want to change?"), ["value"]),
+            (("password", "Secret value"), None),
+        ):
+            code, output, errors = self.run_cli("set", "single", tty=True)
+        self.assertEqual(code, 1, output + errors)
+        self.assertTrue(all(method == "GET" for method, _ in self.calls))
+
+    def test_noninteractive_writes_require_names_and_confirmation(self):
+        with self.prompts():
+            for args in (
+                ["set", "--json"],
+                ["delete", "--json"],
+                ["set", "single"],
+                ["delete", "single"],
+            ):
+                with self.subTest(args=args):
+                    code, _, _ = self.run_cli(*args, stdin=SENTINEL)
+                    self.assertNotEqual(code, 0)
+            self.assertFalse(self.calls)
+            code, output, errors = self.run_cli("set", "new", "--yes", stdin=SENTINEL)
+        self.assertEqual(code, 0, output + errors)
+        self.assertNotIn(SENTINEL, output + errors)
+        self.assertEqual(self.state["new"]["secret_value"], SENTINEL)
+
+    def test_delete_without_names_uses_checkbox_and_confirms(self):
+        with self.prompts(
+            (("checkbox", "Select secrets to delete"), ["single", "credentials"]),
+            (
+                (
+                    "confirm",
+                    "Delete these account secrets for every project with access, including live? single, credentials",
+                ),
+                True,
+            ),
+        ):
+            code, output, errors = self.run_cli("delete", tty=True)
+        self.assertEqual(code, 0, output + errors)
+        self.assertEqual(self.state, {})
 
     def test_invalid_input_never_writes_or_exposes_the_supplied_value(self):
         for value in ('{"password":"' + SENTINEL, '{"password": null}', "{}", "null"):

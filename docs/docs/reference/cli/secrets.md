@@ -19,7 +19,7 @@ These commands update account secrets directly, across branches and environments
 
 ## `poly secrets list`
 
-List each secret's name, description, type, project access, creation time, and last update. Stored values are never shown.
+List each secret's name, description, type, project access, creation time, and last update. Visible projects are shown by name and ID. If a project name is unavailable, the list shows its stored ID. JSON output uses project IDs. Stored values are never shown.
 
 Examples:
 
@@ -57,6 +57,7 @@ Create a secret or update an existing one. A new secret is single-value by defau
 Examples:
 
 ```bash
+poly secrets set
 poly secrets set <secret_name>
 poly secrets set <secret_name> --type key-value
 poly secrets set <secret_name> --type single
@@ -65,11 +66,18 @@ poly secrets set <secret_name> --description 'Service authentication'
 poly secrets set <secret_name> --grant project-b --revoke project-a
 poly secrets set <secret_name> --no-projects
 poly secrets set <secret_name> --description 'Updated' --replace-value
+poly secrets set <secret_name> --yes < /secure/path/token
 poly secrets set <secret_name> --json < /secure/path/token
 poly secrets set <secret_name> --type key-value --json < /secure/path/credentials.json
 ```
 
-Values come from hidden prompts or stdin, never a command argument. Interactive key-value input prompts separately for each key and hides each value. At the interactive value prompt, typing `null` stores it as text. A single value read from stdin is used verbatim, including any trailing newline.
+In a terminal, run `poly secrets set` to pick an existing secret or choose **New secret…**. Supplying the name skips the picker. For a new secret, choose the type, enter an optional description, and select the projects that can use it. The current project starts checked. Flags supply these choices directly.
+
+For an existing secret, select **Value / keys**, **Type**, **Description**, or **Project access**. You can select several at once. Edit flags go straight to the requested changes. The key editor shows existing key names and lets you update a value, add a key, or select keys to delete. Choose **Done** to review the changes.
+
+The save summary shows the secret name, type, key names added, updated or removed, and project access before and after. Confirm to apply the changes to every environment, including live. Press Enter at the confirmation to cancel. Scripts must supply a name and use `--yes` or `--json` when piping input.
+
+Values come from hidden prompts or stdin, never a command argument. At the interactive value prompt, typing `null` stores it as text. A single value read from stdin is used verbatim, including any trailing newline.
 
 To change type, use `--type single` or `--type key-value` and supply the complete replacement value, even when also changing the description or project access. For a conversion to key-value, enter every new key and its string value. Conversions reject `--delete-key` and JSON `null` entries.
 
@@ -83,10 +91,11 @@ Use project IDs visible to you in the secret's account. You can also revoke an I
 
 | Argument | Description |
 |---|---|
-| `<secret_name>` | The secret's display name. |
+| `<secret_name>` | Optional in a terminal. Supply the display name to skip the secret picker. |
 
 | Flag | Description |
 |---|---|
+| `--yes` | Skip the live save confirmation. |
 | `--description TEXT` | Set or clear the description. |
 | `--type {single,key-value}` | Choose the type for a new secret or convert an existing secret with a complete replacement value. |
 | `--project PROJECT_ID` | Replace project access; repeat for multiple projects. |
@@ -118,11 +127,12 @@ Use project IDs visible to you in the secret's account. You can also revoke an I
 
 ## `poly secrets delete`
 
-Delete one or more secrets from the account. Interactive deletion asks for confirmation; `--json` skips confirmation.
+Delete one or more secrets from the account. Run `poly secrets delete` in a terminal to select secrets with a checkbox, or supply their names. Review the selected names and confirm deletion. For scripts, supply the names and use `--yes` or `--json`.
 
 Examples:
 
 ```bash
+poly secrets delete
 poly secrets delete <secret_name>
 poly secrets delete <secret_name> <another_secret_name> --yes
 poly secrets delete <secret_name> --json
@@ -130,7 +140,7 @@ poly secrets delete <secret_name> --json
 
 | Argument | Description |
 |---|---|
-| `<secret_name>` | One or more secret display names. |
+| `<secret_name>` | Optional in a terminal. Supply one or more display names to skip the checkbox. |
 
 | Flag | Description |
 |---|---|
