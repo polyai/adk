@@ -158,6 +158,18 @@ class SecretsCommand(BaseCommand):
             )
             print_secrets(secrets, projects)
 
+    @staticmethod
+    def _edit_options(args: Namespace) -> dict:
+        return {
+            "description": args.description,
+            "value_type": args.value_type,
+            "projects": args.projects,
+            "no_projects": args.no_projects,
+            "grant": args.grant,
+            "revoke": args.revoke,
+            "delete_keys": args.delete_keys,
+        }
+
     @classmethod
     def secrets_set(cls, args: Namespace) -> None:
         """Read a value safely and save the secret through the project layer."""
@@ -167,7 +179,7 @@ class SecretsCommand(BaseCommand):
             raise ValueError("Provide a secret name when running noninteractively.")
         if not interactive and not (args.yes or args.json):
             raise ValueError("Use --yes or --json to confirm a noninteractive save to live.")
-        if args.name:
+        if args.name is not None:
             existing = project.get_secret_metadata(args.name)
         else:
             from poly.cli_commands.secrets_prompts import pick_secret
@@ -176,29 +188,25 @@ class SecretsCommand(BaseCommand):
             args.name = pick_secret(records)
             existing = next((r for r in records if r["display_name"] == args.name), None)
 
-        account_projects = None
+        account_projects = cls._project_names(project) if interactive else None
+        options = cls._edit_options(args)
+        update = project.prepare_secret_update(
+            args.name, existing, account_projects=account_projects, **options
+        )
         if interactive:
             from poly.cli_commands import secrets_prompts
             from poly.output.console import info
 
-            account_projects = cls._project_names(project)
             if not secrets_prompts.prompt_fields(
                 args, existing, account_projects, project.project_id
             ):
                 info("No changes selected.")
                 return
-        update = project.prepare_secret_update(
-            args.name,
-            existing,
-            description=args.description,
-            value_type=args.value_type,
-            projects=args.projects,
-            no_projects=args.no_projects,
-            grant=args.grant,
-            revoke=args.revoke,
-            delete_keys=args.delete_keys,
-            account_projects=account_projects,
-        )
+            selected_options = cls._edit_options(args)
+            if selected_options != options:
+                update = project.prepare_secret_update(
+                    args.name, existing, account_projects=account_projects, **selected_options
+                )
         needs_value = (
             existing is None
             or update.type_changed

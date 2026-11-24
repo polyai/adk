@@ -289,8 +289,40 @@ class SecretsCommandTest(unittest.TestCase):
             "--json",
         )
         self.assertEqual(code, 0, output)
+        self.assertEqual([method for method, _ in self.calls], ["GET", "PUT"])
         self.assertEqual(self.state["credentials"]["access_config"], ["project-b", "project-c"])
         self.assertEqual(self.state["credentials"]["secret_value"]["password"], SENTINEL)
+
+    def test_invalid_set_flags_fail_before_any_edit_prompt(self):
+        cases = (
+            ("new-name", ["--grant", "project-c"], "require an existing secret"),
+            ("new-name", ["--revoke", "project-c"], "require an existing secret"),
+            ("new-name", ["--delete-key", "token"], "requires an existing key-value secret"),
+            ("new-name", ["--project", "missing"], "not found or not visible"),
+            (
+                "credentials",
+                ["--grant", "project-c", "--revoke", "project-c"],
+                "both granted and revoked",
+            ),
+            ("credentials", ["--type", "single", "--delete-key", "token"], "changing secret type"),
+        )
+        for name, flags, message in cases:
+            with self.subTest(name=name, flags=flags), self.prompts():
+                self.calls.clear()
+                code, output, errors = self.run_cli("set", name, *flags, tty=True)
+                self.assertEqual(code, 1)
+                self.assertIn(message, output + errors)
+                self.assertEqual(self.calls, [("GET", None)])
+
+    def test_invalid_project_flag_is_rejected_before_reading_stdin(self):
+        with patch("poly.cli_commands.secrets.SecretsCommand._read_stdin") as read_value:
+            code, output, _ = self.run_cli(
+                "set", "new-name", "--project", "missing", "--json", stdin=SENTINEL
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn("not found or not visible", json.loads(output)["error"])
+        read_value.assert_not_called()
+        self.assertEqual(self.calls, [("GET", None)])
 
     def test_rejects_unknown_project_ids_before_writing(self):
         for flag in ("--project", "--grant", "--revoke"):
