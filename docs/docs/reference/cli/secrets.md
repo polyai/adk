@@ -5,7 +5,7 @@ description: Reference for the `poly secrets` command.
 
 # `poly secrets`
 
-Manage secrets stored in the current project's account without revealing their values. `poly secrets` requires a subcommand. Replace `<secret_name>` with the secret's display name, omitting the angle brackets.
+Manage account secrets. `poly secrets` requires a subcommand. Replace `<secret_name>` with the secret's display name, omitting the angle brackets.
 
 Examples:
 
