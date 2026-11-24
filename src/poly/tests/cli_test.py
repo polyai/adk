@@ -7753,7 +7753,7 @@ class CampaignCommandTest(unittest.TestCase):
 
         self.assertEqual(
             self._output()["error"],
-            "Could not read --contact file ada.json: No such file or directory.",
+            "No --contact file at ada.json.",
         )
 
     def _on_branch(self, main_resources: dict | None = None) -> MagicMock:

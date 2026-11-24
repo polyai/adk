@@ -10,6 +10,7 @@ from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project, require_outbound_campaigns_enabled
 from poly.handlers.sdk import SourcererAPIError
 from poly.output.json_output import json_print
+from poly.utils.json_io import read_json_file
 
 
 class CampaignCommand(BaseCommand):
@@ -281,13 +282,10 @@ class CampaignCommand(BaseCommand):
 
     @staticmethod
     def _read_json_file(path: str, flag: str) -> Any:
-        try:
-            with open(path, encoding="utf-8") as file:
-                return json.load(file)
-        except OSError as e:
-            raise ValueError(f"Could not read {flag} file {path}: {e.strerror}.") from e
-        except json.JSONDecodeError as e:
-            raise ValueError(f"{flag} file {path} is not valid JSON: {e}") from e
+        data = read_json_file(path)
+        if data is None:
+            raise ValueError(f"No {flag} file at {path}.")
+        return data
 
     @staticmethod
     def _parse_json(value: str, flag: str) -> Any:
