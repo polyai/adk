@@ -26,7 +26,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 import requests
 import websockets
@@ -39,15 +39,13 @@ from aiortc import (
 from aiortc.mediastreams import MediaStreamTrack
 
 from poly.call.session import CallSession
+from poly.handlers.platform_api import PlatformAPIHandler
 
 logger = logging.getLogger(__name__)
 
-PROVISION_PATH = "/api/v1/call"
 # The mode that runs the project's agent (the bridge's other mode only echoes audio).
 BRIDGE_CALL_MODE = "voice-agent"
-CALL_TOKEN_HEADER = "X-Call-Token"
 
-_HTTP_TIMEOUT_SECONDS = 15
 _CONNECT_TIMEOUT_SECONDS = 15
 _FALLBACK_ICE_SERVERS = [{"urls": "stun:stun.cloudflare.com:3478"}]
 
@@ -79,30 +77,29 @@ class BridgeCredentials:
     ice_servers: list[dict[str, Any]] = field(default_factory=list)
 
 
-def resolve_bridge_url(path: str, bridge_url: str) -> str:
-    """Resolve a path the bridge returned against the bridge's own origin.
+def bridge_path(path: str) -> str:
+    """Check a path the bridge returned in a call's credentials.
 
     Call credentials are only ever sent back to the bridge, so anything that is not a
     plain path on it is refused.
 
     Args:
         path: A path from the bridge's credentials, such as ``/api/v1/call/x/sdp``.
-        bridge_url: The bridge base URL.
 
     Returns:
-        The absolute URL on the bridge.
+        The path, unchanged.
 
     Raises:
         BridgeError: If the path is not a plain absolute path.
     """
     if not path.startswith("/") or path.startswith("//") or any(c in path for c in "?#@\\"):
         raise BridgeError("The call service returned an unusable credential URL")
-    return f"{bridge_url.rstrip('/')}{path}"
+    return path
 
 
-def events_socket_url(path: str, bridge_url: str) -> str:
-    """Build the events WebSocket URL from the bridge base URL."""
-    url = resolve_bridge_url(path, bridge_url)
+def events_socket_url(path: str, region: str) -> str:
+    """Build the events WebSocket URL for a call in a region."""
+    url = PlatformAPIHandler.get_call_bridge_url(region) + bridge_path(path)
     scheme = "wss" if urlsplit(url).scheme == "https" else "ws"
     return f"{scheme}://{url.split('://', 1)[1]}"
 
@@ -164,55 +161,53 @@ def ice_configuration(ice_servers: list[dict[str, Any]]) -> RTCConfiguration:
     return RTCConfiguration(iceServers=servers)
 
 
-def _is_unsupported_agent(response: requests.Response) -> bool:
+def _is_unsupported_agent(response: requests.Response | None) -> bool:
     """Whether a refused provision says the bridge does not serve this agent."""
     try:
-        return bool(response.json().get("fallback"))
-    except ValueError:
+        return response is not None and bool(response.json().get("fallback"))
+    except (ValueError, AttributeError):
         return False
 
 
 def _provision(session: CallSession, caller: str) -> BridgeCredentials:
-    response = requests.post(
-        f"{session.bridge_url.rstrip('/')}{PROVISION_PATH}",
-        headers={"Authorization": f"Bearer {session.auth_token}"},
-        json=build_provision_body(session, caller),
-        timeout=_HTTP_TIMEOUT_SECONDS,
-        allow_redirects=False,
-    )
-    if not response.ok:
-        if _is_unsupported_agent(response):
+    try:
+        payload = PlatformAPIHandler.create_call(
+            session.region, session.auth_token, build_provision_body(session, caller)
+        )
+    except requests.HTTPError as exc:
+        if _is_unsupported_agent(exc.response):
             raise BridgeError(
                 "This agent's voice setup can't be called from the ADK yet. "
                 "Call it from Agent Studio instead."
-            )
-        raise BridgeError(f"Could not start the call ({response.status_code})")
-    return parse_provision_response(response.json())
+            ) from exc
+        raise BridgeError(f"Could not start the call ({_status(exc)})") from exc
+    except ValueError as exc:
+        raise BridgeError("The call service sent a reply that could not be read") from exc
+    return parse_provision_response(payload)
 
 
-def _signaling_post(url: str, token: str, body: dict[str, Any], step: str) -> dict[str, Any]:
+def _signaling_post(
+    session: CallSession, path: str, token: str, body: dict[str, Any], step: str
+) -> dict[str, Any]:
     """Post one signalling step, authenticated with the call token."""
-    response = requests.post(
-        url,
-        headers={CALL_TOKEN_HEADER: token} if token else {},
-        json={**({"token": token} if token else {}), **body},
-        timeout=_HTTP_TIMEOUT_SECONDS,
-        allow_redirects=False,
-    )
-    if not response.ok:
-        raise BridgeError(f"The call service rejected the {step} step ({response.status_code})")
-    return response.json() if response.content else {}
+    try:
+        return PlatformAPIHandler.post_call_signaling(
+            session.region, bridge_path(path), token, body
+        )
+    except requests.HTTPError as exc:
+        raise BridgeError(f"The call service rejected the {step} step ({_status(exc)})") from exc
+    except ValueError as exc:
+        raise BridgeError(f"The call service's reply to the {step} step could not be read") from exc
 
 
 def _delete_call(session: CallSession, creds: BridgeCredentials) -> None:
     """Tear the call down. The bridge also reaps it when the events socket drops."""
-    with contextlib.suppress(requests.RequestException):
-        requests.delete(
-            f"{session.bridge_url.rstrip('/')}{PROVISION_PATH}/{quote(creds.call_id, safe='')}",
-            headers={CALL_TOKEN_HEADER: creds.token} if creds.token else {},
-            timeout=_HTTP_TIMEOUT_SECONDS,
-            allow_redirects=False,
-        )
+    with contextlib.suppress(requests.RequestException, ValueError):
+        PlatformAPIHandler.delete_call(session.region, creds.call_id, creds.token)
+
+
+def _status(exc: requests.HTTPError) -> str:
+    return str(exc.response.status_code) if exc.response is not None else "no response"
 
 
 def _caller_mid(pc: RTCPeerConnection, track: MediaStreamTrack) -> str:
@@ -228,11 +223,7 @@ async def _pull_agent_audio(
 ) -> None:
     """Ask for the agent's audio and answer the renegotiation offer that adds it."""
     pull = await asyncio.to_thread(
-        _signaling_post,
-        resolve_bridge_url(creds.pull_url, session.bridge_url),
-        creds.token,
-        {},
-        "audio request",
+        _signaling_post, session, creds.pull_url, creds.token, {}, "audio request"
     )
     sdp = pull.get("sdp")
     if not sdp:
@@ -241,7 +232,8 @@ async def _pull_agent_audio(
     await pc.setLocalDescription(await pc.createAnswer())
     await asyncio.to_thread(
         _signaling_post,
-        resolve_bridge_url(creds.renegotiate_url, session.bridge_url),
+        session,
+        creds.renegotiate_url,
         creds.token,
         {"sdp": pc.localDescription.sdp},
         "audio setup",
@@ -316,7 +308,8 @@ async def run_bridge_call(
         await pc.setLocalDescription(await pc.createOffer())
         answer = await asyncio.to_thread(
             _signaling_post,
-            resolve_bridge_url(creds.connect_url, session.bridge_url),
+            session,
+            creds.connect_url,
             creds.token,
             {"sdp": pc.localDescription.sdp, "mid": _caller_mid(pc, source)},
             "connect",
@@ -331,7 +324,7 @@ async def run_bridge_call(
 
         await _pull_agent_audio(pc, session, creds)
 
-        events_url = events_socket_url(creds.events_url, session.bridge_url)
+        events_url = events_socket_url(creds.events_url, session.region)
         async with websockets.connect(events_url) as ws:
             # The socket stays unauthenticated until this first frame arrives.
             await ws.send(json.dumps({"type": "auth", "token": creds.token}))

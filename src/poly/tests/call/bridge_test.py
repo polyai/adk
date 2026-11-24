@@ -19,16 +19,18 @@ pytest.importorskip("aiortc")
 from poly.call import bridge  # noqa: E402
 from poly.call.bridge import (  # noqa: E402
     BridgeError,
+    bridge_path,
     build_provision_body,
     events_socket_url,
     ice_configuration,
     parse_provision_response,
-    resolve_bridge_url,
     run_bridge_call,
 )
 from poly.call.session import CallSession  # noqa: E402
+from poly.tests.testing_utils import make_mock_response  # noqa: E402
 
-BRIDGE = "https://api.test.poly.ai/webrtc-bridge"
+REGION = "us-1"
+BRIDGE = "https://api.us.poly.ai/webrtc-bridge"
 
 
 def make_session(**overrides) -> CallSession:
@@ -37,7 +39,7 @@ def make_session(**overrides) -> CallSession:
         "project_id": "proj-1",
         "variant_id": "",
         "auth_token": "studio-token",
-        "bridge_url": BRIDGE,
+        "region": REGION,
     }
     fields.update(overrides)
     return CallSession(**fields)
@@ -63,25 +65,14 @@ def provision_payload() -> dict:
 
 def response(status: int = 200, payload: dict | None = None) -> MagicMock:
     """A ``requests`` response with the given status and JSON body."""
-    mock = MagicMock()
-    mock.status_code = status
-    mock.ok = 200 <= status < 300
-    mock.content = b"{}" if payload is not None else b""
-    if payload is None:
-        mock.json.side_effect = ValueError("no body")
-    else:
-        mock.json.return_value = payload
-    return mock
+    return make_mock_response(status, payload)
 
 
-class ResolveBridgeUrlTest(unittest.TestCase):
-    """Tests for resolve_bridge_url and events_socket_url."""
+class BridgePathTest(unittest.TestCase):
+    """Tests for bridge_path and events_socket_url."""
 
-    def test_resolves_a_path_against_the_bridge(self):
-        self.assertEqual(
-            resolve_bridge_url("/api/v1/call/x/sdp", BRIDGE + "/"),
-            BRIDGE + "/api/v1/call/x/sdp",
-        )
+    def test_accepts_a_plain_path(self):
+        self.assertEqual(bridge_path("/api/v1/call/x/sdp"), "/api/v1/call/x/sdp")
 
     def test_refuses_anything_that_could_leave_the_bridge(self):
         for path in (
@@ -91,18 +82,20 @@ class ResolveBridgeUrlTest(unittest.TestCase):
             "/api/v1/call?token=x",
             "/api/v1/call#frag",
             "/@elsewhere.example",
+            "/api\\v1",
         ):
             with self.assertRaises(BridgeError, msg=path):
-                resolve_bridge_url(path, BRIDGE)
+                bridge_path(path)
 
-    def test_events_socket_uses_the_websocket_scheme(self):
+    def test_events_socket_is_on_the_regional_bridge(self):
         self.assertEqual(
-            events_socket_url("/api/v1/call/x/events", BRIDGE),
-            "wss://api.test.poly.ai/webrtc-bridge/api/v1/call/x/events",
+            events_socket_url("/api/v1/call/x/events", REGION),
+            "wss://api.us.poly.ai/webrtc-bridge/api/v1/call/x/events",
         )
-        self.assertEqual(
-            events_socket_url("/events", "http://localhost:8080"), "ws://localhost:8080/events"
-        )
+
+    def test_events_socket_refuses_an_unusable_path(self):
+        with self.assertRaises(BridgeError):
+            events_socket_url("//elsewhere.example/events", REGION)
 
 
 class ProvisionBodyTest(unittest.TestCase):
@@ -162,77 +155,109 @@ class IceConfigurationTest(unittest.TestCase):
 class ProvisionTest(unittest.TestCase):
     """Tests for the provisioning request."""
 
-    @patch("poly.call.bridge.requests.post")
-    def test_posts_the_studio_token_to_the_bridge(self, mock_post):
-        mock_post.return_value = response(200, provision_payload())
+    @patch("requests.request")
+    def test_posts_the_studio_token_to_the_bridge(self, mock_request):
+        mock_request.return_value = response(200, provision_payload())
 
         creds = bridge._provision(make_session(variant_id="VARIANT-x"), "user@example.com")
 
         self.assertEqual(creds.call_id, "LOCAL-1")
-        args, kwargs = mock_post.call_args
-        self.assertEqual(args[0], BRIDGE + "/api/v1/call")
-        self.assertEqual(kwargs["headers"], {"Authorization": "Bearer studio-token"})
-        self.assertEqual(kwargs["json"]["variantId"], "VARIANT-x")
+        kwargs = mock_request.call_args.kwargs
+        self.assertEqual(kwargs["method"], "POST")
+        self.assertEqual(kwargs["url"], BRIDGE + "/api/v1/call")
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer studio-token")
+        self.assertNotIn("X-API-KEY", kwargs["headers"])
+        self.assertEqual(json.loads(kwargs["data"])["variantId"], "VARIANT-x")
         self.assertFalse(kwargs["allow_redirects"])
+        self.assertIsNotNone(kwargs["timeout"])
 
-    @patch("poly.call.bridge.requests.post")
-    def test_a_refusal_naming_another_call_path_says_the_agent_is_unsupported(self, mock_post):
-        mock_post.return_value = response(409, {"error": "unsupported", "fallback": "other"})
+    @patch("requests.request")
+    def test_a_refusal_naming_another_call_path_says_the_agent_is_unsupported(self, mock_request):
+        mock_request.return_value = response(409, {"error": "unsupported", "fallback": "other"})
 
         with self.assertRaises(BridgeError) as ctx:
             bridge._provision(make_session(), "")
 
         self.assertIn("can't be called from the ADK yet", str(ctx.exception))
 
-    @patch("poly.call.bridge.requests.post")
-    def test_any_other_refusal_reports_the_status(self, mock_post):
-        mock_post.return_value = response(401)
+    @patch("requests.request")
+    def test_any_other_refusal_reports_the_status(self, mock_request):
+        mock_request.return_value = response(401)
 
         with self.assertRaises(BridgeError) as ctx:
             bridge._provision(make_session(), "")
 
         self.assertEqual(str(ctx.exception), "Could not start the call (401)")
 
+    @patch("requests.request")
+    def test_an_unreadable_reply_is_a_bridge_error(self, mock_request):
+        mock_request.return_value = response(200)
+
+        with self.assertRaises(BridgeError):
+            bridge._provision(make_session(), "")
+
 
 class SignalingPostTest(unittest.TestCase):
     """Tests for the per-call signalling requests."""
 
-    @patch("poly.call.bridge.requests.post")
-    def test_authenticates_with_the_call_token(self, mock_post):
-        mock_post.return_value = response(200, {"sdp": "answer"})
+    @patch("requests.request")
+    def test_authenticates_with_the_call_token_header(self, mock_request):
+        mock_request.return_value = response(200, {"sdp": "answer"})
 
-        result = bridge._signaling_post(BRIDGE + "/sdp", "call-token", {"sdp": "offer"}, "connect")
+        result = bridge._signaling_post(
+            make_session(), "/api/v1/call/LOCAL-1/sdp", "call-token", {"sdp": "offer"}, "connect"
+        )
 
         self.assertEqual(result, {"sdp": "answer"})
-        _args, kwargs = mock_post.call_args
-        self.assertEqual(kwargs["headers"], {"X-Call-Token": "call-token"})
-        self.assertEqual(kwargs["json"], {"token": "call-token", "sdp": "offer"})
+        kwargs = mock_request.call_args.kwargs
+        self.assertEqual(kwargs["url"], BRIDGE + "/api/v1/call/LOCAL-1/sdp")
+        self.assertEqual(kwargs["headers"]["X-Call-Token"], "call-token")
+        self.assertNotIn("X-API-KEY", kwargs["headers"])
+        # The token travels in the header only, so it stays out of the logged body.
+        self.assertEqual(json.loads(kwargs["data"]), {"sdp": "offer"})
 
-    @patch("poly.call.bridge.requests.post")
-    def test_an_empty_success_body_is_an_empty_result(self, mock_post):
-        mock_post.return_value = response(204)
+    @patch("requests.request")
+    def test_a_no_content_reply_is_an_empty_result(self, mock_request):
+        mock_request.return_value = response(204)
 
-        self.assertEqual(bridge._signaling_post(BRIDGE + "/sdp", "t", {}, "audio setup"), {})
+        result = bridge._signaling_post(make_session(), "/sdp/renegotiate", "t", {}, "audio setup")
 
-    @patch("poly.call.bridge.requests.post")
-    def test_a_rejected_step_is_named(self, mock_post):
-        mock_post.return_value = response(404)
+        self.assertEqual(result, {})
+
+    @patch("requests.request")
+    def test_a_rejected_step_is_named(self, mock_request):
+        mock_request.return_value = response(404)
 
         with self.assertRaises(BridgeError) as ctx:
-            bridge._signaling_post(BRIDGE + "/sdp", "t", {}, "connect")
+            bridge._signaling_post(make_session(), "/sdp", "t", {}, "connect")
 
         self.assertIn("connect", str(ctx.exception))
         self.assertIn("404", str(ctx.exception))
 
-    @patch("poly.call.bridge.requests.delete")
-    def test_teardown_deletes_the_call_with_its_token(self, mock_delete):
+    @patch("requests.request")
+    def test_a_path_off_the_bridge_is_never_requested(self, mock_request):
+        with self.assertRaises(BridgeError):
+            bridge._signaling_post(make_session(), "//elsewhere.example/sdp", "t", {}, "connect")
+
+        mock_request.assert_not_called()
+
+    @patch("requests.request")
+    def test_teardown_deletes_the_call_with_its_token(self, mock_request):
+        mock_request.return_value = response(204)
         creds = parse_provision_response(provision_payload())
 
         bridge._delete_call(make_session(), creds)
 
-        args, kwargs = mock_delete.call_args
-        self.assertEqual(args[0], BRIDGE + "/api/v1/call/LOCAL-1")
+        kwargs = mock_request.call_args.kwargs
+        self.assertEqual(kwargs["method"], "DELETE")
+        self.assertEqual(kwargs["url"], BRIDGE + "/api/v1/call/LOCAL-1")
         self.assertEqual(kwargs["headers"], {"X-Call-Token": "call-token"})
+
+    @patch("requests.request")
+    def test_teardown_ignores_a_call_that_is_already_gone(self, mock_request):
+        mock_request.return_value = response(404)
+
+        bridge._delete_call(make_session(), parse_provision_response(provision_payload()))
 
 
 class FakePeerConnection:
@@ -338,15 +363,13 @@ class RunBridgeCallTest(unittest.TestCase):
         self.started: list[str] = []
         self.stop = asyncio.Event()
 
+        self.deletes: list[tuple[str, dict]] = []
         patches = [
-            patch("poly.call.bridge.requests.post", side_effect=self._post),
-            patch("poly.call.bridge.requests.delete"),
+            patch("requests.request", side_effect=self._request),
             patch("poly.call.bridge.RTCPeerConnection", side_effect=self._new_pc),
             patch("poly.call.bridge.websockets.connect", side_effect=self._connect_socket),
         ]
-        _post, self.mock_delete, self.mock_pc_class, self.mock_ws_connect = (
-            p.start() for p in patches
-        )
+        _request, self.mock_pc_class, self.mock_ws_connect = (p.start() for p in patches)
         self.addCleanup(patch.stopall)
 
     def _new_pc(self, configuration=None):
@@ -357,9 +380,12 @@ class RunBridgeCallTest(unittest.TestCase):
         self.socket.url = url
         return self.socket
 
-    def _post(self, url, headers=None, json=None, **_kwargs):
+    def _request(self, method=None, url=None, headers=None, data=None, **_kwargs):
         step = url.removeprefix(BRIDGE)
-        self.posts.append((step, json))
+        if method == "DELETE":
+            self.deletes.append((step, headers))
+            return response(204)
+        self.posts.append((step, json.loads(data) if data else {}))
         status = self.statuses.get(step, 200)
         if status != 200:
             return response(status)
@@ -404,7 +430,7 @@ class RunBridgeCallTest(unittest.TestCase):
 
         self.assertIs(self.pc.track, self.source)
         _step, connect_body = self.posts[1]
-        self.assertEqual(connect_body, {"token": "call-token", "sdp": "caller-offer", "mid": "0"})
+        self.assertEqual(connect_body, {"sdp": "caller-offer", "mid": "0"})
         self.assertEqual(self.pc.steps[:2], [("local", "caller-offer"), ("remote-answer", "bridge-answer")])
 
     def test_answers_the_offer_that_adds_the_agent_audio(self):
@@ -414,7 +440,7 @@ class RunBridgeCallTest(unittest.TestCase):
             self.pc.steps[2:], [("remote-offer", "agent-offer"), ("local", "caller-answer-1")]
         )
         _step, renegotiate_body = self.posts[3]
-        self.assertEqual(renegotiate_body, {"token": "call-token", "sdp": "caller-answer-1"})
+        self.assertEqual(renegotiate_body, {"sdp": "caller-answer-1"})
 
     def test_uses_the_ice_servers_the_bridge_sent(self):
         self._run()
@@ -426,7 +452,7 @@ class RunBridgeCallTest(unittest.TestCase):
         self._run()
 
         self.assertEqual(
-            self.socket.url, "wss://api.test.poly.ai/webrtc-bridge/api/v1/call/LOCAL-1/events"
+            self.socket.url, "wss://api.us.poly.ai/webrtc-bridge/api/v1/call/LOCAL-1/events"
         )
         self.assertEqual(self.socket.sent, [{"type": "auth", "token": "call-token"}])
 
@@ -466,9 +492,9 @@ class RunBridgeCallTest(unittest.TestCase):
     def test_tears_the_call_down_when_it_ends(self):
         self._run()
 
-        args, kwargs = self.mock_delete.call_args
-        self.assertEqual(args[0], BRIDGE + "/api/v1/call/LOCAL-1")
-        self.assertEqual(kwargs["headers"], {"X-Call-Token": "call-token"})
+        self.assertEqual(
+            self.deletes, [("/api/v1/call/LOCAL-1", {"X-Call-Token": "call-token"})]
+        )
         self.assertTrue(self.pc.closed)
 
     def test_hanging_up_ends_a_live_call(self):
@@ -477,7 +503,7 @@ class RunBridgeCallTest(unittest.TestCase):
         call_id = self._run(on_started=lambda _call_id: self.stop.set())
 
         self.assertEqual(call_id, "LOCAL-1")
-        self.mock_delete.assert_called_once()
+        self.assertEqual(len(self.deletes), 1)
         self.assertTrue(self.pc.closed)
 
     def test_a_connection_lost_mid_call_is_an_error(self):
@@ -490,7 +516,7 @@ class RunBridgeCallTest(unittest.TestCase):
             self._run(on_started=lose_connection)
 
         self.assertEqual(str(ctx.exception), "Connection failed")
-        self.mock_delete.assert_called_once()
+        self.assertEqual(len(self.deletes), 1)
         self.assertTrue(self.pc.closed)
 
     @patch("poly.call.bridge._CONNECT_TIMEOUT_SECONDS", 0.01)
@@ -502,7 +528,7 @@ class RunBridgeCallTest(unittest.TestCase):
 
         self.assertIn("Timed out", str(ctx.exception))
         self.assertEqual(self.started, [])
-        self.mock_delete.assert_called_once()
+        self.assertEqual(len(self.deletes), 1)
         self.assertTrue(self.pc.closed)
 
     def test_a_rejected_connect_step_tears_down(self):
@@ -513,7 +539,7 @@ class RunBridgeCallTest(unittest.TestCase):
 
         self.assertIn("connect", str(ctx.exception))
         self.mock_ws_connect.assert_not_called()
-        self.mock_delete.assert_called_once()
+        self.assertEqual(len(self.deletes), 1)
         self.assertTrue(self.pc.closed)
 
     def test_a_refused_call_opens_no_connection(self):
@@ -523,13 +549,10 @@ class RunBridgeCallTest(unittest.TestCase):
             self._run()
 
         self.mock_pc_class.assert_not_called()
-        self.mock_delete.assert_not_called()
+        self.assertEqual(self.deletes, [])
 
     def test_an_unreachable_bridge_is_a_bridge_error(self):
-        with patch(
-            "poly.call.bridge.requests.post",
-            side_effect=requests.ConnectionError("no route"),
-        ):
+        with patch("requests.request", side_effect=requests.ConnectionError("no route")):
             with self.assertRaises(BridgeError) as ctx:
                 self._run()
 
@@ -537,12 +560,12 @@ class RunBridgeCallTest(unittest.TestCase):
         self.mock_pc_class.assert_not_called()
 
     def test_losing_the_bridge_mid_setup_is_a_bridge_error(self):
-        def post(url, **kwargs):
+        def request(url=None, **kwargs):
             if url.endswith("/sdp/pull"):
                 raise requests.Timeout("slow")
-            return self._post(url, **kwargs)
+            return self._request(url=url, **kwargs)
 
-        with patch("poly.call.bridge.requests.post", side_effect=post):
+        with patch("requests.request", side_effect=request):
             with self.assertRaises(BridgeError) as ctx:
                 self._run()
 

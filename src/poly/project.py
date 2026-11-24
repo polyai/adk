@@ -3296,7 +3296,7 @@ class AgentStudioProject:
             project_id=self.project_id,
             variant_id=variant or "",
             auth_token=auth_token,
-            bridge_url=self.api_handler.get_call_bridge_url(),
+            region=self.region,
         )
 
     def send_message(

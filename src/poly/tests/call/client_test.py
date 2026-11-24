@@ -25,7 +25,7 @@ def _session() -> CallSession:
         project_id="proj-1",
         variant_id="",
         auth_token="t",
-        bridge_url="https://api.test.poly.ai/webrtc-bridge",
+        region="us-1",
     )
 
 

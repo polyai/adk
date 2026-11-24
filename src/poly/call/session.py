@@ -15,11 +15,11 @@ class CallSession:
         project_id: The agent/project ID.
         variant_id: The variant ID, or an empty string if none.
         auth_token: The studio token authorizing the call.
-        bridge_url: The base URL of the WebRTC bridge that places the call.
+        region: The region whose WebRTC bridge places the call.
     """
 
     account_id: str
     project_id: str
     variant_id: str
     auth_token: str
-    bridge_url: str
+    region: str

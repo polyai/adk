@@ -19,7 +19,7 @@ class CallSessionTest(unittest.TestCase):
             "project_id": "proj-1",
             "variant_id": "",
             "auth_token": "studio-token",
-            "bridge_url": "https://api.test.poly.ai/webrtc-bridge",
+            "region": "us-1",
         }
         fields.update(overrides)
         return CallSession(**fields)
@@ -30,7 +30,7 @@ class CallSessionTest(unittest.TestCase):
         self.assertEqual(session.project_id, "proj-1")
         self.assertEqual(session.variant_id, "VARIANT-x")
         self.assertEqual(session.auth_token, "studio-token")
-        self.assertEqual(session.bridge_url, "https://api.test.poly.ai/webrtc-bridge")
+        self.assertEqual(session.region, "us-1")
 
     def test_is_frozen(self):
         with self.assertRaises(dataclasses.FrozenInstanceError):

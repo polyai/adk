@@ -8779,9 +8779,6 @@ class CreateCallSessionTest(unittest.TestCase):
     def test_draft_returns_call_session(self):
         """A draft call maps the deploy response onto a CallSession."""
         self.mock_api_handler.get_branch_call_info.return_value = self._valid_call_info()
-        self.mock_api_handler.get_call_bridge_url.return_value = (
-            "https://api.test.poly.ai/webrtc-bridge"
-        )
 
         session = self.project.create_call_session("draft", variant="VARIANT-x")
 
@@ -8790,7 +8787,7 @@ class CreateCallSessionTest(unittest.TestCase):
         self.assertEqual(session.project_id, self.project.project_id)
         self.assertEqual(session.variant_id, "VARIANT-x")
         self.assertEqual(session.auth_token, "studio-token")
-        self.assertEqual(session.bridge_url, "https://api.test.poly.ai/webrtc-bridge")
+        self.assertEqual(session.region, self.project.region)
 
     def test_draft_defaults_empty_variant(self):
         """A missing variant is normalised to an empty string."""
