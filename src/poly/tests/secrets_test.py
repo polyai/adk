@@ -555,6 +555,43 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertIn("retain at least one key", output)
         self.assertFalse(any(method != "GET" for method, _ in self.calls))
 
+    def test_deleting_all_known_keys_skips_save_summary_and_confirmation(self):
+        with self.prompts():
+            code, output, errors = self.run_cli(
+                "set",
+                "credentials",
+                "--delete-key",
+                "username",
+                "--delete-key",
+                "password",
+                tty=True,
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("retain at least one key", output + errors)
+        self.assertNotIn("Keys removed", output)
+        self.assertEqual(self.calls, [("GET", None)])
+
+    def test_deleting_all_known_keys_with_a_replacement_can_be_confirmed(self):
+        with self.prompts(
+            (("select", "Keys"), "add"),
+            (("text", "Key name"), "replacement"),
+            (("password", "Value for replacement"), SENTINEL),
+            (("select", "Keys"), "done"),
+            (("confirm", "Save to every environment, including live?"), True),
+        ):
+            code, output, errors = self.run_cli(
+                "set",
+                "credentials",
+                "--delete-key",
+                "username",
+                "--delete-key",
+                "password",
+                "--replace-value",
+                tty=True,
+            )
+        self.assertEqual(code, 0, output + errors)
+        self.assertEqual(self.state["credentials"]["secret_value"], {"replacement": SENTINEL})
+
     def test_4xx_shows_structured_error_code_and_message(self):
         detail = {"error_code": "INVALID_ACCESS", "error_message": "Unknown project in access list"}
         for body in (

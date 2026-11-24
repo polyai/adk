@@ -125,6 +125,20 @@ class SecretUpdate:
             self.existing is not None and not self.type_changed and self.value_type == "key-value"
         )
 
+    def validate_remaining_keys(self, values: Optional[dict[str, Optional[str]]] = None) -> None:
+        """Reject a key edit that would leave a known key set empty."""
+        keys = (self.existing or {}).get("keys")
+        if not isinstance(keys, list):
+            return
+        remaining = set(keys).difference(self.delete_keys)
+        for key, value in (values or {}).items():
+            if value is None:
+                remaining.discard(key)
+            else:
+                remaining.add(key)
+        if not remaining:
+            raise ValueError("A key-value secret must retain at least one key.")
+
 
 @dataclass
 class ResourceChangeSet:
@@ -5085,16 +5099,8 @@ class AgentStudioProject:
             changes = dict(value or {})
             if set(changes) & set(delete_keys or []):
                 raise ValueError("A key cannot be supplied in both the value and --delete-key.")
+            update.validate_remaining_keys(changes)
             changes.update(dict.fromkeys(delete_keys or []))
-            if isinstance(existing.get("keys"), list):
-                remaining = set(existing["keys"])
-                for key, item in changes.items():
-                    if item is None:
-                        remaining.discard(key)
-                    else:
-                        remaining.add(key)
-                if not remaining:
-                    raise ValueError("A key-value secret must retain at least one key.")
             body = {"display_name": update.name, "secret_value": changes}
             if update.description is not None:
                 body["description"] = update.description

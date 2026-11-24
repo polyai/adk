@@ -221,6 +221,8 @@ class SecretsCommand(BaseCommand):
             from poly.output.console import print_secret_summary
 
             value = secrets_prompts.prompt_value(update) if needs_value else None
+            if update.delete_keys and value is None:
+                update.validate_remaining_keys()
             if value is None and not (
                 update.delete_keys or update.access_requested or args.description is not None
             ):
