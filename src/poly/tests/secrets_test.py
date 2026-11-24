@@ -397,6 +397,7 @@ class SecretsCommandTest(unittest.TestCase):
                 "set", "single", "--type", "key-value", "--yes", tty=True
             )
         self.assertEqual(code, 0, output + errors)
+        self.assertIn("Project access: Bravo (project-b)", output.splitlines())
         self.assertNotIn(SENTINEL, output + errors)
         self.assertEqual(
             [call for call in self.calls if call[0] != "GET"],

@@ -179,9 +179,11 @@ def print_secret_summary(
     def labels(ids: list[str]) -> str:
         return ", ".join(project_label(pid, projects) for pid in ids) or "None"
 
-    lines.append(
-        f"Project access: {labels(before.get('access_config') or [])} → {labels(update.access)}"
-    )
+    previous_access = before.get("access_config") or []
+    access_label = labels(update.access)
+    if set(previous_access) != set(update.access):
+        access_label = f"{labels(previous_access)} → {access_label}"
+    lines.append(f"Project access: {access_label}")
     console.print(Text("\n".join(lines)))
 
 

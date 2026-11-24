@@ -75,7 +75,7 @@ In a terminal, run `poly secrets set` to pick an existing secret or choose **New
 
 For an existing secret, select **Value / keys**, **Description**, **Project access**, or the option to **Convert to single** or **Convert to key-value**. Selecting conversion prompts for the complete replacement value. You can select several at once. Edit flags go straight to the requested changes. The key editor shows existing key names and lets you update a value, add a key, or select keys to delete. Choose **Done** to review the changes.
 
-The save summary shows the secret name, type, key names added, updated or removed, and project access before and after. Confirm to apply the changes to every environment, including live. Press Enter at the confirmation to cancel. Scripts must supply a name and use `--yes` or `--json` when piping input.
+The save summary shows the secret name, type, key names added, updated or removed, and projects with access. When access changes, it shows the previous and new project lists. Confirm to apply the changes to every environment, including live. Press Enter at the confirmation to cancel. Scripts must supply a name and use `--yes` or `--json` when piping input.
 
 Values come from hidden prompts or stdin, never a command argument. At the interactive value prompt, typing `null` stores it as text. For a single value on stdin, the CLI strips one trailing line ending (LF or CRLF). It preserves embedded newlines and surrounding spaces. To store a final newline, supply one extra newline on stdin.
 
