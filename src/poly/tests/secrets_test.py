@@ -65,6 +65,26 @@ class SecretsCommandTest(unittest.TestCase):
         self.addCleanup(update_patch.stop)
 
     def request(self, **kwargs):
+        if (
+            kwargs["url"]
+            == f"https://api.us.poly.ai/adk/v1/accounts/{self.project.account_id}/projects"
+        ):
+            self.assertEqual(kwargs["method"], "GET")
+            self.assertEqual(kwargs["headers"]["X-API-KEY"], "test-key")
+            return make_mock_response(
+                json_body={
+                    "projects": [
+                        {"id": project_id, "name": project_id}
+                        for project_id in (
+                            self.project.project_id,
+                            "project-b",
+                            "project-c",
+                            "one",
+                            "two",
+                        )
+                    ]
+                }
+            )
         self.assertEqual(
             kwargs["url"],
             f"https://api.us.poly.ai/adk/v1/accounts/{self.project.account_id}/secrets",
@@ -222,6 +242,28 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertEqual(self.state["credentials"]["access_config"], ["project-b", "project-c"])
         self.assertEqual(self.state["credentials"]["secret_value"]["password"], SENTINEL)
+
+    def test_rejects_unknown_project_ids_before_writing(self):
+        for flag in ("--project", "--grant", "--revoke"):
+            with self.subTest(flag=flag):
+                self.calls.clear()
+                code, output, _ = self.run_cli(
+                    "set", "credentials", flag, "PROJECT_NOT_EXIST", "--json"
+                )
+                self.assertEqual(code, 1, output)
+                self.assertIn("Project IDs not found or not visible", json.loads(output)["error"])
+                self.assertIn("PROJECT_NOT_EXIST", json.loads(output)["error"])
+                self.assertFalse(any(method != "GET" for method, _ in self.calls))
+
+    def test_revokes_deleted_project_still_on_access_list(self):
+        self.state["credentials"]["access_config"].append("deleted-project")
+        code, output, _ = self.run_cli(
+            "set", "credentials", "--revoke", "deleted-project", "--json"
+        )
+        self.assertEqual(code, 0, output)
+        self.assertEqual(
+            self.state["credentials"]["access_config"], [self.project.project_id, "project-b"]
+        )
 
     def test_replacement_projects_and_no_projects_are_explicit(self):
         code, output, _ = self.run_cli(

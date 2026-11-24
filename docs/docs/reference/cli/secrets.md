@@ -76,6 +76,8 @@ Updates to an existing key-value secret change only the supplied keys. Omitted k
 
 When changing only description or project access, the stored value is preserved without requesting it. Use `--replace-value` to also enter a single value or key updates interactively, or pipe them on stdin. An existing secret's type cannot be changed.
 
+Use project IDs visible to you in the secret's account. You can also revoke an ID still on the secret's access list after its project has been deleted.
+
 | Argument | Description |
 |---|---|
 | `<secret_name>` | The secret's display name. |

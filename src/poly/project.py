@@ -4616,6 +4616,17 @@ class AgentStudioProject:
                 raise ValueError("A single-value secret requires a nonempty string.")
 
         access = list(existing.get("access_config") or []) if existing else [self.project_id]
+        # Allow revoking stale IDs that are still on the secret's access list.
+        requested_projects = set(projects or []) | set(grant or [])
+        requested_projects.update(project for project in (revoke or []) if project not in access)
+        if requested_projects:
+            account_projects = AgentStudioInterface.get_projects(self.region, self.account_id)
+            unknown_projects = requested_projects.difference(account_projects)
+            if unknown_projects:
+                raise ValueError(
+                    "Project IDs not found or not visible in this account: "
+                    + ", ".join(sorted(unknown_projects))
+                )
         if projects is not None:
             access = projects
         elif no_projects:
