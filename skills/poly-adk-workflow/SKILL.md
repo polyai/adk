@@ -9,7 +9,7 @@ description: >
 metadata:
   author: PolyAI
   license: Apache-2.0
-  version: 0.81.1
+  version: 0.89.0
   requires:
     bins:
       - poly
@@ -87,6 +87,7 @@ A project looks like:
 ├── chat/                    # webchat channel config
 ├── flows/                   # multi-step guided conversations
 ├── functions/               # Python functions (deterministic logic, lifecycle hooks)
+├── outbound_campaigns/      # outbound campaign drafts: campaign.yaml + functions/<node name>.py
 ├── topics/                  # knowledge base entries
 ├── test_suite/              # simulated conversation tests
 ├── real_time_configuration/ # per-environment RTC (see poly-adk-rtc)
@@ -141,6 +142,8 @@ poly deployments list             # what is deployed where
 ```
 
 **Never promote to `pre-release` or `live` unless the user explicitly asks** — `live` is production. Use `--dry-run` first to preview, and re-run tests against each environment after promoting. See `poly deployments --help` for the full surface, including rollback.
+
+**Never run `poly campaign publish`, `pause`, `resume` or `archive` unless the user explicitly asks** — they act on the live campaign, and `--json` skips the confirmation. `poly campaign validate` is safe: nothing is sent.
 
 ## Account secrets
 

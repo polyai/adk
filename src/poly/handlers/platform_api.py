@@ -10,6 +10,8 @@ import os
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from urllib.parse import quote
 
 from ruamel.yaml import YAML
 
@@ -76,6 +78,12 @@ FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT = 30
+OUTBOUND_CAMPAIGN_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/branches/{branch_id}"
+    "/outbound-campaigns/{path}"
+)
+
 # Data API routes, served on the regional api.<region>.poly.ai hosts.
 DATA_METRICS_URL = "/api/v1/metrics"
 DATA_METRICS_AGGREGATE_URL = "/api/v1/metrics/aggregate"
@@ -134,6 +142,7 @@ class PlatformAPIHandler:
         files: ty.Optional[dict] = None,
         response_format: str = "json",
         use_jupiter_api: bool = False,
+        timeout: ty.Optional[ty.Union[float, tuple[float, float]]] = None,
         sensitive: bool = False,
     ) -> dict:
         """Make a request to the Platform API.
@@ -151,6 +160,8 @@ class PlatformAPIHandler:
             response_format (str): How to parse the response. "json" (default)
                 or "yaml".
             use_jupiter_api (bool): Whether to use the Jupiter API.
+            timeout (float | tuple[float, float] | None): Seconds to wait for the server to
+                connect and to send data, or a (connect, read) pair. None waits forever.
             sensitive (bool): Suppress payload logs and redact errors for secrets.
 
         Returns:
@@ -185,7 +196,7 @@ class PlatformAPIHandler:
                 allow_redirects=False,
                 files=files,
                 data=json.dumps(data) if data and not files else None,
-                **({"timeout": 30} if sensitive else {}),
+                timeout=30 if sensitive and timeout is None else timeout,
             )
         except requests.RequestException:
             if sensitive:
@@ -1129,7 +1140,13 @@ class PlatformAPIHandler:
 
     @staticmethod
     def create_account_api_key_internal(
-        region: str, jwt_token: str, account_id: str, name: str, source: str = "adk"
+        region: str,
+        jwt_token: str,
+        account_id: str,
+        name: str,
+        source: str = "adk",
+        api_groups: list[str] | None = None,
+        expires_at: datetime | None = None,
     ) -> dict:
         """Create an account-scoped API key, via JWT auth.
 
@@ -1139,15 +1156,49 @@ class PlatformAPIHandler:
             account_id: The account ID to scope the key to.
             name: A label for the API key.
             source: Value for the ``X-Poly-Source`` header.
+            api_groups: API groups to limit the key to (``"models"``, ``"data"``). Omitted
+                from the request when None, which gives a key for every API.
+            expires_at: When the key expires. Omitted from the request when None, which
+                gives a key that never expires.
 
         Returns:
             dict: The full API key record, including the secret under ``key``.
         """
+        body: dict[str, ty.Any] = {"name": name}
+        if api_groups is not None:
+            body["api_groups"] = api_groups
+        if expires_at is not None:
+            body["expires_at"] = expires_at.isoformat()
         return PlatformAPIHandler.make_request(
             region,
             f"/jupiter/v2/accounts/{account_id}/api-keys",
             "POST",
-            data={"name": name},
+            data=body,
+            headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
+            use_jupiter_api=True,
+        )
+
+    @staticmethod
+    def list_account_api_keys_internal(
+        region: str, jwt_token: str, account_id: str, source: str = "adk"
+    ) -> list[dict]:
+        """List an account's API keys, via JWT auth.
+
+        The records carry no secret, only ``key_prefix`` and ``key_suffix``.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID whose keys to list.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The API key records.
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            f"/jupiter/v2/accounts/{account_id}/api-keys",
+            "GET",
             headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
             use_jupiter_api=True,
         )
@@ -1889,6 +1940,32 @@ class PlatformAPIHandler:
         """
         endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    @staticmethod
+    def validate_outbound_campaign(
+        region: str, account_id: str, project_id: str, branch_id: str, campaign_id: str
+    ) -> dict:
+        """Validate a campaign as it is on `branch_id`.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            campaign_id: The campaign ID.
+
+        Returns:
+            dict: {"valid": bool, "errors": [...], "warnings": [...]}.
+        """
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id=quote(branch_id, safe=""),
+            path=f"{quote(campaign_id, safe='')}/validate",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "POST", timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
+        )
 
     @staticmethod
     def get_available_metrics(region: str, project_id: ty.Optional[str] = None) -> dict:

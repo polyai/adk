@@ -46,5 +46,6 @@ Do not use `$var.attribute` - stringify complex objects in Python first, then st
 ## Best practices
 - Variables are discovered automatically - no manual registration needed.
 - Use descriptive snake_case names.
+- A variable name cannot be a Python reserved word, such as `class`.
 - Initialize state variables in `start_function` or early in the flow to avoid `None` values.
 - Keep variable names consistent across functions and prompts.

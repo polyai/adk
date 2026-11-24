@@ -4,6 +4,7 @@ Copyright PolyAI Limited"""
 
 import json
 import uuid
+from datetime import datetime
 from typing import Any, NoReturn, Optional
 
 from google.protobuf.message import Message
@@ -23,6 +24,9 @@ from poly.resources import (
     Function,
     FunctionStep,
     Handoff,
+    OutboundCampaign,
+    OutboundCampaignNode,
+    OutboundCampaignSettings,
     ResourceMap,
     ResourceMapping,
     SMSTemplate,
@@ -468,6 +472,9 @@ class AgentStudioInterface:
         FlowStep,
         Condition,
         ApiIntegration,
+        OutboundCampaign,
+        OutboundCampaignSettings,
+        OutboundCampaignNode,
     ]
 
     PRIORITY_DELETE_TYPES = [
@@ -608,6 +615,20 @@ class AgentStudioInterface:
             return self.sync_client.get_queued_commands()
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
+
+    def validate_outbound_campaign(self, campaign_id: str) -> dict[str, Any]:
+        """Validate a campaign on the current branch."""
+        import requests
+
+        self.sync_client.assert_branch_exists()
+        try:
+            return PlatformAPIHandler.validate_outbound_campaign(
+                self.region, self.account_id, self.project_id, self.branch_id, campaign_id
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
 
     def get_branches(self) -> dict[str, dict[str, Any]]:
         """Get a list of branches with full metadata.
@@ -1141,7 +1162,9 @@ class AgentStudioInterface:
             jwt_token: The user's JWT access token
 
         Returns:
-            list[dict]: List of PAT records.
+            list[dict]: List of PAT records. Each has the PAT's `id`, `name`, `created_at`,
+                and the first and last four characters of its secret as `key_prefix` and
+                `key_suffix`. The secret itself is only returned when the PAT is created.
         """
         return PlatformAPIHandler.get_pats_internal(region, jwt_token)
 
@@ -1175,7 +1198,13 @@ class AgentStudioInterface:
 
     @staticmethod
     def create_account_api_key_internal(
-        region: str, jwt_token: str, account_id: str, name: str, source: str = "adk"
+        region: str,
+        jwt_token: str,
+        account_id: str,
+        name: str,
+        source: str = "adk",
+        api_groups: list[str] | None = None,
+        expires_at: datetime | None = None,
     ) -> dict:
         """Create an account-scoped API key, via JWT auth.
 
@@ -1185,12 +1214,39 @@ class AgentStudioInterface:
             account_id: The account ID to scope the key to.
             name: A label for the API key.
             source: Value for the ``X-Poly-Source`` header.
+            api_groups: API groups to limit the key to. None gives a key for every API.
+            expires_at: When the key expires. None gives a key that never expires.
 
         Returns:
             dict: The full API key record, including the secret under ``key``.
         """
         return PlatformAPIHandler.create_account_api_key_internal(
-            region, jwt_token, account_id, name, source=source
+            region,
+            jwt_token,
+            account_id,
+            name,
+            source=source,
+            api_groups=api_groups,
+            expires_at=expires_at,
+        )
+
+    @staticmethod
+    def list_account_api_keys_internal(
+        region: str, jwt_token: str, account_id: str, source: str = "adk"
+    ) -> list[dict]:
+        """List an account's API keys (no secrets, only prefix and suffix), via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID whose keys to list.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The API key records.
+        """
+        return PlatformAPIHandler.list_account_api_keys_internal(
+            region, jwt_token, account_id, source=source
         )
 
     @staticmethod

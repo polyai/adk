@@ -2,6 +2,102 @@
 
 <!-- version list -->
 
+## v0.89.0 (2026-11-23)
+
+### Features
+
+- Add poly campaign publish, pause, resume and archive
+  ([#439](https://github.com/polyai/adk/pull/439),
+  [`cc0f7af`](https://github.com/polyai/adk/commit/cc0f7af0fbfecaf4564e669bcbc6faff0e90697e))
+
+
+## v0.88.0 (2026-11-23)
+
+### Features
+
+- Add poly campaign validate ([#438](https://github.com/polyai/adk/pull/438),
+  [`23a43ff`](https://github.com/polyai/adk/commit/23a43ff474679da1aac0949df9e51ab1868b8eec))
+
+
+## v0.87.1 (2026-11-19)
+
+### Bug Fixes
+
+- Stop poly login failing for users who already have a personal access token
+  ([#442](https://github.com/polyai/adk/pull/442),
+  [`01c6c94`](https://github.com/polyai/adk/commit/01c6c946ca172084c9691a5a5fb010530f123f7a))
+
+
+## v0.87.0 (2026-11-17)
+
+### Features
+
+- Sync outbound campaigns as files ([#428](https://github.com/polyai/adk/pull/428),
+  [`706f04a`](https://github.com/polyai/adk/commit/706f04a7825e5ba6c82dbb4cf51fd045d097ce39))
+
+
+## v0.86.1 (2026-11-17)
+
+### Bug Fixes
+
+- Refuse poly update on Windows and give the command to run instead
+  ([#407](https://github.com/polyai/adk/pull/407),
+  [`0fdd0a5`](https://github.com/polyai/adk/commit/0fdd0a5e387b39ff07250dd2a63a245e4595c319))
+
+
+## v0.86.0 (2026-11-17)
+
+### Features
+
+- Exit non-zero when a command fails ([#423](https://github.com/polyai/adk/pull/423),
+  [`ffc561f`](https://github.com/polyai/adk/commit/ffc561fbbd262ce48f737e1ee2f02190e86c94f4))
+
+
+## v0.85.0 (2026-11-17)
+
+### Features
+
+- Validate function names, parameters and latency control before push
+  ([#414](https://github.com/polyai/adk/pull/414),
+  [`6b0df68`](https://github.com/polyai/adk/commit/6b0df682d933f753a95110c9fd553c26b6dbbe36))
+
+
+## v0.84.0 (2026-11-16)
+
+### Features
+
+- **apikey**: Create Models-only keys with --type model, and keys now expire after 90 days by
+  default ([#430](https://github.com/polyai/adk/pull/430),
+  [`c43b1e8`](https://github.com/polyai/adk/commit/c43b1e895085138fee008648c242849e0624bb4a))
+
+
+## v0.83.0 (2026-11-16)
+
+### Features
+
+- **setup**: Offer an account API key as an optional step that runs poly apikey
+  ([#399](https://github.com/polyai/adk/pull/399),
+  [`5b540cd`](https://github.com/polyai/adk/commit/5b540cdcca002f06c9f4686b924fe82f9a080b57))
+
+
+## v0.82.0 (2026-11-16)
+
+### Features
+
+- **setup**: Report setup start, step outcomes and completion to PostHog with an opt-out
+  ([#398](https://github.com/polyai/adk/pull/398),
+  [`e3da1f0`](https://github.com/polyai/adk/commit/e3da1f00716a19ae06a76661e553248d1c044364))
+
+
+## v0.81.2 (2026-11-16)
+
+### Bug Fixes
+
+- Stop poly validate rejecting an empty flow description, step prompt or greeting
+  ([#421](https://github.com/polyai/adk/pull/421),
+  [`eec16fd`](https://github.com/polyai/adk/commit/eec16fd2d192a8be0a5f44f0503fcc9ad2c1435f))
+
+
 ## v0.81.1 (2026-11-16)
 
 ### Bug Fixes

@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import dataclasses
 import json
 import os
 import subprocess
@@ -10,11 +11,11 @@ import sys
 import tempfile
 import time
 import unittest
-from argparse import ArgumentParser, _SubParsersAction
+from argparse import ArgumentParser, Namespace, _SubParsersAction
 from importlib.metadata import PackageNotFoundError
 from io import StringIO
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import argcomplete
 import requests
@@ -37,6 +38,7 @@ from poly.cli_commands.branch import (
     BRANCH_SUBCOMMAND_GROUPS,
     BranchCommand,
 )
+from poly.cli_commands.campaign import CampaignCommand
 from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
@@ -55,7 +57,14 @@ from poly.cli_commands.shared import (
     require_experiments_enabled,
     resolve_project_scope,
 )
-from poly.cli_commands.sync import FormatCommand, PushCommand, RevertCommand
+from poly.cli_commands.sync import (
+    DiffCommand,
+    FormatCommand,
+    PullCommand,
+    PushCommand,
+    RevertCommand,
+    ValidateCommand,
+)
 from poly.cli_commands.update import (
     UpdateCommand,
     _record_update_check,
@@ -64,8 +73,10 @@ from poly.cli_commands.update import (
     display_update_message,
 )
 from poly.cli_commands.utils import CompletionCommand
+from poly.handlers.protobuf.commands_pb2 import CommandBatch
 from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
+from poly.tests.testing_utils import make_mock_response
 
 
 def _run_result(returncode: int, stdout: str = "", stderr: str = ""):
@@ -439,6 +450,19 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.pull_project_from_env.assert_not_called()
         self.proj.push_project.assert_not_called()
 
+    @patch("poly.output.console.plain")
+    @patch("poly.output.console.error")
+    def test_branch_create_env_exits_1_when_the_push_is_rejected(self, mock_error, mock_plain):
+        """A rejected push of the environment's state is reported and exits 1."""
+        self.proj.push_project.return_value = (False, "Rejected by the platform", [])
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("Failed to push the live state", mock_error.call_args[0][0])
+        mock_plain.assert_called_once_with("Rejected by the platform")
+
 
 class BranchCreateFromSourceBranchTest(unittest.TestCase):
     """Tests for ``poly branch create --from <branch>``."""
@@ -554,7 +578,8 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("poly.output.console.error")
     def test_direct_delete_nonexistent_branch_shows_error(self, mock_error):
         """Attempting to delete a branch that doesn't exist shows an error."""
-        BranchCommand.branch_delete(TEST_DIR, branch_name="no-such-branch")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="no-such-branch")
 
         self.proj.delete_branch.assert_not_called()
         mock_error.assert_called_once()
@@ -563,7 +588,8 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("poly.cli_commands.branch.json_print")
     def test_direct_delete_nonexistent_branch_json_mode(self, mock_json):
         """Non-existent branch with output_json=True prints JSON with success=False."""
-        BranchCommand.branch_delete(TEST_DIR, branch_name="no-such-branch", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="no-such-branch", output_json=True)
 
         self.proj.delete_branch.assert_not_called()
         mock_json.assert_called_once()
@@ -574,7 +600,8 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("poly.output.console.error")
     def test_direct_delete_main_branch_shows_error(self, mock_error):
         """Attempting to delete 'main' shows an error because main is not deletable."""
-        BranchCommand.branch_delete(TEST_DIR, branch_name="main")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="main")
 
         self.proj.delete_branch.assert_not_called()
         mock_error.assert_called_once()
@@ -613,7 +640,8 @@ class BranchDeleteTest(unittest.TestCase):
         mock_confirm.return_value.ask.return_value = True
         self.proj.delete_branch.return_value = False
 
-        BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
 
         mock_error.assert_called_once()
         self.assertIn("Failed to delete", mock_error.call_args[0][0])
@@ -727,7 +755,8 @@ class BranchDeleteTest(unittest.TestCase):
         mock_checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
         mock_confirm.return_value.ask.return_value = True
 
-        BranchCommand.branch_delete(TEST_DIR)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR)
 
         self.assertEqual(self.proj.delete_branch.call_count, 2)
         mock_error.assert_called_once()
@@ -2269,37 +2298,37 @@ class ComputeDiffTest(unittest.TestCase):
         self.assertEqual(call_kwargs["before_name"], "def789012")
 
     @patch("poly.output.console.error")
-    def test_only_after_version_not_found_returns_none(self, mock_error):
-        """With only after and hash not in versions, calls error and returns None."""
+    def test_only_after_version_not_found_exits(self, mock_error):
+        """With only after and hash not in versions, reports the error and exits 1."""
         versions = [{"version_hash": "abc123456xyz"}]
         self.proj.get_deployments.return_value = (versions, {})
 
-        result = compute_diff(TEST_DIR, after="zzz999999")
+        with self.assertRaises(SystemExit):
+            compute_diff(TEST_DIR, after="zzz999999")
 
-        self.assertIsNone(result)
         mock_error.assert_called_once()
         self.assertIn("not found", mock_error.call_args[0][0])
 
     @patch("poly.output.console.error")
-    def test_only_after_no_previous_version_returns_none(self, mock_error):
-        """With only after matching the last version, returns None (no previous)."""
+    def test_only_after_no_previous_version_exits(self, mock_error):
+        """With only after matching the last version, reports the error and exits 1."""
         versions = [{"version_hash": "abc123456xyz"}]
         self.proj.get_deployments.return_value = (versions, {})
 
-        result = compute_diff(TEST_DIR, after="abc123456")
+        with self.assertRaises(SystemExit):
+            compute_diff(TEST_DIR, after="abc123456")
 
-        self.assertIsNone(result)
         mock_error.assert_called_once()
         self.assertIn("No previous version", mock_error.call_args[0][0])
 
     @patch("poly.output.console.error")
-    def test_only_after_no_versions_returns_none(self, mock_error):
-        """With only after but no versions at all, calls error and returns None."""
+    def test_only_after_no_versions_exits(self, mock_error):
+        """With only after but no versions at all, reports the error and exits 1."""
         self.proj.get_deployments.return_value = ([], {})
 
-        result = compute_diff(TEST_DIR, after="abc123456")
+        with self.assertRaises(SystemExit):
+            compute_diff(TEST_DIR, after="abc123456")
 
-        self.assertIsNone(result)
         mock_error.assert_called_once()
         self.assertIn("No versions found", mock_error.call_args[0][0])
 
@@ -2479,6 +2508,121 @@ class PushStdinProjectionGuardTest(unittest.TestCase):
         )
 
 
+class SyncExitCodeTest(unittest.TestCase):
+    """Tests that push, pull and diff exit 1 on failure and 0 when there is nothing to do."""
+
+    def setUp(self):
+        self.project = MagicMock()
+        self.project.account_id = "test_account"
+        self.project.project_id = "test_project"
+        self.project.branch_id = "BRANCH-1"
+        patch("poly.cli_commands.sync.load_project", return_value=self.project).start()
+        patch("poly.cli_commands.shared.load_project", return_value=self.project).start()
+        self.addCleanup(patch.stopall)
+
+    @patch("poly.output.console.plain")
+    @patch("poly.output.console.error")
+    def test_failed_push_exits_1(self, mock_error, mock_plain):
+        """A push the platform or validation refuses exits 1 without --json."""
+        self.project.push_project.return_value = (False, "Validation errors detected", [])
+
+        with self.assertRaises(SystemExit) as ctx:
+            PushCommand.push(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("Failed to push", mock_error.call_args[0][0])
+
+    @patch("poly.output.console.plain")
+    @patch("poly.output.console.error")
+    def test_push_with_no_changes_exits_0(self, mock_error, mock_plain):
+        """A push with nothing to send says so and is not a failure."""
+        self.project.push_project.return_value = (True, "No changes detected", [])
+
+        PushCommand.push(TEST_DIR)
+
+        mock_error.assert_not_called()
+        self.assertIn("No changes detected", mock_plain.call_args[0][0])
+
+    @patch("poly.cli_commands.sync.json_print")
+    def test_push_with_no_changes_is_a_json_success(self, mock_json_print):
+        """JSON mode reports a push with nothing to send as a success."""
+        self.project.push_project.return_value = (True, "No changes detected", [])
+
+        PushCommand.push(TEST_DIR, output_json=True)
+
+        self.assertTrue(mock_json_print.call_args[0][0]["success"])
+
+    @patch("poly.output.console.print_file_list")
+    def test_pull_with_conflicts_exits_1(self, mock_print_file_list):
+        """A pull that leaves merge conflicts lists them and exits 1."""
+        self.project.pull_project.return_value = (["topics/a.yaml"], {})
+
+        with self.assertRaises(SystemExit) as ctx:
+            PullCommand.pull(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_print_file_list.assert_called_once()
+
+    @patch("poly.cli_commands.sync.json_print")
+    def test_diff_with_no_changes_is_a_json_success(self, mock_json_print):
+        """JSON mode reports an empty diff as a success."""
+        self.project.get_diffs.return_value = {}
+
+        DiffCommand.diff(TEST_DIR, output_json=True)
+
+        self.assertEqual(
+            mock_json_print.call_args[0][0], {"success": True, "message": "No changes detected"}
+        )
+
+    @patch("poly.cli_commands.sync.json_print")
+    def test_validate_json_with_errors_exits_1(self, mock_json_print):
+        """JSON mode reports validation errors as a failure and exits 1."""
+        self.project.validate_project.return_value = ["topics/a.yaml: name cannot be empty"]
+
+        with self.assertRaises(SystemExit) as ctx:
+            ValidateCommand.validate_project(TEST_DIR, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(
+            mock_json_print.call_args[0][0],
+            {
+                "success": False,
+                "valid": False,
+                "errors": ["topics/a.yaml: name cannot be empty"],
+            },
+        )
+
+    @patch("poly.cli_commands.sync.json_print")
+    def test_validate_json_without_errors_exits_0(self, mock_json_print):
+        """JSON mode reports a valid project as a success."""
+        self.project.validate_project.return_value = []
+
+        ValidateCommand.validate_project(TEST_DIR, output_json=True)
+
+        self.assertEqual(
+            mock_json_print.call_args[0][0], {"success": True, "valid": True, "errors": []}
+        )
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_diff_against_an_unknown_name_exits_1(self, mock_json_print):
+        """A --before name that matches nothing is a failure, not an empty diff."""
+        self.project.diff_remote_named_versions.side_effect = ValueError(
+            "No branch, environment or deployment version named 'typo' was found."
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            DiffCommand.diff(TEST_DIR, before="typo", after="main", output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(
+            mock_json_print.call_args[0][0],
+            {
+                "success": False,
+                "error": "No branch, environment or deployment version named 'typo' was found.",
+            },
+        )
+
+
 class PrintDeploymentsTest(unittest.TestCase):
     """Tests for the print_deployments CLI method."""
 
@@ -2494,15 +2638,23 @@ class PrintDeploymentsTest(unittest.TestCase):
     def tearDown(self):
         patch.stopall()
 
-    @patch("poly.output.console.error")
-    def test_no_versions_calls_error(self, mock_error):
-        """print_deployments with no versions calls error('No versions found.')."""
+    @patch("poly.output.console.plain")
+    def test_no_versions_is_not_an_error(self, mock_plain):
+        """Listing an environment with no versions says so and exits 0."""
         self.proj.get_deployments.return_value = ([], {})
 
         DeploymentsCommand.deployments_list(TEST_DIR)
 
-        mock_error.assert_called_once()
-        self.assertIn("No versions found", mock_error.call_args[0][0])
+        self.assertIn("No versions found", mock_plain.call_args[0][0])
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_no_versions_json_is_an_empty_list(self, mock_json):
+        """JSON mode with no versions prints an empty list."""
+        self.proj.get_deployments.return_value = ([], {})
+
+        DeploymentsCommand.deployments_list(TEST_DIR, output_json=True)
+
+        self.assertEqual(mock_json.call_args[0][0]["versions"], [])
 
     @patch("poly.output.console.print_deployments")
     def test_default_call_shows_all(self, mock_print_dep):
@@ -2555,7 +2707,8 @@ class PrintDeploymentsTest(unittest.TestCase):
         """print_deployments with unknown hash calls error."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
 
-        DeploymentsCommand.deployments_list(TEST_DIR, version_hash="zzz999999")
+        with self.assertRaises(SystemExit):
+            DeploymentsCommand.deployments_list(TEST_DIR, version_hash="zzz999999")
 
         mock_error.assert_called_once()
         self.assertIn("not found", mock_error.call_args[0][0])
@@ -2625,7 +2778,8 @@ class DeploymentsShowTest(unittest.TestCase):
         """When the project has no versions, error is called."""
         self.proj.get_deployments.return_value = ([], {})
 
-        DeploymentsCommand.deployments_show(TEST_DIR, version_hash="hash00000")
+        with self.assertRaises(SystemExit):
+            DeploymentsCommand.deployments_show(TEST_DIR, version_hash="hash00000")
 
         mock_error.assert_called_once()
         self.assertIn("No versions found", mock_error.call_args[0][0])
@@ -2635,7 +2789,8 @@ class DeploymentsShowTest(unittest.TestCase):
         """When the version hash doesn't match any version, error is called."""
         self.proj.get_deployments.return_value = (self.sandbox_versions, self.active_hashes)
 
-        DeploymentsCommand.deployments_show(TEST_DIR, version_hash="zzz999999")
+        with self.assertRaises(SystemExit):
+            DeploymentsCommand.deployments_show(TEST_DIR, version_hash="zzz999999")
 
         mock_error.assert_called_once()
         self.assertIn("not found", mock_error.call_args[0][0])
@@ -3088,6 +3243,22 @@ class DeploymentsPromoteTest(unittest.TestCase):
             "dep-1", "pre-release", message="custom notes"
         )
 
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_dry_run_is_a_json_success_without_calling_api(self, mock_json):
+        """A promote dry run reports success and does not promote."""
+        DeploymentsCommand.deployments_promote(
+            TEST_DIR,
+            from_deployment="abc123456",
+            to_env="pre-release",
+            output_json=True,
+            dry_run=True,
+        )
+
+        self.proj.promote_deployment.assert_not_called()
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["dry_run"])
+
 
 class DeploymentsRollbackTest(unittest.TestCase):
     """Tests for AgentStudioCLI.deployments_rollback."""
@@ -3302,6 +3473,7 @@ class DeploymentsRollbackTest(unittest.TestCase):
         self.proj.rollback_deployment.assert_not_called()
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["dry_run"])
+        self.assertTrue(payload["success"])
         self.assertEqual(payload["target_hash"], "def789012xyz")
         reverted_ids = [d["id"] for d in payload["reverted_deployments"]]
         self.assertEqual(reverted_ids, ["dep-1"])
@@ -4302,7 +4474,8 @@ class BranchHistoryTest(unittest.TestCase):
     @patch("poly.output.console.warning")
     def test_nonexistent_branch_shows_warning(self, mock_warning):
         """A branch name not in the branches dict shows a warning."""
-        BranchCommand.branch_history(TEST_DIR, branch_name="no-such-branch")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_history(TEST_DIR, branch_name="no-such-branch")
 
         self.proj.get_branch_history.assert_not_called()
         mock_warning.assert_called_once()
@@ -4389,7 +4562,8 @@ class BranchRenameTest(unittest.TestCase):
         """When rename_branch returns False, a failure message is shown."""
         self.proj.rename_branch.return_value = False
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
 
         mock_error.assert_called_once()
         self.assertIn("Failed to rename", mock_error.call_args[0][0])
@@ -4399,7 +4573,8 @@ class BranchRenameTest(unittest.TestCase):
         """When current branch is None, a warning is shown."""
         self.proj.get_current_branch.return_value = None
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
 
         self.proj.rename_branch.assert_not_called()
         mock_warning.assert_called_once()
@@ -4410,7 +4585,8 @@ class BranchRenameTest(unittest.TestCase):
         """JSON mode outputs error when no current branch exists."""
         self.proj.get_current_branch.return_value = None
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
@@ -4422,7 +4598,8 @@ class BranchRenameTest(unittest.TestCase):
         """Renaming main branch shows an error."""
         self.proj.get_current_branch.return_value = "main"
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
 
         self.proj.rename_branch.assert_not_called()
         mock_error.assert_called_once()
@@ -4433,7 +4610,8 @@ class BranchRenameTest(unittest.TestCase):
         """JSON mode outputs error when trying to rename main."""
         self.proj.get_current_branch.return_value = "main"
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
@@ -4442,17 +4620,14 @@ class BranchRenameTest(unittest.TestCase):
 
     @patch("poly.cli_commands.branch.json_print")
     def test_no_name_json_mode(self, mock_json):
-        """JSON mode outputs error when no name is provided."""
-        self.proj.rename_branch.side_effect = ValueError("New branch name must be provided.")
-
+        """JSON mode with no name reports the error and does not rename."""
         with self.assertRaises(SystemExit):
             BranchCommand.branch_rename(TEST_DIR, new_branch_name=None, output_json=True)
 
-        calls = mock_json.call_args_list
-        self.assertEqual(len(calls), 2)
-        self.assertFalse(calls[0][0][0]["success"])
-        self.assertIn("No new branch name provided", calls[0][0][0]["error"])
-        self.assertFalse(calls[1][0][0]["success"])
+        mock_json.assert_called_once()
+        self.assertFalse(mock_json.call_args[0][0]["success"])
+        self.assertIn("No new branch name provided", mock_json.call_args[0][0]["error"])
+        self.proj.rename_branch.assert_not_called()
 
     @patch("poly.output.console.error")
     def test_rename_exception_shows_error(self, mock_error):
@@ -4580,7 +4755,8 @@ class BranchRestoreTest(unittest.TestCase):
         """When restore_branch returns False, a failure message is shown."""
         self.proj.restore_branch.return_value = False
 
-        BranchCommand.branch_restore(TEST_DIR, branch_id="old-branch")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_restore(TEST_DIR, branch_id="old-branch")
 
         mock_error.assert_called_once()
         self.assertIn("Failed to restore", mock_error.call_args[0][0])
@@ -4675,7 +4851,8 @@ class BranchRestoreTest(unittest.TestCase):
         mock_select.return_value.ask.return_value = "old-branch (BRANCH-1) — parent: main"
         self.proj.restore_branch.return_value = False
 
-        BranchCommand.branch_restore(TEST_DIR, branch_id=None)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_restore(TEST_DIR, branch_id=None)
 
         mock_error.assert_called_once()
         self.assertIn("Failed to restore", mock_error.call_args[0][0])
@@ -4808,7 +4985,8 @@ class BranchTagTest(unittest.TestCase):
         """A False from the project layer surfaces as an error."""
         self.proj.tag_branch.return_value = False
 
-        BranchCommand.branch_tag(TEST_DIR)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_tag(TEST_DIR)
 
         self.assertIn("Failed to tag", mock_error.call_args[0][0])
 
@@ -4817,7 +4995,8 @@ class BranchTagTest(unittest.TestCase):
         """A False from the project layer surfaces as an error."""
         self.proj.untag_branch.return_value = False
 
-        BranchCommand.branch_untag(TEST_DIR)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_untag(TEST_DIR)
 
         self.assertIn("Failed to remove tag", mock_error.call_args[0][0])
 
@@ -4828,7 +5007,8 @@ class BranchTagTest(unittest.TestCase):
         self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
 
         self.proj.untag_branch.return_value = False
-        BranchCommand.branch_untag(TEST_DIR, output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_untag(TEST_DIR, output_json=True)
         self.assertEqual(mock_json_print.call_args[0][0], {"success": False})
 
     @patch("poly.output.console.error")
@@ -5027,7 +5207,8 @@ class AudioCacheCommandTest(unittest.TestCase):
         """audio-cache bulk-delete reports IDs that failed to delete."""
         mock_api.return_value = {"deleted": [], "failed": ["9"]}
 
-        AudioCacheCommand.audio_cache_bulk_delete(TEST_DIR, "9")
+        with self.assertRaises(SystemExit):
+            AudioCacheCommand.audio_cache_bulk_delete(TEST_DIR, "9")
 
         mock_error.assert_called_once()
 
@@ -5135,9 +5316,33 @@ class FunctionsCommandTest(unittest.TestCase):
         issues = [{"type": "syntax_error", "function_id": "fn-1"}]
         mock_api.return_value = {"valid": False, "issues": issues}
 
+        with self.assertRaises(SystemExit) as ctx:
+            FunctionsCommand.functions_validate(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_print.assert_called_once_with(False, issues)
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.validate_functions")
+    @patch("poly.cli_commands.functions.json_print")
+    def test_validate_json_with_issues_exits_1(self, mock_json_print, mock_api):
+        """functions validate --json prints the result and exits 1 when it is not valid."""
+        mock_api.return_value = {"valid": False, "issues": [{"type": "syntax_error"}]}
+
+        with self.assertRaises(SystemExit) as ctx:
+            FunctionsCommand.functions_validate(TEST_DIR, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_json_print.assert_called_once_with(mock_api.return_value)
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.validate_functions")
+    @patch("poly.output.console.print_function_validation_issues")
+    def test_validate_without_issues_exits_0(self, mock_print, mock_api):
+        """functions validate returns normally when every function is valid."""
+        mock_api.return_value = {"valid": True, "issues": []}
+
         FunctionsCommand.functions_validate(TEST_DIR)
 
-        mock_print.assert_called_once_with(False, issues)
+        mock_print.assert_called_once_with(True, [])
 
 
 # argparse wraps the usage line to the terminal width, which differs between the
@@ -5676,6 +5881,148 @@ class InstallMethodDetectionTest(unittest.TestCase):
         self.assertEqual(self._detect(prefix, uv_on_path=False), "pip")
 
 
+class RefuseIfNotUpgradableTest(unittest.TestCase):
+    """Tests for which installs UpdateCommand.refuse_if_not_upgradable refuses, and what it says."""
+
+    WINDOWS_PYTHON = "C:\\Program Files\\Python312\\python.exe"
+
+    def _start(self, patcher) -> MagicMock:
+        """Start a patch for the duration of the test."""
+        mock = patcher.start()
+        self.addCleanup(patcher.stop)
+        return mock
+
+    def _patch(self, target: str, **kwargs) -> MagicMock:
+        return self._start(patch(target, **kwargs))
+
+    def _patch_update(self, attribute: str, **kwargs) -> MagicMock:
+        return self._start(patch.object(UpdateCommand, attribute, **kwargs))
+
+    def setUp(self):
+        """Simulate a pip install on Windows, with the call extra installed."""
+        self.method = self._patch_update("_detect_install_method", return_value="pip")
+        self._patch_update("_package_spec", return_value="polyai-adk[call]")
+        self._patch("sys.platform", new="win32")
+        self._patch("sys.executable", new=self.WINDOWS_PYTHON)
+        self.warning = self._patch("poly.output.console.warning")
+
+    def test_windows_pip_install_is_refused(self):
+        """pip cannot replace the running poly.exe, so the update is refused, not attempted."""
+        self.assertTrue(UpdateCommand.refuse_if_not_upgradable(output_json=False))
+
+    def test_windows_pip_refusal_gives_the_pip_command_to_run(self):
+        """The message names the exact pip command for PowerShell, which runs a quoted path
+        only after `&`."""
+        UpdateCommand.refuse_if_not_upgradable(output_json=False)
+
+        message = self.warning.call_args[0][0]
+        self.assertIn(
+            "& 'C:\\Program Files\\Python312\\python.exe' -m pip install --upgrade "
+            "'polyai-adk\\[call]'",
+            message,
+        )
+        self.assertIn("poly update --skills-only", message)
+
+    def test_windows_refusal_quotes_a_path_powershell_would_misread(self):
+        """In PowerShell a `'` ends a string and `$` expands a variable, even in double quotes."""
+        self._patch("sys.executable", new="C:\\Users\\O'Brien\\$work\\python.exe")
+
+        UpdateCommand.refuse_if_not_upgradable(output_json=False)
+
+        self.assertIn(
+            "& 'C:\\Users\\O''Brien\\$work\\python.exe' -m pip", self.warning.call_args[0][0]
+        )
+
+    def test_windows_refusal_keeps_the_command_on_one_line(self):
+        """A command wrapped across two lines doesn't run when pasted."""
+        UpdateCommand.refuse_if_not_upgradable(output_json=False)
+
+        self.assertTrue(self.warning.call_args.kwargs["soft_wrap"])
+
+    @patch("poly.cli_commands.update.json_print")
+    def test_windows_pip_refusal_pins_the_target_version(self, mock_json_print):
+        """With --to, the suggested command installs that version, unescaped in JSON."""
+        UpdateCommand.refuse_if_not_upgradable(output_json=True, target_version="0.52.0")
+
+        payload = mock_json_print.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("-m pip install 'polyai-adk[call]==0.52.0'", payload["error"])
+
+    def test_pip_install_off_windows_is_upgradable(self):
+        """pip can replace a running script on macOS and Linux, so nothing is refused."""
+        self._patch("sys.platform", new="darwin")
+
+        self.assertFalse(UpdateCommand.refuse_if_not_upgradable(output_json=False))
+
+    def test_every_windows_install_is_refused_with_its_own_command(self):
+        """Every method's upgrade replaces files the running poly uses, so none runs in place."""
+        commands = {
+            "uv-tool": "uv tool upgrade polyai-adk",
+            "pipx": "pipx upgrade polyai-adk",
+            "uv-pip": (
+                "uv pip install --python 'C:\\Program Files\\Python312\\python.exe' "
+                "--upgrade 'polyai-adk\\[call]'"
+            ),
+        }
+        for method, command in commands.items():
+            with self.subTest(method):
+                self.method.return_value = method
+
+                self.assertTrue(UpdateCommand.refuse_if_not_upgradable(output_json=False))
+                self.assertIn(command, self.warning.call_args[0][0])
+
+    def test_windows_install_is_not_refused_when_nothing_is_installed(self):
+        """Checking for updates and refreshing skills replace nothing, so they still run."""
+        self.assertFalse(
+            UpdateCommand.refuse_if_not_upgradable(output_json=False, installing=False)
+        )
+
+    @patch("poly.output.console.info")
+    def test_windows_check_still_reports_an_update(self, mock_info):
+        self._patch_update("check_for_updates", return_value=(True, "9.9.9"))
+
+        UpdateCommand.update(check=True, output_json=False)
+
+        self.warning.assert_not_called()
+        self.assertIn("Update available", mock_info.call_args[0][0])
+
+    @patch("poly.output.console.info")
+    def test_windows_update_refuses_before_announcing_it(self, mock_info):
+        self._patch_update("check_for_updates", return_value=(True, "9.9.9"))
+        run = self._patch("poly.cli_commands.update.subprocess.run")
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.warning.assert_called_once()
+        run.assert_not_called()
+        announced = [c[0][0] for c in mock_info.call_args_list]
+        self.assertFalse(any("Updating Poly CLI" in m for m in announced), announced)
+
+    @patch("poly.output.console.info")
+    def test_windows_update_with_nothing_new_still_refreshes_skills(self, mock_info):
+        self._patch_update("check_for_updates", return_value=(False, "0.0.1"))
+        skills = self._patch_update("update_skills_step", return_value=True)
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.warning.assert_not_called()
+        skills.assert_called_once()
+
+    def test_editable_install_is_still_refused(self):
+        """The existing refusals are unchanged."""
+        self.method.return_value = "editable"
+
+        self.assertTrue(UpdateCommand.refuse_if_not_upgradable(output_json=False))
+        self.assertIn("editable/dev mode", self.warning.call_args[0][0])
+
+    def test_perform_update_never_runs_pip_on_windows(self):
+        """perform_update refuses as well, so calling it directly cannot break the install."""
+        run = self._patch("poly.cli_commands.update.subprocess.run")
+
+        self.assertFalse(UpdateCommand.perform_update(output_json=False))
+        run.assert_not_called()
+
+
 class IsNewerVersionTest(unittest.TestCase):
     """Tests for shared.is_newer_version, which gates the 'update available' message."""
 
@@ -5810,16 +6157,22 @@ class UpgradeCommandTest(unittest.TestCase):
         self.assertEqual(command, ["pipx", "install", "--force", "polyai-adk==0.52.0"])
 
     def test_uv_pip_latest_passes_upgrade_flag(self):
-        """A uv-managed venv upgrades with 'uv pip install --upgrade'."""
+        """A uv-managed venv upgrades with 'uv pip install --upgrade', into poly's own venv
+        whether or not it's active."""
         command = UpdateCommand._upgrade_command("uv-pip", None)
 
-        self.assertEqual(command, ["uv", "pip", "install", "--upgrade", "polyai-adk"])
+        self.assertEqual(
+            command,
+            ["uv", "pip", "install", "--python", sys.executable, "--upgrade", "polyai-adk"],
+        )
 
     def test_uv_pip_pinned_drops_upgrade_flag(self):
         """A pinned spec installs exactly that version, so --upgrade is dropped."""
         command = UpdateCommand._upgrade_command("uv-pip", "0.52.0")
 
-        self.assertEqual(command, ["uv", "pip", "install", "polyai-adk==0.52.0"])
+        self.assertEqual(
+            command, ["uv", "pip", "install", "--python", sys.executable, "polyai-adk==0.52.0"]
+        )
 
     def test_pip_latest_passes_upgrade_flag(self):
         """A plain venv upgrades via the running interpreter's pip."""
@@ -5893,13 +6246,19 @@ class UpgradeCommandWithCallExtraTest(unittest.TestCase):
         """An upgrade in a uv-managed venv also upgrades the voice deps."""
         command = UpdateCommand._upgrade_command("uv-pip", None)
 
-        self.assertEqual(command, ["uv", "pip", "install", "--upgrade", "polyai-adk[call]"])
+        self.assertEqual(
+            command,
+            ["uv", "pip", "install", "--python", sys.executable, "--upgrade", "polyai-adk[call]"],
+        )
 
     def test_uv_pip_pinned_keeps_call_extra(self):
         """A pinned install in a uv-managed venv requests the extra at that version."""
         command = UpdateCommand._upgrade_command("uv-pip", "0.52.0")
 
-        self.assertEqual(command, ["uv", "pip", "install", "polyai-adk[call]==0.52.0"])
+        self.assertEqual(
+            command,
+            ["uv", "pip", "install", "--python", sys.executable, "polyai-adk[call]==0.52.0"],
+        )
 
     def test_pip_latest_keeps_call_extra(self):
         """An upgrade via pip also upgrades the voice deps."""
@@ -5922,7 +6281,10 @@ class PerformUpdateFailureTest(unittest.TestCase):
     """Tests for how UpdateCommand.perform_update reports a failed install."""
 
     def setUp(self):
-        """Simulate a uv tool install with the call extra whose installer fails."""
+        """Simulate a uv tool install with the call extra whose installer fails.
+
+        Off Windows, where poly update refuses before running the installer.
+        """
         for name, return_value in (
             ("_detect_install_method", "uv-tool"),
             ("_package_spec", "polyai-adk[call]"),
@@ -5930,6 +6292,9 @@ class PerformUpdateFailureTest(unittest.TestCase):
             patcher = patch.object(UpdateCommand, name, return_value=return_value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        patcher = patch("sys.platform", new="linux")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         patcher = patch(
             "poly.cli_commands.update.subprocess.run",
             side_effect=subprocess.CalledProcessError(1, "uv"),
@@ -6303,6 +6668,50 @@ class TestRunNameTest(unittest.TestCase):
         self.proj.trigger_tests.assert_called_once_with(["tc-1"], name=None)
 
 
+class TestRunExitCodeTest(unittest.TestCase):
+    """Tests that a polled ``poly test run`` exits 1 unless every test passed."""
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.testing.load_project").start()
+        self.proj = MagicMock()
+        self.proj.resolve_tests.return_value = [MagicMock(resource_id="tc-1")]
+        self.proj.trigger_tests.return_value = {"id": "run-1", "test_case_count": 1}
+        self.mock_load.return_value = self.proj
+        self.poll = patch("poly.output.console.poll_test_run_live").start()
+        patch("poly.output.console.info").start()
+        patch("poly.output.console.success").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _run(self) -> None:
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        testing_cli.TestingCommand.run(cli._create_parser().parse_args(["test", "run"]))
+
+    def test_a_run_where_every_test_passed_exits_0(self):
+        """A finished run with no failures or errors returns normally."""
+        self.poll.return_value = {"status": "completed", "passedCount": 1, "failedCount": 0}
+
+        self._run()
+
+    def test_a_run_that_did_not_fully_pass_exits_1(self):
+        """A failed test, an errored test, or polling that gave up all exit 1."""
+        for result in [
+            {"status": "completed", "failedCount": 1, "errorCount": 0},
+            {"status": "completed", "failedCount": 0, "errorCount": 1},
+            {"status": "running", "failedCount": 0, "errorCount": 0},
+            {},
+        ]:
+            with self.subTest(result=result):
+                self.poll.return_value = result
+
+                with self.assertRaises(SystemExit) as ctx:
+                    self._run()
+
+                self.assertEqual(ctx.exception.code, 1)
+
+
 class TestRunJsonTest(unittest.TestCase):
     """Tests for ``poly test run --json``, which returns without polling."""
 
@@ -6624,3 +7033,502 @@ class UpdateCheckStampTest(unittest.TestCase):
         _record_update_check()
 
         self.assertFalse(self.stamp_file.exists())
+
+
+class CampaignCommandTest(unittest.TestCase):
+    """`poly campaign` subcommands, with the HTTP layer mocked."""
+
+    CAMPAIGN = "Appointment reminders"
+    CAMPAIGN_ID = "CMPGN-TEST0001"
+    MAIN_SEQUENCE = {"lastKnownSequence": "41", "projection": {}}
+    CAMPAIGN_URL = (
+        "https://api.us.poly.ai/adk/v1/accounts/test_account/projects/test_project"
+        "/branches/{branch}/outbound-campaigns/CMPGN-TEST0001"
+    )
+
+    def setUp(self):
+        from poly.handlers.interface import AgentStudioInterface
+        from poly.handlers.sdk import SourcererSDK
+        from poly.project import AgentStudioProject
+        from poly.tests.project_test import PROJECT_DATA
+
+        patch.object(AgentStudioProject, "save_config").start()
+        patch("poly.handlers.sdk.retrieve_api_key", return_value="test-key").start()
+        patch("poly.handlers.platform_api.retrieve_api_key", return_value="test-key").start()
+        self.request = patch("requests.request").start()
+        self.session = MagicMock()
+        patch.object(
+            SourcererSDK, "session", new_callable=PropertyMock, return_value=self.session
+        ).start()
+        self.post = patch("requests.post").start()
+        self.addCleanup(patch.stopall)
+
+        self.campaigns_enabled = patch.object(
+            AgentStudioProject,
+            "outbound_campaigns_enabled",
+            new_callable=PropertyMock,
+            return_value=True,
+        ).start()
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.pull_main = patch.object(
+            AgentStudioInterface,
+            "pull_branch_resources",
+            side_effect=lambda *_: (self.project.resources, []),
+        ).start()
+        patch("poly.cli_commands.campaign.load_project", return_value=self.project).start()
+        self.json_print = patch("poly.cli_commands.campaign.json_print").start()
+        self.shared_json_print = patch("poly.cli_commands.shared.json_print").start()
+
+    def _respond(self, *responses: MagicMock) -> None:
+        self.request.side_effect = list(responses)
+
+    def _request(self, index: int = 0) -> tuple[str, str, dict]:
+        call = self.request.call_args_list[index]
+        data = call.kwargs.get("data")
+        return call.kwargs["method"], call.kwargs["url"], json.loads(data) if data else None
+
+    def _output(self) -> dict:
+        return self.json_print.call_args.args[0]
+
+    def _lifecycle(
+        self, action: str, name: str, force: bool = False, output_json: bool = False
+    ) -> None:
+        CampaignCommand.run(
+            Namespace(
+                campaign_subcommand=action,
+                path=TEST_DIR,
+                name=name,
+                force=force,
+                json=output_json,
+            )
+        )
+
+    def _validate(self, name: str, output_json: bool = True) -> None:
+        CampaignCommand.run(
+            Namespace(campaign_subcommand="validate", path=TEST_DIR, name=name, json=output_json)
+        )
+
+    def test_validate_posts_to_the_branch_route(self):
+        """validate checks the campaign on the current branch and returns the platform's result."""
+        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
+
+        self._validate(self.CAMPAIGN, output_json=True)
+
+        self.assertEqual(
+            self._request(), ("POST", self.CAMPAIGN_URL.format(branch="main") + "/validate", None)
+        )
+        self.assertEqual(
+            self._output(),
+            {
+                "success": True,
+                "campaign": self.CAMPAIGN,
+                "result": {"valid": True, "errors": [], "warnings": []},
+            },
+        )
+
+    def test_validate_names_nodes_by_label_and_fails(self):
+        """Issues name nodes by their label, and an invalid campaign exits 1."""
+        self._respond(
+            make_mock_response(
+                200,
+                {
+                    "valid": False,
+                    "errors": [
+                        {
+                            "node_id": "call-1",
+                            "field": "flowName",
+                            "message": "No live flow is named test_flow",
+                            "is_warning": False,
+                        }
+                    ],
+                    "warnings": [],
+                },
+            )
+        )
+
+        with patch("poly.output.console.error") as error, self.assertRaises(SystemExit) as exit:
+            self._validate(self.CAMPAIGN, output_json=False)
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertEqual(
+            error.call_args_list[0].args[0],
+            "Reminder call: flowName: No live flow is named test_flow",
+        )
+
+    def test_lifecycle_sends_one_command_to_main(self):
+        """Each lifecycle action sends exactly one command, straight to main."""
+        expected = {
+            "publish": "outbound_campaign_publish",
+            "pause": "outbound_campaign_pause",
+            "resume": "outbound_campaign_resume",
+            "archive": "outbound_campaign_archive_definition",
+        }
+        self._on_branch()
+        self.session.get.return_value = make_mock_response(200, self.MAIN_SEQUENCE)
+        self.post.return_value = make_mock_response(200, {"success": True})
+        for action, command_type in expected.items():
+            with self.subTest(action=action):
+                self.post.reset_mock()
+
+                self._lifecycle(action, self.CAMPAIGN, force=True, output_json=True)
+
+                url = self.post.call_args.args[0]
+                self.assertTrue(url.endswith("/branches/main/command-batch"), url)
+                batch = CommandBatch()
+                batch.ParseFromString(self.post.call_args.kwargs["data"])
+                self.assertEqual(batch.last_known_sequence, 41)
+                self.assertEqual([command.type for command in batch.commands], [command_type])
+                self.assertEqual(getattr(batch.commands[0], command_type).id, self.CAMPAIGN_ID)
+                self.assertEqual(
+                    self._output(), {"success": True, "campaign": self.CAMPAIGN, "action": action}
+                )
+        self.session.get.assert_any_call(
+            "https://api.us.poly.ai/adk/v1/accounts/test_account/projects/test_project"
+            "/branches/main/sequence"
+        )
+
+    @staticmethod
+    def _platform_error(status: int, code: str, message: str) -> MagicMock:
+        return make_mock_response(
+            status,
+            {
+                "error": message,
+                "error_id": "adk-1",
+                "error_code": code,
+                "error_message": message,
+                "success": False,
+            },
+        )
+
+    def test_missing_campaigns_key_shows_the_platform_message_once(self):
+        """The platform's own setup advice is shown once, with the campaign by name."""
+        self.session.get.return_value = make_mock_response(200, self.MAIN_SEQUENCE)
+        self.post.return_value = self._platform_error(
+            412,
+            "CAMPAIGNS_KEY_MISSING",
+            f"[command 1: outboundCampaignResume ({self.CAMPAIGN_ID})] This project isn’t set "
+            "up to run campaigns yet. Publish or resume a campaign once in Agent Studio, then "
+            "try again",
+        )
+
+        with self.assertRaises(SystemExit):
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
+
+        error = self._output()["error"]
+        self.assertIn(f"Could not resume campaign '{self.CAMPAIGN}'", error)
+        self.assertEqual(error.count("in Agent Studio"), 1)
+        self.assertEqual(error.count("set up to run campaigns"), 1)
+        self.assertNotIn(self.CAMPAIGN_ID, error)
+
+    def test_lifecycle_asks_before_acting_on_live(self):
+        """Without --force, a lifecycle action asks first and sends nothing when declined."""
+        with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
+            confirm.return_value.ask.return_value = False
+            self._lifecycle("publish", self.CAMPAIGN)
+
+        self.assertEqual(exit.exception.code, 0)
+        self.assertIn("to live", confirm.call_args.args[0])
+        self.post.assert_not_called()
+
+    def test_lifecycle_on_an_unknown_campaign_fails_before_asking(self):
+        """A name that matches no campaign fails straight away, without the live warning."""
+        with patch("questionary.confirm") as confirm, self.assertRaises(SystemExit) as exit:
+            self._lifecycle("publish", "Nope")
+
+        self.assertEqual(exit.exception.code, 1)
+        confirm.assert_not_called()
+        self.post.assert_not_called()
+
+    def test_lifecycle_by_folder_name_shows_the_campaign_name(self):
+        """Naming a campaign by its folder still prompts and reports with its real name."""
+        self.session.get.return_value = make_mock_response(200, self.MAIN_SEQUENCE)
+        self.post.return_value = make_mock_response(200, {"success": True})
+
+        with patch("questionary.confirm") as confirm:
+            confirm.return_value.ask.return_value = True
+            self._lifecycle("pause", "appointment_reminders")
+
+        self.assertIn(f"'{self.CAMPAIGN}'", confirm.call_args.args[0])
+
+    def test_unknown_campaign_lists_the_known_ones(self):
+        """An unknown name lists the campaigns that do exist."""
+        with self.assertRaises(SystemExit):
+            self._validate("Nope", output_json=True)
+
+        self.assertEqual(
+            self._output()["error"],
+            f"No campaign named 'Nope'. Campaigns: {self.CAMPAIGN}.",
+        )
+        self.request.assert_not_called()
+
+    def test_campaign_is_found_by_folder_name(self):
+        """A campaign can be named by its folder as well as its name."""
+        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
+
+        self._validate("appointment_reminders", output_json=True)
+
+        self.assertTrue(self._output()["success"])
+
+    def _add_namesake(self) -> None:
+        from poly.resources import OutboundCampaign
+
+        campaigns = self.project.resources[OutboundCampaign]
+        namesake = dataclasses.replace(
+            campaigns[self.CAMPAIGN_ID],
+            resource_id="CMPGN-TEST0002",
+            name=f"{self.CAMPAIGN} (1)",
+            folder_name="appointment_reminders_1",
+            platform_label=self.CAMPAIGN,
+        )
+        campaigns[namesake.resource_id] = namesake
+
+    def test_campaigns_sharing_a_name_in_agent_studio_are_listed_by_folder(self):
+        """A name two campaigns share in Agent Studio is refused with the folders to use."""
+        self._add_namesake()
+
+        with self.assertRaises(SystemExit):
+            self._validate(self.CAMPAIGN, output_json=True)
+
+        self.assertEqual(
+            self._output()["error"],
+            f"More than one campaign is named '{self.CAMPAIGN}'. Name it by its folder "
+            "instead: appointment_reminders, appointment_reminders_1.",
+        )
+        self.request.assert_not_called()
+
+    def test_campaign_sharing_a_name_is_found_by_its_pulled_name_or_folder(self):
+        """Pull names the second of two namesakes `<name> (1)`, and either names it."""
+        self._add_namesake()
+        for name in (f"{self.CAMPAIGN} (1)", "appointment_reminders_1"):
+            with self.subTest(name=name):
+                self._respond(
+                    make_mock_response(200, {"valid": True, "errors": [], "warnings": []})
+                )
+
+                self._validate(name, output_json=True)
+
+                self.assertEqual(
+                    self._request()[1],
+                    self.CAMPAIGN_URL.format(branch="main").replace("TEST0001", "TEST0002")
+                    + "/validate",
+                )
+
+    def test_validate_campaign_names_nodes_in_its_issues(self):
+        """The project returns issues with node names, inside the platform's message too."""
+        self._respond(
+            make_mock_response(
+                200,
+                {
+                    "valid": False,
+                    "errors": [
+                        {"node_id": None, "message": "Node 'call-1' cannot reach an end"},
+                        {"node_id": "call-1", "field": "flowName", "message": "No flow"},
+                    ],
+                    "warnings": [],
+                },
+            )
+        )
+
+        result = self.project.validate_campaign(self.CAMPAIGN)
+
+        self.assertEqual(result["errors"][0]["message"], "Node 'Reminder call' cannot reach an end")
+        self.assertEqual(result["errors"][1]["node"], "Reminder call")
+        self.assertEqual(result["errors"][1]["node_id"], "call-1")
+
+    def test_campaigns_turned_off_exit_before_any_request(self):
+        """The ADK checks the project's flag first, so nothing reaches the platform."""
+        self.campaigns_enabled.return_value = False
+
+        with self.assertRaises(SystemExit) as exit:
+            self._validate(self.CAMPAIGN, output_json=True)
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertEqual(
+            self.shared_json_print.call_args.args[0],
+            {
+                "success": False,
+                "error": "Outbound campaigns aren't turned on for this project.",
+                "campaign": self.CAMPAIGN,
+            },
+        )
+        self.request.assert_not_called()
+
+    def test_platform_refusal_for_campaigns_turned_off_shows_its_message_once(self):
+        """The platform's flag refusal is shown in its own words, not as a bare 403."""
+        self.session.get.return_value = make_mock_response(200, self.MAIN_SEQUENCE)
+        self.post.return_value = self._platform_error(
+            403, "OUTBOUND_CAMPAIGNS_DISABLED", "Campaigns aren’t turned on for this project"
+        )
+
+        with self.assertRaises(SystemExit):
+            self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
+
+        error = self._output()["error"]
+        self.assertEqual(
+            error,
+            f"Could not pause campaign '{self.CAMPAIGN}': "
+            "Campaigns aren’t turned on for this project",
+        )
+
+    def test_412_with_no_message_shows_the_status(self):
+        """A refusal with no message of its own is shown as a push shows it, with no hint added."""
+        self.session.get.return_value = make_mock_response(200, self.MAIN_SEQUENCE)
+        self.post.return_value = make_mock_response(412)
+
+        with self.assertRaises(SystemExit):
+            self._lifecycle("publish", self.CAMPAIGN, force=True, output_json=True)
+
+        self.assertEqual(
+            self._output()["error"],
+            f"Could not publish campaign '{self.CAMPAIGN}': API Error 412: ",
+        )
+
+    def _on_branch(self, main_resources: dict | None = None) -> MagicMock:
+        self.project.branch_id = "BRANCH-1"
+        handler = self.project.api_handler
+        self.assertEqual(handler.branch_id, "BRANCH-1")
+        pull = patch.object(
+            handler,
+            "pull_branch_resources",
+            return_value=(
+                self.project.resources if main_resources is None else main_resources,
+                [],
+            ),
+        ).start()
+        return pull
+
+    def test_campaign_requests_have_a_timeout(self):
+        """A stalled connection cannot hang a campaign call: each request has a timeout."""
+        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
+
+        self._validate(self.CAMPAIGN, output_json=True)
+
+        self.assertEqual(self.request.call_args.kwargs["timeout"], 30)
+
+    def test_validate_checks_the_branch_exists_first(self):
+        """validate checks the branch exists before its request, as other remote calls do."""
+        self.project.branch_id = "BRANCH-1"
+        check = patch.object(
+            self.project.api_handler.sync_client, "assert_branch_exists", return_value="BRANCH-1"
+        ).start()
+        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
+
+        self._validate(self.CAMPAIGN, output_json=True)
+
+        check.assert_called_once()
+        self.assertNotIn("branch", self._output())
+
+    def test_main_is_read_once_per_command_even_on_main(self):
+        """Live checks read main's projection, not the local copy, and only once."""
+        self.post.return_value = make_mock_response(200, {"success": True})
+        self.session.get.return_value = make_mock_response(200, self.MAIN_SEQUENCE)
+
+        self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
+
+        self.pull_main.assert_called_once_with("main")
+
+    def test_main_that_cannot_be_read_fails_before_sending(self):
+        """A failed read of main is reported as it is, and nothing is sent."""
+        self.pull_main.side_effect = ValueError("API error: Try again shortly")
+
+        with self.assertRaises(SystemExit) as exit:
+            self._lifecycle("pause", self.CAMPAIGN, force=True, output_json=True)
+
+        self.assertEqual(exit.exception.code, 1)
+        self.assertEqual(self._output()["error"], "API error: Try again shortly")
+        self.post.assert_not_called()
+
+    def test_lifecycle_failure_is_reported_as_the_error_it_is(self):
+        """A send that fails, a timeout included, is a plain failure, sent once."""
+        self.session.get.return_value = make_mock_response(200, self.MAIN_SEQUENCE)
+        self.post.side_effect = requests.ReadTimeout("read timed out")
+
+        with self.assertRaises(SystemExit) as exit:
+            self._lifecycle("resume", self.CAMPAIGN, force=True, output_json=True)
+
+        self.assertEqual(exit.exception.code, 1)
+        output = self._output()
+        self.assertEqual(
+            set(output), {"success", "error", "campaign", "action"}, output
+        )
+        self.assertFalse(output["success"])
+        self.assertTrue(output["error"].startswith(f"Could not resume campaign '{self.CAMPAIGN}'"))
+        self.assertEqual(self.post.call_count, 1)
+
+    def test_lifecycle_finds_the_campaign_by_its_name_on_main(self):
+        """A campaign renamed on the branch is paused by its live name, and named as main has it."""
+        from poly.resources import OutboundCampaign, OutboundCampaignNode
+
+        live = dataclasses.replace(
+            self.project.resources[OutboundCampaign][self.CAMPAIGN_ID],
+            name="Live reminders",
+            folder_name="live_reminders",
+        )
+        self._on_branch(
+            {
+                OutboundCampaign: {self.CAMPAIGN_ID: live},
+                OutboundCampaignNode: self.project.resources[OutboundCampaignNode],
+            }
+        )
+        self.session.get.return_value = make_mock_response(200, self.MAIN_SEQUENCE)
+        self.post.return_value = make_mock_response(200, {"success": True})
+
+        with patch("questionary.confirm") as confirm, patch("poly.output.console.success") as ok:
+            confirm.return_value.ask.return_value = True
+            self._lifecycle("pause", "Live reminders")
+
+        self.assertIn("'Live reminders'", confirm.call_args.args[0])
+        self.assertEqual(ok.call_args.args[0], "Paused campaign 'Live reminders'.")
+        batch = CommandBatch()
+        batch.ParseFromString(self.post.call_args.kwargs["data"])
+        self.assertEqual(batch.commands[0].outbound_campaign_pause.id, self.CAMPAIGN_ID)
+
+    def test_lifecycle_refusal_shows_the_platform_message(self):
+        """The platform's refusal is shown in its own words, with the campaign by name."""
+        self.session.get.return_value = make_mock_response(200, self.MAIN_SEQUENCE)
+        self.post.return_value = self._platform_error(
+            409,
+            "CAMPAIGN_LIFECYCLE_REFUSED",
+            f"[command 1: outboundCampaignArchiveDefinition ({self.CAMPAIGN_ID})] The campaign "
+            "could not be archived. Refresh to see its current status",
+        )
+
+        with self.assertRaises(SystemExit):
+            self._lifecycle("archive", self.CAMPAIGN, force=True, output_json=True)
+
+        self.assertEqual(
+            self._output()["error"],
+            f"Could not archive campaign '{self.CAMPAIGN}': [command 1: "
+            f"outboundCampaignArchiveDefinition ({self.CAMPAIGN})] The campaign could not be "
+            "archived. Refresh to see its current status",
+        )
+
+    def test_live_campaign_missing_on_main_lists_main_campaigns(self):
+        """A name main lacks lists main's campaigns, whatever the branch holds."""
+        from poly.resources import OutboundCampaign
+
+        live = dataclasses.replace(
+            self.project.resources[OutboundCampaign][self.CAMPAIGN_ID], name="Live reminders"
+        )
+        self._on_branch({OutboundCampaign: {self.CAMPAIGN_ID: live}})
+
+        with self.assertRaises(SystemExit):
+            self._lifecycle("pause", "Nope", force=True, output_json=True)
+
+        self.assertEqual(
+            self._output()["error"],
+            "No campaign named 'Nope' on main. A campaign made on a branch must be merged first. "
+            "Campaigns on main: Live reminders.",
+        )
+
+    def test_parsed_command_line_reaches_validate(self):
+        """`poly campaign validate <name> --json` is wired through the parser to the handler."""
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(["campaign", "validate", self.CAMPAIGN, "--json"])
+        self._respond(make_mock_response(200, {"valid": True, "errors": [], "warnings": []}))
+
+        CampaignCommand.run(args)
+
+        self.assertEqual(self._request()[1], self.CAMPAIGN_URL.format(branch="main") + "/validate")
+        self.assertTrue(self._output()["success"])

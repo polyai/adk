@@ -100,8 +100,8 @@ def error(message: str) -> None:
     err_console.print(f"[error]Error:[/error] {message}")
 
 
-def warning(message: str) -> None:
-    console.print(f"[warning]Warning:[/warning] {message}")
+def warning(message: str, soft_wrap: bool = False) -> None:
+    console.print(f"[warning]Warning:[/warning] {message}", soft_wrap=soft_wrap)
 
 
 def info(message: str) -> None:
@@ -1421,6 +1421,15 @@ _TEST_STATUS_STYLES = {
 _PENDING_STATUSES = {"pending", "running", "in_progress"}
 _FAILURE_STATUSES = {"failed", "error", "errored", "timed_out"}
 _ERROR_STATUSES = {"error", "errored", "timed_out"}
+
+
+def test_run_passed(result: dict) -> bool:
+    """Whether a test run finished with no failed or errored tests."""
+    return (
+        result.get("status", "pending") not in _PENDING_STATUSES
+        and not result.get("failedCount")
+        and not result.get("errorCount")
+    )
 
 
 def _build_test_table(

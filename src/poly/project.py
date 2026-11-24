@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from functools import cached_property
+from http import HTTPStatus
 from pathlib import PurePath
 from typing import Any, Optional, TypeAlias
 from zoneinfo import ZoneInfo
@@ -42,6 +43,7 @@ from poly.constants import (
     DATA_TRANSCRIPT_QUERY_MIN_CHARS,
     POLY_SCORE_VERSIONS,
 )
+from poly.handlers.campaigns import CampaignHandler
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
@@ -62,6 +64,8 @@ from poly.resources import (
     FunctionStep,
     MCPServer,
     MultiResourceYamlResource,
+    OutboundCampaign,
+    OutboundCampaignNode,
     Pronunciation,
     Resource,
     ResourceMap,
@@ -70,6 +74,10 @@ from poly.resources import (
     SubResourceMap,
     TestCase,
     Topic,
+)
+from poly.resources.outbound_campaign import (
+    campaign_folder_of,
+    route_targets,
 )
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
@@ -397,6 +405,7 @@ class AgentStudioProject:
     project_name: Optional[str] = None
     account_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
+    _campaign_handler: CampaignHandler = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
@@ -414,6 +423,13 @@ class AgentStudioProject:
         for resources_dict in self.resources.values():
             all_resources.extend(resources_dict.values())
         return all_resources
+
+    @property
+    def campaign_handler(self) -> CampaignHandler:
+        """Get the handler that sends live campaign changes to main"""
+        if self._campaign_handler is None:
+            self._campaign_handler = CampaignHandler(self.region, self.account_id, self.project_id)
+        return self._campaign_handler
 
     @property
     def api_handler(self) -> AgentStudioInterface:
@@ -894,9 +910,11 @@ class AgentStudioProject:
         # Deal with empty flow folders
         # -------
 
-        flow_folder = os.path.join(self.root_path, "flows")
-        if os.path.exists(flow_folder):
-            self._delete_empty_folders(flow_folder)
+        OutboundCampaign.remove_empty_files(self.root_path)
+        for folder in ("flows", "outbound_campaigns"):
+            folder_path = os.path.join(self.root_path, folder)
+            if os.path.exists(folder_path):
+                self._delete_empty_folders(folder_path)
 
         # Save the updated project configuration
         self.resources = incoming_resources
@@ -1057,6 +1075,49 @@ class AgentStudioProject:
             for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
         }
 
+    def _follow_moved_multi_resources(
+        self, original_resources: ResourceMap, incoming_resources: ResourceMap
+    ) -> tuple[ResourceMap, dict[tuple[type[Resource], str], Resource]]:
+        """Find saved multi-resource entries whose file was renamed upstream.
+
+        Returns:
+            The original resources with each moved entry placed where it now lives, so it
+            merges there, and each entry whose new file is not yet on disk, as it was saved,
+            by type and id. An entry whose old file is gone and new file is on disk, because
+            the same rename was made here, only merges there.
+        """
+        moved: dict[tuple[type[Resource], str], Resource] = {}
+        followed = dict(original_resources)
+        for resource_type, originals in original_resources.items():
+            if not issubclass(resource_type, MultiResourceYamlResource):
+                continue
+            incoming = incoming_resources.get(resource_type) or {}
+            for resource_id, original in originals.items():
+                if resource_id not in incoming:
+                    continue
+                old_file = _parse_multi_resource_path(original.get_path(self.root_path))[0]
+                new_file = _parse_multi_resource_path(
+                    incoming[resource_id].get_path(self.root_path)
+                )[0]
+                relocated = original.moved_to(incoming[resource_id])
+                if old_file == new_file or relocated is None:
+                    continue
+                if os.path.isfile(old_file) == os.path.exists(new_file):
+                    continue
+                if os.path.exists(new_file):
+                    followed[resource_type] = {**followed[resource_type], resource_id: relocated}
+                    continue
+                moved[(resource_type, resource_id)] = original
+                followed[resource_type] = {**followed[resource_type], resource_id: relocated}
+        return followed, moved
+
+    @staticmethod
+    def _write_yaml_or_remove(file: str, data: dict) -> None:
+        if data:
+            MultiResourceYamlResource.save_to_file(resource_utils.dump_yaml(data), file)
+        elif os.path.exists(file):
+            os.remove(file)
+
     def _update_multi_resource_yaml_resources(
         self,
         original_resources: ResourceMap,
@@ -1068,6 +1129,7 @@ class AgentStudioProject:
         on_save: Callable[[int, int], None] | None = None,
         progress_offset: int = 0,
         progress_total: int = 0,
+        moved: Optional[dict[tuple[type[Resource], str], Resource]] = None,
     ) -> tuple[list[str], int]:
         """Merge MultiResourceYaml resources when pulling
 
@@ -1076,8 +1138,13 @@ class AgentStudioProject:
         - From the incoming resources
         - From what's currently on disk (read + applying formatting)
         Then perform the merge with that and the current file contents.
+
+        `moved` holds, by type and id, the saved entries that moved to another file upstream.
+        Their local version is read from the old file, so local edits move with them.
         """
         files_with_conflicts = []
+        moved = moved or {}
+        moved_from: set[str] = set()
 
         # Merge MultiResourceYaml:
         # Compute original file data
@@ -1171,11 +1238,17 @@ class AgentStudioProject:
                     continue
                 for resource in resources.values():
                     try:
-                        mapping = self._make_resource_mapping(resource)
+                        old = moved.get((resource_type, resource.resource_id))
+                        mapping = self._make_resource_mapping(old or resource)
                         local_resource = self.read_local_resource(
                             resource=mapping,
                             resource_mappings=incoming_resource_mappings,
                         )
+                        if old is not None:
+                            local_resource = local_resource.moved_to(resource)
+                            old_path = old.get_path(self.root_path)
+                            resource_type.delete_resource(old_path, save_to_cache=True)
+                            moved_from.add(_parse_multi_resource_path(old_path)[0])
                         local_resource.save(
                             self.root_path,
                             resource_name=local_resource.name,
@@ -1215,6 +1288,8 @@ class AgentStudioProject:
                     original_data is not None
                     and resource_utils.same_yaml_data(original_data, incoming_data)
                 ):
+                    if file in moved_from:
+                        self._write_yaml_or_remove(file, local_data)
                     continue
                 # Only incoming changed: take incoming
                 if original_data is not None and resource_utils.same_yaml_data(
@@ -1239,7 +1314,7 @@ class AgentStudioProject:
                 os.remove(file)
                 continue
 
-            if merged_contents == local_content:
+            if merged_contents == local_content and file not in moved_from:
                 continue
 
             if resource_utils.contains_merge_conflict(merged_contents):
@@ -1294,6 +1369,11 @@ class AgentStudioProject:
             return []
 
         files_with_conflicts = []
+        moved: dict[tuple[type[Resource], str], Resource] = {}
+        if not force:
+            original_resources, moved = self._follow_moved_multi_resources(
+                original_resources, incoming_resources
+            )
 
         # Generate resource mappings
         incoming_resource_mappings: list[ResourceMapping] = (
@@ -1321,6 +1401,7 @@ class AgentStudioProject:
             on_save=on_save,
             progress_offset=0,
             progress_total=total,
+            moved=moved,
         )
 
         files_with_conflicts.extend(multi_conflicts)
@@ -1526,6 +1607,7 @@ class AgentStudioProject:
             updated_resources,
             new_state,
         )
+        self._assign_campaign_positions(new_state, new_resources, post_changes.new)
 
         # Queue new/updated/deleted resources
         commands = self.api_handler.get_queued_commands()
@@ -1728,12 +1810,15 @@ class AgentStudioProject:
         deleted_resources.update(subresource_changes.deleted)
 
         if not (updated_resources or new_resources or deleted_resources):
-            return False, "No changes detected", []
+            return True, "No changes detected", []
 
         # 4. Validate all resources with new state
         if not skip_validation:
             validation_errors = self.validate_resources(
-                resources_dict=new_state, resource_mappings=resource_mappings
+                resources_dict=new_state,
+                resource_mappings=resource_mappings,
+                new_resources=new_resources,
+                deleted_resources=deleted_resources,
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
@@ -1761,6 +1846,22 @@ class AgentStudioProject:
             self.save_config()
 
         return True, "Resources pushed successfully.", commands
+
+    @staticmethod
+    def _assign_campaign_positions(new_state: ResourceMap, *new_resources: ResourceMap) -> None:
+        """Lay out the new nodes of each campaign around the nodes it already has."""
+        campaign_ids = {
+            node.campaign_id
+            for changes in new_resources
+            for node in changes.get(OutboundCampaignNode, {}).values()
+        }
+        for campaign_id in campaign_ids:
+            nodes = [
+                node
+                for node in new_state.get(OutboundCampaignNode, {}).values()
+                if node.campaign_id == campaign_id
+            ]
+            resource_utils.assign_campaign_positions(nodes, lambda node: route_targets(node.data))
 
     @staticmethod
     def _assign_flow_positions(
@@ -1929,6 +2030,14 @@ class AgentStudioProject:
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
         prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
+        prepush.group_outbound_campaign_changes(
+            state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            pre_push_updated_resources,
+            pre_push_deleted_resources,
+        )
         prepush.fix_orphaned_variables(
             state,
             new_resources,
@@ -2261,12 +2370,11 @@ class AgentStudioProject:
         before_resources, before_slim_resources = self.get_remote_resources_by_name(before_name)
         after_resources, after_slim_resources = self.get_remote_resources_by_name(after_name)
 
-        if not before_resources or not after_resources:
-            logger.error(
-                "Could not retrieve resources for one or both specified names: "
-                f"before={before_name}, after={after_name}"
-            )
-            return None
+        for name, resources in ((before_name, before_resources), (after_name, after_resources)):
+            if not resources:
+                raise ValueError(
+                    f"No branch, environment or deployment version named '{name}' was found."
+                )
 
         diffs = self.diff_resource_maps(
             before_resources, before_slim_resources, after_resources, after_slim_resources
@@ -2589,6 +2697,35 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == OutboundCampaign:
+            saved_campaign = (
+                original_resource if isinstance(original_resource, OutboundCampaign) else None
+            )
+            additional_kwargs["known_identity"] = (
+                saved_campaign.identity if saved_campaign else None
+            )
+            additional_kwargs["known_status"] = saved_campaign.status if saved_campaign else None
+            additional_kwargs["known_settings"] = (
+                saved_campaign.settings if saved_campaign else None
+            )
+            additional_kwargs["had_trigger"] = any(
+                node.campaign_id == resource.resource_id and node.data.get("type") == "trigger"
+                for node in self.resources.get(OutboundCampaignNode, {}).values()
+            )
+
+        if resource_class == OutboundCampaignNode:
+            saved_node = (
+                original_resource if isinstance(original_resource, OutboundCampaignNode) else None
+            )
+            additional_kwargs["known_position"] = saved_node.position if saved_node else None
+            additional_kwargs["known_type"] = saved_node.data.get("type") if saved_node else None
+            additional_kwargs["known_label"] = saved_node.platform_name if saved_node else None
+            additional_kwargs["known_data"] = saved_node.data if saved_node else None
+            additional_kwargs["known_code"] = saved_node.code if saved_node else None
+            additional_kwargs["known_published"] = bool(
+                saved_node and saved_node.campaign_published
+            )
+
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):
                 raise TypeError(f"Original resource is not an MCPServer: {original_resource}")
@@ -2686,6 +2823,20 @@ class AgentStudioProject:
                 parent_flow = parent_lookup.get(flow_path)
                 flow_paths_to_ids[resource_utils.clean_name(flow_name)] = (
                     parent_flow.resource_id if parent_flow else self.generate_uuid(FlowConfig)
+                )
+
+        campaign_folders_to_ids = {
+            campaign.folder: campaign_id
+            for campaign_id, campaign in self.resources.get(OutboundCampaign, {}).items()
+        }
+        for campaign_path in discovered_resources.get(OutboundCampaign, []):
+            folder = campaign_folder_of(campaign_path)
+            if folder not in campaign_folders_to_ids:
+                parent_campaign = parent_lookup.get(campaign_path)
+                campaign_folders_to_ids[folder] = (
+                    parent_campaign.resource_id
+                    if parent_campaign
+                    else self.generate_uuid(OutboundCampaign)
                 )
 
         if not self.file_structure_info:
@@ -2788,6 +2939,16 @@ class AgentStudioProject:
                         resource_id = flow_id
                     elif resource_type == Document:
                         resource_id = os.path.basename(file_path).upper()
+                    elif resource_type == OutboundCampaign:
+                        resource_id = campaign_folders_to_ids[campaign_folder_of(file_path)]
+                    elif resource_type == OutboundCampaignNode:
+                        campaign_id = campaign_folders_to_ids.get(campaign_folder_of(file_path), "")
+                        node_id = (
+                            parent_resource.node_id
+                            if isinstance(parent_resource, OutboundCampaignNode)
+                            else f"{resource.data.get('type') or 'node'}-{uuid.uuid4()}"
+                        )
+                        resource_id = f"{campaign_id}:{node_id}"
                     elif parent_resource:
                         resource_id = parent_resource.resource_id
                     else:
@@ -3358,8 +3519,8 @@ class AgentStudioProject:
             list[str]: A list of validation error messages.
         """
         # Read local resources
-        new_resource_mappings, kept_resource_mappings, _ = self.find_new_kept_deleted(
-            self.discover_local_resources()
+        new_resource_mappings, kept_resource_mappings, deleted_resource_mappings = (
+            self.find_new_kept_deleted(self.discover_local_resources())
         )
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
 
@@ -3375,22 +3536,50 @@ class AgentStudioProject:
                 resource_mapping.resource_id
             ] = local_resource
 
+        new_resources: ResourceMap = {}
+        for mapping in new_resource_mappings:
+            new_resources.setdefault(mapping.resource_type, {})[mapping.resource_id] = resources[
+                mapping.resource_type
+            ][mapping.resource_id]
+        deleted_resources: ResourceMap = {}
+        for mapping in deleted_resource_mappings:
+            saved = self.resources.get(mapping.resource_type, {}).get(mapping.resource_id)
+            if saved is not None:
+                deleted_resources.setdefault(mapping.resource_type, {})[mapping.resource_id] = saved
+
         return self.validate_resources(
             resources_dict=resources,
             resource_mappings=resource_mappings,
+            new_resources=new_resources,
+            deleted_resources=deleted_resources,
         )
 
     @staticmethod
     def validate_resources(
         resources_dict: ResourceMap,
         resource_mappings: list[ResourceMapping],
+        new_resources: Optional[ResourceMap] = None,
+        deleted_resources: Optional[ResourceMap] = None,
     ) -> list[str]:
         """Validate all resources in the project.
+
+        Args:
+            resources_dict: Every local resource, by type and id.
+            resource_mappings: The mappings to resolve references with.
+            new_resources: The resources the push would create, to check deletes against.
+            deleted_resources: The saved resources the push would delete.
 
         Returns:
             list[str]: A list of validation error messages.
         """
-        validation_errors = []
+        validation_errors = [
+            f"Validation error: {error}"
+            for resource_type in {**(new_resources or {}), **(deleted_resources or {})}
+            if issubclass(resource_type, Resource)
+            for error in resource_type.validate_creates_and_deletes(
+                new_resources or {}, deleted_resources or {}
+            )
+        ]
         seen_paths: set[str] = set()
         for mapping in resource_mappings:
             if mapping.file_path in seen_paths:
@@ -3928,6 +4117,176 @@ class AgentStudioProject:
             raise ValueError("No tests found to run based on the provided criteria.")
 
         return matched
+
+    @property
+    def outbound_campaigns_enabled(self) -> bool:
+        """Whether outbound campaigns are turned on for this project in Agent Studio."""
+        return self.api_handler.feature_flag_enabled(
+            key="outbound-campaigns",
+            region=self.region,
+            project_id=self.project_id,
+            account_id=self.account_id,
+            default=False,
+        )
+
+    def get_campaign(self, name: str) -> OutboundCampaign:
+        """Return the pulled campaign with this name or folder name.
+
+        Raises:
+            ValueError: if no campaign matches, or several share the name.
+        """
+        campaigns = list(self.resources.get(OutboundCampaign, {}).values())
+        known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
+        return self._match_campaign(
+            name, campaigns, f"No campaign named '{name}'. Campaigns: {known}."
+        )
+
+    @staticmethod
+    def _match_campaign(
+        name: str, campaigns: list[OutboundCampaign], not_found: str
+    ) -> OutboundCampaign:
+        found = [
+            campaign
+            for campaign in campaigns
+            if name in (campaign.name, campaign.platform_label, campaign.folder)
+        ]
+        if len(found) > 1:
+            folders = ", ".join(sorted(campaign.folder for campaign in found))
+            raise ValueError(
+                f"More than one campaign is named '{name}'. Name it by its folder instead: "
+                f"{folders}."
+            )
+        if not found:
+            raise ValueError(not_found)
+        return found[0]
+
+    def get_live_campaign(self, name: str) -> OutboundCampaign:
+        """Return the campaign on main with this name or folder name, as main has it.
+
+        Raises:
+            ValueError: if main has no campaign by that name, or several.
+        """
+        resources, _ = self.api_handler.pull_branch_resources("main")
+        live = list(resources.get(OutboundCampaign, {}).values())
+        known = ", ".join(sorted(campaign.name for campaign in live)) or "none"
+        return self._match_campaign(
+            name,
+            live,
+            f"No campaign named '{name}' on main. A campaign made on a branch must be merged "
+            f"first. Campaigns on main: {known}.",
+        )
+
+    def campaign_node_names(self, campaign: OutboundCampaign) -> dict[str, str]:
+        """Return the names of a pushed campaign's nodes, by node id."""
+        return {
+            node.node_id: node.name
+            for node in self.resources.get(OutboundCampaignNode, {}).values()
+            if node.campaign_id == campaign.resource_id
+        }
+
+    @staticmethod
+    def _campaign_error(
+        action: str, campaign: OutboundCampaign, error: SourcererAPIError
+    ) -> SourcererAPIError:
+        reason = error.server_message or str(error)
+        if not error.server_message and error.status_code:
+            try:
+                reason = f"HTTP {error.status_code} {HTTPStatus(error.status_code).phrase}"
+            except ValueError:
+                reason = f"HTTP {error.status_code}"
+        reason = reason.replace(campaign.resource_id, campaign.name)
+        message = f"Could not {action} campaign '{campaign.name}': {reason}"
+        if not error.server_message:
+            if error.error_code == "OUTBOUND_CAMPAIGNS_DISABLED":
+                message += "\nOutbound campaigns aren't turned on for this project."
+        return SourcererAPIError(
+            message,
+            status_code=error.status_code,
+            error_code=error.error_code,
+            server_message=error.server_message,
+        )
+
+    def validate_campaign(self, name: str) -> dict[str, Any]:
+        """Check the campaign as pushed to the current branch.
+
+        Returns:
+            The platform's result: `valid`, plus `errors` and `warnings`, each issue naming
+            its node by name in `node` and in its `message`.
+        """
+        campaign = self.get_campaign(name)
+        try:
+            result = self.api_handler.validate_outbound_campaign(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("validate", campaign, e) from e
+        names = self.campaign_node_names(campaign)
+        for key in ("errors", "warnings"):
+            result[key] = [
+                self._campaign_issue_with_node_names(issue, names)
+                for issue in result.get(key) or []
+            ]
+        return result
+
+    @staticmethod
+    def _replace_campaign_node_ids(text: str, names: dict[str, str]) -> str:
+        for node_id in sorted(names, key=len, reverse=True):
+            if names[node_id]:
+                text = text.replace(node_id, names[node_id])
+        return text
+
+    @classmethod
+    def _campaign_issue_with_node_names(
+        cls, issue: dict[str, Any], names: dict[str, str]
+    ) -> dict[str, Any]:
+        named = dict(issue)
+        if issue.get("node_id"):
+            named["node"] = names.get(issue["node_id"]) or issue["node_id"]
+        if issue.get("message") is not None:
+            named["message"] = cls._replace_campaign_node_ids(str(issue["message"]), names)
+        return named
+
+    def publish_campaign(self, campaign: OutboundCampaign) -> None:
+        """Publish the campaign's draft to live, so it starts contacting people.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self.campaign_handler.publish(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("publish", campaign, e) from e
+
+    def pause_campaign(self, campaign: OutboundCampaign) -> None:
+        """Pause the live campaign.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self.campaign_handler.pause(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("pause", campaign, e) from e
+
+    def resume_campaign(self, campaign: OutboundCampaign) -> None:
+        """Resume the paused live campaign, so it contacts people again.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self.campaign_handler.resume(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("resume", campaign, e) from e
+
+    def archive_campaign(self, campaign: OutboundCampaign) -> None:
+        """Archive the campaign on live.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self.campaign_handler.archive(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("archive", campaign, e) from e
 
     def trigger_tests(self, test_ids: list[str], name: str | None = None) -> dict:
         """Trigger tests for the project.

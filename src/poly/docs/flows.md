@@ -28,7 +28,7 @@ Information about the flow.
 
 Fields:
 - **name**: Human-readable flow name
-- **description** (required): What this flow does
+- **description**: What this flow does. Can be empty.
 - **start_step** (required): Name of the step to enter when the flow is triggered. Must match a real step name.
 
 Example:
