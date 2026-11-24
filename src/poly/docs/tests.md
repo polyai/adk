@@ -26,7 +26,7 @@ Each test case has these fields:
 - **integration_attributes** (map, optional): Attributes a channel or connector passes in.
 - **api_mocks** (map, optional): Mock responses for API integration operations, so the simulation runner returns these instead of calling the real API.
 - **prompt_assertions** (list, optional): Expected behaviours in the agent's response.
-- **function_call_assertions** (list, optional): Expected function calls and argument values.
+- **function_call_assertions** (list, optional): Expected function calls and argument values. To assert a handoff in a project with handoff reasons, name `builtin_handoff`, the platform tool the agent calls to hand off.
 
 ## Example
 
@@ -204,7 +204,7 @@ On `push`, each test case is validated:
 - **tags** must be unique.
 - **language** is required and must match a configured project language (default or additional).
 - **variant**, if specified, must match an existing variant in the project.
-- **function_call_assertions**: each function name must match a global function (`functions/`) or a flow function (`flows/<flow>/functions/`) in the project, and each argument's `value_type` must be one of `string`, `integer`, `float`, or `boolean`, and each argument's `expected_value`, when set, must not be blank and must read as its `value_type`.
+- **function_call_assertions**: each function name must match a global function (`functions/`) or a flow function (`flows/<flow>/functions/`) in the project, or be `builtin_handoff`, and each argument's `value_type` must be one of `string`, `integer`, `float`, or `boolean`, and each argument's `expected_value`, when set, must not be blank and must read as its `value_type`.
 - **integration_attributes**: values must be text, numbers, `true`/`false`, `null`, lists or nested maps. An unquoted date is rejected with the quoted form to use instead, and keys must be text.
 - **api_mocks**: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `status` must be a valid HTTP status code (100–599); `body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation.
 

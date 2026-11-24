@@ -11567,6 +11567,25 @@ class TestCaseTests(unittest.TestCase):
             resource_mappings=self._function_mappings()
         )
 
+    def test_validate_accepts_builtin_handoff_assertion(self):
+        """With handoff reasons the agent hands off through this platform tool."""
+        self._test_case_asserting_function("builtin_handoff").validate(
+            resource_mappings=self._function_mappings()
+        )
+
+    def test_builtin_handoff_assertion_round_trips_by_name(self):
+        """The platform tool's name is not swapped for an id on pull or push."""
+        test_case = self._test_case_asserting_function("builtin_handoff")
+        mappings = self._function_mappings()
+        pretty = TestCase.to_pretty_dict(test_case.to_yaml_dict(), resource_mappings=mappings)
+        again = TestCase.from_yaml_dict(
+            TestCase.from_pretty_dict(pretty, resource_mappings=mappings),
+            resource_id=test_case.resource_id,
+            name=test_case.name,
+        )
+        self.assertEqual(again.assertions.function_calls[0].name, "builtin_handoff")
+        self.assertEqual(again.assertions.build_update_proto(), test_case.assertions.build_update_proto())
+
     def test_validate_rejects_unknown_function_assertion(self):
         with self.assertRaises(ValueError) as cm:
             self._test_case_asserting_function("register_phone_numbr").validate(
