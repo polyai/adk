@@ -17,6 +17,8 @@ poly secrets delete <secret_name> --yes
 
 These commands update account secrets directly, across branches and environments including live. They do not write values to project files or require `poly push`.
 
+Secret operations require an HTTP 2xx response. If the API redirects a request, the command exits with an error and reports the HTTP status.
+
 ## `poly secrets list`
 
 List each secret's name, description, type, project access, creation time, and last update. Visible projects are shown by name and ID. If a project name is unavailable, the list shows its stored ID. JSON output uses project IDs. Stored values are never shown.

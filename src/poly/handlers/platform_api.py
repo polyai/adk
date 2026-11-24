@@ -206,19 +206,11 @@ class PlatformAPIHandler:
                 raise SourcererAPIError("Secret request failed; check your connection.") from None
             raise
 
-        if not sensitive:
-            logger.debug(
-                f"Request/response url={url!r} body={data!r}"
-                f" status_code={api_response.status_code!r} response={api_response.text!r}"
-            )
-
-        try:
-            api_response.raise_for_status()
-        except requests.HTTPError:
-            if sensitive:
+        if sensitive:
+            status = api_response.status_code
+            if not 200 <= status < 300:
                 from poly.handlers.sdk import SourcererAPIError
 
-                status = api_response.status_code
                 message = f"Secret request failed (HTTP {status})."
                 if 400 <= status < 500:
                     details = PlatformAPIHandler._secret_error_details(api_response, data)
@@ -232,11 +224,19 @@ class PlatformAPIHandler:
                         "check the account, secret name and API availability in your region."
                     )
                 raise SourcererAPIError(message) from None
+        else:
             logger.debug(
-                f"Error in request status_code={api_response.status_code!r}"
-                f" response={api_response.text!r}"
+                f"Request/response url={url!r} body={data!r}"
+                f" status_code={api_response.status_code!r} response={api_response.text!r}"
             )
-            raise
+            try:
+                api_response.raise_for_status()
+            except requests.HTTPError:
+                logger.debug(
+                    f"Error in request status_code={api_response.status_code!r}"
+                    f" response={api_response.text!r}"
+                )
+                raise
 
         if api_response.status_code == 204:
             logger.info(f"Request to {url} successful (no content)")

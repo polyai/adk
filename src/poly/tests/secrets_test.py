@@ -877,6 +877,35 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertNotIn(SENTINEL, output + errors)
 
+    def test_redirected_secret_requests_fail_without_following_the_redirect(self):
+        for method, args, stdin in (
+            ("GET", ["list"], ""),
+            ("POST", ["set", "new"], SENTINEL),
+            ("PUT", ["set", "single"], SENTINEL),
+            ("PATCH", ["set", "credentials"], json.dumps({"username": SENTINEL})),
+            ("DELETE", ["delete", "single"], ""),
+        ):
+            with self.subTest(method=method):
+                redirect = make_mock_response(307, [] if method == "GET" else {})
+                redirect.headers = {"Location": "https://example.invalid/redirect"}
+
+                def request(**kwargs):
+                    self.assertFalse(kwargs["allow_redirects"])
+                    return redirect if kwargs["method"] == method else self.request(**kwargs)
+
+                self.http.reset_mock()
+                self.http.side_effect = request
+                code, output, errors = self.run_cli(*args, "--json", stdin=stdin)
+                self.assertEqual(code, 1, output + errors)
+                result = json.loads(output)
+                self.assertFalse(result["success"])
+                self.assertIn("HTTP 307", result["error"])
+                self.assertNotIn(SENTINEL, output + errors)
+                methods = [call.kwargs["method"] for call in self.http.call_args_list]
+                self.assertEqual(
+                    methods, [method] if method in ("GET", "DELETE") else ["GET", method]
+                )
+
     def test_missing_endpoint_is_not_reported_as_a_permission_failure(self):
         self.http.side_effect = None
         self.http.return_value = make_mock_response(
