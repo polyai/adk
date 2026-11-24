@@ -44,17 +44,20 @@ The table shows each model's name, its model ID (the ID a channel stores, which 
 `--json` output shape:
 
 ~~~json
-[
-  {
-    "id": "MODEL-1a2b3c4d",
-    "name": "PolyAI Raven 3.5",
-    "polyaiModel": true,
-    "providerModelId": "polywhirl-3-5",
-    "endToEnd": false,
-    "supportsWebchat": true,
-    "supportsTemperature": true
-  }
-]
+{
+  "success": true,
+  "llm_models": [
+    {
+      "id": "MODEL-1a2b3c4d",
+      "name": "PolyAI Raven 3.5",
+      "polyaiModel": true,
+      "providerModelId": "polywhirl-3-5",
+      "endToEnd": false,
+      "supportsWebchat": true,
+      "supportsTemperature": true
+    }
+  ]
+}
 ~~~
 
 `id` differs between regions. `providerModelId` is the same everywhere, and is the value a step's `llm.provider_model_id` takes.
@@ -79,14 +82,17 @@ poly library asr --refresh --json
 `--json` output shape:
 
 ~~~json
-[
-  {
-    "id": "ASR-1a2b3c4d",
-    "name": "Deepgram Nova 3",
-    "provider": "deepgram",
-    "model": "nova-3"
-  }
-]
+{
+  "success": true,
+  "asr_models": [
+    {
+      "id": "ASR-1a2b3c4d",
+      "name": "Deepgram Nova 3",
+      "provider": "deepgram",
+      "model": "nova-3"
+    }
+  ]
+}
 ~~~
 
 `id` differs between regions. `provider` and `model` are the values a step's `asr` override takes.

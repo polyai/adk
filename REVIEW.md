@@ -48,6 +48,8 @@ Report **blocking** issues first, then **nits**. Don't comment on what the ignor
   `load_project`, `json_print`) instead of reusing or extending it.
 - Back-compat shims or code nothing calls. Delete it.
 - Flags or terms that differ from sibling commands (`--json`, `--path`, `--force`, region names).
+- `--json` output that isn't one object with `"success"`, prints a list as a bare array
+  instead of under a named key, or reports errors without `fail()` (`{"success": false, "error": ...}`).
 - Tests in a new file or class when an existing one fits, or mocks deeper than the API boundary.
 - No manual QA notes for a new or changed command.
 

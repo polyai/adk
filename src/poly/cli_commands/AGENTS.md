@@ -17,9 +17,19 @@ Rules for `src/poly/cli_commands/`. The repo-wide rules in the root `AGENTS.md` 
   `project list` / `create`) call `AgentStudioInterface` directly.
 - Reuse the shared parent parsers in `Parents` (`base.py`) for `--path`, `--json`, `--verbose`
   and `--debug`. Don't redefine them per command.
-- `--json`: print one object with `json_print` (`output/json_output.py`), never prompt, and
-  exit 1 on failure. Human output goes through `output/console.py` helpers (`success`, `error`,
-  `info`, `paged_output` for long lists).
+- `--json`: print exactly one object with `json_print` (`output/json_output.py`), never prompt,
+  and exit 1 on failure. Human output goes through `output/console.py` helpers (`success`,
+  `error`, `info`, `paged_output` for long lists).
+- `--json` shape, for every new or changed command:
+  - Success includes `"success": true`.
+  - A list goes under a key named for what it holds, never as a bare array:
+    `{"success": true, "voices": [...]}`.
+  - A single item goes under its own key, not spread over the top level:
+    `{"success": true, "voice": {...}}`.
+  - Report failures with `fail()` (`shared.py`), which prints `{"success": false, "error": "..."}`
+    and exits 1. The message key is `error`, never `message`.
+  - Older commands that print a bare array or skip `success` (`metrics list`, `branch list`) are
+    not the pattern to copy.
 - Failures exit non-zero in both modes. Unexpected exceptions reach `handle_exception` in
   `cli.py`; don't catch and swallow them here.
 - Import heavy modules (console rendering, `requests`, call/WebRTC, YAML dumpers) inside the

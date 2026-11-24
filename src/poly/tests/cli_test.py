@@ -7150,7 +7150,7 @@ class LibraryCommandTest(unittest.TestCase):
 
     def test_llm_json_lists_polyai_models_first_then_by_name(self):
         """Models flagged polyaiModel come first, and each group is sorted by name."""
-        names = [m["name"] for m in self._json_output(LibraryCommand.list_llm_models, None)]
+        names = [m["name"] for m in self._json_output(LibraryCommand.list_llm_models, None)["llm_models"]]
 
         self.assertEqual(
             names,
@@ -7159,12 +7159,24 @@ class LibraryCommandTest(unittest.TestCase):
 
     def test_asr_json_lists_polyai_models_first_then_by_name(self):
         """ASR models from a PolyAI provider or with a poly- model come first, by name."""
-        names = [m["name"] for m in self._json_output(LibraryCommand.list_asr_models, None)]
+        names = [m["name"] for m in self._json_output(LibraryCommand.list_asr_models, None)["asr_models"]]
 
         self.assertEqual(
             names,
             ["Auto", "PolyAI ASR", "Raven ASR", "Deepgram Nova 3", "Soniox STT RT v5"],
         )
+
+    def test_list_json_is_one_object_with_success_and_the_models(self):
+        """Each list prints one object: success, and the models under their own key."""
+        for method, key in (
+            (LibraryCommand.list_asr_models, "asr_models"),
+            (LibraryCommand.list_llm_models, "llm_models"),
+        ):
+            with self.subTest(method.__name__):
+                output = self._json_output(method, None)
+
+                self.assertEqual(set(output), {"success", key})
+                self.assertIs(output["success"], True)
 
     def test_list_reads_the_saved_library_without_calling_the_api(self):
         """With a library loaded, listing makes no API calls and no refresh."""
@@ -7177,7 +7189,7 @@ class LibraryCommandTest(unittest.TestCase):
         """A project with no saved library fetches one before listing."""
         self.proj.library = None
 
-        output = self._json_output(LibraryCommand.list_asr_models, None)
+        output = self._json_output(LibraryCommand.list_asr_models, None)["asr_models"]
 
         self.mock_get_asr.assert_called_once_with("us-1")
         self.assertEqual(len(output), len(self.ASR_MODELS))
@@ -7196,14 +7208,14 @@ class LibraryCommandTest(unittest.TestCase):
         stale.last_refreshed = datetime.now(UTC) - timedelta(days=2)
         stale.save_library()
 
-        output = self._json_output(LibraryCommand.list_asr_models, "uk-1")
+        output = self._json_output(LibraryCommand.list_asr_models, "uk-1")["asr_models"]
 
         self.mock_get_asr.assert_called_once_with("uk-1")
         self.assertEqual(len(output), len(self.ASR_MODELS))
 
     def test_list_with_new_region_fetches_and_saves_it(self):
         """--region for a region with no saved library fetches and saves it."""
-        output = self._json_output(LibraryCommand.list_llm_models, "uk-1")
+        output = self._json_output(LibraryCommand.list_llm_models, "uk-1")["llm_models"]
 
         self.mock_get_llm.assert_called_once_with("uk-1")
         self.assertEqual(len(output), len(self.LLM_MODELS))
@@ -7213,7 +7225,7 @@ class LibraryCommandTest(unittest.TestCase):
         """--region for a region already saved reads it without calling the API."""
         Library.build_library("uk-1", self.ASR_MODELS[:1], self.LLM_MODELS[:1]).save_library()
 
-        output = self._json_output(LibraryCommand.list_asr_models, "uk-1")
+        output = self._json_output(LibraryCommand.list_asr_models, "uk-1")["asr_models"]
 
         self.mock_get_asr.assert_not_called()
         self.assertEqual([m["name"] for m in output], ["Soniox STT RT v5"])
@@ -7241,7 +7253,7 @@ class LibraryCommandTest(unittest.TestCase):
         self._save_stale_region("uk-1")
         self.mock_get_llm.side_effect = RuntimeError("list route down")
 
-        output = self._json_output(LibraryCommand.list_llm_models, "uk-1")
+        output = self._json_output(LibraryCommand.list_llm_models, "uk-1")["llm_models"]
 
         self.assertEqual([m["name"] for m in output], ["GPT-4.1 mini"])
 
@@ -7253,15 +7265,18 @@ class LibraryCommandTest(unittest.TestCase):
             LibraryCommand.list_asr_models(TEST_DIR, "euw-1")
 
     def test_refresh_flag_refetches_and_prints_one_json_document(self):
-        """--refresh refetches before listing, and --json still prints only the list."""
+        """--refresh refetches before listing, and --json still prints only the one object."""
         Library.build_library("uk-1", [], []).save_library()
 
-        for method in (LibraryCommand.list_asr_models, LibraryCommand.list_llm_models):
+        for method, key in (
+            (LibraryCommand.list_asr_models, "asr_models"),
+            (LibraryCommand.list_llm_models, "llm_models"),
+        ):
             with self.subTest(method.__name__):
                 output = self._json_output(method, "uk-1", refresh=True)
 
-                self.assertIsInstance(output, list)
-                self.assertTrue(output)
+                self.assertTrue(output["success"])
+                self.assertTrue(output[key])
 
     def test_llm_table_tags_polyai_models(self):
         """The table lists PolyAI's models first, with the PolyAI tag."""

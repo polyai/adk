@@ -247,7 +247,7 @@ class LibraryCommand(BaseCommand):
         sorted_asr_models = _poly_first(asr_models_json, _is_poly_asr)
 
         if output_json:
-            json_print(sorted_asr_models)
+            json_print({"success": True, "asr_models": sorted_asr_models})
 
         else:
             with paged_output():
@@ -282,7 +282,7 @@ class LibraryCommand(BaseCommand):
         sorted_llm_models = _poly_first(llm_models, _is_poly_llm)
 
         if output_json:
-            json_print(sorted_llm_models)
+            json_print({"success": True, "llm_models": sorted_llm_models})
 
         else:
             with paged_output():
