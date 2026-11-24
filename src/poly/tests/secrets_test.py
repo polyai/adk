@@ -819,6 +819,7 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertEqual(code, 0, output)
         confirm.assert_not_called()
         self.assertEqual(json.loads(output)["deleted"], ["single", "credentials"])
+        self.assertEqual(self.calls, [("DELETE", {"display_name": ["single", "credentials"]})])
         self.assertEqual(self.state, {})
 
     def test_cancelled_delete_does_not_write(self):

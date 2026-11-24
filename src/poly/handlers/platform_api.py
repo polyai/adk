@@ -360,7 +360,7 @@ class PlatformAPIHandler:
 
     @staticmethod
     def delete_secrets(region: str, account_id: str, names: list[str]) -> None:
-        """Delete account secrets without retaining their response payload."""
+        """Delete account secrets. The endpoint requires display_name as an array in the body."""
         PlatformAPIHandler.make_request(
             region,
             SECRETS_URL.format(account_id=account_id),
