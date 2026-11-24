@@ -54,7 +54,8 @@ class SecretsCommand(BaseCommand):
             parents=[parents.path, parents.json],
             help="Create or update an account secret immediately, including live.",
             description=(
-                "Create or update an account secret immediately for all projects with access, including live. "
+                "Create or update an account secret immediately for all projects with access, "
+                "including live. "
                 "Values come from a hidden prompt or stdin, never command arguments. "
                 "Changing type requires a complete replacement value."
             ),
@@ -114,7 +115,7 @@ class SecretsCommand(BaseCommand):
         delete_parser = actions.add_parser(
             "delete",
             parents=[parents.path, parents.json],
-            help="Delete account secrets immediately for every project with access, including live.",
+            help="Delete account secrets immediately for all projects with access, including live.",
         )
         delete_parser.add_argument(
             "names",
