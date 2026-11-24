@@ -68,9 +68,11 @@ poly secrets set <secret_name> --json < /secure/path/token
 poly secrets set <secret_name> --key-value --json < /secure/path/credentials.json
 ```
 
-Values come from hidden prompts or stdin, never a command argument. Interactive key-value input prompts separately for each key and hides each value. A single value read from stdin is used verbatim, including any trailing newline. Key-value stdin must contain a nonempty JSON object: strings add or update keys, and `null` deletes a key from an existing secret. New secrets require string values for every key.
+Values come from hidden prompts or stdin, never a command argument. Interactive key-value input prompts separately for each key and hides each value. At the interactive value prompt, typing `null` stores it as text. A single value read from stdin is used verbatim, including any trailing newline.
 
-Updates to an existing key-value secret change only the supplied keys. Omitted keys keep their stored values without being read. For example, input `{"password":"new-value"}` updates only `password`; `{"obsolete":null}` removes only `obsolete`. Alternatively, use repeatable `--delete-key` to remove keys without supplying a value. A secret must retain at least one key.
+For key-value input on stdin, pass a nonempty JSON object. A string value such as `{"status":"null"}` adds or updates the key. An unquoted JSON `null`, as in `{"obsolete":null}`, deletes a key from an existing secret. New secrets require string values for every key.
+
+Updates to an existing key-value secret change only the supplied keys. Omitted keys keep their stored values without being read. To delete a key without piping JSON, use `--delete-key KEY`. Repeat the flag to delete multiple keys. A secret must retain at least one key.
 
 When changing only description or project access, the stored value is preserved without requesting it. Use `--replace-value` to also enter a single value or key updates interactively, or pipe them on stdin. An existing secret's type cannot be changed.
 
