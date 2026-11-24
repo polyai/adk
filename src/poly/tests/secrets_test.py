@@ -530,10 +530,31 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertIn("retain at least one key", output)
         self.assertFalse(any(method != "GET" for method, _ in self.calls))
 
+    def test_4xx_shows_structured_error_code_and_message(self):
+        detail = {"error_code": "INVALID_ACCESS", "error_message": "Unknown project in access list"}
+        for body in (
+            {**detail, "debug": SENTINEL},
+            {
+                "error_code": "BAD_REQUEST",
+                "error_message": json.dumps({**detail, "debug": SENTINEL}),
+            },
+        ):
+            with self.subTest(body=body):
+                self.http.side_effect = lambda **kw: (
+                    self.request(**kw) if kw["method"] == "GET" else make_mock_response(400, body)
+                )
+                code, output, errors = self.run_cli("set", "single", "--json", stdin=SENTINEL)
+                self.assertEqual(code, 1)
+                self.assertIn("HTTP 400", output)
+                self.assertIn("INVALID_ACCESS: Unknown project in access list", output)
+                self.assertNotIn(SENTINEL, output + errors)
+
     def test_patch_errors_are_redacted_and_are_not_retried_as_put(self):
         def reject_patch(**kwargs):
             if kwargs["method"] == "PATCH":
-                return make_mock_response(400, {"message": SENTINEL}, content=SENTINEL.encode())
+                return make_mock_response(
+                    400, {"error_code": "BAD_REQUEST", "error_message": f"Rejected {SENTINEL}"}
+                )
             return self.request(**kwargs)
 
         self.http.side_effect = reject_patch

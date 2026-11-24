@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import os
+import re
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -219,6 +220,10 @@ class PlatformAPIHandler:
 
                 status = api_response.status_code
                 message = f"Secret request failed (HTTP {status})."
+                if 400 <= status < 500:
+                    details = PlatformAPIHandler._secret_error_details(api_response, data)
+                    if details:
+                        message += f" {details}"
                 if status in (401, 403):
                     message += " Check your API key and account secrets permissions."
                 elif status == 404:
@@ -254,6 +259,51 @@ class PlatformAPIHandler:
 
         logger.info(f"Request to {url} successful")
         return parsed
+
+    @staticmethod
+    def _secret_error_details(response, data: ty.Optional[dict]) -> str:
+        """Read the API's structured client error without exposing a request or response body."""
+        try:
+            error = response.json()
+        except ValueError:
+            return ""
+        if not isinstance(error, dict):
+            return ""
+        code = error.get("error_code")
+        message = error.get("error_message")
+        if not isinstance(code, str) or not isinstance(message, str):
+            return ""
+
+        # The gateway can wrap a downstream JSON error inside its error_message.
+        if message.lstrip().startswith(("{", "[")):
+            try:
+                nested = json.loads(message)
+            except ValueError:
+                return ""
+            if not isinstance(nested, dict):
+                return ""
+            code = nested.get("error_code", code)
+            message = nested.get("error_message")
+        if not isinstance(code, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", code):
+            return ""
+        if (
+            not isinstance(message, str)
+            or not message.strip()
+            or message.lstrip().startswith(("{", "["))
+        ):
+            return ""
+
+        details = f"{code}: {message}"
+        value = (data or {}).get("secret_value")
+        values = value.values() if isinstance(value, dict) else [value]
+        for item in values:
+            if (
+                isinstance(item, str)
+                and item
+                and (item in details or json.dumps(item)[1:-1] in details)
+            ):
+                return ""
+        return details
 
     @staticmethod
     def _secret_metadata(record: dict) -> dict:
