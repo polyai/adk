@@ -33,6 +33,7 @@ from poly.cli_commands.metrics import MetricsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.rtc import RTCCommand
+from poly.cli_commands.secrets import SecretsCommand
 from poly.cli_commands.setup import SetupCommand
 from poly.cli_commands.shared import REGION_CHOICES, get_package_version, region_type
 from poly.cli_commands.sync import (
@@ -79,6 +80,7 @@ COMMANDS = [
     AudioCacheCommand,
     FunctionsCommand,
     CampaignCommand,
+    SecretsCommand,
     TestingCommand,
     RTCCommand,
     ChatCommand,

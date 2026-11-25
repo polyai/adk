@@ -145,6 +145,18 @@ poly deployments list             # what is deployed where
 
 **Never run `poly campaign publish`, `pause`, `resume`, `archive` or `test` unless the user explicitly asks** — they act on the live campaign, `test` calls or texts a real person, and `--json` skips the confirmation. `poly campaign validate` and `preview` are safe: nothing is sent.
 
+## Account secrets
+
+Use `poly secrets list` to discover account secret names and project access without reading values. `--current-project` filters the list to secrets the current project can use. The human list shows project names and IDs. Scripts receive IDs in JSON.
+
+In a terminal, `poly secrets set` opens a picker. Supply a name to skip it. For a new secret, choose the type, optional description and projects with access. For an existing secret, choose **Value or type** to edit the value or convert its type. You can include description and project access changes in the same save. The key editor lists stored key names and supports adding, updating and deleting keys. Values come from hidden prompts or stdin. Review the key names and access changes before confirming the live save. Use `poly secrets delete` without names for a multi-select picker. Scripts must supply names and pass `--yes` or `--json` to confirm writes.
+
+New secrets default to `single`. Use `--type single` or `--type key-value` to choose a type. Changing an existing secret’s type requires a complete replacement value. For a conversion to key-value, supply every key with a string value. Conversions reject JSON `null` entries and `--delete-key`, and preserve description and access unless explicitly changed.
+
+Description and access changes alone preserve the stored value. New secrets default to the current project's access; use repeatable `--project`, `--no-projects`, or `--grant` / `--revoke` to change it. Existing key-value secrets update only the supplied keys and preserve omitted keys. A JSON `null` or repeatable `--delete-key KEY` deletes a key; at least one key must remain. New key-value secrets require string values. `--json` never prompts and requires stdin when supplying values; metadata-only updates and `--delete-key` need no value.
+
+These commands change account storage directly across all environments, including live; they do not go through the branch/push/deployment workflow. Only write or delete secrets when the user requests it. Use `poly secrets --help` for the command reference.
+
 ## Rules and gotchas
 
 - Never edit anything under `_gen/` — generated stubs.
