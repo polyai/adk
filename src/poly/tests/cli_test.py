@@ -7227,6 +7227,28 @@ class LibraryCommandTest(unittest.TestCase):
         self.assertEqual(set(output), {"success", "voices"})
         self.assertEqual([voice["name"] for voice in output["voices"]], ["Anne", "Ben"])
 
+    def test_voice_list_owner_keeps_only_that_owners_voices(self):
+        """--owner lists only the shared library's voices, or only the account's own."""
+        self._use_voices()
+
+        for owner, names in (("global", ["Anne"]), ("account", ["Ben"])):
+            with self.subTest(owner):
+                output = self._json_output(LibraryCommand.list_tts_voices, owner=owner)
+
+                self.assertEqual([voice["name"] for voice in output["voices"]], names)
+
+    @patch("poly.cli_commands.library.LibraryCommand.list_tts_voices")
+    def test_voice_list_subcommand_passes_owner(self, mock_list):
+        """`poly library voice list --owner account` reaches list_tts_voices."""
+        AgentStudioCLI().main(["library", "voice", "list", "--owner", "account", "--path", TEST_DIR])
+
+        self.assertEqual(mock_list.call_args.kwargs["owner"], "account")
+
+    def test_voice_list_rejects_an_unknown_owner(self):
+        """--owner only takes global or account."""
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI().main(["library", "voice", "list", "--owner", "team"])
+
     def test_voice_show_json_puts_the_voice_under_its_own_key(self):
         """`voice show --json` prints success and the voice, not the voice's fields."""
         self._use_voices()

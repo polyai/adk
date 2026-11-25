@@ -109,6 +109,7 @@ Examples:
 ~~~bash
 poly library voice list
 poly library voice list --language fr --gender female
+poly library voice list --owner account
 poly library voice list --name anne --json
 ~~~
 
@@ -120,6 +121,7 @@ Voices are in Agent Studio's order: the shared library before imported voices, t
 | `--language` | Only voices in this language, e.g. `en` or `en-GB`. |
 | `--gender` | Only voices of this gender. One of `male`, `female`, `neutral`. |
 | `--poly` | Only PolyAI's own voices. |
+| `--owner` | Only voices from the shared library (`global`), or only the account's own (`account`). |
 | `--archived` | Include archived voices, and internal ones. |
 | `--refresh` | Fetch the voices before listing, even if the saved copy is recent. |
 

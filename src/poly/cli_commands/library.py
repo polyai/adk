@@ -139,7 +139,8 @@ class LibraryCommand(BaseCommand):
             help="List the TTS voices available in the project's region.",
             description=(
                 "List the TTS voices available in the project's region.\n\n"
-                "Examples:\n  poly library voice list\n  poly library voice list --json\n"
+                "Examples:\n  poly library voice list\n  poly library voice list --owner account\n"
+                "  poly library voice list --json\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -163,6 +164,11 @@ class LibraryCommand(BaseCommand):
             "--poly",
             action="store_true",
             help="Filter TTS voices to only include PolyAI voices.",
+        )
+        library_voice_list_subparser.add_argument(
+            "--owner",
+            choices=["global", "account"],
+            help="Only voices from the shared library (global), or only the account's own (account).",
         )
         library_voice_list_subparser.add_argument(
             "--archived",
@@ -250,6 +256,7 @@ class LibraryCommand(BaseCommand):
                     language=args.language,
                     gender=args.gender,
                     is_poly_voice=args.poly,
+                    owner=args.owner,
                     archived=args.archived,
                 )
             elif args.library_voice_subcommand == "show":
@@ -451,6 +458,7 @@ class LibraryCommand(BaseCommand):
         language: Optional[str] = None,
         gender: Optional[str] = None,
         is_poly_voice: Optional[bool] = None,
+        owner: Optional[str] = None,
         archived: bool = False,
     ) -> None:
         """List the TTS voices available in the project's region.
@@ -463,6 +471,8 @@ class LibraryCommand(BaseCommand):
             gender (Optional[str]): The gender of the TTS voice.
             archived (Optional[bool]): Whether to include archived voices.
             is_poly_voice (Optional[bool]): Whether the voice is a PolyAI voice.
+            owner (Optional[str]): "global" for the shared library's voices only, "account" for
+                the account's own only. Defaults to both.
             output_json (bool, optional): Whether to output the result in JSON format. Defaults to False.
 
         Returns:
@@ -489,6 +499,7 @@ class LibraryCommand(BaseCommand):
             and (archived or not tts_voice.metadata.get("archived"))
             and (archived or not tts_voice.is_internal)
             and (not is_poly_voice or tts_voice.poly_ai_voice)
+            and (owner is None or tts_voice.owner == owner)
         ]
 
         # Agent Studio's order, so the first voices are the ones its Recommended shelf shows.
