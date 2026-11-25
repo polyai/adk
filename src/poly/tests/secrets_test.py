@@ -207,6 +207,25 @@ class SecretsCommandTest(unittest.TestCase):
         self.assertEqual(code, 0, output + errors)
         self.assertNotIn(SENTINEL, output + errors)
 
+    def test_interactive_access_validation_reports_project_list_permission_error(self):
+        def request(**kwargs):
+            if kwargs["url"].endswith("/projects"):
+                return make_mock_response(403)
+            return self.request(**kwargs)
+
+        self.http.side_effect = request
+        for flag in ("--grant", "--project"):
+            with self.subTest(flag=flag):
+                self.calls.clear()
+                with self.prompts():
+                    code, output, errors = self.run_cli(
+                        "set", "single", flag, "project-b", tty=True
+                    )
+                self.assertEqual(code, 1, output + errors)
+                self.assertIn("HTTP 403", errors)
+                self.assertIn("permission to list projects", errors)
+                self.assertEqual(self.calls, [("GET", None)])
+
     def test_single_stdin_strips_one_line_ending(self):
         for raw, expected in (
             ("token", "token"),

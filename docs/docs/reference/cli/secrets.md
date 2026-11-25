@@ -93,6 +93,8 @@ When changing only description or project access, the stored value is preserved 
 
 For `--project`, `--grant`, and `--revoke`, run `poly project list` for the secret's account and use the **Agent ID** beside the project's name. You can also revoke an ID still on the secret's access list after its project has been deleted.
 
+Validating project IDs for `--project` or `--grant` requires permission to list projects in the account.
+
 | Argument | Description |
 |---|---|
 | `<secret_name>` | Optional in a terminal. Supply the display name to skip the secret picker. |

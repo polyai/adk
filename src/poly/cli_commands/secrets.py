@@ -132,7 +132,7 @@ class SecretsCommand(BaseCommand):
         getattr(cls, f"secrets_{args.secrets_subcommand}")(args)
 
     @staticmethod
-    def _project_names(project: "AgentStudioProject") -> dict[str, str]:
+    def _project_names(project: "AgentStudioProject", *, required: bool = False) -> dict[str, str]:
         from requests import HTTPError
 
         try:
@@ -140,6 +140,13 @@ class SecretsCommand(BaseCommand):
         except HTTPError as error:
             if error.response is None or error.response.status_code != 403:
                 raise
+            if required:
+                from poly.handlers.sdk import SourcererAPIError
+
+                raise SourcererAPIError(
+                    "Cannot validate project IDs (HTTP 403). "
+                    "Check that your API key has permission to list projects."
+                ) from None
             from poly.output.console import info
 
             info("Project names are unavailable with this API key. Showing stored project IDs.")
@@ -190,7 +197,11 @@ class SecretsCommand(BaseCommand):
             args.name = pick_secret(records)
             existing = next((r for r in records if r["display_name"] == args.name), None)
 
-        account_projects = cls._project_names(project) if interactive else None
+        account_projects = (
+            cls._project_names(project, required=bool(args.grant or args.projects))
+            if interactive
+            else None
+        )
         options = cls._edit_options(args)
         update = project.prepare_secret_update(
             args.name, existing, account_projects=account_projects, **options
