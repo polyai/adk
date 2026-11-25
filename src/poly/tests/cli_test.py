@@ -7063,10 +7063,11 @@ class LibraryCommandTest(unittest.TestCase):
     ]
 
     def setUp(self):
-        self.library = Library.build_library("us-1", self.ASR_MODELS, self.LLM_MODELS)
+        self.library = Library.build_library("us-1", self.ASR_MODELS, self.LLM_MODELS, [])
         self.mock_load = patch("poly.cli_commands.library.load_project").start()
         self.proj = MagicMock()
         self.proj.region = "us-1"
+        self.proj.account_id = "acct"
         self.proj.library = self.library
         self.proj.refresh_library.return_value = self.library
         self.mock_load.return_value = self.proj
@@ -7178,6 +7179,119 @@ class LibraryCommandTest(unittest.TestCase):
                 self.assertEqual(set(output), {"success", key})
                 self.assertIs(output["success"], True)
 
+    VOICES = [
+        {
+            "id": "VOICE-anne",
+            "name": "Anne",
+            "provider": "ELEVEN_LABS",
+            "providerVoiceId": "el-anne",
+            "config": {},
+            "metadata": {
+                "accent": "en-GB",
+                "sample_voice": ["https://example.com/anne.mp3"],
+            },
+            "isPolyVoice": True,
+            "owner": "global",
+        },
+        {
+            "id": "VOICE-ben",
+            "name": "Ben",
+            "provider": "CARTESIA",
+            "providerVoiceId": "ca-ben",
+            "config": {},
+            "metadata": {"accent": "en-US"},
+            "isPolyVoice": False,
+            "owner": "account",
+        },
+    ]
+
+    def _use_voices(self) -> None:
+        self.proj.library = Library.build_library(
+            "us-1", self.ASR_MODELS, self.LLM_MODELS, self.VOICES, account_id="acct"
+        )
+
+    def _json_failure(self, method, *args, **kwargs):
+        """Run a command method with --json that should fail; return its JSON document."""
+        with patch("sys.stdout", new_callable=StringIO) as stdout:
+            with self.assertRaises(SystemExit) as ctx:
+                method(TEST_DIR, *args, output_json=True, **kwargs)
+        self.assertEqual(ctx.exception.code, 1)
+        return json.loads(stdout.getvalue())
+
+    def test_voice_list_json_is_one_object_with_the_voices(self):
+        """`voice list --json` prints success and the voices under their own key."""
+        self._use_voices()
+
+        output = self._json_output(LibraryCommand.list_tts_voices)
+
+        self.assertEqual(set(output), {"success", "voices"})
+        self.assertEqual([voice["name"] for voice in output["voices"]], ["Anne", "Ben"])
+
+    def test_voice_list_owner_keeps_only_that_owners_voices(self):
+        """--owner lists only the shared library's voices, or only the account's own."""
+        self._use_voices()
+
+        for owner, names in (("global", ["Anne"]), ("account", ["Ben"])):
+            with self.subTest(owner):
+                output = self._json_output(LibraryCommand.list_tts_voices, owner=owner)
+
+                self.assertEqual([voice["name"] for voice in output["voices"]], names)
+
+    @patch("poly.cli_commands.library.LibraryCommand.list_tts_voices")
+    def test_voice_list_subcommand_passes_owner(self, mock_list):
+        """`poly library voice list --owner account` reaches list_tts_voices."""
+        AgentStudioCLI().main(["library", "voice", "list", "--owner", "account", "--path", TEST_DIR])
+
+        self.assertEqual(mock_list.call_args.kwargs["owner"], "account")
+
+    def test_voice_list_rejects_an_unknown_owner(self):
+        """--owner only takes global or account."""
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI().main(["library", "voice", "list", "--owner", "team"])
+
+    def test_voice_show_json_puts_the_voice_under_its_own_key(self):
+        """`voice show --json` prints success and the voice, not the voice's fields."""
+        self._use_voices()
+
+        output = self._json_output(LibraryCommand.show_tts_voice, "Anne")
+
+        self.assertEqual(set(output), {"success", "voice"})
+        self.assertEqual(output["voice"]["id"], "VOICE-anne")
+
+    def test_voice_show_json_reports_an_unknown_voice_as_an_error(self):
+        """A voice that can't be found fails with the standard error shape."""
+        self._use_voices()
+
+        output = self._json_failure(LibraryCommand.show_tts_voice, "Zed")
+
+        self.assertEqual(set(output), {"success", "error"})
+        self.assertFalse(output["success"])
+        self.assertIn('No voice called "Zed"', output["error"])
+
+    def test_voice_play_json_returns_the_recording_without_playing(self):
+        """`voice play --json` reports the recording's URL."""
+        self._use_voices()
+
+        output = self._json_output(LibraryCommand.play_tts_voice, "Anne")
+
+        self.assertEqual(
+            output,
+            {
+                "success": True,
+                "voice_id": "VOICE-anne",
+                "name": "Anne",
+                "sample_voice_url": "https://example.com/anne.mp3",
+            },
+        )
+
+    def test_voice_play_json_fails_for_a_voice_with_no_recording(self):
+        """A voice with no recording fails with the standard error shape."""
+        self._use_voices()
+
+        output = self._json_failure(LibraryCommand.play_tts_voice, "Ben")
+
+        self.assertEqual(output, {"success": False, "error": "Ben has no recording to play."})
+
     def test_list_reads_the_saved_library_without_calling_the_api(self):
         """With a library loaded, listing makes no API calls and no refresh."""
         self._json_output(LibraryCommand.list_llm_models, None)
@@ -7204,7 +7318,7 @@ class LibraryCommandTest(unittest.TestCase):
 
     def test_list_refetches_a_stale_saved_region(self):
         """A saved --region library past the refresh interval is refetched before listing."""
-        stale = Library.build_library("uk-1", [], [])
+        stale = Library.build_library("uk-1", [], [], [])
         stale.last_refreshed = datetime.now(UTC) - timedelta(days=2)
         stale.save_library()
 
@@ -7223,7 +7337,7 @@ class LibraryCommandTest(unittest.TestCase):
 
     def test_list_with_saved_region_reads_it_from_disk(self):
         """--region for a region already saved reads it without calling the API."""
-        Library.build_library("uk-1", self.ASR_MODELS[:1], self.LLM_MODELS[:1]).save_library()
+        Library.build_library("uk-1", self.ASR_MODELS[:1], self.LLM_MODELS[:1], []).save_library()
 
         output = self._json_output(LibraryCommand.list_asr_models, "uk-1")["asr_models"]
 
@@ -7231,7 +7345,7 @@ class LibraryCommandTest(unittest.TestCase):
         self.assertEqual([m["name"] for m in output], ["Soniox STT RT v5"])
 
     def _save_stale_region(self, region: str) -> None:
-        stale = Library.build_library(region, self.ASR_MODELS[:1], self.LLM_MODELS[:1])
+        stale = Library.build_library(region, self.ASR_MODELS[:1], self.LLM_MODELS[:1], [])
         stale.last_refreshed = datetime.now(UTC) - timedelta(days=2)
         stale.save_library()
 
@@ -7266,7 +7380,7 @@ class LibraryCommandTest(unittest.TestCase):
 
     def test_refresh_flag_refetches_and_prints_one_json_document(self):
         """--refresh refetches before listing, and --json still prints only the one object."""
-        Library.build_library("uk-1", [], []).save_library()
+        Library.build_library("uk-1", [], [], []).save_library()
 
         for method, key in (
             (LibraryCommand.list_asr_models, "asr_models"),

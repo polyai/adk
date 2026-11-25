@@ -5,14 +5,20 @@ Provides consistent, colorful terminal output with clean error formatting.
 Copyright PolyAI Limited
 """
 
+import functools
 import json
 import logging
 import os
+import pydoc
+import re
+import shlex
+import shutil
+import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rich import box
@@ -28,6 +34,9 @@ from rich.theme import Theme
 from rich.tree import Tree
 
 from poly.constants import DATA_AGGS
+
+if TYPE_CHECKING:
+    from poly.library import TTSVoice
 
 # Global verbose flag — set by CLI before commands run
 _verbose = False
@@ -59,6 +68,49 @@ def set_verbose(verbose: bool) -> None:
     _verbose = verbose
 
 
+@functools.cache
+def _less_version(command: str) -> int | None:
+    """The version of ``less`` that ``command`` runs, or None if it doesn't run ``less``."""
+    try:
+        result = subprocess.run(
+            [command, "--version"], capture_output=True, text=True, timeout=2, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.match(r"less (\d+)", result.stdout)
+    return int(match.group(1)) if match else None
+
+
+def _less_command(header_lines: int) -> str | None:
+    """The command that runs the reader's pager as ``less`` with search options added.
+
+    Returns None when the pager isn't ``less``, so the caller leaves it to pydoc. Searches
+    ignore case unless they contain a capital letter (``-i``), and the first
+    ``header_lines`` lines stay on screen while scrolling and filtering (``--header``,
+    less 600 and later).
+    """
+    if sys.platform == "win32" or os.environ.get("TERM") in ("dumb", "emacs"):
+        return None
+    pager = os.environ.get("MANPAGER") or os.environ.get("PAGER")
+    if pager:
+        words = shlex.split(pager)
+        if not words or os.path.basename(words[0]) != "less":
+            return None
+        executable = words[0]
+    else:
+        executable = shutil.which("less")
+        if executable is None:
+            return None
+        pager = shlex.quote(executable)
+    version = _less_version(executable)
+    if version is None:
+        return None
+    command = f"{pager} -i"
+    if header_lines and version >= 600:
+        command += f" --header={header_lines}"
+    return command
+
+
 class _OverflowPager(Pager):
     """Pager that only engages when the content overflows the screen.
 
@@ -68,22 +120,42 @@ class _OverflowPager(Pager):
     reader whose ``PAGER`` is ``bat`` or ``more``, or whose ``LESS`` has no
     ``F``. Spawning the pager, colour passthrough, ctrl-c and quitting early are
     all left to Rich and pydoc, which already handle them.
+
+    When the pager is ``less``, the prompt says how to search and filter, searches
+    ignore case, and the first ``header_lines`` lines (a table's column names) stay
+    on screen. pydoc sets ``LESS`` itself, so these go on the command line.
     """
+
+    def __init__(self, title: str = "", header_lines: int = 0) -> None:
+        self.title = title
+        self.header_lines = header_lines
 
     def show(self, content: str) -> None:
         """Write content straight out if it fits, otherwise hand it to the pager."""
         # Rich has already wrapped to the console width, so newlines are rows.
         if content.count("\n") < console.size.height:
             console.file.write(content)
-        else:
+            return
+        command = _less_command(self.header_lines)
+        if command is None:
             SystemPager().show(content)
+            return
+        hint = "/ to search, & to filter ·"
+        pydoc.pipe_pager(content, command, f"{self.title} · {hint}" if self.title else hint)
 
 
 @contextmanager
-def paged_output(enabled: bool = True) -> Iterator[None]:
-    """Pipe output through the system pager when enabled and stdout is a TTY."""
+def paged_output(enabled: bool = True, title: str = "", header_lines: int = 0) -> Iterator[None]:
+    """Pipe output through the system pager when enabled and stdout is a TTY.
+
+    Args:
+        enabled: Whether to page at all.
+        title: Shown in the pager's prompt.
+        header_lines: How many lines at the top stay on screen while scrolling.
+    """
     if enabled and console.is_terminal:
-        with console.pager(pager=_OverflowPager(), styles=True):
+        pager = _OverflowPager(title=title, header_lines=header_lines)
+        with console.pager(pager=pager, styles=True):
             yield
     else:
         yield
@@ -2137,6 +2209,15 @@ def _flag(value: Any) -> str:
     return "[success]✓[/success]" if value else "[muted]✗[/muted]"
 
 
+def _voice_tag(voice: "TTSVoice") -> str:
+    """The label beside a voice's name: PolyAI's own, or imported into the account."""
+    if voice.poly_ai_voice:
+        return _poly_tag(True)
+    if voice.is_imported:
+        return "[muted]Imported[/muted]"
+    return ""
+
+
 def _poly_tag(is_poly: bool) -> str:
     return "[magenta]PolyAI[/magenta]" if is_poly else ""
 
@@ -2205,3 +2286,190 @@ def print_asr_models(
 
     console.print(table)
     console.print(f"\n{len(asr_models)} ASR models")
+
+
+_TTS_PROVIDER_NAMES = {
+    "CARTESIA": "Cartesia",
+    "ELEVEN_LABS": "ElevenLabs",
+    "GOOGLE_GEMINI": "Gemini",
+    "HUME": "Hume",
+}
+
+
+def _tts_provider_name(provider: str | None) -> str:
+    if not provider:
+        return "—"
+    return _TTS_PROVIDER_NAMES.get(provider, provider.replace("_", " ").title())
+
+
+def _voice_language(voice: dict[str, Any]) -> str:
+    metadata = voice.get("metadata") or {}
+    return metadata.get("accent") or metadata.get("language_code") or "—"
+
+
+def print_tts_voices(tts_voices: "list[TTSVoice]") -> None:
+    """Print a table of the TTS voices the project can use, in the order given.
+
+    A voice is picked by its name, provider and language. When those three are shared by
+    more than one voice, its vendor voice ID is shown too, since that's what tells them
+    apart. Tags leave out the ones Agent Studio hides.
+
+    Args:
+        tts_voices: The voices, as the library holds them.
+    """
+    if not tts_voices:
+        plain("No voices available.")
+        return
+
+    def language(voice: "TTSVoice") -> str:
+        return _voice_language({"metadata": voice.metadata})
+
+    def identity(voice: "TTSVoice") -> tuple:
+        return ((voice.name or "").lower(), voice.provider, language(voice).lower())
+
+    identity_counts: dict[tuple, int] = {}
+    for voice in tts_voices:
+        identity_counts[identity(voice)] = identity_counts.get(identity(voice), 0) + 1
+    shows_vendor_id = any(count > 1 for count in identity_counts.values())
+
+    def widest(values: list[str], header: str) -> int:
+        return max([len(header), *(len(value) for value in values)])
+
+    names = [voice.name or "—" for voice in tts_voices]
+    providers = [_tts_provider_name(voice.provider) for voice in tts_voices]
+    voice_ids = [voice.voice_id or "—" for voice in tts_voices]
+
+    tag_width = max(
+        (
+            len(label)
+            for voice in tts_voices
+            if (label := Text.from_markup(_voice_tag(voice)).plain)
+        ),
+        default=0,
+    )
+    fixed_columns = [
+        ("Name", "bold yellow", widest(names, "Name")),
+        ("", None, tag_width),
+        ("Language", None, 8),
+        ("Gender", None, 6),
+        ("Provider", "cyan", widest(providers, "Provider")),
+        ("Voice ID", "muted", widest(voice_ids, "Voice ID")),
+    ]
+    if shows_vendor_id:
+        fixed_columns.append(("Vendor voice ID", "muted", 20))
+
+    # The columns that identify a voice keep their full width; tags get what's left, and are
+    # left out when that's too little to read. The header is underlined to match how less
+    # draws it once it's pinned at the top of the pager.
+    table = Table(box=None, show_header=True, header_style="bold underline", padding=(0, 1))
+    for header, style, width in fixed_columns:
+        table.add_column(
+            header,
+            style=style,
+            no_wrap=header != "Vendor voice ID",
+            overflow="fold",
+            min_width=width,
+            max_width=width,
+        )
+    tags_width = console.width - sum(width + 2 for _, _, width in fixed_columns) - 2
+    shows_tags = tags_width >= 10
+    if shows_tags:
+        table.add_column(
+            "Tags", style="muted", no_wrap=True, overflow="ellipsis", max_width=tags_width
+        )
+
+    for voice in tts_voices:
+        metadata = voice.metadata or {}
+        row = [
+            voice.name or "—",
+            _voice_tag(voice),
+            language(voice),
+            (metadata.get("gender") or "—").capitalize(),
+            _tts_provider_name(voice.provider),
+            voice.voice_id or "—",
+        ]
+        if shows_vendor_id:
+            shared = identity_counts[identity(voice)] > 1
+            row.append(voice.provider_voice_id or "—" if shared else "")
+        if shows_tags:
+            row.append(", ".join(voice.display_tags))
+        table.add_row(*row)
+
+    console.print(table)
+    console.print(f"\n{len(tts_voices)} voices")
+    if shows_vendor_id:
+        console.print(
+            "[muted]A vendor voice ID is shown where voices share a name, provider and "
+            "language.[/muted]"
+        )
+
+
+def _humanise(value: str) -> str:
+    """Turn an API value such as ``informative_educational`` into ``Informative educational``."""
+    return value.replace("_", " ").capitalize()
+
+
+def print_tts_voice(voice: "TTSVoice") -> None:
+    """Print one TTS voice's details in a panel.
+
+    Shows what identifies the voice (its ID, provider, vendor voice ID, owner and language), its tags,
+    the recording to listen to, and the default settings the library gives it. A project's own
+    tuning overrides those settings field by field.
+
+    Args:
+        voice: The voice, as the library holds it.
+    """
+    metadata = voice.metadata or {}
+
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("Key", style="label", no_wrap=True)
+    table.add_column("Value", overflow="fold")
+
+    table.add_row("Voice ID", voice.voice_id or "—")
+    table.add_row("Provider", _tts_provider_name(voice.provider))
+    table.add_row("Vendor voice ID", voice.provider_voice_id or "—")
+    table.add_row("Owner", "account" if voice.is_imported else "global")
+
+    language = _voice_language({"metadata": metadata})
+    language_name = metadata.get("language")
+    if language_name and language_name != language:
+        language = f"{language} ({language_name})"
+    table.add_row("Language", language)
+    table.add_row("Gender", (metadata.get("gender") or "—").capitalize())
+
+    if voice.display_tags:
+        table.add_row("Tags", ", ".join(voice.display_tags))
+    if metadata.get("suggested_use"):
+        table.add_row("Suggested use", _humanise(metadata["suggested_use"]))
+    if metadata.get("live_projects") is not None:
+        table.add_row("Live projects", str(metadata["live_projects"]))
+
+    samples = metadata.get("sample_voice") or []
+    table.add_row("Sample", samples[0] if samples else "[muted]No recording[/muted]")
+
+    if metadata.get("archived"):
+        archived = "[warning]Yes[/warning]"
+        details = [
+            _format_iso_timestamp(metadata["archived_at"]) if metadata.get("archived_at") else "",
+            f"by {metadata['archived_by']}" if metadata.get("archived_by") else "",
+        ]
+        details_text = " ".join(detail for detail in details if detail)
+        if details_text:
+            archived += f", {details_text}"
+        if metadata.get("archive_reason"):
+            archived += f": {metadata['archive_reason']}"
+        table.add_row("Archived", archived)
+
+    body: list[Any] = [table]
+    if voice.config:
+        settings = Table(show_header=False, box=None, padding=(0, 1))
+        settings.add_column("Setting", style="muted", no_wrap=True)
+        settings.add_column("Value")
+        for key in sorted(voice.config):
+            settings.add_row(key, str(voice.config[key]))
+        body += [Text(""), Text(" Default settings", style="label"), settings]
+
+    title = f"[bold]{voice.name or voice.voice_id}[/bold]"
+    if _voice_tag(voice):
+        title += f" {_voice_tag(voice)}"
+    console.print(Panel(Group(*body), title=title, title_align="left", border_style="cyan"))

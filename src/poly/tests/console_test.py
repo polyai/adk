@@ -3,12 +3,15 @@
 Copyright PolyAI Limited
 """
 
+import os
 import unittest
 from unittest.mock import MagicMock, PropertyMock, patch
 
 from rich.console import Console, ConsoleDimensions
 
+from poly.library import TTSVoice
 from poly.output.console import (
+    _less_command,
     _merge_leaf_diffs,
     _OverflowPager,
     console,
@@ -29,6 +32,8 @@ from poly.output.console import (
     print_releases_branches,
     print_transcript,
     print_transcript_matches,
+    print_tts_voice,
+    print_tts_voices,
     resolve_parent_branch_label,
 )
 
@@ -431,8 +436,11 @@ class OverflowPagerTest(unittest.TestCase):
         size_patcher.start()
         self.addCleanup(size_patcher.stop)
 
-    def _show(self, content: str):
-        """Run the pager over content, returning (written_directly, system_pager)."""
+    def _show(self, content: str, less_command: str | None = None, **pager_kwargs):
+        """Run the pager over content, returning (written_directly, system_pager, pipe_pager).
+
+        less_command is what the reader's pager resolves to; None means it isn't less.
+        """
         written = []
         with (
             patch.object(
@@ -442,35 +450,116 @@ class OverflowPagerTest(unittest.TestCase):
                 return_value=MagicMock(write=written.append),
             ),
             patch("poly.output.console.SystemPager") as mock_system_pager,
+            patch("poly.output.console._less_command", return_value=less_command),
+            patch("poly.output.console.pydoc.pipe_pager") as mock_pipe_pager,
         ):
-            _OverflowPager().show(content)
-        return "".join(written), mock_system_pager
+            _OverflowPager(**pager_kwargs).show(content)
+        return "".join(written), mock_system_pager, mock_pipe_pager
 
     def test_content_shorter_than_screen_is_written_directly(self):
         """Output that fits on one screen bypasses the pager entirely."""
         content = "row\n" * (self.SCREEN_HEIGHT - 1)
 
-        written, mock_system_pager = self._show(content)
+        written, mock_system_pager, mock_pipe_pager = self._show(content, "less -i")
 
         self.assertEqual(written, content)
         mock_system_pager.assert_not_called()
+        mock_pipe_pager.assert_not_called()
 
     def test_content_longer_than_screen_is_handed_to_the_pager(self):
-        """Output that overflows the screen goes to the pager, not stdout."""
+        """Output that overflows the screen goes to a pager other than less, not stdout."""
         content = "row\n" * (self.SCREEN_HEIGHT + 10)
 
-        written, mock_system_pager = self._show(content)
+        written, mock_system_pager, mock_pipe_pager = self._show(content)
 
         self.assertEqual(written, "")
         mock_system_pager.return_value.show.assert_called_once_with(content)
+        mock_pipe_pager.assert_not_called()
+
+    def test_less_is_run_with_its_search_options_and_a_hint(self):
+        """With less, the content goes to the resolved command, with the title and a hint."""
+        content = "row\n" * (self.SCREEN_HEIGHT + 10)
+
+        written, mock_system_pager, mock_pipe_pager = self._show(
+            content, "less -i --header=1", title="TTS voices", header_lines=1
+        )
+
+        self.assertEqual(written, "")
+        mock_system_pager.assert_not_called()
+        mock_pipe_pager.assert_called_once_with(
+            content, "less -i --header=1", "TTS voices · / to search, & to filter ·"
+        )
+
+    def test_less_without_a_title_shows_only_the_hint(self):
+        """A caller that gives no title still gets the search hint in the prompt."""
+        content = "row\n" * (self.SCREEN_HEIGHT + 10)
+
+        _, _, mock_pipe_pager = self._show(content, "less -i")
+
+        self.assertEqual(mock_pipe_pager.call_args.args[2], "/ to search, & to filter ·")
 
     def test_content_exactly_filling_the_screen_is_not_paged(self):
         """The boundary case stays inline rather than opening the pager."""
         content = "row\n" * (self.SCREEN_HEIGHT - 1)
 
-        _, mock_system_pager = self._show(content)
+        _, mock_system_pager, mock_pipe_pager = self._show(content, "less -i")
 
         mock_system_pager.assert_not_called()
+        mock_pipe_pager.assert_not_called()
+
+
+class LessCommandTest(unittest.TestCase):
+    """Tests for _less_command, which adds search options when the pager is less."""
+
+    def _command(self, header_lines=1, env=None, version=668, which="/usr/bin/less"):
+        environ = {key: value for key, value in os.environ.items()}
+        for key in ("PAGER", "MANPAGER", "TERM"):
+            environ.pop(key, None)
+        environ.update(env or {})
+        with (
+            patch.dict(os.environ, environ, clear=True),
+            patch("poly.output.console.sys.platform", "darwin"),
+            patch("poly.output.console.shutil.which", return_value=which),
+            patch("poly.output.console._less_version", return_value=version),
+        ):
+            return _less_command(header_lines)
+
+    def test_default_less_gets_case_insensitive_search_and_a_pinned_header(self):
+        """With no PAGER set, the less on the PATH runs with -i and --header."""
+        self.assertEqual(self._command(), "/usr/bin/less -i --header=1")
+
+    def test_pager_set_to_less_keeps_its_own_options(self):
+        """A PAGER of less with options keeps them, with the search options added."""
+        self.assertEqual(self._command(env={"PAGER": "less -R"}), "less -R -i --header=1")
+
+    def test_manpager_wins_over_pager(self):
+        """MANPAGER is read first, matching pydoc."""
+        self.assertIsNone(self._command(env={"MANPAGER": "bat", "PAGER": "less"}))
+
+    def test_other_pagers_are_left_to_pydoc(self):
+        """A pager that isn't less gets no options added."""
+        self.assertIsNone(self._command(env={"PAGER": "bat"}))
+        self.assertIsNone(self._command(env={"PAGER": "more"}))
+
+    def test_no_header_without_header_lines(self):
+        """Output with no header row only gets case-insensitive search."""
+        self.assertEqual(self._command(header_lines=0), "/usr/bin/less -i")
+
+    def test_less_older_than_600_gets_no_header_option(self):
+        """--header needs less 600, so older versions run without it."""
+        self.assertEqual(self._command(version=581), "/usr/bin/less -i")
+
+    def test_no_less_on_the_path(self):
+        """Without less installed, the pager is left to pydoc."""
+        self.assertIsNone(self._command(which=None))
+
+    def test_dumb_terminal_is_left_to_pydoc(self):
+        """pydoc strips styles on dumb and emacs terminals, so it keeps those."""
+        self.assertIsNone(self._command(env={"TERM": "dumb"}))
+
+    def test_command_that_is_not_really_less(self):
+        """A pager named less that doesn't report a less version gets no options."""
+        self.assertIsNone(self._command(version=None))
 
 
 class PagedOutputTest(unittest.TestCase):
@@ -510,6 +599,18 @@ class PagedOutputTest(unittest.TestCase):
         mock_pager.assert_called_once()
         self.assertIsInstance(mock_pager.call_args.kwargs["pager"], _OverflowPager)
         self.assertTrue(mock_pager.call_args.kwargs["styles"])
+
+    def test_title_and_header_lines_reach_the_pager(self):
+        """The prompt title and pinned header rows are passed through to the pager."""
+        with (
+            patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True),
+            patch.object(console, "pager") as mock_pager,
+        ):
+            with paged_output(title="TTS voices", header_lines=1):
+                pass
+
+        pager = mock_pager.call_args.kwargs["pager"]
+        self.assertEqual((pager.title, pager.header_lines), ("TTS voices", 1))
 
 
 def _topic(content: str, timestamp: str) -> dict:
@@ -1012,3 +1113,197 @@ class PrintAsrModelsTest(unittest.TestCase):
 
         self.assertIn("PolyAI  default", poly_row)
         self.assertNotIn("PolyAI", other_row)
+
+
+def _voice(**overrides) -> TTSVoice:
+    """A TTS voice as the library holds it, with any field overridden."""
+    fields = {
+        "voice_id": "VOICE-1a2b3c4d",
+        "name": "Anne",
+        "provider": "ELEVEN_LABS",
+        "provider_voice_id": "DAgjOaO8Ats7",
+        "config": {"stability": 0.3, "model_id": "eleven_multilingual_v2"},
+        "metadata": {
+            "accent": "en-US",
+            "language": "English (United States)",
+            "gender": "female",
+            "tags": ["Sophisticated", "Clear"],
+            "description": "English, Sophisticated, Clear",
+            "suggested_use": "informative_educational",
+            "live_projects": 3,
+            "sample_voice": ["https://example.com/anne.mp3"],
+        },
+        "poly_ai_voice": False,
+        "owner": "global",
+    }
+    fields.update(overrides)
+    return TTSVoice(**fields)
+
+
+class PrintTtsVoiceTest(unittest.TestCase):
+    """Tests for print_tts_voice, the panel `poly library voice show` prints."""
+
+    def _render(self, voice: TTSVoice) -> str:
+        with console.capture() as capture:
+            print_tts_voice(voice)
+        return capture.get()
+
+    def test_identifying_fields_are_shown(self):
+        """The panel shows the voice's ID, provider name and vendor voice ID."""
+        output = self._render(_voice())
+
+        self.assertIn("Anne", output)
+        self.assertIn("VOICE-1a2b3c4d", output)
+        self.assertIn("ElevenLabs", output)
+        self.assertIn("DAgjOaO8Ats7", output)
+
+    def test_language_shows_the_code_and_its_name(self):
+        """The accent is followed by the language's name when the voice has one."""
+        self.assertIn("en-US (English (United States))", self._render(_voice()))
+
+    def test_descriptive_fields_are_readable(self):
+        """Gender is capitalised, tags are joined and the suggested use loses its underscores."""
+        output = self._render(_voice())
+
+        self.assertIn("Female", output)
+        self.assertIn("Sophisticated, Clear", output)
+        self.assertIn("Informative educational", output)
+        self.assertIn("Live projects", output)
+
+    def test_description_is_left_out(self):
+        """The description only repeats the language and tags, so it isn't shown."""
+        self.assertNotIn("Description", self._render(_voice()))
+
+    def test_sample_url_is_shown(self):
+        """The first recording's URL is shown so it can be opened."""
+        self.assertIn("https://example.com/anne.mp3", self._render(_voice()))
+
+    def test_voice_without_a_recording_says_so(self):
+        """A voice with no sample_voice says it has no recording."""
+        voice = _voice(metadata={"accent": "en-US", "gender": "male"})
+
+        self.assertIn("No recording", self._render(voice))
+
+    def test_default_settings_are_listed_in_order(self):
+        """The library's settings are listed under their own heading, sorted by name."""
+        output = self._render(_voice())
+
+        self.assertIn("Default settings", output)
+        self.assertLess(output.index("model_id"), output.index("stability"))
+        self.assertIn("eleven_multilingual_v2", output)
+
+    def test_voice_without_settings_has_no_settings_section(self):
+        """A voice with an empty config doesn't show the settings heading."""
+        self.assertNotIn("Default settings", self._render(_voice(config={})))
+
+    def test_polyai_voice_is_tagged_in_the_title(self):
+        """A PolyAI voice carries the PolyAI tag next to its name."""
+        self.assertIn("Anne PolyAI", self._render(_voice(poly_ai_voice=True)))
+        self.assertNotIn("PolyAI", self._render(_voice()))
+
+    def test_archived_voice_shows_when_who_and_why(self):
+        """An archived voice shows who archived it and why; others have no Archived row."""
+        archived = _voice(
+            metadata={
+                "accent": "en-GB",
+                "archived": True,
+                "archived_at": "2026-07-27T12:15:00+00:00",
+                "archived_by": "someone@example.com",
+                "archive_reason": "Internal test voice",
+            }
+        )
+
+        # The time zone's name varies by machine and moves where the row wraps, so compare words.
+        words = " ".join(self._render(archived).replace("│", " ").split())
+
+        self.assertIn("Archived", words)
+        self.assertIn("by someone@example.com: Internal test voice", words)
+        self.assertNotIn("Archived", self._render(_voice()))
+
+    def test_missing_fields_show_a_dash(self):
+        """A voice missing its gender and vendor ID shows a dash for each."""
+        voice = _voice(provider_voice_id=None, metadata={"accent": "en-US"})
+
+        output = self._render(voice)
+
+        self.assertIn("Vendor voice ID  —", output)
+        self.assertIn("Gender           —", output)
+
+
+class PrintTtsVoicesTest(unittest.TestCase):
+    """Tests for print_tts_voices, the table `poly library voice list` prints."""
+
+    def _render(self, voices: list[TTSVoice]) -> str:
+        with console.capture() as capture:
+            print_tts_voices(voices)
+        return capture.get()
+
+    def test_no_voices_says_so(self):
+        """An empty list prints a message instead of an empty table."""
+        self.assertIn("No voices available.", self._render([]))
+
+    def test_rows_follow_the_given_order(self):
+        """The table keeps the caller's order, which is Agent Studio's ranking."""
+        output = self._render([_voice(name="Zed"), _voice(name="Amy")])
+
+        self.assertLess(output.index("Zed"), output.index("Amy"))
+
+    def test_hidden_tags_are_left_out(self):
+        """Tags Agent Studio hides, such as PolyVoice, don't appear in the table."""
+        voice = _voice(metadata={"accent": "en-US", "tags": ["Calm", "PolyVoice"]})
+
+        output = self._render([voice])
+
+        self.assertIn("Calm", output)
+        self.assertNotIn("PolyVoice", output)
+
+    def test_polyai_voices_are_tagged(self):
+        """A PolyAI voice's row carries the PolyAI tag."""
+        self.assertIn("PolyAI", self._render([_voice(poly_ai_voice=True)]))
+
+    def test_vendor_id_is_shown_only_where_voices_clash(self):
+        """Voices sharing a name, provider and language show their vendor voice IDs."""
+        voices = [
+            _voice(provider_voice_id="first-vendor-id"),
+            _voice(voice_id="VOICE-2", provider_voice_id="second-vendor-id"),
+            _voice(name="Ben", provider_voice_id="ben-vendor-id"),
+        ]
+
+        output = self._render(voices)
+
+        self.assertIn("first-vendor-id", output)
+        self.assertIn("second-vendor-id", output)
+        self.assertNotIn("ben-vendor-id", output)
+
+
+class VoiceOwnerOutputTest(unittest.TestCase):
+    """Tests for how a voice's owner shows in `voice list` and `voice show`."""
+
+    def _list(self, voices: list[TTSVoice]) -> str:
+        with console.capture() as capture:
+            print_tts_voices(voices)
+        return capture.get()
+
+    def _show(self, voice: TTSVoice) -> str:
+        with console.capture() as capture:
+            print_tts_voice(voice)
+        return capture.get()
+
+    def test_imported_voices_are_labelled_in_the_list(self):
+        """An account's own voice is labelled Imported; a global one isn't."""
+        output = self._list([_voice(name="Cloned", owner="account"), _voice(owner="global")])
+
+        self.assertIn("Imported", output)
+        self.assertEqual(output.count("Imported"), 1)
+
+    def test_polyai_label_wins_over_imported(self):
+        """A PolyAI voice keeps its PolyAI label."""
+        output = self._list([_voice(poly_ai_voice=True, owner="global")])
+
+        self.assertIn("PolyAI", output)
+        self.assertNotIn("Imported", output)
+
+    def test_show_says_who_owns_the_voice(self):
+        """The Owner row uses the same values as `poly library voice list --owner`."""
+        self.assertRegex(self._show(_voice(owner="account")), r"Owner\s+account")
+        self.assertRegex(self._show(_voice(owner="global")), r"Owner\s+global")

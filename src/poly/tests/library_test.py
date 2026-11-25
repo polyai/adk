@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import poly.library
-from poly.library import REFRESH_INTERVAL, ASRModel, Library, LLMModel
+from poly.library import REFRESH_INTERVAL, ASRModel, Library, LLMModel, TTSVoice
 
 ASR_RESPONSE = [
     {"id": "ASR-1", "name": "Deepgram Nova 3", "provider": "deepgram", "model": "nova-3"},
@@ -49,7 +49,7 @@ def patch_model_lists(asr_models=None, llm_models=None):
 
 def make_library(region: str = "us-1") -> Library:
     """Build a library from sample API responses."""
-    return Library.build_library(region, ASR_RESPONSE, LLM_RESPONSE)
+    return Library.build_library(region, ASR_RESPONSE, LLM_RESPONSE, [])
 
 
 class BuildLibraryTest(unittest.TestCase):
@@ -140,9 +140,7 @@ class LibraryLookupTest(unittest.TestCase):
 
         self.assertEqual(by_id.name, "Deepgram Nova 3")
         self.assertIs(self.library.get_asr_model_by_name("Deepgram Nova 3"), by_id)
-        self.assertIs(
-            self.library.get_asr_model_by_provider_and_model("deepgram", "nova-3"), by_id
-        )
+        self.assertIs(self.library.get_asr_model_by_provider_and_model("deepgram", "nova-3"), by_id)
 
     def test_llm_lookups_find_the_same_model(self):
         """A language model is found by its ID, its name, and its provider model ID."""
@@ -217,7 +215,7 @@ class RefreshLibraryTest(unittest.TestCase):
         handler.get_asr_models.return_value = ASR_RESPONSE[:1]
         handler.get_llm_models.return_value = []
 
-        library = Library.load_library_from_api("euw-1", handler)
+        library = Library.load_library_from_api("euw-1", api_handler=handler)
 
         handler.get_asr_models.assert_called_once_with("euw-1")
         self.mock_asr.assert_not_called()
@@ -225,7 +223,7 @@ class RefreshLibraryTest(unittest.TestCase):
 
     def test_overwrites_an_older_saved_library(self):
         """Refreshing replaces what was saved before for that region."""
-        Library.build_library("euw-1", [], []).save_library()
+        Library.build_library("euw-1", [], [], []).save_library()
 
         Library.load_library_from_api("euw-1")
 
@@ -251,3 +249,213 @@ class LLMModelTest(unittest.TestCase):
         model = LLMModel.from_api_response(LLM_RESPONSE[0])
 
         self.assertEqual(model.name, "PolyAI Raven 3.5")
+
+
+def voice(name: str = "Anne", **metadata) -> TTSVoice:
+    """A TTS voice with the given metadata."""
+    return TTSVoice(
+        voice_id=f"VOICE-{name.lower()}",
+        name=name,
+        provider="ELEVEN_LABS",
+        provider_voice_id="abc123",
+        config={},
+        metadata=metadata,
+        poly_ai_voice=False,
+        owner="global",
+    )
+
+
+class TTSVoiceTest(unittest.TestCase):
+    """Tests for the fields TTSVoice reads out of a voice's metadata."""
+
+    def test_featured_rank_must_be_a_positive_whole_number(self):
+        """Only a positive int is a rank; anything else leaves the voice unranked."""
+        self.assertEqual(voice(featured_rank=2).featured_rank, 2)
+        for bad in (0, -1, 1.5, "1", True, None):
+            with self.subTest(rank=bad):
+                self.assertIsNone(voice(featured_rank=bad).featured_rank)
+
+    def test_live_projects_defaults_to_zero(self):
+        """A missing or invalid count reads as no live projects."""
+        self.assertEqual(voice(live_projects=40).live_projects, 40)
+        self.assertEqual(voice().live_projects, 0)
+        self.assertEqual(voice(live_projects=-3).live_projects, 0)
+
+    def test_sample_url_is_the_first_recording(self):
+        """The first sample_voice entry is the recording; none gives None."""
+        self.assertEqual(voice(sample_voice=["a.mp3", "b.mp3"]).sample_url, "a.mp3")
+        self.assertIsNone(voice(sample_voice=[]).sample_url)
+
+    def test_dev_only_and_test_voices_are_internal(self):
+        """A voice marked dev_only or tagged Test, in any case, is internal."""
+        self.assertTrue(voice(dev_only=True).is_internal)
+        self.assertTrue(voice(tags=["Calm", " test "]).is_internal)
+        self.assertFalse(voice(tags=["Calm", "Testing"]).is_internal)
+
+    def test_display_tags_leave_out_internal_and_training_tags(self):
+        """PolyVoice, Test, Live, ?, and training notes like 10h are dropped."""
+        tags = ["Calm", "PolyVoice", "test", "Live", "?", "10h", "100 epochs", "Warm"]
+
+        self.assertEqual(voice(tags=tags).display_tags, ["Calm", "Warm"])
+
+    def test_rank_key_orders_like_agent_studio(self):
+        """Ranked voices lead by rank, then most live projects, then a recording, then name."""
+        voices = [
+            voice("Zed", sample_voice=["z.mp3"]),
+            voice("Amy"),
+            voice("Bob", sample_voice=["b.mp3"]),
+            voice("Popular", live_projects=40),
+            voice("Second", featured_rank=2),
+            voice("First", featured_rank=1, live_projects=0),
+        ]
+
+        ordered = [v.name for v in sorted(voices, key=TTSVoice.rank_key)]
+
+        self.assertEqual(ordered, ["First", "Second", "Popular", "Bob", "Zed", "Amy"])
+
+
+def voice_library(*voices: TTSVoice) -> Library:
+    """A library holding only the given voices."""
+    library = Library.build_library("us-1", [], [], [])
+    library.tts_voices = list(voices)
+    return library
+
+
+def voice_in(name: str, voice_id: str, accent: str, **metadata) -> TTSVoice:
+    """A voice with an ID and an accent."""
+    tts_voice = voice(name, accent=accent, **metadata)
+    tts_voice.voice_id = voice_id
+    return tts_voice
+
+
+class FindTTSVoiceTest(unittest.TestCase):
+    """Tests for Library.find_tts_voice, which `voice show` and `voice play` use."""
+
+    def setUp(self):
+        self.anne = voice_in("Anne", "VOICE-anne", "en-US")
+        self.pierre_fr = voice_in("Pierre", "VOICE-pierre-fr", "fr-FR")
+        self.pierre_ca = voice_in("Pierre", "VOICE-pierre-ca", "fr-CA")
+        self.old_anne = voice_in("Anne", "VOICE-old-anne", "en-US", archived=True)
+        self.library = voice_library(self.anne, self.old_anne, self.pierre_fr, self.pierre_ca)
+
+    def test_finds_a_voice_by_id(self):
+        """A voice ID finds that voice, ignoring case and spaces."""
+        self.assertIs(self.library.find_tts_voice(" voice-pierre-ca "), self.pierre_ca)
+
+    def test_finds_a_voice_by_name(self):
+        """A name finds the voice, ignoring case and spaces."""
+        self.assertIs(self.library.find_tts_voice("  anne "), self.anne)
+
+    def test_live_voice_wins_over_an_archived_one_with_the_same_name(self):
+        """An archived voice sharing a live voice's name and language doesn't make it ambiguous."""
+        self.assertIs(self.library.find_tts_voice("Anne"), self.anne)
+
+    def test_archived_voice_is_found_when_no_live_voice_matches(self):
+        """An archived voice is still found by name when it's the only match."""
+        retired = voice_in("Retired", "VOICE-retired", "en-GB", archived=True)
+        library = voice_library(retired)
+
+        self.assertIs(library.find_tts_voice("Retired"), retired)
+
+    def test_archived_voice_is_found_by_its_id(self):
+        """An ID always finds its voice, archived or not."""
+        self.assertIs(self.library.find_tts_voice("VOICE-old-anne"), self.old_anne)
+
+    def test_name_in_several_languages_lists_them(self):
+        """A name used in more than one language fails, listing each language and ID."""
+        with self.assertRaises(ValueError) as ctx:
+            self.library.find_tts_voice("Pierre")
+
+        message = str(ctx.exception)
+        self.assertIn("fr-CA (VOICE-pierre-ca)", message)
+        self.assertIn("fr-FR (VOICE-pierre-fr)", message)
+        self.assertIn("--language", message)
+
+    def test_language_picks_one_of_several(self):
+        """--language chooses between voices that share a name."""
+        self.assertIs(self.library.find_tts_voice("Pierre", language="fr-ca"), self.pierre_ca)
+
+    def test_language_prefix_can_still_be_ambiguous(self):
+        """A base language like fr matches both regions, so it still fails."""
+        with self.assertRaises(ValueError):
+            self.library.find_tts_voice("Pierre", language="fr")
+
+    def test_unknown_name_suggests_voice_list(self):
+        """A name no voice has fails and points at `voice list --name`."""
+        with self.assertRaises(ValueError) as ctx:
+            self.library.find_tts_voice("Nobody")
+
+        self.assertIn('No voice called "Nobody"', str(ctx.exception))
+        self.assertIn("poly library voice list --name Nobody", str(ctx.exception))
+
+    def test_name_in_the_wrong_language_is_not_found(self):
+        """A name that exists only in another language says so for the language asked."""
+        with self.assertRaises(ValueError) as ctx:
+            self.library.find_tts_voice("Anne", language="de")
+
+        self.assertIn("in de", str(ctx.exception))
+
+    def test_id_in_the_wrong_language_fails(self):
+        """An ID given with a --language the voice doesn't speak fails, naming its language."""
+        with self.assertRaises(ValueError) as ctx:
+            self.library.find_tts_voice("VOICE-anne", language="fr")
+
+        self.assertIn("en-US", str(ctx.exception))
+
+    def test_empty_input_fails(self):
+        """A blank name is refused."""
+        with self.assertRaises(ValueError):
+            self.library.find_tts_voice("  ")
+
+
+VOICE_RESPONSE = {
+    "id": "VOICE-1",
+    "name": "Cloned CEO",
+    "provider": "ELEVEN_LABS",
+    "providerVoiceId": "abc123",
+    "config": {"speed": 1},
+    "metadata": {"accent": "en-GB"},
+    "isPolyVoice": False,
+    "owner": "account",
+}
+
+
+class TTSVoiceOwnerTest(unittest.TestCase):
+    """Tests for a voice's owner: the shared library's, or the account's own."""
+
+    def test_owner_is_read_from_the_route(self):
+        """The route's owner field says whose voice it is."""
+        tts_voice = TTSVoice.from_api_response(VOICE_RESPONSE)
+
+        self.assertEqual(tts_voice.owner, "account")
+        self.assertTrue(tts_voice.is_imported)
+        self.assertFalse(tts_voice.is_global)
+
+    def test_global_voice(self):
+        """A global voice is neither imported nor the account's to change."""
+        tts_voice = TTSVoice.from_api_response({**VOICE_RESPONSE, "owner": "global"})
+
+        self.assertTrue(tts_voice.is_global)
+        self.assertFalse(tts_voice.is_imported)
+
+    def test_to_dict_returns_the_route_shape(self):
+        """to_dict gives back the route's record, owner included."""
+        self.assertEqual(TTSVoice.from_api_response(VOICE_RESPONSE).to_dict(), VOICE_RESPONSE)
+
+    def test_imported_voices_rank_after_the_shared_library(self):
+        """An account's own voice sorts after library voices, whatever its rank or use."""
+        imported = voice("Imported", featured_rank=1, live_projects=50)
+        imported.owner = "account"
+        library_voice = voice("Library")
+
+        ordered = [v.name for v in sorted([imported, library_voice], key=TTSVoice.rank_key)]
+
+        self.assertEqual(ordered, ["Library", "Imported"])
+
+    def test_owner_survives_saving_and_loading(self):
+        """The saved voice library keeps each voice's owner."""
+        Library.build_library("us-1", [], [], [VOICE_RESPONSE], account_id="acct").save_library()
+
+        loaded = Library.load_library_from_file("us-1", account_id="acct")
+
+        self.assertEqual(loaded.tts_voices[0].owner, "account")

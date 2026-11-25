@@ -84,6 +84,7 @@ DATA_TRANSCRIPTS_SEARCH_URL = "/api/v1/transcripts/search"
 DATA_TRANSCRIPT_URL = "/api/v1/transcripts/conversation/{conversation_id}"
 LLM_MODELS_API = "/v1/llm-models"
 ASR_MODELS_API = "/v1/asr-models"
+TTS_VOICES_API = "/v1/accounts/{account_id}/voice-library"
 
 
 class PlatformAPIHandler:
@@ -1949,3 +1950,35 @@ class PlatformAPIHandler:
         """
         endpoint = ASR_MODELS_API
         return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def get_tts_voices(
+        region: str,
+        account_id: str,
+        language: ty.Optional[str] = None,
+        gender: ty.Optional[ty.Literal["male", "female", "neutral"]] = None,
+        is_poly_voice: ty.Optional[bool] = None,
+    ) -> list[dict]:
+        """Get the list of available TTS voices.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            language (Optional[str]): The language of the TTS voice.
+            gender (Optional[str]): The gender of the TTS voice.
+            is_poly_voice (Optional[bool]): Whether the voice is a PolyAI voice.
+
+        Returns:
+            list[dict]: The available TTS voices.
+        """
+        endpoint = TTS_VOICES_API.format(account_id=account_id)
+        params = {}
+        if language is not None:
+            params["language"] = language
+        if gender is not None:
+            params["gender"] = gender
+        if is_poly_voice is not None:
+            params["is_poly_voice"] = is_poly_voice
+        return PlatformAPIHandler.make_request(region, endpoint, "GET", params=params).get(
+            "voices", []
+        )

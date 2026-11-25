@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from enum import Enum
 from functools import cached_property
 from pathlib import PurePath
-from typing import Any, Optional, TypeAlias
+from typing import Any, Literal, Optional, TypeAlias
 from zoneinfo import ZoneInfo
 
 from google.protobuf.message import Message
@@ -526,8 +526,9 @@ class AgentStudioProject:
 
         # Load library
         region = config_dict.get("region", "")
+        account_id = config_dict.get("account_id", None)
         try:
-            library = Library.load_library_from_file(region=region)
+            library = Library.load_library_from_file(region=region, account_id=account_id)
         except ValueError as e:
             logger.error(f"Error loading library for region '{region}': {e}")
             library = None
@@ -536,7 +537,7 @@ class AgentStudioProject:
 
         return cls(
             region=region,
-            account_id=config_dict.get("account_id", ""),
+            account_id=account_id,
             project_id=config_dict.get("project_id", ""),
             resources=resources,
             root_path=root_path,
@@ -588,8 +589,9 @@ class AgentStudioProject:
 
         # Load library
         region = data.get("region", "")
+        account_id = data.get("account_id", None)
         try:
-            library = Library.load_library_from_file(region=region)
+            library = Library.load_library_from_file(region=region, account_id=account_id)
         except ValueError as e:
             logger.error(f"Error loading library for region '{region}': {e}")
             library = None
@@ -598,7 +600,7 @@ class AgentStudioProject:
 
         return cls(
             region=data.get("region", ""),
-            account_id=data.get("account_id", ""),
+            account_id=account_id,
             project_id=data.get("project_id", ""),
             resources=resources,
             root_path=root_path,
@@ -5449,6 +5451,35 @@ class AgentStudioProject:
         """
         return self.api_handler.get_asr_models(self.region)
 
+    def get_tts_voices(
+        self,
+        language: Optional[str] = None,
+        gender: Optional[Literal["male", "female", "neutral"]] = None,
+        is_poly_voice: Optional[bool] = None,
+    ) -> list[dict]:
+        """Get the list of available TTS voices.
+
+        Args:
+            language (Optional[str]): The language of the TTS voice.
+            gender (Optional[str]): The gender of the TTS voice.
+            is_poly_voice (Optional[bool]): Whether the voice is a PolyAI voice.
+
+        Returns:
+            list[dict]: The available TTS voices.
+
+        Raises:
+            ValueError: If an invalid gender is specified.
+        """
+        if gender is not None and gender not in ("male", "female", "neutral"):
+            raise ValueError("Invalid gender specified. Must be 'male', 'female', or 'neutral'.")
+        return self.api_handler.get_tts_voices(
+            self.region,
+            self.account_id,
+            language=language,
+            gender=gender,
+            is_poly_voice=is_poly_voice,
+        )
+
     def refresh_library(self, force_refresh: bool = False) -> Library:
         """Load the library for the current region.
 
@@ -5465,7 +5496,9 @@ class AgentStudioProject:
         """
         if not self.library or force_refresh or self.library.is_stale:
             try:
-                library = Library.load_library_from_api(self.region, self.api_handler)
+                library = Library.load_library_from_api(
+                    self.region, self.account_id, self.api_handler
+                )
                 self.library = library
             except Exception as e:
                 if not force_refresh:

@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -79,6 +80,129 @@ class LLMModel:
         }
 
 
+# Tags Agent Studio never shows: PolyAI's own markers, and ones left over from training a voice.
+_HIDDEN_TAG = re.compile(r"^(polyvoice|\d+h|\d+ epochs|\?|test|live)$", re.IGNORECASE)
+
+
+@dataclass
+class TTSVoice:
+    """Library model for TTS voices."""
+
+    voice_id: str
+    name: str
+    provider: str
+    provider_voice_id: str
+    config: dict
+    metadata: dict
+    poly_ai_voice: bool
+    # "global" for the shared library, "account" for the account's own voices.
+    owner: str
+
+    @classmethod
+    def from_api_response(cls, api_response: dict) -> "TTSVoice":
+        return cls(
+            voice_id=api_response.get("id"),
+            name=api_response.get("name"),
+            provider=api_response.get("provider"),
+            provider_voice_id=api_response.get("providerVoiceId"),
+            config=api_response.get("config", {}),
+            metadata=api_response.get("metadata", {}),
+            poly_ai_voice=api_response.get("isPolyVoice", False),
+            owner=api_response["owner"],
+        )
+
+    @property
+    def language(self) -> str | None:
+        """The voice's language code, such as ``en-GB``: its accent, else its language code."""
+        metadata = self.metadata or {}
+        return metadata.get("accent") or metadata.get("language_code") or None
+
+    @property
+    def is_imported(self) -> bool:
+        """Whether the voice is the account's own rather than the shared library's."""
+        return self.owner == "account"
+
+    @property
+    def is_global(self) -> bool:
+        """Whether the voice is in the shared library, so the account can't change it."""
+        return self.owner == "global"
+
+    @property
+    def is_archived(self) -> bool:
+        """Whether the voice has been archived in the library."""
+        return bool((self.metadata or {}).get("archived"))
+
+    def speaks(self, language: str) -> bool:
+        """Whether the voice's language starts with ``language``, ignoring case.
+
+        ``en`` matches ``en-US`` and ``en-GB``; ``en-GB`` matches only ``en-GB``.
+        """
+        return (self.language or "").lower().startswith(language.strip().lower())
+
+    @property
+    def featured_rank(self) -> int | None:
+        """The voice's place on Agent Studio's Recommended shelf (1 leads), if it's curated."""
+        rank = (self.metadata or {}).get("featured_rank")
+        if isinstance(rank, int) and not isinstance(rank, bool) and rank > 0:
+            return rank
+        return None
+
+    @property
+    def live_projects(self) -> int:
+        """How many live customer projects use the voice, as the library last counted."""
+        count = (self.metadata or {}).get("live_projects")
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            return count
+        return 0
+
+    @property
+    def sample_url(self) -> str | None:
+        """The voice's recording, if it has one."""
+        samples = (self.metadata or {}).get("sample_voice") or []
+        return samples[0] if samples else None
+
+    @property
+    def is_internal(self) -> bool:
+        """Whether the voice is for PolyAI's own use: marked dev-only, or tagged Test."""
+        metadata = self.metadata or {}
+        tags = metadata.get("tags") or []
+        return bool(metadata.get("dev_only")) or any(tag.strip().lower() == "test" for tag in tags)
+
+    @property
+    def display_tags(self) -> list[str]:
+        """The voice's tags, without the ones Agent Studio hides."""
+        tags = (self.metadata or {}).get("tags") or []
+        return [tag for tag in tags if not _HIDDEN_TAG.match(tag.strip())]
+
+    def rank_key(self) -> tuple:
+        """Sort key for Agent Studio's voice order.
+
+        The shared library's voices before the account's own, then curated rank (unranked
+        voices after ranked ones), then the most live projects, then voices with a recording,
+        then name.
+        """
+        return (
+            self.is_imported,
+            self.featured_rank is None,
+            self.featured_rank or 0,
+            -self.live_projects,
+            self.sample_url is None,
+            (self.name or "").lower(),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.voice_id,
+            "name": self.name,
+            "provider": self.provider,
+            "providerVoiceId": self.provider_voice_id,
+            "config": self.config,
+            "metadata": self.metadata,
+            "isPolyVoice": self.poly_ai_voice,
+            "owner": self.owner,
+        }
+
+
 @dataclass
 class Library:
     """Library model for PolyAI models."""
@@ -87,6 +211,8 @@ class Library:
     region: str
     asr_models: list[ASRModel]
     llm_models: list[LLMModel]
+    tts_voices: list[TTSVoice]
+    account_id: Optional[str] = None
 
     @property
     def is_stale(self) -> bool:
@@ -95,12 +221,16 @@ class Library:
 
     @classmethod
     def load_library_from_api(
-        cls, region: str, api_handler: Optional["AgentStudioInterface"] = None
+        cls,
+        region: str,
+        account_id: Optional[str] = None,
+        api_handler: Optional["AgentStudioInterface"] = None,
     ) -> "Library":
         """Load the library of models for the specified region from the API
 
         Args:
             region (str): The region to refresh the library for.
+            account_id (Optional[str], optional): The account ID to use for fetching models. Defaults to None. If not provided, will not load TTS voices.
             api_handler (optional): The API handler to use for fetching models.
             Defaults to None, which uses AgentStudioInterface.
 
@@ -113,19 +243,34 @@ class Library:
             api_handler = AgentStudioInterface
 
         # Load the latest ASR and LLM async models and build the library
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             asr_future = executor.submit(api_handler.get_asr_models, region)
             llm_future = executor.submit(api_handler.get_llm_models, region)
+            if account_id is not None:
+                tts_future = executor.submit(api_handler.get_tts_voices, region, account_id)
             asr_models = asr_future.result()
             llm_models = llm_future.result()
+            if account_id is not None:
+                tts_voices = tts_future.result()
 
-        library = cls.build_library(region, asr_models, llm_models)
+        library = cls.build_library(
+            region,
+            asr_models,
+            llm_models,
+            tts_voices if account_id is not None else [],
+            account_id=account_id,
+        )
         library.save_library()
         return library
 
     @classmethod
     def build_library(
-        cls, region: str, asr_models: list[dict], llm_models: list[dict]
+        cls,
+        region: str,
+        asr_models: list[dict],
+        llm_models: list[dict],
+        tts_voices: list[dict],
+        account_id: Optional[str] = None,
     ) -> "Library":
         # Load a library object from API responses
         return cls(
@@ -133,31 +278,51 @@ class Library:
             region=region,
             asr_models=[ASRModel.from_api_response(asr) for asr in asr_models],
             llm_models=[LLMModel.from_api_response(llm) for llm in llm_models],
+            tts_voices=[TTSVoice.from_api_response(tts) for tts in tts_voices],
+            account_id=account_id,
         )
 
     @classmethod
-    def load_library_from_file(cls, region: str) -> "Library":
+    def load_library_from_file(cls, region: str, account_id: Optional[str] = None) -> "Library":
         # Load library in ~/.poly/library/{region}.json
 
         library_path = os.path.join(LIBRARY_DIR, f"{region}.json")
+        tts_voices: list[TTSVoice] = []
+        tts_last_refreshed: Optional[datetime] = None
+        if account_id is not None:
+            tts_library_path = os.path.join(LIBRARY_DIR, f"{region}-{account_id}.json")
+            if os.path.exists(tts_library_path):
+                try:
+                    with open(tts_library_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        tts_last_refreshed = datetime.fromisoformat(data.get("last_refreshed"))
+                        tts_voices = [TTSVoice(**tts) for tts in data.get("tts_voices", [])]
+                except Exception as e:
+                    raise ValueError(f"Error loading TTS library file: {tts_library_path}") from e
         if os.path.exists(library_path):
             try:
                 with open(library_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     asr_models = [ASRModel(**asr) for asr in data.get("asr_models", [])]
                     llm_models = [LLMModel(**llm) for llm in data.get("llm_models", [])]
+                    last_refreshed = datetime.fromisoformat(data.get("last_refreshed"))
+                    if tts_last_refreshed is not None:
+                        last_refreshed = max(last_refreshed, tts_last_refreshed)
                     return cls(
-                        last_refreshed=datetime.fromisoformat(data.get("last_refreshed")),
+                        last_refreshed=last_refreshed,
                         region=region,
                         asr_models=asr_models,
                         llm_models=llm_models,
+                        tts_voices=tts_voices,
+                        account_id=account_id,
                     )
             except Exception as e:
                 raise ValueError(f"Error loading library file: {library_path}") from e
         raise FileNotFoundError(f"Library for region '{region}' not found.")
 
     def save_library(self) -> None:
-        # Save library in ~/.poly/library/{region}.json
+        # Save ASR, LLM library in ~/.poly/library/{region}.json
+        # Save TTS voices in ~/.poly/library/{region}-{account_id}.json
         import json
         import os
 
@@ -174,6 +339,17 @@ class Library:
                 f,
                 indent=4,
             )
+        if self.account_id is not None:
+            tts_library_path = os.path.join(LIBRARY_DIR, f"{self.region}-{self.account_id}.json")
+            with open(tts_library_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "last_refreshed": self.last_refreshed.isoformat(),
+                        "tts_voices": [asdict(tts_voice) for tts_voice in self.tts_voices],
+                    },
+                    f,
+                    indent=4,
+                )
 
     def get_asr_model_by_id(self, model_id: str) -> ASRModel | None:
         for asr_model in self.asr_models:
@@ -221,3 +397,77 @@ class Library:
             if llm_model.name.strip().lower() == name.strip().lower():
                 return llm_model
         return None
+
+    def get_tts_voice_by_name(self, name: str) -> TTSVoice | None:
+        if not name:
+            return None
+        for tts_voice in self.tts_voices:
+            if tts_voice.name.strip().lower() == name.strip().lower():
+                return tts_voice
+        return None
+
+    def get_tts_voice_by_id(self, voice_id: str) -> TTSVoice | None:
+        if not voice_id:
+            return None
+        for tts_voice in self.tts_voices:
+            if tts_voice.voice_id.strip().lower() == voice_id.strip().lower():
+                return tts_voice
+        return None
+
+    def find_tts_voice(self, name_or_id: str, language: Optional[str] = None) -> TTSVoice:
+        """Find one voice by its ``VOICE-…`` ID or its name.
+
+        Names are matched ignoring case and surrounding spaces. ``language`` narrows the
+        match the way ``voice list --language`` does, so ``fr`` covers ``fr-FR`` and
+        ``fr-CA``. A name is unique within a language among live voices, so live voices
+        win over archived ones with the same name, and archived voices are only matched
+        when no live voice is.
+
+        Args:
+            name_or_id: A voice name, or a voice ID.
+            language: A language code or prefix that the voice must speak.
+
+        Returns:
+            The voice.
+
+        Raises:
+            ValueError: If no voice matches, or more than one does.
+        """
+        if not name_or_id or not name_or_id.strip():
+            raise ValueError("Give a voice name or ID.")
+
+        by_id = self.get_tts_voice_by_id(name_or_id)
+        if by_id is not None:
+            if language and not by_id.speaks(language):
+                raise ValueError(
+                    f"{by_id.voice_id} ({by_id.name}) is in {by_id.language or 'no language'}, "
+                    f"not {language}."
+                )
+            return by_id
+
+        name = name_or_id.strip().lower()
+        matches = [
+            tts_voice
+            for tts_voice in self.tts_voices
+            if (tts_voice.name or "").strip().lower() == name
+            and (not language or tts_voice.speaks(language))
+        ]
+        live = [tts_voice for tts_voice in matches if not tts_voice.is_archived]
+        candidates = live or matches
+
+        if not candidates:
+            where = f" in {language}" if language else ""
+            raise ValueError(
+                f'No voice called "{name_or_id.strip()}"{where}. Find one with '
+                f"`poly library voice list --name {name_or_id.strip()}`."
+            )
+        if len(candidates) > 1:
+            options = ", ".join(
+                f"{tts_voice.language or 'no language'} ({tts_voice.voice_id})"
+                for tts_voice in sorted(candidates, key=lambda v: (v.language or "", v.voice_id))
+            )
+            raise ValueError(
+                f'More than one voice is called "{candidates[0].name}": {options}. '
+                "Pick one with --language, or give the voice ID."
+            )
+        return candidates[0]
