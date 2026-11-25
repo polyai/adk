@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.91.0 (2026-11-25)
+
+### Features
+
+- Add account secrets CLI commands ([#434](https://github.com/polyai/adk/pull/434),
+  [`621189c`](https://github.com/polyai/adk/commit/621189cbf3d0a42a1ab442f812d9f475c0a53480))
+
+
 ## v0.90.0 (2026-11-24)
 
 ### Features
