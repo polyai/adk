@@ -2428,7 +2428,7 @@ def print_tts_voice(voice: "TTSVoice") -> None:
     table.add_row("Voice ID", voice.voice_id or "—")
     table.add_row("Provider", _tts_provider_name(voice.provider))
     table.add_row("Vendor voice ID", voice.provider_voice_id or "—")
-    table.add_row("Owner", "This account" if voice.is_imported else "Global library")
+    table.add_row("Owner", "account" if voice.is_imported else "global")
 
     language = _voice_language({"metadata": metadata})
     language_name = metadata.get("language")

@@ -1304,6 +1304,6 @@ class VoiceOwnerOutputTest(unittest.TestCase):
         self.assertNotIn("Imported", output)
 
     def test_show_says_who_owns_the_voice(self):
-        """The panel has an Owner row when the platform said whose voice it is."""
-        self.assertIn("This account", self._show(_voice(owner="account")))
-        self.assertIn("Global library", self._show(_voice(owner="global")))
+        """The Owner row uses the same values as `poly library voice list --owner`."""
+        self.assertRegex(self._show(_voice(owner="account")), r"Owner\s+account")
+        self.assertRegex(self._show(_voice(owner="global")), r"Owner\s+global")
