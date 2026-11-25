@@ -24,7 +24,7 @@ Commands are listed under section headers so related ones stay together:
 |---|---|
 | Getting started | `init`, `setup`, `login`, `apikey`, `studio`, `project` |
 | Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch`, `test`, `rtc`, `chat`, `call` |
-| Builder API | `deployments`, `metrics`, `conversations`, `audio-cache`, `functions`, `campaign` |
+| Builder API | `deployments`, `metrics`, `conversations`, `audio-cache`, `functions`, `campaign`, `secrets` |
 | Other | `template`, `docs`, `completion` |
 
 Each command also supports its own help output. For example:
@@ -90,6 +90,7 @@ poly push --help
 | [`poly audio-cache`](./cli/audio-cache.md) | Inspect and replace cached TTS audio |
 | [`poly functions`](./cli/functions.md) | Run and validate Functions via the REST API |
 | [`poly campaign`](./cli/campaign.md) | Validate, preview, test, publish, pause, resume and archive outbound campaigns |
+| [`poly secrets`](./cli/secrets.md) | Create, update, and delete account-level secrets |
 | [`poly studio`](./cli/studio.md) | Open the project in the Agent Studio web app |
 
 ## Shared flags
@@ -168,6 +169,9 @@ poly campaign preview 'Appointment reminders' --phone +15550100 --json
 poly campaign test 'Appointment reminders' --phone +15550100 --json
 poly campaign pause 'Appointment reminders' --json
 poly apikey --region studio --json
+poly secrets list --json
+poly secrets set <secret_name> --yes --json < /secure/path/token
+poly secrets delete <secret_name> --yes --json
 ~~~
 
 ### `--json` contract
