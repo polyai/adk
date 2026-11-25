@@ -656,6 +656,12 @@ class SecretsCommandTest(unittest.TestCase):
             )
             return choices[0].value
 
+        def name_with_whitespace(kwargs):
+            validate = kwargs["validate"]
+            self.assertIsInstance(validate("  single  "), str)
+            self.assertIsInstance(validate("   "), str)
+            return "  new  "
+
         def choose_projects(kwargs):
             choices = kwargs["choices"]
             self.assertEqual([c.value for c in choices if c.checked], [self.project.project_id])
@@ -664,7 +670,7 @@ class SecretsCommandTest(unittest.TestCase):
 
         with self.prompts(
             (("select", "Secret"), choose_new),
-            (("text", "New secret name"), "new"),
+            (("text", "New secret name"), name_with_whitespace),
             (("select", "Type"), "single"),
             (("text", "Description (optional)"), "Example"),
             (("checkbox", "Projects with access"), choose_projects),

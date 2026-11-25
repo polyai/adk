@@ -41,10 +41,10 @@ def pick_secret(records: list[dict]) -> str:
         questionary.text(
             "New secret name",
             validate=lambda name: bool(name.strip())
-            and name not in names
+            and name.strip() not in names
             or "Enter a nonempty, unused secret name.",
         )
-    )
+    ).strip()
 
 
 def pick_secrets_to_delete(records: list[dict]) -> list[str]:

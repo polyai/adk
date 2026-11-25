@@ -73,7 +73,7 @@ poly secrets set <secret_name> --json < /secure/path/token
 poly secrets set <secret_name> --type key-value --json < /secure/path/credentials.json
 ```
 
-In a terminal, run `poly secrets set` to pick an existing secret or choose **New secret…**. Supplying the name skips the picker. For a new secret, choose the type, enter an optional description, and select the projects that can use it. The current project starts checked. Flags supply these choices directly. Once you choose a name, the CLI checks the supplied flags before asking for any remaining fields or reading the value from stdin.
+In a terminal, run `poly secrets set` to pick an existing secret or choose **New secret…**. The new-name prompt trims surrounding whitespace. Supplying the name skips the picker. For a new secret, choose the type, enter an optional description, and select the projects that can use it. The current project starts checked. Flags supply these choices directly. Once you choose a name, the CLI checks the supplied flags before asking for any remaining fields or reading the value from stdin.
 
 For an existing secret, select **Value or type** to edit the current value or convert the secret to the other type. Conversion requires a complete replacement value. You can also select **Description** and **Project access** in the same save. Edit flags go straight to the requested changes. The key editor shows existing key names and lets you update a value, add a key, or select keys to delete. Choose **Done** to review the changes.
 
