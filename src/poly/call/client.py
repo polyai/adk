@@ -46,7 +46,7 @@ async def run_call(
     *,
     aec: bool = False,
     on_started: Callable[[str], None] | None = None,
-) -> str:
+) -> None:
     """Place a voice call and run it until it ends or an error occurs.
 
     Args:
@@ -55,9 +55,6 @@ async def run_call(
         aec: When True, run the mic through acoustic echo cancellation so the agent
             does not hear its own audio played through the speaker.
         on_started: Called with the conversation ID once the call is connected.
-
-    Returns:
-        The conversation ID of the call in Agent Studio.
 
     Raises:
         CallError: If the call cannot be placed or its connection fails.
@@ -80,7 +77,7 @@ async def run_call(
     # Graceful termination
     with _hangup_on_signal(asyncio.get_running_loop()) as stop:
         try:
-            return await run_bridge_call(
+            await run_bridge_call(
                 session,
                 caller,
                 source=microphone,

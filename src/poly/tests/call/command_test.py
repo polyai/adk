@@ -30,8 +30,6 @@ def make_project(branch: str = "feature-x") -> MagicMock:
         lambda cid: f"https://studio.poly.ai/acc-1/proj-1/conversations/{cid}"
     )
     project.create_call_session.return_value = CallSession(
-        account_id="acc-1",
-        project_id="proj-1",
         variant_id="",
         auth_token="t",
         region="us-1",
@@ -54,7 +52,6 @@ def fake_client_module(recorder: list, started_as: str = "LOCAL-1") -> types.Mod
         recorder.append((session, caller, aec))
         if started_as and on_started is not None:
             on_started(started_as)
-        return started_as
 
     module.CallError = CallError
     module.run_call = run_call
@@ -86,7 +83,7 @@ class CallCommandTest(unittest.TestCase):
         project.create_call_session.assert_called_once_with("draft", variant="v1")
         self.assertEqual(len(recorder), 1)
         session, _caller, aec = recorder[0]
-        self.assertEqual(session.project_id, "proj-1")
+        self.assertIs(session, project.create_call_session.return_value)
         self.assertFalse(aec)
 
     @patch("poly.cli_commands.call.load_project")

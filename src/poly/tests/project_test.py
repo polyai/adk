@@ -8860,8 +8860,6 @@ class CreateCallSessionTest(unittest.TestCase):
         session = self.project.create_call_session("draft", variant="VARIANT-x")
 
         self.mock_api_handler.get_branch_call_info.assert_called_once_with(self.project.branch_id)
-        self.assertEqual(session.account_id, self.project.account_id)
-        self.assertEqual(session.project_id, self.project.project_id)
         self.assertEqual(session.variant_id, "VARIANT-x")
         self.assertEqual(session.auth_token, "studio-token")
         self.assertEqual(session.region, self.project.region)

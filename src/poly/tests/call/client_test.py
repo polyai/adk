@@ -21,8 +21,6 @@ from poly.call.session import CallSession  # noqa: E402
 
 def _session() -> CallSession:
     return CallSession(
-        account_id="acc-1",
-        project_id="proj-1",
         variant_id="",
         auth_token="t",
         region="us-1",
@@ -41,9 +39,8 @@ class RunCallTest(unittest.TestCase):
         mock_bridge.return_value = "LOCAL-1"
         on_started = MagicMock()
 
-        result = asyncio.run(run_call(_session(), "caller", on_started=on_started))
+        asyncio.run(run_call(_session(), "caller", on_started=on_started))
 
-        self.assertEqual(result, "LOCAL-1")
         args, kwargs = mock_bridge.call_args
         self.assertEqual(args, (_session(), "caller"))
         self.assertIs(kwargs["source"], mock_mic.return_value)

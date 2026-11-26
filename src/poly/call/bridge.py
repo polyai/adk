@@ -254,6 +254,53 @@ async def _run_events(
             await _pull_agent_audio(pc, session, creds)
 
 
+async def _wait_until_connected(connected: asyncio.Event, failed: asyncio.Event) -> None:
+    """Wait for the call's audio to connect, giving up as soon as it is known to have failed."""
+    waiters = [asyncio.ensure_future(event.wait()) for event in (connected, failed)]
+    try:
+        await asyncio.wait(
+            waiters, timeout=_CONNECT_TIMEOUT_SECONDS, return_when=asyncio.FIRST_COMPLETED
+        )
+    finally:
+        for task in waiters:
+            task.cancel()
+    if connected.is_set():
+        return
+    if failed.is_set():
+        raise BridgeError("Connection failed")
+    raise BridgeError("Timed out connecting the call's audio")
+
+
+async def _follow_call(
+    pc: RTCPeerConnection,
+    session: CallSession,
+    creds: BridgeCredentials,
+    failed: asyncio.Event,
+    stop: asyncio.Event,
+) -> None:
+    """Open the events socket and stay on the call until it ends, fails or is hung up."""
+    events_url = events_socket_url(creds.events_url, session.region)
+    async with websockets.connect(events_url) as ws:
+        # The socket stays unauthenticated until this first frame arrives.
+        await ws.send(json.dumps({"type": "auth", "token": creds.token}))
+        events = asyncio.ensure_future(_run_events(ws, pc, session, creds))
+        waiters = {
+            events,
+            asyncio.ensure_future(failed.wait()),
+            asyncio.ensure_future(stop.wait()),
+        }
+        done, pending = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        if events in done:
+            with contextlib.suppress(websockets.ConnectionClosed):
+                events.result()  # re-raise a failed repull
+        elif not stop.is_set():
+            raise BridgeError("Connection failed")
+
+
 async def run_bridge_call(
     session: CallSession,
     caller: str,
@@ -262,7 +309,7 @@ async def run_bridge_call(
     on_agent_track: Callable[[MediaStreamTrack], None],
     stop: asyncio.Event,
     on_started: Callable[[str], None] | None = None,
-) -> str:
+) -> None:
     """Place a call through the bridge and run it until it ends.
 
     Args:
@@ -271,10 +318,8 @@ async def run_bridge_call(
         source: The caller's audio.
         on_agent_track: Called with each audio track the agent's side adds.
         stop: Set to hang up.
-        on_started: Called with the call id once audio is flowing both ways.
-
-    Returns:
-        The call id, which is the conversation ID in Agent Studio.
+        on_started: Called once the caller's audio is connected, with the call id,
+            which is the conversation ID in Agent Studio.
 
     Raises:
         BridgeError: If any step of the call fails.
@@ -317,38 +362,20 @@ async def run_bridge_call(
         if not answer.get("sdp"):
             raise BridgeError("The call service returned no answer")
         await pc.setRemoteDescription(RTCSessionDescription(sdp=answer["sdp"], type="answer"))
-        try:
-            await asyncio.wait_for(connected.wait(), timeout=_CONNECT_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError as exc:
-            raise BridgeError("Timed out connecting the call's audio") from exc
+        await _wait_until_connected(connected, failed)
+        # The conversation exists from here on, so it can be reviewed even if a later
+        # step fails.
+        if on_started is not None:
+            on_started(creds.call_id)
 
         await _pull_agent_audio(pc, session, creds)
-
-        events_url = events_socket_url(creds.events_url, session.region)
-        async with websockets.connect(events_url) as ws:
-            # The socket stays unauthenticated until this first frame arrives.
-            await ws.send(json.dumps({"type": "auth", "token": creds.token}))
-            if on_started is not None:
-                on_started(creds.call_id)
-            events = asyncio.ensure_future(_run_events(ws, pc, session, creds))
-            waiters = {
-                events,
-                asyncio.ensure_future(failed.wait()),
-                asyncio.ensure_future(stop.wait()),
-            }
-            done, pending = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
-            for task in pending:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-            if events in done:
-                with contextlib.suppress(websockets.ConnectionClosed):
-                    events.result()  # re-raise a failed repull
-            elif not stop.is_set():
-                raise BridgeError("Connection failed")
+        await _follow_call(pc, session, creds, failed, stop)
     except requests.RequestException as exc:
         raise BridgeError(f"Lost contact with the call service: {exc}") from exc
+    except (websockets.WebSocketException, OSError, TimeoutError) as exc:
+        # The events socket: refused, unreachable, timed out on open, or closed before
+        # the call was under way.
+        raise BridgeError(f"The call's control connection failed: {exc}") from exc
     finally:
         await asyncio.to_thread(_delete_call, session, creds)
         await pc.close()
-    return creds.call_id

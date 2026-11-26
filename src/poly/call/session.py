@@ -11,15 +11,11 @@ class CallSession:
     service takes those from it rather than from the caller.
 
     Attributes:
-        account_id: The PolyAI account ID.
-        project_id: The agent/project ID.
         variant_id: The variant ID, or an empty string if none.
         auth_token: The studio token authorizing the call.
         region: The region whose WebRTC bridge places the call.
     """
 
-    account_id: str
-    project_id: str
     variant_id: str
     auth_token: str
     region: str

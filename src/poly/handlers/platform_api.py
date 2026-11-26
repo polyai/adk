@@ -151,6 +151,24 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.get_base_url(region) + CALL_BRIDGE_URL
 
     @staticmethod
+    def _call_headers(auth: dict) -> dict:
+        """Headers for a WebRTC bridge request.
+
+        The bridge takes its own credentials in place of the API key, and the request
+        still carries the headers that trace it back to the ADK.
+
+        Args:
+            auth (dict): The credential and content headers for the request
+        Returns:
+            dict: The complete request headers
+        """
+        return {
+            "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+            "X-Poly-Source": "adk",
+            **auth,
+        }
+
+    @staticmethod
     def create_call(region: str, auth_token: str, body: dict) -> dict:
         """Provision a voice call on the WebRTC bridge.
 
@@ -166,10 +184,9 @@ class PlatformAPIHandler:
             CALLS_URL,
             method="POST",
             data=body,
-            headers={
-                "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json",
-            },
+            headers=PlatformAPIHandler._call_headers(
+                {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
+            ),
             timeout=CALL_REQUEST_TIMEOUT_SECONDS,
         )
 
@@ -190,7 +207,9 @@ class PlatformAPIHandler:
             CALL_BRIDGE_URL + path,
             method="POST",
             data=body,
-            headers={CALL_TOKEN_HEADER: call_token, "Content-Type": "application/json"},
+            headers=PlatformAPIHandler._call_headers(
+                {CALL_TOKEN_HEADER: call_token, "Content-Type": "application/json"}
+            ),
             timeout=CALL_REQUEST_TIMEOUT_SECONDS,
         )
 
@@ -207,7 +226,7 @@ class PlatformAPIHandler:
             region,
             CALL_URL.format(call_id=quote(call_id, safe="")),
             method="DELETE",
-            headers={CALL_TOKEN_HEADER: call_token},
+            headers=PlatformAPIHandler._call_headers({CALL_TOKEN_HEADER: call_token}),
             timeout=CALL_REQUEST_TIMEOUT_SECONDS,
         )
 

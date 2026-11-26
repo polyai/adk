@@ -191,10 +191,12 @@ class CallBridgeRequestsTest(unittest.TestCase):
         kwargs = mock_request.call_args.kwargs
         self.assertEqual(kwargs["method"], "POST")
         self.assertEqual(kwargs["url"], "https://api.us.poly.ai/webrtc-bridge/api/v1/call")
-        self.assertEqual(
-            kwargs["headers"],
-            {"Authorization": "Bearer studio-token", "Content-Type": "application/json"},
-        )
+        headers = kwargs["headers"]
+        self.assertEqual(headers["Authorization"], "Bearer studio-token")
+        self.assertEqual(headers["Content-Type"], "application/json")
+        self.assertEqual(headers["X-Poly-Source"], "adk")
+        self.assertTrue(headers["X-PolyAI-Correlation-Id"].startswith("adk-"))
+        self.assertNotIn("X-API-KEY", headers)
         self.assertEqual(json.loads(kwargs["data"]), {"mode": "voice-agent"})
 
     @patch("requests.request")
@@ -224,7 +226,9 @@ class CallBridgeRequestsTest(unittest.TestCase):
         self.assertEqual(
             kwargs["url"], "https://api.us.poly.ai/webrtc-bridge/api/v1/call/LOCAL%2F1"
         )
-        self.assertEqual(kwargs["headers"], {"X-Call-Token": "call-token"})
+        self.assertEqual(kwargs["headers"]["X-Call-Token"], "call-token")
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "adk")
+        self.assertNotIn("X-API-KEY", kwargs["headers"])
 
 
 class CreateChat(unittest.TestCase):

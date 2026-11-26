@@ -3367,8 +3367,6 @@ class AgentStudioProject:
             raise ValueError("Incomplete branch call info; missing field(s): authToken")
 
         return CallSession(
-            account_id=self.account_id,
-            project_id=self.project_id,
             variant_id=variant or "",
             auth_token=auth_token,
             region=self.region,

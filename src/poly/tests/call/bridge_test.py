@@ -9,10 +9,11 @@ Copyright PolyAI Limited
 import asyncio
 import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import requests
+import websockets
 
 pytest.importorskip("aiortc")
 
@@ -35,8 +36,6 @@ BRIDGE = "https://api.us.poly.ai/webrtc-bridge"
 
 def make_session(**overrides) -> CallSession:
     fields = {
-        "account_id": "acc-1",
-        "project_id": "proj-1",
         "variant_id": "",
         "auth_token": "studio-token",
         "region": REGION,
@@ -167,6 +166,8 @@ class ProvisionTest(unittest.TestCase):
         self.assertEqual(kwargs["url"], BRIDGE + "/api/v1/call")
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer studio-token")
         self.assertNotIn("X-API-KEY", kwargs["headers"])
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "adk")
+        self.assertTrue(kwargs["headers"]["X-PolyAI-Correlation-Id"].startswith("adk-"))
         self.assertEqual(json.loads(kwargs["data"])["variantId"], "VARIANT-x")
         self.assertFalse(kwargs["allow_redirects"])
         self.assertIsNotNone(kwargs["timeout"])
@@ -213,6 +214,8 @@ class SignalingPostTest(unittest.TestCase):
         self.assertEqual(kwargs["url"], BRIDGE + "/api/v1/call/LOCAL-1/sdp")
         self.assertEqual(kwargs["headers"]["X-Call-Token"], "call-token")
         self.assertNotIn("X-API-KEY", kwargs["headers"])
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "adk")
+        self.assertTrue(kwargs["headers"]["X-PolyAI-Correlation-Id"].startswith("adk-"))
         # The token travels in the header only, so it stays out of the logged body.
         self.assertEqual(json.loads(kwargs["data"]), {"sdp": "offer"})
 
@@ -251,7 +254,10 @@ class SignalingPostTest(unittest.TestCase):
         kwargs = mock_request.call_args.kwargs
         self.assertEqual(kwargs["method"], "DELETE")
         self.assertEqual(kwargs["url"], BRIDGE + "/api/v1/call/LOCAL-1")
-        self.assertEqual(kwargs["headers"], {"X-Call-Token": "call-token"})
+        self.assertEqual(kwargs["headers"]["X-Call-Token"], "call-token")
+        self.assertNotIn("X-API-KEY", kwargs["headers"])
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "adk")
+        self.assertTrue(kwargs["headers"]["X-PolyAI-Correlation-Id"].startswith("adk-"))
 
     @patch("requests.request")
     def test_teardown_ignores_a_call_that_is_already_gone(self, mock_request):
@@ -410,10 +416,9 @@ class RunBridgeCallTest(unittest.TestCase):
     def _steps(self) -> list[str]:
         return [step for step, _body in self.posts]
 
-    def test_runs_the_whole_exchange_and_returns_the_call_id(self):
-        call_id = self._run()
+    def test_runs_the_whole_exchange_and_reports_the_call_id(self):
+        self._run()
 
-        self.assertEqual(call_id, "LOCAL-1")
         self.assertEqual(
             self._steps(),
             [
@@ -478,7 +483,8 @@ class RunBridgeCallTest(unittest.TestCase):
         self.socket = FakeEventsSocket()
         self.socket._events = ["not json", "[]"]
 
-        self.assertEqual(self._run(), "LOCAL-1")
+        self._run()
+
         self.assertEqual(self._steps().count("/api/v1/call/LOCAL-1/sdp/pull"), 1)
 
     def test_nothing_to_pull_skips_the_renegotiation(self):
@@ -492,17 +498,15 @@ class RunBridgeCallTest(unittest.TestCase):
     def test_tears_the_call_down_when_it_ends(self):
         self._run()
 
-        self.assertEqual(
-            self.deletes, [("/api/v1/call/LOCAL-1", {"X-Call-Token": "call-token"})]
-        )
+        self.assertEqual([step for step, _headers in self.deletes], ["/api/v1/call/LOCAL-1"])
+        self.assertEqual(self.deletes[0][1]["X-Call-Token"], "call-token")
         self.assertTrue(self.pc.closed)
 
     def test_hanging_up_ends_a_live_call(self):
         self.socket = FakeEventsSocket(hold_open=True)
 
-        call_id = self._run(on_started=lambda _call_id: self.stop.set())
+        self._run(on_started=lambda _call_id: self.stop.set())
 
-        self.assertEqual(call_id, "LOCAL-1")
         self.assertEqual(len(self.deletes), 1)
         self.assertTrue(self.pc.closed)
 
@@ -575,3 +579,52 @@ class RunBridgeCallTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_audio_that_fails_to_connect_is_reported_without_waiting_for_the_timeout(self):
+        self.pc.state_after_answer = "failed"
+
+        with self.assertRaises(BridgeError) as ctx:
+            self._run()
+
+        self.assertEqual(str(ctx.exception), "Connection failed")
+        self.assertEqual(self.started, [])
+        self.assertEqual(len(self.deletes), 1)
+        self.assertTrue(self.pc.closed)
+
+    def test_the_call_id_is_reported_before_a_later_step_fails(self):
+        self.statuses["/api/v1/call/LOCAL-1/sdp/pull"] = 500
+
+        with self.assertRaises(BridgeError):
+            self._run()
+
+        self.assertEqual(self.started, ["LOCAL-1"])
+
+    def _assert_socket_failure_is_a_bridge_error(self):
+        with self.assertRaises(BridgeError) as ctx:
+            self._run()
+
+        self.assertIn("control connection failed", str(ctx.exception))
+        self.assertEqual(self.started, ["LOCAL-1"])
+        self.assertEqual(len(self.deletes), 1)
+        self.assertTrue(self.pc.closed)
+
+    def test_a_refused_events_socket_is_a_bridge_error(self):
+        refusal = websockets.exceptions.InvalidStatus(MagicMock(status_code=403))
+        self.mock_ws_connect.side_effect = refusal
+
+        self._assert_socket_failure_is_a_bridge_error()
+
+    def test_an_unreachable_events_socket_is_a_bridge_error(self):
+        self.mock_ws_connect.side_effect = OSError("Name or service not known")
+
+        self._assert_socket_failure_is_a_bridge_error()
+
+    def test_an_events_socket_that_times_out_on_open_is_a_bridge_error(self):
+        self.mock_ws_connect.side_effect = TimeoutError("timed out during opening handshake")
+
+        self._assert_socket_failure_is_a_bridge_error()
+
+    def test_an_events_socket_closed_during_auth_is_a_bridge_error(self):
+        self.socket.send = AsyncMock(side_effect=websockets.ConnectionClosedError(None, None))
+
+        self._assert_socket_failure_is_a_bridge_error()
