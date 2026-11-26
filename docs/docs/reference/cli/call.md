@@ -24,7 +24,7 @@ uv tool install "polyai-adk[call]"   # or: pip install "polyai-adk[call]"
 
 Without them, `poly call` exits before connecting and prints the install command for how the ADK was installed.
 
-The call connects your local audio to the agent over WebRTC. Speak to talk to the agent; press `Ctrl+C` to hang up. When the call ends, the command prints a link to the conversation in Agent Studio so you can review the transcript, function calls, and audio.
+The call connects your local audio to the agent over WebRTC. Speak to talk to the agent; press `Ctrl+C` to hang up. When a call that connected ends, the command prints a link to the conversation in Agent Studio so you can review the transcript, function calls, and audio. A call that never connected has no conversation, so no link is printed.
 
 Calling is only available against the current branch's **draft** build, so you must be on a non-main branch. On `main` (or with no branch) the command exits with an error.
 

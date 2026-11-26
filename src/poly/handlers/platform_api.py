@@ -92,6 +92,12 @@ DATA_METRICS_AGGREGATE_URL = "/api/v1/metrics/aggregate"
 DATA_CONVERSATIONS_SEARCH_URL = "/api/v1/conversations/search"
 DATA_TRANSCRIPTS_SEARCH_URL = "/api/v1/transcripts/search"
 DATA_TRANSCRIPT_URL = "/api/v1/transcripts/conversation/{conversation_id}"
+# Voice calls (`poly call`): the WebRTC bridge, served on the regional api.<region>.poly.ai hosts.
+CALL_BRIDGE_URL = "/webrtc-bridge"
+CALLS_URL = CALL_BRIDGE_URL + "/api/v1/call"
+CALL_URL = CALLS_URL + "/{call_id}"
+CALL_TOKEN_HEADER = "X-Call-Token"
+CALL_REQUEST_TIMEOUT_SECONDS = 15
 
 
 class PlatformAPIHandler:
@@ -132,6 +138,97 @@ class PlatformAPIHandler:
             if base_url := PlatformAPIHandler.region_to_base_url.get(region):
                 return base_url
         raise ValueError(f"Unknown region: {region}")
+
+    @staticmethod
+    def get_call_bridge_url(region: str) -> str:
+        """Get the base URL of the WebRTC bridge that places voice calls in a region.
+
+        Args:
+            region (str): The region name
+        Returns:
+            str: The bridge base URL
+        """
+        return PlatformAPIHandler.get_base_url(region) + CALL_BRIDGE_URL
+
+    @staticmethod
+    def _call_headers(auth: dict) -> dict:
+        """Headers for a WebRTC bridge request.
+
+        The bridge takes its own credentials in place of the API key, and the request
+        still carries the headers that trace it back to the ADK.
+
+        Args:
+            auth (dict): The credential and content headers for the request
+        Returns:
+            dict: The complete request headers
+        """
+        return {
+            "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+            "X-Poly-Source": "adk",
+            **auth,
+        }
+
+    @staticmethod
+    def create_call(region: str, auth_token: str, body: dict) -> dict:
+        """Provision a voice call on the WebRTC bridge.
+
+        Args:
+            region (str): The region name
+            auth_token (str): The studio token that authorizes the call
+            body (dict): The call request (mode, variant, caller label)
+        Returns:
+            dict: The call id and the credentials for the rest of the call
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            CALLS_URL,
+            method="POST",
+            data=body,
+            headers=PlatformAPIHandler._call_headers(
+                {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
+            ),
+            timeout=CALL_REQUEST_TIMEOUT_SECONDS,
+        )
+
+    @staticmethod
+    def post_call_signaling(region: str, path: str, call_token: str, body: dict) -> dict:
+        """Post one signalling step of a voice call to the WebRTC bridge.
+
+        Args:
+            region (str): The region name
+            path (str): The step's path on the bridge, from the call's credentials
+            call_token (str): The call's own short-lived token
+            body (dict): The step's payload
+        Returns:
+            dict: The bridge's reply, empty when the step returns no content
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            CALL_BRIDGE_URL + path,
+            method="POST",
+            data=body,
+            headers=PlatformAPIHandler._call_headers(
+                {CALL_TOKEN_HEADER: call_token, "Content-Type": "application/json"}
+            ),
+            timeout=CALL_REQUEST_TIMEOUT_SECONDS,
+        )
+
+    @staticmethod
+    def delete_call(region: str, call_id: str, call_token: str) -> None:
+        """End a voice call on the WebRTC bridge.
+
+        Args:
+            region (str): The region name
+            call_id (str): The call to end
+            call_token (str): The call's own short-lived token
+        """
+        PlatformAPIHandler.make_request(
+            region,
+            CALL_URL.format(call_id=quote(call_id, safe="")),
+            method="DELETE",
+            headers=PlatformAPIHandler._call_headers({CALL_TOKEN_HEADER: call_token}),
+            timeout=CALL_REQUEST_TIMEOUT_SECONDS,
+        )
 
     @staticmethod
     def make_request(

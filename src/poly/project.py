@@ -3338,8 +3338,8 @@ class AgentStudioProject:
     ) -> CallSession:
         """Bootstrap a WebRTC voice call session against a branch draft build.
 
-        Prepares the branch deployment and mints a studio token, returning the
-        parameters the signaling OFFER needs. Only draft/branch calls are
+        Prepares the branch deployment and mints the studio token that places the
+        call on the WebRTC bridge. Only draft/branch calls are
         currently supported; deployed environments raise NotImplementedError.
 
         Args:
@@ -3362,25 +3362,14 @@ class AgentStudioProject:
 
         call_info = self.api_handler.get_branch_call_info(self.branch_id)
 
-        fields = {
-            "artifactVersion": call_info.get("artifactVersion"),
-            "lambdaDeploymentVersion": call_info.get("lambdaDeploymentVersion"),
-            "authToken": call_info.get("authToken"),
-            "gatewayWsUrl": call_info.get("gatewayWsUrl"),
-        }
-        missing = [name for name, value in fields.items() if not value]
-        if missing:
-            # Report only the missing field names
-            raise ValueError(f"Incomplete branch call info; missing field(s): {', '.join(missing)}")
+        auth_token = call_info.get("authToken")
+        if not auth_token:
+            raise ValueError("Incomplete branch call info; missing field(s): authToken")
 
         return CallSession(
-            account_id=self.account_id,
-            project_id=self.project_id,
             variant_id=variant or "",
-            artifact_version=fields["artifactVersion"],
-            lambda_deployment_version=fields["lambdaDeploymentVersion"],
-            auth_token=fields["authToken"],
-            gateway_ws_url=fields["gatewayWsUrl"],
+            auth_token=auth_token,
+            region=self.region,
         )
 
     def send_message(

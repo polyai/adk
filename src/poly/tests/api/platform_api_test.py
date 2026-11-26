@@ -169,6 +169,67 @@ class GetBaseUrl(unittest.TestCase):
         with self.assertRaises(ValueError):
             PlatformAPIHandler.get_base_url("mars-1", use_jupiter_api=True)
 
+    def test_call_bridge_url_is_on_the_regional_api_host(self):
+        self.assertEqual(
+            PlatformAPIHandler.get_call_bridge_url("us-1"),
+            "https://api.us.poly.ai/webrtc-bridge",
+        )
+        with self.assertRaises(ValueError):
+            PlatformAPIHandler.get_call_bridge_url("mars-1")
+
+
+class CallBridgeRequestsTest(unittest.TestCase):
+    """Tests for the voice call requests to the WebRTC bridge."""
+
+    @patch("requests.request")
+    def test_create_call_authorizes_with_the_studio_token(self, mock_request):
+        mock_request.return_value = make_mock_response(200, {"callId": "LOCAL-1"})
+
+        result = PlatformAPIHandler.create_call("us-1", "studio-token", {"mode": "voice-agent"})
+
+        self.assertEqual(result, {"callId": "LOCAL-1"})
+        kwargs = mock_request.call_args.kwargs
+        self.assertEqual(kwargs["method"], "POST")
+        self.assertEqual(kwargs["url"], "https://api.us.poly.ai/webrtc-bridge/api/v1/call")
+        headers = kwargs["headers"]
+        self.assertEqual(headers["Authorization"], "Bearer studio-token")
+        self.assertEqual(headers["Content-Type"], "application/json")
+        self.assertEqual(headers["X-Poly-Source"], "adk")
+        self.assertTrue(headers["X-PolyAI-Correlation-Id"].startswith("adk-"))
+        self.assertNotIn("X-API-KEY", headers)
+        self.assertEqual(json.loads(kwargs["data"]), {"mode": "voice-agent"})
+
+    @patch("requests.request")
+    def test_signaling_step_authorizes_with_the_call_token(self, mock_request):
+        mock_request.return_value = make_mock_response(200, {"sdp": "answer"})
+
+        result = PlatformAPIHandler.post_call_signaling(
+            "us-1", "/api/v1/call/LOCAL-1/sdp", "call-token", {"sdp": "offer"}
+        )
+
+        self.assertEqual(result, {"sdp": "answer"})
+        kwargs = mock_request.call_args.kwargs
+        self.assertEqual(
+            kwargs["url"], "https://api.us.poly.ai/webrtc-bridge/api/v1/call/LOCAL-1/sdp"
+        )
+        self.assertEqual(kwargs["headers"]["X-Call-Token"], "call-token")
+        self.assertEqual(json.loads(kwargs["data"]), {"sdp": "offer"})
+
+    @patch("requests.request")
+    def test_delete_call_escapes_the_call_id(self, mock_request):
+        mock_request.return_value = make_mock_response(204)
+
+        PlatformAPIHandler.delete_call("us-1", "LOCAL/1", "call-token")
+
+        kwargs = mock_request.call_args.kwargs
+        self.assertEqual(kwargs["method"], "DELETE")
+        self.assertEqual(
+            kwargs["url"], "https://api.us.poly.ai/webrtc-bridge/api/v1/call/LOCAL%2F1"
+        )
+        self.assertEqual(kwargs["headers"]["X-Call-Token"], "call-token")
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "adk")
+        self.assertNotIn("X-API-KEY", kwargs["headers"])
+
 
 class CreateChat(unittest.TestCase):
     """Tests for chat creation request payloads."""
