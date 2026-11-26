@@ -75,7 +75,7 @@ from poly.resources.flows import (
 from poly.resources.function import FunctionParameters, FunctionType
 from poly.resources.outbound_campaign import NODE_FIELDS
 from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
-from poly.resources.test_suite import TestCaseApiOperationMock
+from poly.resources.test_suite import TestCaseAgentMemory, TestCaseApiOperationMock
 from poly.tests.testing_utils import (
     campaign_entity,
     campaign_function,
@@ -2396,9 +2396,13 @@ class PushProjectTest(unittest.TestCase):
         updated = kwargs["updated_resources"][TestCase]
         self.assertEqual(list(updated), ["TEST-greeting_flow"])
         self.assertEqual(updated["TEST-greeting_flow"].name, "Greeting flow test")
-        # Only the name changed, so no sub-resource commands are sent.
+        # Only the name changed, so no sub-resource commands are sent, and the
+        # api_mocks and `agent_memory: {}` stay on the same Studio test case.
         self.assertNotIn(TestCaseAssertion, kwargs["updated_resources"])
         self.assertNotIn(TestCaseTags, kwargs["updated_resources"])
+        self.assertNotIn(TestCaseApiOperationMock, kwargs["updated_resources"])
+        self.assertNotIn(TestCaseAgentMemory, kwargs["updated_resources"])
+        self.assertEqual(updated["TEST-greeting_flow"].agent_memory.memory, {})
         self.assertEqual(
             set(project.resources[TestCase]), {"TEST-greeting_flow", "TEST-webchat_smoke"}
         )
@@ -2462,6 +2466,18 @@ class PushProjectTest(unittest.TestCase):
         self.assertEqual(
             set(kwargs["deleted_resources"][TestCase]),
             {"TEST-greeting_flow", "TEST-greeting_twin"},
+        )
+        # The recreated case starts with agentMemory null, so `{}` and the mocks are re-sent.
+        [new_id] = kwargs["new_resources"][TestCase]
+        memories = list(kwargs["updated_resources"][TestCaseAgentMemory].values())
+        self.assertEqual([m.resource_id for m in memories], [new_id])
+        self.assertTrue(memories[0].build_update_proto().HasField("agent_memory"))
+        self.assertEqual(
+            [
+                m.test_case_id
+                for m in kwargs["updated_resources"][TestCaseApiOperationMock].values()
+            ],
+            [new_id],
         )
 
     def test_push_project_force_does_not_delete_remote_only_resources(self):

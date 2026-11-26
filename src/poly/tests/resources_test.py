@@ -130,6 +130,7 @@ from poly.resources.test_suite import (
     FunctionCallArgumentAssertion,
     FunctionCallAssertion,
     TestCase,
+    TestCaseAgentMemory,
     TestCaseApiMocks,
     TestCaseApiOperationMock,
     TestCaseAssertion,
@@ -4051,9 +4052,7 @@ conditions:
                     prompt=prompt,
                     position={"x": 0.0, "y": 0.0},
                 )
-                self.assertIsNone(
-                    empty_prompt_step.validate(resource_mappings=resource_mappings)
-                )
+                self.assertIsNone(empty_prompt_step.validate(resource_mappings=resource_mappings))
 
         # Test with missing flow config
         invalid_step = FlowStep(
@@ -4402,9 +4401,7 @@ conditions:
         """A condition pointing at a step in its own flow validates."""
         condition = self._step_condition_to("step-2")
 
-        self.assertIsNone(
-            condition.validate(resource_mappings=self._step_mappings_in_two_flows())
-        )
+        self.assertIsNone(condition.validate(resource_mappings=self._step_mappings_in_two_flows()))
 
     def test_validate_condition_child_step_in_other_flow_raises(self):
         """A condition pointing at another flow's step is rejected."""
@@ -11913,6 +11910,146 @@ class TestCaseMockContextTests(unittest.TestCase):
         self.assertEqual(test_case.sip_headers.headers, {})
         self.assertEqual(test_case.integration_attributes.attributes, {})
         self.assertNotIn("sip_headers", test_case.to_yaml_dict())
+
+
+class TestCaseAgentMemoryTests(unittest.TestCase):
+    """agent_memory: absent is "not mocked" and `{}` a first-time caller, in both directions."""
+
+    RESOURCE_ID = "TEST-agent_memory"
+    NESTED = {"first_name": "Sam", "visits": 3, "last_booking": {"reference": "40017"}}
+
+    def _yaml(self, extra: str = "") -> dict:
+        return resource_utils.load_yaml(
+            "name: Memory test\nscenario: Caller asks about their booking.\n"
+            f"channel: voice\nlanguage: en-GB\n{extra}"
+        )
+
+    def _from_yaml(self, extra: str = "") -> TestCase:
+        return TestCase.from_yaml_dict(
+            self._yaml(extra), resource_id=self.RESOURCE_ID, name="Memory test"
+        )
+
+    def _from_projection(self, **fields) -> TestCase:
+        entity = {
+            "name": "Memory test",
+            "scenario": "Caller asks about their booking.",
+            "channel": "chat.polyai",
+            "language": "en-GB",
+            **fields,
+        }
+        projection = {"testing": {"testCases": {"entities": {self.RESOURCE_ID: entity}}}}
+        return TestCase.from_projection(projection)[self.RESOURCE_ID]
+
+    def test_yaml_round_trips_unchanged(self):
+        for label, extra, expected in (
+            ("absent", "", None),
+            ("first-time caller", "agent_memory: {}\n", {}),
+            (
+                "nested map",
+                "agent_memory:\n  first_name: Sam\n  visits: 3\n"
+                "  last_booking:\n    reference: '40017'\n",
+                self.NESTED,
+            ),
+        ):
+            with self.subTest(label):
+                test_case = self._from_yaml(extra)
+                self.assertEqual(test_case.agent_memory.memory, expected)
+                reread = TestCase.from_yaml_dict(
+                    resource_utils.load_yaml(test_case.raw),
+                    resource_id=self.RESOURCE_ID,
+                    name="Memory test",
+                )
+                self.assertEqual(reread.agent_memory.memory, expected)
+                self.assertEqual(reread.raw, test_case.raw)
+                if expected is None:
+                    self.assertNotIn("agent_memory", test_case.to_yaml_dict())
+                else:
+                    self.assertEqual(test_case.to_yaml_dict()["agent_memory"], expected)
+
+    def test_projection_keeps_null_and_empty_distinct(self):
+        self.assertIsNone(self._from_projection().agent_memory.memory)
+        self.assertIsNone(self._from_projection(agentMemory=None).agent_memory.memory)
+        self.assertEqual(self._from_projection(agentMemory={}).agent_memory.memory, {})
+        self.assertNotIn("agent_memory", self._from_projection(agentMemory=None).to_yaml_dict())
+        self.assertEqual(self._from_projection(agentMemory={}).to_yaml_dict()["agent_memory"], {})
+
+    def test_struct_doubles_are_written_back_as_ints(self):
+        pulled = self._from_projection(agentMemory={"visits": 3.0, "ratio": 1.5})
+        self.assertEqual(pulled.to_yaml_dict()["agent_memory"], {"visits": 3, "ratio": 1.5})
+        self.assertIsInstance(pulled.to_yaml_dict()["agent_memory"]["visits"], int)
+
+    def test_pull_then_push_is_a_no_op(self):
+        for memory in (None, {}, self.NESTED):
+            with self.subTest(memory=memory):
+                pulled = self._from_projection(agentMemory=memory)
+                local = TestCase.from_yaml_dict(
+                    resource_utils.load_yaml(pulled.raw),
+                    resource_id=self.RESOURCE_ID,
+                    name="Memory test",
+                )
+                _, updated, _ = local.get_new_updated_deleted_subresources(pulled)
+                self.assertNotIn(local.agent_memory, updated)
+
+    def test_status_file_round_trip(self):
+        for memory in (None, {}, self.NESTED):
+            with self.subTest(memory=memory):
+                test_case = self._from_projection(agentMemory=memory)
+                restored = TestCase(**resource_utils.resource_to_dict(test_case))
+                self.assertEqual(restored.agent_memory.memory, memory)
+
+    def test_create_pushes_a_first_time_caller(self):
+        # createTestCase starts with agentMemory null, so `{}` must still be sent.
+        _, updated, _ = self._from_yaml("agent_memory: {}\n").get_new_updated_deleted_subresources()
+        memories = [s for s in updated if isinstance(s, TestCaseAgentMemory)]
+        self.assertEqual(len(memories), 1)
+        proto = memories[0].build_update_proto()
+        self.assertEqual(proto.id, self.RESOURCE_ID)
+        self.assertTrue(proto.HasField("agent_memory"))
+        self.assertEqual(dict(proto.agent_memory), {})
+
+    def test_create_without_a_mock_sends_nothing(self):
+        _, updated, _ = self._from_yaml().get_new_updated_deleted_subresources()
+        self.assertFalse(any(isinstance(s, TestCaseAgentMemory) for s in updated))
+
+    def test_update_proto_carries_nested_values(self):
+        memory = TestCaseAgentMemory(
+            resource_id=self.RESOURCE_ID, name="agent_memory", memory=self.NESTED
+        )
+        proto = memory.build_update_proto()
+        self.assertEqual(memory.update_command_type, "set_test_case_agent_memory")
+        self.assertEqual(proto.agent_memory["first_name"], "Sam")
+        self.assertEqual(proto.agent_memory["visits"], 3)
+        self.assertEqual(dict(proto.agent_memory["last_booking"]), {"reference": "40017"})
+
+    def test_removing_the_field_clears_the_mock(self):
+        old = self._from_yaml("agent_memory: {}\n")
+        new = self._from_yaml()
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertIn(new.agent_memory, updated)
+        self.assertFalse(new.agent_memory.build_update_proto().HasField("agent_memory"))
+
+    def test_switching_between_first_time_and_returning_pushes(self):
+        old = self._from_yaml("agent_memory: {}\n")
+        new = self._from_yaml("agent_memory:\n  first_name: Sam\n")
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertIn(new.agent_memory, updated)
+
+    def test_validate_rejects_a_non_mapping(self):
+        with self.assertRaises(ValueError) as ctx:
+            self._from_yaml("agent_memory: returning\n").validate()
+        self.assertIn("agent_memory must be a mapping", str(ctx.exception))
+
+    def test_validate_rejects_an_unquoted_date(self):
+        with self.assertRaises(ValueError) as ctx:
+            # The fallback YAML loader types an unquoted date.
+            test_case = self._from_yaml()
+            test_case.agent_memory.memory = {"last_visit": datetime.date(2026, 8, 12)}
+            test_case.validate()
+        self.assertIn("Agent memory field 'agent_memory.last_visit'", str(ctx.exception))
 
 
 class TestCaseApiMocksTests(unittest.TestCase):

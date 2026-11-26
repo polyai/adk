@@ -18,6 +18,7 @@ class ChannelType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WEB_CHAT: _ClassVar[ChannelType]
     SMS: _ClassVar[ChannelType]
     EMAIL: _ClassVar[ChannelType]
+    RCS: _ClassVar[ChannelType]
 
 class ChannelStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -27,6 +28,7 @@ VOICE: ChannelType
 WEB_CHAT: ChannelType
 SMS: ChannelType
 EMAIL: ChannelType
+RCS: ChannelType
 NOT_CREATED: ChannelStatus
 CREATED: ChannelStatus
 
@@ -225,17 +227,45 @@ class EmailChannel(_message.Message):
     status: ChannelStatus
     def __init__(self, config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., status: _Optional[_Union[ChannelStatus, str]] = ...) -> None: ...
 
+class RcsBehaviorConfig(_message.Message):
+    __slots__ = ("tones", "emoji_use", "sign_off", "opener", "date_format", "time_format")
+    TONES_FIELD_NUMBER: _ClassVar[int]
+    EMOJI_USE_FIELD_NUMBER: _ClassVar[int]
+    SIGN_OFF_FIELD_NUMBER: _ClassVar[int]
+    OPENER_FIELD_NUMBER: _ClassVar[int]
+    DATE_FORMAT_FIELD_NUMBER: _ClassVar[int]
+    TIME_FORMAT_FIELD_NUMBER: _ClassVar[int]
+    tones: _containers.RepeatedScalarFieldContainer[str]
+    emoji_use: str
+    sign_off: str
+    opener: str
+    date_format: str
+    time_format: str
+    def __init__(self, tones: _Optional[_Iterable[str]] = ..., emoji_use: _Optional[str] = ..., sign_off: _Optional[str] = ..., opener: _Optional[str] = ..., date_format: _Optional[str] = ..., time_format: _Optional[str] = ...) -> None: ...
+
+class RcsChannel(_message.Message):
+    __slots__ = ("config", "status", "behavior_config")
+    CONFIG_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    BEHAVIOR_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    config: ChannelConfig
+    status: ChannelStatus
+    behavior_config: RcsBehaviorConfig
+    def __init__(self, config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., status: _Optional[_Union[ChannelStatus, str]] = ..., behavior_config: _Optional[_Union[RcsBehaviorConfig, _Mapping]] = ...) -> None: ...
+
 class Channels(_message.Message):
-    __slots__ = ("voice", "web_chat", "sms", "email")
+    __slots__ = ("voice", "web_chat", "sms", "email", "rcs")
     VOICE_FIELD_NUMBER: _ClassVar[int]
     WEB_CHAT_FIELD_NUMBER: _ClassVar[int]
     SMS_FIELD_NUMBER: _ClassVar[int]
     EMAIL_FIELD_NUMBER: _ClassVar[int]
+    RCS_FIELD_NUMBER: _ClassVar[int]
     voice: VoiceChannel
     web_chat: WebChatChannel
     sms: SmsChannel
     email: EmailChannel
-    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ..., sms: _Optional[_Union[SmsChannel, _Mapping]] = ..., email: _Optional[_Union[EmailChannel, _Mapping]] = ...) -> None: ...
+    rcs: RcsChannel
+    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ..., sms: _Optional[_Union[SmsChannel, _Mapping]] = ..., email: _Optional[_Union[EmailChannel, _Mapping]] = ..., rcs: _Optional[_Union[RcsChannel, _Mapping]] = ...) -> None: ...
 
 class SmsChannel_UpdateSettings(_message.Message):
     __slots__ = ("sender_phone_number", "channel_behavior_mode", "behavior_config", "ending_message", "error_fallback_message", "compliance_keywords", "enabled")
@@ -260,6 +290,14 @@ class EmailChannel_UpdateSettings(_message.Message):
     ENABLED_FIELD_NUMBER: _ClassVar[int]
     enabled: bool
     def __init__(self, enabled: bool = ...) -> None: ...
+
+class RcsChannel_UpdateSettings(_message.Message):
+    __slots__ = ("enabled", "behavior_config")
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    BEHAVIOR_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    behavior_config: RcsBehaviorConfig
+    def __init__(self, enabled: bool = ..., behavior_config: _Optional[_Union[RcsBehaviorConfig, _Mapping]] = ...) -> None: ...
 
 class Channel_UpdateGreeting(_message.Message):
     __slots__ = ("channel_type", "greeting")
