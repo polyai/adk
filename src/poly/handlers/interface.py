@@ -24,6 +24,7 @@ from poly.resources import (
     Function,
     FunctionStep,
     Handoff,
+    HandoffReason,
     OutboundCampaign,
     OutboundCampaignNode,
     OutboundCampaignSettings,
@@ -480,6 +481,8 @@ class AgentStudioInterface:
     PRIORITY_DELETE_TYPES = [
         Variable,
         Condition,
+        # The platform refuses to delete the default destination while reasons exist.
+        HandoffReason,
     ]
 
     PRIORITY_UPDATE_TYPES = [

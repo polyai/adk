@@ -130,7 +130,7 @@ Resource-specific documentation is available via `poly docs {resource} [resource
 | `entities` | Structured data collection |
 | `experimental_config` | Feature flags |
 | `flows` | Multistep processes with steps, functions, conditions |
-| `handoffs` | SIP call transfers |
+| `handoffs` | SIP call transfers, handoff reasons and the default transfer message |
 | `functions` | Global and flow functions, decorators, state, metrics |
 | `languages` | Default and additional language configuration |
 | `mcp` | MCP servers the agent connects to |

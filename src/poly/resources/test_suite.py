@@ -67,6 +67,10 @@ VALUE_TYPE_ALIASES = {"number": "float"}
 
 ALLOWED_ASSERTION_TYPES = ["equals", "any"]
 
+# Tools the platform gives every agent, which a test can assert like a project function.
+# `builtin_handoff` is how the agent hands off when the project has handoff reasons.
+PLATFORM_TOOL_NAMES = frozenset({"builtin_handoff"})
+
 _INTEGER_PATTERN = re.compile(r"-?[0-9]+")
 
 
@@ -1215,7 +1219,11 @@ class TestCase(YamlResource):
         for function_call in self.assertions.function_calls:
             if not function_call.name:
                 raise ValueError("Function call assertion must have a name")
-            if known_functions and function_call.name not in known_functions:
+            if (
+                known_functions
+                and function_call.name not in known_functions
+                and function_call.name not in PLATFORM_TOOL_NAMES
+            ):
                 raise ValueError(f"Unknown function in assertion: {function_call.name}")
             for argument in function_call.arguments:
                 if argument.value_type not in ALLOWED_TYPES:

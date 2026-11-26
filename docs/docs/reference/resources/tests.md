@@ -70,7 +70,7 @@ The directory is optional. Create it only when you have test cases to define.
 | `agent_memory` | No | The Agent Memory profile the agent sees as `conv.memory`. Absent means not mocked, and `{}` means a first-time caller. See [mock agent memory](#mock-agent-memory). |
 | `api_mocks` | No | Mocked responses for [API integration](./api_integrations.md) operations. See [API mocks](#api-mocks). |
 | `prompt_assertions` | No | List of natural-language statements that must hold about the agent's behavior. Each is evaluated by an LLM judge. |
-| `function_call_assertions` | No | List of expected function calls and their argument values. |
+| `function_call_assertions` | No | List of expected function calls and their argument values. To assert a handoff in a project with handoff reasons, use `builtin_handoff`. |
 
 At least one of `prompt_assertions` or `function_call_assertions` should be set — a test with no assertions runs but cannot pass or fail.
 
@@ -315,7 +315,7 @@ prompt_assertions:
 - `integration_attributes` values must be text, numbers, `true`/`false`, `null`, lists, or nested maps; an unquoted date is rejected with the quoted form to use instead; keys must be text
 - `agent_memory`, if set, must be a map; its values follow the same type rules as `integration_attributes`
 - `api_mocks`: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `respond.status` must be a valid HTTP status code (100–599); `respond.body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation
-- each `function_call_assertions[*].name` must match a global function under `functions/` or a flow function under `flows/<flow>/functions/`
+- each `function_call_assertions[*].name` must match a global function under `functions/`, a flow function under `flows/<flow>/functions/`, or `builtin_handoff`, the platform tool the agent calls to hand off when the project has handoff reasons
 - each argument's `value_type` must be one of `string`, `integer`, `float`, `boolean`
 - each argument's `expected_value`, when set, must not be blank and must read as its `value_type`
 - the filename must match the normalized `name`

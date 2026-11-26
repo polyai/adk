@@ -21,6 +21,7 @@ from google.protobuf.json_format import MessageToDict
 from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
+from poly.handlers.protobuf.handoff_pb2 import HANDOFF_CHANNEL_CALL
 from poly.handlers.protobuf.knowledge_base_pb2 import KnowledgeBase_DeleteTopic
 from poly.handlers.protobuf.variant_pb2 import Variant_UpdateVariant
 from poly.resources.agent_settings import (
@@ -83,7 +84,7 @@ from poly.resources.function import (
     LatencyControl,
 )
 from poly.resources.guardrails import MAX_CUSTOM_GUARDRAILS, CustomGuardrail, PlatformGuardrail
-from poly.resources.handoff import Handoff
+from poly.resources.handoff import Handoff, HandoffReason, HandoffTransferMessage, ReasonOutcome
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import (
     AdditionalLanguage,
@@ -7526,6 +7527,14 @@ class HandoffTests(unittest.TestCase):
         defaults.update(kwargs)
         return Handoff(**defaults)
 
+    def test_validate_refuses_a_non_bool_transfer_test_calls(self):
+        """A quoted or empty value would silently change whether test calls transfer."""
+        self._handoff(transfer_test_calls=False).validate()
+        for value in ("false", None, 0):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "transfer_test_calls"):
+                    self._handoff(transfer_test_calls=value).validate()
+
     def test_validate_fields_at_their_length_limits_pass(self):
         """Name, description, phone number and outbound endpoint at their limits are valid."""
         self._handoff(
@@ -7654,6 +7663,251 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(len(discovered), 1)
         self.assertIn("handoffs", discovered[0])
         self.assertIn("H1", discovered[0])
+
+
+def _reason_mappings() -> list[ResourceMapping]:
+    """A destination and a variable, as a project with both maps them."""
+    return [
+        ResourceMapping(
+            resource_id="HANDOFF-1",
+            resource_type=Handoff,
+            resource_name="Front desk",
+            file_path=None,
+            flow_name=None,
+            resource_prefix="ho",
+        ),
+        ResourceMapping(
+            resource_id="VAR-1",
+            resource_type=Variable,
+            resource_name="caller_name",
+            file_path=None,
+            flow_name=None,
+            resource_prefix="vrbl",
+        ),
+    ]
+
+
+class HandoffReasonTests(unittest.TestCase):
+    @staticmethod
+    def _reason(**changes) -> HandoffReason:
+        fields = {
+            "resource_id": "R",
+            "name": "Complaint",
+            "description": "The caller complains.",
+            "call": ReasonOutcome(kind="message", message="Apologise."),
+        }
+        return HandoffReason(**{**fields, **changes})
+
+    def test_yaml_round_trip_keeps_every_outcome_shape(self):
+        """to_yaml_dict -> from_yaml_dict gives back the same reason."""
+        reason = self._reason(
+            key="COMPLAINT",
+            call=ReasonOutcome(kind="transfer", destination_id="HANDOFF-1", wording="Hold on."),
+            chat=ReasonOutcome(kind="not_offered"),
+        )
+        again = HandoffReason.from_yaml_dict(reason.to_yaml_dict(), "R")
+        self.assertEqual(again, reason)
+        self.assertEqual(again.to_yaml_dict()["chat"], "not_offered")
+
+    def test_file_path_is_inside_handoffs_yaml(self):
+        """A reason lives under `reasons` in config/handoffs.yaml."""
+        self.assertEqual(
+            self._reason(name="Can't help").file_path,
+            os.path.join("config", "handoffs.yaml", "reasons", "Can_t_help"),
+        )
+
+    def test_outcome_shape_is_strict(self):
+        """Any outcome other than the three shapes is refused."""
+        cases = [
+            ({"transfer_to": "X", "message": "Y"}, "can't go with"),
+            ({"kind": "transfer"}, "unknown keys"),
+            ("transfer", "must be `not_offered`"),
+            ({"wording": "Hi"}, "needs `transfer_to` or `message`"),
+        ]
+        for value, error in cases:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, error):
+                    ReasonOutcome.from_yaml_value(value, "call", "R")
+
+    def test_missing_call_is_refused(self):
+        """A reason needs a call outcome."""
+        with self.assertRaisesRegex(ValueError, "needs a `call` outcome"):
+            HandoffReason.from_yaml_dict({"name": "R", "description": "d"}, "R")
+
+    def test_validate_applies_the_platform_rules(self):
+        """Keys, descriptions, chat transfers and destinations are checked."""
+        self._reason().validate(resource_mappings=[])
+        cases = [
+            ({"key": "lower"}, "key"),
+            ({"description": " "}, "needs a description"),
+            ({"chat": ReasonOutcome(kind="transfer", destination_id="H")}, "chat can't transfer"),
+            ({"call": ReasonOutcome(kind="transfer", destination_id="Nowhere")}, "not a dest"),
+            ({"call": ReasonOutcome(kind="message", message=" ")}, "message is empty"),
+            ({"call": ReasonOutcome(kind="message", message="x" * 301)}, "longer than 300"),
+        ]
+        for changes, error in cases:
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(ValueError, error):
+                    self._reason(**changes).validate(resource_mappings=[])
+
+    def test_validate_collection_refuses_duplicate_names_and_keys(self):
+        """Names and keys are unique across reasons."""
+        with self.assertRaisesRegex(ValueError, "keys must be unique"):
+            HandoffReason.validate_collection(
+                {"A": self._reason(key="K"), "B": self._reason(resource_id="B", name="B", key="K")}
+            )
+        with self.assertRaisesRegex(ValueError, "names must be unique"):
+            HandoffReason.validate_collection(
+                {"A": self._reason(), "B": self._reason(resource_id="B", name="complaint")}
+            )
+
+    def test_pretty_dict_shows_destination_and_variable_names(self):
+        """Pull shows `transfer_to` and `{{vrbl:}}` by name; push turns them back into ids."""
+        stored = {
+            "name": "Complaint",
+            "description": "The caller complains.",
+            "call": {"transfer_to": "HANDOFF-1", "wording": "Hold on, {{vrbl:VAR-1}}."},
+            "chat": {"message": "Sorry, {{vrbl:VAR-1}}."},
+        }
+        pretty = HandoffReason.to_pretty_dict(stored, resource_mappings=_reason_mappings())
+        self.assertEqual(
+            pretty["call"], {"transfer_to": "Front desk", "wording": "Hold on, {{vrbl:caller_name}}."}
+        )
+        self.assertEqual(pretty["chat"], {"message": "Sorry, {{vrbl:caller_name}}."})
+        self.assertEqual(
+            HandoffReason.from_pretty_dict(pretty, resource_mappings=_reason_mappings()), stored
+        )
+
+    def test_unknown_variable_fails_validation(self):
+        """A `{{vrbl:}}` the project doesn't have is reported, as for other resources."""
+        reason = HandoffReason.from_yaml_dict(
+            HandoffReason.from_pretty_dict(
+                {
+                    "name": "Complaint",
+                    "description": "The caller complains.",
+                    "call": {"transfer_to": "Front desk", "wording": "Hi {{vrbl:nobody}}."},
+                },
+                resource_mappings=_reason_mappings(),
+            ),
+            "R",
+        )
+        with self.assertRaisesRegex(ValueError, "invalid references"):
+            reason.validate(resource_mappings=_reason_mappings())
+
+    def test_other_reference_types_fail_validation(self):
+        """Wording and messages only take `{{vrbl:}}` references."""
+        reason = self._reason(call=ReasonOutcome(kind="message", message="See {{fn:lookup}}."))
+        with self.assertRaisesRegex(ValueError, "not a valid reference type"):
+            reason.validate(resource_mappings=_reason_mappings())
+
+    def test_from_projection_keeps_a_missing_destination(self):
+        """A transfer to a deleted destination keeps its id, so validate reports it."""
+        projection = {
+            "handoff": {
+                "handoffs": {"entities": {}},
+                "reasons": {
+                    "entities": {
+                        "R": {
+                            "name": "Complaint",
+                            "key": "COMPLAINT",
+                            "description": "d",
+                            "active": True,
+                            "outcomes": {
+                                "call": {
+                                    "outcome": {
+                                        "$case": "transfer",
+                                        "value": {"destinationId": "HANDOFF-GONE"},
+                                    }
+                                }
+                            },
+                        },
+                        "OLD": {"name": "Old", "active": False},
+                    }
+                },
+            }
+        }
+        reasons = HandoffReason.from_projection(projection)
+        self.assertEqual(list(reasons), ["R"])
+        self.assertEqual(reasons["R"].call.destination_id, "HANDOFF-GONE")
+        self.assertIsNone(reasons["R"].chat)
+        with self.assertRaisesRegex(ValueError, "HANDOFF-GONE.*not a destination"):
+            reasons["R"].validate(resource_mappings=_reason_mappings())
+
+    def test_from_projection_skips_a_reason_without_a_call_outcome(self):
+        """A reason with no call outcome can't be written to the file."""
+        projection = {"handoff": {"reasons": {"entities": {"R": {"name": "R", "active": True}}}}}
+        with self.assertLogs("poly.resources.handoff", level="WARNING"):
+            self.assertEqual(HandoffReason.from_projection(projection), {})
+
+    def test_create_sends_the_key_and_update_does_not(self):
+        """The key is set on create only; the platform fixes it afterwards."""
+        reason = self._reason(key="COMPLAINT", chat=ReasonOutcome(kind="not_offered"))
+        create = reason.build_create_proto()
+        self.assertEqual(create.key, "COMPLAINT")
+        self.assertTrue(create.outcomes.chat.HasField("not_offered"))
+        self.assertFalse(self._reason().build_create_proto().HasField("key"))
+        self.assertEqual(reason.build_update_proto().outcomes.call.message.message, "Apologise.")
+        self.assertEqual(reason.build_delete_proto().id, "R")
+
+
+class HandoffTransferMessageTests(unittest.TestCase):
+    def test_chat_is_refused_when_read(self):
+        """Chat has no default transfer message."""
+        with self.assertRaisesRegex(ValueError, "only takes `call`"):
+            HandoffTransferMessage.from_yaml_dict({"call": "Hi", "chat": "Hello"}, "id")
+
+    def test_empty_call_transfers_without_a_line(self):
+        """`call: ""` is sent as an empty message, which the platform keeps."""
+        proto = HandoffTransferMessage.from_yaml_dict({"call": ""}, "id").build_update_proto()
+        self.assertEqual(proto.channel, HANDOFF_CHANNEL_CALL)
+        self.assertTrue(proto.HasField("message"))
+        self.assertEqual(proto.message, "")
+
+    def test_delete_unsets_the_message(self):
+        """Removing the section unsets the message."""
+        proto = HandoffTransferMessage(call="Hi").build_delete_proto()
+        self.assertEqual(proto.channel, HANDOFF_CHANNEL_CALL)
+        self.assertFalse(proto.HasField("message"))
+
+    def test_pretty_dict_round_trips_variables(self):
+        """`{{vrbl:}}` shows by name and goes back to an id."""
+        stored = {"call": "One moment, {{vrbl:VAR-1}}."}
+        pretty = HandoffTransferMessage.to_pretty_dict(stored, resource_mappings=_reason_mappings())
+        self.assertEqual(pretty, {"call": "One moment, {{vrbl:caller_name}}."})
+        self.assertEqual(
+            HandoffTransferMessage.from_pretty_dict(pretty, resource_mappings=_reason_mappings()),
+            stored,
+        )
+
+    def test_validate(self):
+        """The message is at most 300 characters and references known variables."""
+        HandoffTransferMessage(call="One moment, {{vrbl:VAR-1}}.").validate(
+            resource_mappings=_reason_mappings()
+        )
+        with self.assertRaisesRegex(ValueError, "longer than 300"):
+            HandoffTransferMessage(call="x" * 301).validate(resource_mappings=[])
+        with self.assertRaisesRegex(ValueError, "invalid references"):
+            HandoffTransferMessage(call="{{vrbl:nobody}}").validate(resource_mappings=[])
+
+    def test_from_projection_reads_only_a_set_call_message(self):
+        """An unset message, or a chat-only one, gives no resource."""
+        settings = {"callTransferMessage": "Hi", "chatTransferMessage": "Hello"}
+        messages = HandoffTransferMessage.from_projection({"handoff": {"settings": settings}})
+        self.assertEqual(messages[HandoffTransferMessage.RESOURCE_ID].call, "Hi")
+        chat_only = {"handoff": {"settings": {"chatTransferMessage": "Hello"}}}
+        self.assertEqual(HandoffTransferMessage.from_projection(chat_only), {})
+
+    def test_no_section_empty_section_and_null_call_are_one_state(self):
+        """Each of these means the project has no default message."""
+        for section in ("", "transfer_message:\n", "transfer_message:\n  call: null\n"):
+            with self.subTest(section=section), tempfile.TemporaryDirectory() as base_path:
+                os.makedirs(os.path.join(base_path, "config"))
+                with open(
+                    os.path.join(base_path, "config", "handoffs.yaml"), "w", encoding="utf-8"
+                ) as f:
+                    f.write("handoffs: []\n" + section)
+                self.assertEqual(HandoffTransferMessage.discover_resources(base_path), [])
+                MultiResourceYamlResource._file_cache.clear()
 
 
 QUERY_SCHEMA = {"type": "object", "properties": {"family": {"type": "string"}}}
@@ -11424,6 +11678,25 @@ class TestCaseTests(unittest.TestCase):
         self._test_case_asserting_function("register_phone_number").validate(
             resource_mappings=self._function_mappings()
         )
+
+    def test_validate_accepts_builtin_handoff_assertion(self):
+        """With handoff reasons the agent hands off through this platform tool."""
+        self._test_case_asserting_function("builtin_handoff").validate(
+            resource_mappings=self._function_mappings()
+        )
+
+    def test_builtin_handoff_assertion_round_trips_by_name(self):
+        """The platform tool's name is not swapped for an id on pull or push."""
+        test_case = self._test_case_asserting_function("builtin_handoff")
+        mappings = self._function_mappings()
+        pretty = TestCase.to_pretty_dict(test_case.to_yaml_dict(), resource_mappings=mappings)
+        again = TestCase.from_yaml_dict(
+            TestCase.from_pretty_dict(pretty, resource_mappings=mappings),
+            resource_id=test_case.resource_id,
+            name=test_case.name,
+        )
+        self.assertEqual(again.assertions.function_calls[0].name, "builtin_handoff")
+        self.assertEqual(again.assertions.build_update_proto(), test_case.assertions.build_update_proto())
 
     def test_validate_rejects_unknown_function_assertion(self):
         with self.assertRaises(ValueError) as cm:
