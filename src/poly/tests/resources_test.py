@@ -1092,39 +1092,53 @@ def test_code(conv: Conversation, test_param: int):
             flow_name="Test Flow" if function_type == FunctionType.TRANSITION else None,
         )
 
-    def _call_mappings(self, tmpdir: str) -> list[ResourceMapping]:
-        """Mappings for a global function and a transition function, written to disk."""
-        files = {
-            "lookup_booking": (
-                os.path.join(tmpdir, "functions", "lookup_booking.py"),
-                "def lookup_booking(conv: Conversation, booking_ref: str, surname: str):\n"
-                "    pass\n",
+    def _callees(self) -> tuple[list[ResourceMapping], dict[str, Function]]:
+        """A global and a transition function that the tests call, with their mappings."""
+        callees = [
+            (
+                Function(
+                    resource_id="FUNCTION-lookup_booking",
+                    name="lookup_booking",
+                    description="desc",
+                    code="",
+                    parameters=[
+                        FunctionParameters(id="p1", name="booking_ref", description="d", type="string"),
+                        FunctionParameters(id="p2", name="surname", description="d", type="string"),
+                    ],
+                    latency_control=FunctionLatencyControl(),
+                    function_type=FunctionType.GLOBAL,
+                ),
                 "fn",
-                None,
             ),
-            "confirm": (
-                os.path.join(tmpdir, "flows", "test_flow", "functions", "confirm.py"),
-                "def confirm(conv: Conversation, flow: Flow, answer: str):\n    pass\n",
+            (
+                Function(
+                    resource_id="FUNCTION-confirm",
+                    name="confirm",
+                    description="desc",
+                    code="",
+                    parameters=[
+                        FunctionParameters(id="p3", name="answer", description="d", type="string"),
+                    ],
+                    latency_control=FunctionLatencyControl(),
+                    function_type=FunctionType.TRANSITION,
+                    flow_id="flow-1",
+                    flow_name="Test Flow",
+                ),
                 "ft",
-                "Test Flow",
             ),
-        }
-        mappings = []
-        for name, (path, code, prefix, flow_name) in files.items():
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(code)
-            mappings.append(
-                ResourceMapping(
-                    resource_id=f"FUNCTION-{name}",
-                    resource_name=name,
-                    resource_type=Function,
-                    file_path=path,
-                    resource_prefix=prefix,
-                    flow_name=flow_name,
-                )
+        ]
+        mappings = [
+            ResourceMapping(
+                resource_id=function.resource_id,
+                resource_name=function.name,
+                resource_type=Function,
+                file_path=f"{function.name}.py",
+                resource_prefix=prefix,
+                flow_name=function.flow_name,
             )
-        return mappings
+            for function, prefix in callees
+        ]
+        return mappings, {function.resource_id: function for function, _ in callees}
 
     def _calling(self, call: str, function_type: FunctionType = FunctionType.GLOBAL) -> Function:
         """A function whose body is the given call."""
@@ -1134,67 +1148,64 @@ def test_code(conv: Conversation, test_param: int):
 
     def test_validate_function_calls_that_fit_pass(self):
         """Calls that bind to the called function's own arguments validate."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            mappings = self._call_mappings(tmpdir)
-            for call, function_type in [
-                ("conv.functions.lookup_booking('AB12', 'Smith')", FunctionType.GLOBAL),
-                (
-                    "conv.functions.lookup_booking(booking_ref='AB12', surname='Smith')",
-                    FunctionType.GLOBAL,
-                ),
-                ("conv.functions.lookup_booking(*refs)", FunctionType.GLOBAL),
-                ("flow.functions.confirm(answer='yes')", FunctionType.TRANSITION),
-            ]:
-                with self.subTest(call=call):
-                    func = self._calling(call, function_type)
-                    self.assertIsNone(func.validate(resource_mappings=mappings))
+        mappings, functions = self._callees()
+        for call, function_type in [
+            ("conv.functions.lookup_booking('AB12', 'Smith')", FunctionType.GLOBAL),
+            (
+                "conv.functions.lookup_booking(booking_ref='AB12', surname='Smith')",
+                FunctionType.GLOBAL,
+            ),
+            ("conv.functions.lookup_booking(*refs)", FunctionType.GLOBAL),
+            ("flow.functions.confirm(answer='yes')", FunctionType.TRANSITION),
+        ]:
+            with self.subTest(call=call):
+                func = self._calling(call, function_type)
+                self.assertIsNone(func.validate(resource_mappings=mappings, functions=functions))
 
     def test_validate_function_call_with_wrong_arguments_raises(self):
         """A call the called function's def can't accept is reported with the reason."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            mappings = self._call_mappings(tmpdir)
-            for call, function_type, reason in [
-                (
-                    "conv.functions.lookup_booking('AB12', 'Smith', mock_scenario='')",
-                    FunctionType.GLOBAL,
-                    "got an unexpected keyword argument 'mock_scenario'",
-                ),
-                (
-                    "conv.functions.lookup_booking('AB12')",
-                    FunctionType.GLOBAL,
-                    "missing a required argument: 'surname'",
-                ),
-                (
-                    "conv.functions.lookup_booking('AB12', 'Smith', 'extra')",
-                    FunctionType.GLOBAL,
-                    "too many positional arguments",
-                ),
-                (
-                    "flow.functions.confirm(conv, flow, 'yes')",
-                    FunctionType.TRANSITION,
-                    "too many positional arguments",
-                ),
-            ]:
-                with self.subTest(call=call):
-                    func = self._calling(call, function_type)
-                    with self.assertRaises(ValueError) as cm:
-                        func.validate(resource_mappings=mappings)
-                    self.assertIn(f"{call.split('(')[0]}(...) {reason}", str(cm.exception))
+        mappings, functions = self._callees()
+        for call, function_type, reason in [
+            (
+                "conv.functions.lookup_booking('AB12', 'Smith', mock_scenario='')",
+                FunctionType.GLOBAL,
+                "got an unexpected keyword argument 'mock_scenario'",
+            ),
+            (
+                "conv.functions.lookup_booking('AB12')",
+                FunctionType.GLOBAL,
+                "missing a required argument: 'surname'",
+            ),
+            (
+                "conv.functions.lookup_booking('AB12', 'Smith', 'extra')",
+                FunctionType.GLOBAL,
+                "too many positional arguments",
+            ),
+            (
+                "flow.functions.confirm(conv, flow, 'yes')",
+                FunctionType.TRANSITION,
+                "too many positional arguments",
+            ),
+        ]:
+            with self.subTest(call=call):
+                func = self._calling(call, function_type)
+                with self.assertRaises(ValueError) as cm:
+                    func.validate(resource_mappings=mappings, functions=functions)
+                self.assertIn(f"{call.split('(')[0]}(...) {reason}", str(cm.exception))
 
     def test_validate_call_to_a_missing_function_raises(self):
         """conv.functions needs a global function, and flow.functions one in the same flow."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            mappings = self._call_mappings(tmpdir)
-            for call, function_type in [
-                ("conv.functions.missing()", FunctionType.GLOBAL),
-                ("conv.functions.confirm(answer='yes')", FunctionType.TRANSITION),
-                ("flow.functions.lookup_booking('AB12', 'Smith')", FunctionType.TRANSITION),
-            ]:
-                with self.subTest(call=call):
-                    func = self._calling(call, function_type)
-                    with self.assertRaises(ValueError) as cm:
-                        func.validate(resource_mappings=mappings)
-                    self.assertIn("calls a function that does not exist", str(cm.exception))
+        mappings, functions = self._callees()
+        for call, function_type in [
+            ("conv.functions.missing()", FunctionType.GLOBAL),
+            ("conv.functions.confirm(answer='yes')", FunctionType.TRANSITION),
+            ("flow.functions.lookup_booking('AB12', 'Smith')", FunctionType.TRANSITION),
+        ]:
+            with self.subTest(call=call):
+                func = self._calling(call, function_type)
+                with self.assertRaises(ValueError) as cm:
+                    func.validate(resource_mappings=mappings, functions=functions)
+                self.assertIn("calls a function that does not exist", str(cm.exception))
 
     def test_validate_ascii_function_and_parameter_names_pass(self):
         """ASCII identifiers are accepted for the function and its parameters."""
