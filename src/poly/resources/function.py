@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import ast
+import inspect
 import logging
 import os
 import re
@@ -886,6 +887,74 @@ class Function(Resource):
                         raise ValueError(
                             f"conv.goto_flow('{target_flow}') references a flow that does not exist."
                         )
+
+        if resource_mappings:
+            self._validate_function_calls(resource_mappings)
+
+    def _validate_function_calls(self, resource_mappings: list[ResourceMapping]) -> None:
+        """Check each `conv.functions.<name>(...)` and `flow.functions.<name>(...)` call.
+
+        The runtime calls a global function with `conv` first, and a flow's function with
+        `conv` and `flow` first, so the call's own arguments must fit the rest of its `def`.
+        """
+        for node in ast.walk(utils.parse_python(self.code)):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            owner = node.func.value
+            if not (
+                isinstance(owner, ast.Attribute)
+                and owner.attr == "functions"
+                and isinstance(owner.value, ast.Name)
+                and owner.value.id in ("conv", "flow")
+            ):
+                continue
+            call = f"{owner.value.id}.functions.{node.func.attr}"
+            if owner.value.id == "conv":
+                prefix, flow_name, implicit = "fn", None, 1
+            elif self.flow_name:
+                prefix, flow_name, implicit = "ft", self.flow_name, 2
+            else:
+                continue
+            target = next(
+                (
+                    r
+                    for r in resource_mappings
+                    if r.resource_type is Function
+                    and r.resource_prefix == prefix
+                    and r.resource_name == node.func.attr
+                    and (flow_name is None or r.flow_name == flow_name)
+                ),
+                None,
+            )
+            if target is None:
+                where = f" in flow '{flow_name}'" if flow_name else ""
+                raise ValueError(
+                    f"Line {node.lineno}: {call} calls a function that does not exist{where}."
+                )
+            if (
+                not target.file_path
+                or any(isinstance(a, ast.Starred) for a in node.args)
+                or any(k.arg is None for k in node.keywords)
+            ):
+                continue
+            try:
+                metadata = Function._get_target_function(
+                    Function.read_from_file(target.file_path), target.resource_name
+                )
+            except FileNotFoundError:
+                continue
+            if metadata is None:
+                continue
+            signature = inspect.Signature(
+                [
+                    inspect.Parameter(arg.arg, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                    for arg in metadata.args[implicit:]
+                ]
+            )
+            try:
+                signature.bind(*node.args, **{k.arg: k.value for k in node.keywords})
+            except TypeError as e:
+                raise ValueError(f"Line {node.lineno}: {call}(...) {e}.") from None
 
     @staticmethod
     @lru_cache(maxsize=2048)
