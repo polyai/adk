@@ -443,6 +443,9 @@ class AgentStudioProject:
     last_updated: datetime
     slim_resources: list[ResourceMapping] = field(default_factory=list)
     branch_id: str = None
+    # Branch ID -> name, from the last branch listing. Lets status show the branch name
+    # without an API call.
+    branch_names: dict[str, str] = field(default_factory=dict)
     project_name: Optional[str] = None
     account_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
@@ -581,6 +584,7 @@ class AgentStudioProject:
             file_structure_info={},
             slim_resources=slim_resources,
             branch_id=status_dict.get("branch_id", "main"),
+            branch_names=status_dict.get("branch_names", {}),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
             account_name=config_dict.get("account_name") or status_dict.get("account_name"),
             _not_loaded_resources=not_loaded_resources,
@@ -604,6 +608,7 @@ class AgentStudioProject:
             "last_updated": (self.last_updated.isoformat() if self.last_updated else None),
             "file_structure_info": self.file_structure_info,
             "branch_id": self.branch_id,
+            "branch_names": self.branch_names,
             "project_name": self.project_name,
             "account_name": self.account_name,
             "migration_flags": [flag.value for flag in self._migration_flags]
@@ -631,6 +636,7 @@ class AgentStudioProject:
             last_updated=datetime.fromisoformat(data.get("last_updated", "1970-01-01T00:00:00")),
             file_structure_info=file_structure_info,
             branch_id=data.get("branch_id", "main"),
+            branch_names=data.get("branch_names", {}),
             project_name=data.get("project_name"),
             account_name=data.get("account_name"),
             _migration_flags=migration_flags,
@@ -783,6 +789,21 @@ class AgentStudioProject:
             with open(config_file_path, "w", encoding="utf-8") as f:
                 yaml_content = resource_utils.dump_yaml(config_dict)
                 f.write(yaml_content)
+
+    def _save_branch_names(self) -> None:
+        """Write branch_names to the status file, leaving the rest of it as it was.
+
+        Unlike save_config, this doesn't write the in-memory resources or change the
+        last pulled time, so it's safe to call from a read in the middle of any operation.
+        """
+        status_file_path = os.path.join(self.root_path, STATUS_FILE)
+        if not os.path.exists(status_file_path):
+            return
+        with open(status_file_path, "rb") as f:
+            status_dict = json.loads(base64.b64decode(f.read()).decode("utf-8"))
+        status_dict["branch_names"] = self.branch_names
+        with open(status_file_path, "wb") as f:
+            f.write(base64.b64encode(json.dumps(status_dict).encode("utf-8")))
 
     def load_project(
         self,
@@ -3073,6 +3094,10 @@ class AgentStudioProject:
             (name for name, meta in branches.items() if meta["branchId"] == self.branch_id),
             None,
         )
+        branch_names = {meta["branchId"]: name for name, meta in branches.items()}
+        if branch_names != self.branch_names:
+            self.branch_names = branch_names
+            self._save_branch_names()
         return current_branch, branches
 
     def create_branch(
@@ -3131,6 +3156,8 @@ class AgentStudioProject:
 
         branch_id = self.api_handler.create_branch(branch_name, source_branch_id)
         self.branch_id = branch_id
+        if branch_name:
+            self.branch_names[branch_id] = branch_name
         self.save_config()
         return branch_id
 
@@ -3178,7 +3205,7 @@ class AgentStudioProject:
                 "Cannot switch branches with uncommitted changes. Use --force to switch and discard changes, or --keep-files to switch and keep them."
             )
 
-        branches = self.api_handler.get_branches()
+        _, branches = self.get_branches()
         if branch_name in branches:
             branch_id = branches[branch_name]["branchId"]
             if not self.api_handler.switch_branch(branch_id):
@@ -3200,9 +3227,17 @@ class AgentStudioProject:
     def get_current_branch(self) -> Optional[str]:
         """Get the current branch name.
 
+        Uses the name saved from the last branch listing, and asks the API only when the
+        current branch isn't in it. A rename made in Agent Studio shows up after the next
+        listing, e.g. `poly branch list` or `poly branch current`.
+
         Returns:
-            Optional[str]: The name of the current branch. None if the current branch does not exist in the remote.
+            Optional[str]: The saved name if the current branch is in the last listing, even
+            if it has since been deleted in Agent Studio. Otherwise the name from a new
+            listing, or None if the branch isn't in it.
         """
+        if self.branch_id in self.branch_names:
+            return self.branch_names[self.branch_id]
         return self.get_branches()[0]
 
     @classmethod
@@ -3798,7 +3833,7 @@ class AgentStudioProject:
         Returns:
             bool: True if the branch was deleted successfully, False otherwise
         """
-        branches = self.api_handler.get_branches()
+        _, branches = self.get_branches()
         if branch_name not in branches:
             raise ValueError(f"Branch {branch_name} does not exist.")
 
@@ -3807,6 +3842,9 @@ class AgentStudioProject:
 
         branch_id = branches[branch_name]["branchId"]
         success = self.api_handler.delete_branch(branch_id)
+        if success:
+            self.branch_names.pop(branch_id, None)
+            self._save_branch_names()
         if success and self.branch_id == branch_id:
             self.switch_branch("main", force=True)
         return True
@@ -5877,6 +5915,9 @@ class AgentStudioProject:
             raise ValueError(f"Branch {new_branch_name} already exists.")
 
         success = self.api_handler.rename_branch(new_branch_name=new_branch_name)
+        if success:
+            self.branch_names[self.branch_id] = new_branch_name
+            self._save_branch_names()
         return success
 
     def list_archived_branches(self) -> list[dict[str, Any]]:
