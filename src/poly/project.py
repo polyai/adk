@@ -88,6 +88,7 @@ from poly.resources.resource import (
 )
 from poly.utils import prepush
 from poly.utils.commands import queue_set_default_commands
+from poly.utils.ty_check import function_code_errors
 from poly.version import __version__ as ADK_VERSION
 
 logger = logging.getLogger(__name__)
@@ -3629,8 +3630,8 @@ class AgentStudioProject:
             deleted_resources=deleted_resources,
         )
 
-    @staticmethod
     def validate_resources(
+        self,
         resources_dict: ResourceMap,
         resource_mappings: list[ResourceMapping],
         new_resources: Optional[ResourceMap] = None,
@@ -3705,7 +3706,21 @@ class AgentStudioProject:
             except ValueError as e:
                 validation_errors.append(f"Validation error: {e}")
 
+        validation_errors.extend(self._function_code_errors())
         return validation_errors
+
+    def _function_code_errors(self) -> list[str]:
+        """Imports between functions that don't resolve.
+
+        Each file compiles on its own, so a function importing a helper that no longer exists
+        only fails at runtime; ty resolves imports across the project. If ty can't run, imports
+        aren't checked.
+        """
+        messages = []
+        for error in function_code_errors(self.root_path) or []:
+            path = os.path.join(self.root_path, *error.path.split("/"))
+            messages.append(f"Validation error in {path}, line {error.line}: {error.message}")
+        return messages
 
     def merge_branch(
         self,

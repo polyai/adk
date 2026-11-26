@@ -10,6 +10,7 @@ import dataclasses
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 from copy import deepcopy
@@ -85,6 +86,7 @@ from poly.tests.testing_utils import (
     mock_read_from_file,
 )
 from poly.utils import merge_strings
+from poly.utils.ty_check import function_code_errors
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_PROJECT_DIR = os.path.join(DIR, "test_projects")
@@ -3125,6 +3127,245 @@ class ValidateProjectTest(unittest.TestCase):
             "Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts
         )
         self.assertIn("Start step 'missing_step' not found.", error_texts)
+
+    def _validate_edited_copy(
+        self,
+        edits: dict[str, str],
+        parent_pyproject: Optional[str] = None,
+        from_parent: bool = False,
+    ) -> list[str]:
+        """Validate a copy of the test project with lines added after each file's header.
+
+        Function code is checked with ty, which reads the files on disk, so these edit real files
+        rather than mocking reads. `parent_pyproject` is written to the folder above the project.
+        `from_parent` validates from that folder, with the project's root as a relative path.
+        """
+        root = _copy_test_project(self)
+        if parent_pyproject is not None:
+            with open(os.path.join(os.path.dirname(root), "pyproject.toml"), "w") as f:
+                f.write(parent_pyproject)
+        for rel_path, lines in edits.items():
+            path = os.path.join(root, rel_path)
+            with open(path, encoding="utf-8") as f:
+                header, rest = f.read().split("\n", 1)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(f"{header}\n{lines}\n{rest}")
+        if from_parent:
+            self.addCleanup(os.chdir, os.getcwd())
+            os.chdir(os.path.dirname(root))
+            root = os.path.basename(root)
+        return AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), root).validate_project()
+
+    def test_validate_project_reports_an_import_of_a_missing_helper(self):
+        """A merge that drops a helper another function imports only fails at runtime."""
+        errors = self._validate_edited_copy(
+            {"functions/test_function.py": "from functions.format_date import dropped_helper"}
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn(os.path.join("functions", "test_function.py") + ", line", errors[0])
+        self.assertIn("dropped_helper", errors[0])
+
+    def test_validate_project_ignores_ty_settings_above_the_project(self):
+        """A repository holding many projects can switch rules off for its own ty runs."""
+        errors = self._validate_edited_copy(
+            {"functions/test_function.py": "from functions.format_date import dropped_helper"},
+            parent_pyproject='[tool.ty.rules]\nunresolved-import = "ignore"\n',
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("dropped_helper", errors[0])
+
+    def test_validate_project_reports_an_import_of_a_missing_module(self):
+        errors = self._validate_edited_copy(
+            {"functions/test_function.py": "from functions.deleted_module import something"}
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("functions.deleted_module", errors[0])
+
+    def test_validate_project_reports_a_missing_helper_in_a_flows_functions(self):
+        errors = self._validate_edited_copy(
+            {
+                "flows/test_flow/functions/process_data.py": (
+                    "from flows.test_flow.functions.shared_helper import gone"
+                )
+            }
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("gone", errors[0])
+
+    def test_validate_project_ignores_modules_the_runtime_provides(self):
+        """Packages such as plog exist only on the platform, so they can't resolve locally."""
+        errors = self._validate_edited_copy(
+            {
+                "functions/test_function.py": "import plog\nfrom functions.format_date import format_date"
+            }
+        )
+        self.assertEqual(errors, [])
+
+    def test_validate_project_reports_syntax_errors_in_functions_and_steps(self):
+        """Errors that parse but don't compile. A parse error already fails reading the file."""
+        errors = self._validate_edited_copy(
+            {
+                "functions/test_function.py": "return None",
+                "flows/test_flow/function_steps/process_payment.py": "nonlocal missing",
+            }
+        )
+        self.assertEqual(len(errors), 2, errors)
+        text = "\n".join(errors)
+        self.assertIn(os.path.join("functions", "test_function.py"), text)
+        self.assertIn(os.path.join("function_steps", "process_payment.py"), text)
+        self.assertEqual(text.count("Syntax error in function code"), 2)
+
+    def test_validate_project_leaves_function_step_imports_alone(self):
+        errors = self._validate_edited_copy(
+            {"flows/test_flow/function_steps/process_payment.py": "from functions.gone import x"}
+        )
+        self.assertEqual(errors, [])
+
+    def test_validate_project_skips_import_checks_when_ty_fails(self):
+        """A ty crash with no output must not read as an error, nor stop the other checks."""
+        failed = subprocess.CompletedProcess(args=[], returncode=2, stdout="", stderr="panic")
+        with patch("poly.utils.ty_check.subprocess.run", return_value=failed):
+            errors = self._validate_edited_copy(
+                {"functions/test_function.py": "from functions.gone import x\nreturn None"}
+            )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("Syntax error in function code", errors[0])
+
+    def test_validate_project_skips_import_checks_when_ty_cant_run(self):
+        with patch("poly.utils.ty_check.subprocess.run", side_effect=OSError("no ty")):
+            errors = self._validate_edited_copy(
+                {"functions/test_function.py": "from functions.gone import x"}
+            )
+        self.assertEqual(errors, [])
+
+    def test_validate_project_skips_import_checks_when_ty_isnt_installed(self):
+        """Running a missing ty module exits 1 with no output, just as a clean ty run would."""
+        with patch("poly.utils.ty_check.find_spec", return_value=None):
+            errors = self._validate_edited_copy(
+                {"functions/test_function.py": "from functions.gone import x"}
+            )
+        self.assertEqual(errors, [])
+
+    def test_validate_project_checks_imports_with_a_relative_root(self):
+        errors = self._validate_edited_copy(
+            {"functions/test_function.py": "from functions.format_date import dropped_helper"},
+            from_parent=True,
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("dropped_helper", errors[0])
+
+    def test_validate_project_reports_a_missing_name_imported_from_the_functions_package(self):
+        errors = self._validate_edited_copy(
+            {"functions/test_function.py": "from functions import dropped_helper"}
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("dropped_helper", errors[0])
+
+    def test_validate_project_reports_broken_relative_imports(self):
+        errors = self._validate_edited_copy(
+            {
+                "functions/test_function.py": "from . import dropped_helper",
+                "flows/test_flow/functions/process_data.py": "from .deleted_module import x",
+            }
+        )
+        text = "\n".join(errors)
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("dropped_helper", text)
+        self.assertIn(".deleted_module", text)
+
+    def test_validate_project_resolves_relative_imports_within_a_flow(self):
+        """A flow's functions share one folder on the platform, as they do locally."""
+        errors = self._validate_edited_copy(
+            {
+                "flows/test_flow/functions/process_data.py": (
+                    "from .shared_helper import shared_helper"
+                )
+            }
+        )
+        self.assertEqual(errors, [])
+
+    def test_validate_project_allows_imports_that_may_fail(self):
+        """Code that catches a failed import, or imports only for type checkers, expects it."""
+        errors = self._validate_edited_copy(
+            {
+                "functions/test_function.py": (
+                    "from typing import TYPE_CHECKING\n"
+                    "try:\n"
+                    "    from functions.optional_helper import (\n"
+                    "        helper,\n"
+                    "    )\n"
+                    "except ImportError:\n"
+                    "    helper = None\n"
+                    "if TYPE_CHECKING:\n"
+                    "    from functions.typing_only import Thing"
+                )
+            }
+        )
+        self.assertEqual(errors, [])
+
+    def test_validate_project_reports_imports_in_a_try_that_doesnt_catch_import_errors(self):
+        errors = self._validate_edited_copy(
+            {
+                "functions/test_function.py": (
+                    "try:\n    from functions.gone import x\nexcept ValueError:\n    x = None"
+                )
+            }
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("functions.gone", errors[0])
+
+    def test_validate_project_resolves_parent_imports_in_a_flow_to_global_functions(self):
+        """On the platform a flow's functions sit in functions/<flow id>/, so `..` is functions/."""
+        errors = self._validate_edited_copy(
+            {"flows/test_flow/functions/process_data.py": "from ..format_date import format_date"}
+        )
+        self.assertEqual(errors, [])
+
+    def test_validate_project_reports_broken_parent_imports_in_a_flow(self):
+        errors = self._validate_edited_copy(
+            {
+                "flows/test_flow/functions/process_data.py": (
+                    "from ..format_date import dropped_helper\nfrom ..deleted_module import x"
+                )
+            }
+        )
+        text = "\n".join(errors)
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn(os.path.join("flows", "test_flow", "functions", "process_data.py"), text)
+        self.assertIn("Module `..format_date` has no member `dropped_helper`", text)
+        self.assertIn("Cannot resolve imported module `..deleted_module`", text)
+
+    def _function_code_errors(self, files: dict[str, str]) -> list:
+        """ty's errors for a project holding only these files.
+
+        For code the ADK can't load as a project, such as a file that doesn't parse.
+        """
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        for rel_path, code in files.items():
+            path = os.path.join(root, rel_path)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(code)
+        return function_code_errors(root)
+
+    def test_function_code_errors_leaves_syntax_to_function_validation(self):
+        errors = self._function_code_errors({"functions/broken.py": "def f(:\n    pass\n"})
+        self.assertEqual(errors, [])
+
+    def test_function_code_errors_allows_flow_imports_that_pull_writes(self):
+        """A flow folder can start with a digit or be a keyword, so the import isn't Python."""
+        errors = self._function_code_errors(
+            {
+                "flows/2fa_flow/functions/helper.py": "X = 1\n",
+                "flows/2fa_flow/functions/caller.py": (
+                    "from flows.2fa_flow.functions.helper import X\n"
+                ),
+                "flows/class/functions/helper.py": "X = 1\n",
+                "flows/class/functions/caller.py": "import flows.class.functions.helper\n",
+            }
+        )
+        self.assertEqual(errors, [])
 
     def test_validate_project_reports_duplicate_entry_names(self):
         """Entries sharing a name are reported, whether new or already on the platform."""
