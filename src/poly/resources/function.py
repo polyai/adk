@@ -928,9 +928,7 @@ class Function(Resource):
             )
             if target is None:
                 where = f" in flow '{flow_name}'" if flow_name else ""
-                raise ValueError(
-                    f"Line {node.lineno}: {call} calls a function that does not exist{where}."
-                )
+                raise ValueError(f"{call} calls a function that does not exist{where}.")
             if (
                 not target.file_path
                 or any(isinstance(a, ast.Starred) for a in node.args)
@@ -954,7 +952,7 @@ class Function(Resource):
             try:
                 signature.bind(*node.args, **{k.arg: k.value for k in node.keywords})
             except TypeError as e:
-                raise ValueError(f"Line {node.lineno}: {call}(...) {e}.") from None
+                raise ValueError(f"{call}(...) {e}.") from None
 
     @staticmethod
     @lru_cache(maxsize=2048)

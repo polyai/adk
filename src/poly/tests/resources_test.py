@@ -1179,8 +1179,7 @@ def test_code(conv: Conversation, test_param: int):
                     func = self._calling(call, function_type)
                     with self.assertRaises(ValueError) as cm:
                         func.validate(resource_mappings=mappings)
-                    self.assertIn("Line 3:", str(cm.exception))
-                    self.assertIn(reason, str(cm.exception))
+                    self.assertIn(f"{call.split('(')[0]}(...) {reason}", str(cm.exception))
 
     def test_validate_call_to_a_missing_function_raises(self):
         """conv.functions needs a global function, and flow.functions one in the same flow."""
