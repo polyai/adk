@@ -24,6 +24,7 @@ Each test case has these fields:
 - **caller_number** (string, optional): The number the simulated call arrives from.
 - **sip_headers** (map, optional): SIP headers a carrier would send with an inbound call.
 - **integration_attributes** (map, optional): Attributes a channel or connector passes in.
+- **agent_memory** (map, optional): The Agent Memory profile the agent sees as `conv.memory`. Absent means not mocked, and `{}` means a first-time caller.
 - **api_mocks** (map, optional): Mock responses for API integration operations, so the simulation runner returns these instead of calling the real API.
 - **prompt_assertions** (list, optional): Expected behaviours in the agent's response.
 - **function_call_assertions** (list, optional): Expected function calls and argument values.
@@ -126,6 +127,38 @@ Types come from YAML, which means quoting matters:
 
 Dates must be quoted. An unquoted `expiry: 2026-08-12` is a YAML date, which the agent cannot receive, and `push` rejects it rather than guessing what you meant.
 
+## Mock agent memory
+
+`agent_memory` sets the Agent Memory profile the agent sees, read as `conv.memory`, so returning-caller and first-time-caller paths each get a test case of their own. When it is set, it **replaces** `conv.memory` for the whole run, and nothing stored for the caller is read.
+
+```yaml
+name: Returning caller skips the name question
+scenario: Book a table for Friday at 7pm.
+channel: voice
+language: en-GB
+agent_memory:
+  first_name: Sam
+  last_booking:
+    date: "2026-08-14"
+    party_size: 2
+prompt_assertions:
+- The agent greets the caller as Sam without asking for their name
+```
+
+There are three states, and each one means something different:
+
+| YAML | Meaning |
+|------|---------|
+| field absent | Not mocked. The run reads whatever profile is stored for the caller's identifier. |
+| `agent_memory: {}` | A first-time caller, with nothing on file. |
+| `agent_memory:` with fields | A returning caller with exactly those fields. |
+
+A flow that branches on `conv.memory` wants both a returning-caller case and a first-time-caller case. `caller_number` alone doesn't make a returning caller, so use `agent_memory` for that.
+
+Values follow the same type rules as `integration_attributes`: they keep their YAML type, nested maps and lists are supported, and dates must be quoted. Use synthetic values only, never real customer data.
+
+Pulling, renaming and pushing a case keep `{}` and an absent field distinct.
+
 ## API mocks
 
 A flow that branches on an API integration's response — a booking that's available vs. full, a lookup that succeeds vs. errors — needs that response to be deterministic to test reliably. `api_mocks` intercepts calls to a named integration operation during simulation and returns the mocked response instead of calling the real API.
@@ -206,6 +239,7 @@ On `push`, each test case is validated:
 - **variant**, if specified, must match an existing variant in the project.
 - **function_call_assertions**: each function name must match a global function (`functions/`) or a flow function (`flows/<flow>/functions/`) in the project, and each argument's `value_type` must be one of `string`, `integer`, `float`, or `boolean`, and each argument's `expected_value`, when set, must not be blank and must read as its `value_type`.
 - **integration_attributes**: values must be text, numbers, `true`/`false`, `null`, lists or nested maps. An unquoted date is rejected with the quoted form to use instead, and keys must be text.
+- **agent_memory**: must be a map when set. Values follow the same type rules as `integration_attributes`.
 - **api_mocks**: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `status` must be a valid HTTP status code (100–599); `body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation.
 
 ## Best practices

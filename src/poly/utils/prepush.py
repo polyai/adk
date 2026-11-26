@@ -47,6 +47,7 @@ from poly.resources.outbound_campaign import (
     paired_campaigns,
 )
 from poly.resources.test_suite import (
+    TestCaseAgentMemory,
     TestCaseApiOperationMock,
     TestCaseIntegrationAttributes,
     TestCaseSipHeaders,
@@ -259,6 +260,7 @@ def pair_renamed_test_cases(
             case.tags,
             case.sip_headers,
             case.integration_attributes,
+            case.agent_memory,
         ):
             if sub_resource is not None:
                 sub_resource.resource_id = old_id
@@ -285,6 +287,7 @@ _TEST_CASE_SUBRESOURCE_TYPES = (
     TestCaseTags,
     TestCaseSipHeaders,
     TestCaseIntegrationAttributes,
+    TestCaseAgentMemory,
     TestCaseApiOperationMock,
 )
 

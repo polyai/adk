@@ -1420,6 +1420,11 @@
               ]
             }
           }
+        },
+        "agent_memory": {
+          "resource_id": "TEST-greeting_flow",
+          "name": "agent_memory",
+          "memory": {}
         }
       },
       "TEST-webchat_smoke": {

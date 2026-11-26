@@ -248,6 +248,18 @@ class Voice_UpdateDisclaimerVoiceSettings(_message.Message):
     google_gemini: GoogleGeminiTtsConfig
     def __init__(self, voice_id: _Optional[str] = ..., eleven_labs: _Optional[_Union[ElevenLabsTtsConfig, _Mapping]] = ..., play_ht: _Optional[_Union[PlayHTTtsConfig, _Mapping]] = ..., cartesia: _Optional[_Union[CartesiaTtsConfig, _Mapping]] = ..., hume: _Optional[_Union[HumeTtsConfig, _Mapping]] = ..., google_gemini: _Optional[_Union[GoogleGeminiTtsConfig, _Mapping]] = ...) -> None: ...
 
+class Voice_ResetAgentVoiceSettings(_message.Message):
+    __slots__ = ("voice_id",)
+    VOICE_ID_FIELD_NUMBER: _ClassVar[int]
+    voice_id: str
+    def __init__(self, voice_id: _Optional[str] = ...) -> None: ...
+
+class Voice_ResetDisclaimerVoiceSettings(_message.Message):
+    __slots__ = ("voice_id",)
+    VOICE_ID_FIELD_NUMBER: _ClassVar[int]
+    voice_id: str
+    def __init__(self, voice_id: _Optional[str] = ...) -> None: ...
+
 class Voice_AddFavoriteVoice(_message.Message):
     __slots__ = ("voice_id", "account_id")
     VOICE_ID_FIELD_NUMBER: _ClassVar[int]

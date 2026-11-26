@@ -28,6 +28,7 @@ from poly.handlers.protobuf.testing_pb2 import (
     Delete_TestCase,
     DeleteTestCaseApiOperationMock,
     PromptAssertion,
+    SetTestCaseAgentMemory,
     SetTestCaseAssertions,
     SetTestCaseIntegrationAttributes,
     SetTestCaseSipHeaders,
@@ -363,7 +364,7 @@ def _normalise_attribute(value: Any) -> Any:
     return value
 
 
-def _validate_attribute_value(value: Any, path: str) -> None:
+def _validate_attribute_value(value: Any, path: str, label: str = "Integration attribute") -> None:
     """Reject values a google.protobuf.Struct cannot carry.
 
     The fallback YAML loader types unquoted dates, so `expiry: 2026-08-12`
@@ -376,23 +377,23 @@ def _validate_attribute_value(value: Any, path: str) -> None:
         for key, item in value.items():
             if not isinstance(key, str):
                 raise ValueError(
-                    f"Integration attribute key {path}.{key!r} must be text — "
+                    f"{label} key {path}.{key!r} must be text — "
                     f"quote it to stop YAML reading it as {type(key).__name__}"
                 )
-            _validate_attribute_value(item, f"{path}.{key}")
+            _validate_attribute_value(item, f"{path}.{key}", label)
         return
     if isinstance(value, list):
         for index, item in enumerate(value):
-            _validate_attribute_value(item, f"{path}[{index}]")
+            _validate_attribute_value(item, f"{path}[{index}]", label)
         return
     if isinstance(value, (date, datetime)):
         raise ValueError(
-            f"Integration attribute '{path}' is a {type(value).__name__}, which the agent "
+            f"{label} '{path}' is a {type(value).__name__}, which the agent "
             f"cannot receive — quote it to send it as text: '{value.isoformat()}'"
         )
     if value is not None and not isinstance(value, (str, int, float, bool)):
         raise ValueError(
-            f"Integration attribute '{path}' is a {type(value).__name__}; "
+            f"{label} '{path}' is a {type(value).__name__}; "
             "only text, numbers, true/false, lists and nested maps are supported"
         )
 
@@ -432,6 +433,44 @@ class TestCaseIntegrationAttributes(SubResource):
 
     def build_delete_proto(self) -> None:
         raise NotImplementedError("Test Case Integration Attributes cannot be deleted")
+
+
+@dataclass
+class TestCaseAgentMemory(SubResource):
+    """Dataclass representing the mock Agent Memory profile on a test case.
+
+    `None` is not mocked, so the run reads whatever is stored for the caller. `{}` is a
+    first-time caller with nothing on file. The two must stay distinct end to end.
+    """
+
+    __test__ = False
+
+    memory: Optional[dict[str, Any]] = None
+
+    @property
+    def command_type(self) -> str:
+        return "test_case_agent_memory"
+
+    @property
+    def update_command_type(self) -> str:
+        return "set_test_case_agent_memory"
+
+    def to_yaml_dict(self) -> Optional[dict]:
+        return None if self.memory is None else _normalise_attribute(self.memory)
+
+    def build_update_proto(self) -> SetTestCaseAgentMemory:
+        proto = SetTestCaseAgentMemory(id=self.resource_id)
+        if self.memory is not None:
+            # SetInParent marks the field present even for `{}`; an unset field clears the mock.
+            proto.agent_memory.SetInParent()
+            proto.agent_memory.update(self.memory)
+        return proto
+
+    def build_create_proto(self) -> None:
+        raise NotImplementedError("Test Case Agent Memory cannot be created")
+
+    def build_delete_proto(self) -> None:
+        raise NotImplementedError("Test Case Agent Memory cannot be deleted")
 
 
 def _body_text(body: Any) -> str:
@@ -770,6 +809,7 @@ class TestCase(YamlResource):
     sip_headers: "TestCaseSipHeaders" = None
     integration_attributes: "TestCaseIntegrationAttributes" = None
     api_mocks: "TestCaseApiMocks" = None
+    agent_memory: "TestCaseAgentMemory" = None
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "TestCase"]:
@@ -836,6 +876,12 @@ class TestCase(YamlResource):
             api_mocks = TestCaseApiMocks.from_dict(
                 test_case_data.get("apiMocks"), from_projection=True
             )
+            # Not `or {}`: null is "not mocked" and {} is a first-time caller.
+            agent_memory = TestCaseAgentMemory(
+                resource_id=test_case_id,
+                name="agent_memory",
+                memory=test_case_data.get("agentMemory"),
+            )
             test_cases[test_case_id] = cls(
                 resource_id=test_case_id,
                 name=test_case_data.get("name", ""),
@@ -850,6 +896,7 @@ class TestCase(YamlResource):
                 sip_headers=sip_headers,
                 integration_attributes=integration_attributes,
                 api_mocks=api_mocks,
+                agent_memory=agent_memory,
             )
         return test_cases
 
@@ -869,6 +916,7 @@ class TestCase(YamlResource):
         sip_headers: "TestCaseSipHeaders | dict | None" = None,
         integration_attributes: "TestCaseIntegrationAttributes | dict | None" = None,
         api_mocks: "TestCaseApiMocks | dict | None" = None,
+        agent_memory: "TestCaseAgentMemory | dict | None" = None,
     ):
         self.resource_id = resource_id
         self.name = name
@@ -916,6 +964,13 @@ class TestCase(YamlResource):
             self.api_mocks = TestCaseApiMocks.from_dict(api_mocks.get("mocks", api_mocks))
         else:
             self.api_mocks = TestCaseApiMocks()
+        # A dict here is a status-file TestCaseAgentMemory, never the memory itself.
+        if isinstance(agent_memory, TestCaseAgentMemory):
+            self.agent_memory = agent_memory
+        elif isinstance(agent_memory, dict):
+            self.agent_memory = TestCaseAgentMemory(**agent_memory)
+        else:
+            self.agent_memory = TestCaseAgentMemory(resource_id=resource_id, name="agent_memory")
 
     @property
     def file_path(self) -> str:
@@ -955,6 +1010,10 @@ class TestCase(YamlResource):
 
         if mocks := self.api_mocks.to_yaml_dict():
             output["api_mocks"] = mocks
+
+        # Written whenever mocked, `{}` included: absent and `{}` mean different callers.
+        if (memory := self.agent_memory.to_yaml_dict()) is not None:
+            output["agent_memory"] = memory
 
         if assert_dict := self.assertions.to_yaml_dict():
             output.update(assert_dict)
@@ -1002,6 +1061,11 @@ class TestCase(YamlResource):
             attributes=yaml_dict.get("integration_attributes") or {},
         )
         test_case_api_mocks = TestCaseApiMocks.from_dict(yaml_dict.get("api_mocks"))
+        test_case_agent_memory = TestCaseAgentMemory(
+            resource_id=resource_id,
+            name="agent_memory",
+            memory=yaml_dict.get("agent_memory"),
+        )
 
         channel = yaml_dict.get("channel")
         return cls(
@@ -1018,6 +1082,7 @@ class TestCase(YamlResource):
             sip_headers=test_case_sip_headers,
             integration_attributes=test_case_integration_attributes,
             api_mocks=test_case_api_mocks,
+            agent_memory=test_case_agent_memory,
         )
 
     @classmethod
@@ -1125,6 +1190,15 @@ class TestCase(YamlResource):
 
         # Integration attributes carry JSON types through to the agent
         _validate_attribute_value(self.integration_attributes.attributes, "integration_attributes")
+
+        memory = self.agent_memory.memory
+        if memory is not None:
+            if not isinstance(memory, dict):
+                raise ValueError(
+                    f"agent_memory must be a mapping of field name to value, got "
+                    f"{type(memory).__name__} — use `agent_memory: {{}}` for a first-time caller"
+                )
+            _validate_attribute_value(memory, "agent_memory", "Agent memory field")
 
         # API mocks: integration must exist (when the project's integrations are known).
         known_integrations = {
@@ -1236,6 +1310,9 @@ class TestCase(YamlResource):
                 updated.append(self.sip_headers)
             if self.integration_attributes.attributes:
                 updated.append(self.integration_attributes)
+            # A new case starts with agentMemory null, so push `{}` too.
+            if self.agent_memory.memory is not None:
+                updated.append(self.agent_memory)
             mock_updates, mock_deletes = self._diff_api_mocks({})
         else:
             if old_resource.assertions != self.assertions:
@@ -1247,6 +1324,8 @@ class TestCase(YamlResource):
                 updated.append(self.sip_headers)
             if old_resource.integration_attributes != self.integration_attributes:
                 updated.append(self.integration_attributes)
+            if old_resource.agent_memory.memory != self.agent_memory.memory:
+                updated.append(self.agent_memory)
             mock_updates, mock_deletes = self._diff_api_mocks(old_resource.api_mocks.mocks)
 
         updated.extend(mock_updates)

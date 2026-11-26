@@ -112,7 +112,7 @@ class ApiOverride(_message.Message):
     def __init__(self, integrations: _Optional[_Mapping[str, ApiIntegrationOverride]] = ...) -> None: ...
 
 class TestCase(_message.Message):
-    __slots__ = ("id", "name", "scenario", "variant_id", "language", "created_by", "created_at", "updated_by", "updated_at", "tags", "simulated_at", "assertions", "channel", "severity", "api_mocks", "caller_number", "sip_headers", "integration_attributes")
+    __slots__ = ("id", "name", "scenario", "variant_id", "language", "created_by", "created_at", "updated_by", "updated_at", "tags", "simulated_at", "assertions", "channel", "severity", "api_mocks", "caller_number", "sip_headers", "integration_attributes", "agent_memory")
     class SipHeadersEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -138,6 +138,7 @@ class TestCase(_message.Message):
     CALLER_NUMBER_FIELD_NUMBER: _ClassVar[int]
     SIP_HEADERS_FIELD_NUMBER: _ClassVar[int]
     INTEGRATION_ATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
+    AGENT_MEMORY_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     scenario: str
@@ -156,7 +157,8 @@ class TestCase(_message.Message):
     caller_number: str
     sip_headers: _containers.ScalarMap[str, str]
     integration_attributes: _struct_pb2.Struct
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., scenario: _Optional[str] = ..., variant_id: _Optional[str] = ..., language: _Optional[str] = ..., created_by: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., tags: _Optional[_Iterable[str]] = ..., simulated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., assertions: _Optional[_Iterable[_Union[TestCaseAssertion, _Mapping]]] = ..., channel: _Optional[str] = ..., severity: _Optional[str] = ..., api_mocks: _Optional[_Union[ApiOverride, _Mapping]] = ..., caller_number: _Optional[str] = ..., sip_headers: _Optional[_Mapping[str, str]] = ..., integration_attributes: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+    agent_memory: _struct_pb2.Struct
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., scenario: _Optional[str] = ..., variant_id: _Optional[str] = ..., language: _Optional[str] = ..., created_by: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., tags: _Optional[_Iterable[str]] = ..., simulated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., assertions: _Optional[_Iterable[_Union[TestCaseAssertion, _Mapping]]] = ..., channel: _Optional[str] = ..., severity: _Optional[str] = ..., api_mocks: _Optional[_Union[ApiOverride, _Mapping]] = ..., caller_number: _Optional[str] = ..., sip_headers: _Optional[_Mapping[str, str]] = ..., integration_attributes: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., agent_memory: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class Create_TestCase(_message.Message):
     __slots__ = ("id", "name", "scenario", "variant_id", "language", "simulated_at", "channel", "caller_number")
@@ -272,3 +274,11 @@ class SetTestCaseIntegrationAttributes(_message.Message):
     id: str
     integration_attributes: _struct_pb2.Struct
     def __init__(self, id: _Optional[str] = ..., integration_attributes: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+
+class SetTestCaseAgentMemory(_message.Message):
+    __slots__ = ("id", "agent_memory")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    AGENT_MEMORY_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    agent_memory: _struct_pb2.Struct
+    def __init__(self, id: _Optional[str] = ..., agent_memory: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
