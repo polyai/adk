@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.91.2 (2026-11-26)
+
+### Performance Improvements
+
+- Reuse saved file hashes when loading a project ([#405](https://github.com/polyai/adk/pull/405),
+  [`dfc7a5c`](https://github.com/polyai/adk/commit/dfc7a5c23b9b73242d4856f3dc93daeb22cca6b4))
+
+
 ## v0.91.1 (2026-11-26)
 
 ### Bug Fixes
