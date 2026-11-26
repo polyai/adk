@@ -284,7 +284,8 @@ class DeleteGistsTest(unittest.TestCase):
         """An ID that doesn't match any review gist shows an error and does not delete."""
         mock_list.return_value = self.SAMPLE_GISTS
 
-        ReviewCommand.delete_gists(gist_id="zzz9999")
+        with self.assertRaises(SystemExit):
+            ReviewCommand.delete_gists(gist_id="zzz9999")
 
         mock_delete.assert_not_called()
         mock_error.assert_called_once()
@@ -300,7 +301,8 @@ class DeleteGistsTest(unittest.TestCase):
         mock_list.return_value = self.SAMPLE_GISTS  # contains "aaa1111111"
 
         # "aaa1111xyz" shares the "aaa1111" prefix but is not a valid ID
-        ReviewCommand.delete_gists(gist_id="aaa1111xyz")
+        with self.assertRaises(SystemExit):
+            ReviewCommand.delete_gists(gist_id="aaa1111xyz")
 
         mock_delete.assert_not_called()
         mock_error.assert_called_once()
@@ -328,7 +330,8 @@ class DeleteGistsTest(unittest.TestCase):
         interactive checkbox prompt is never shown."""
         mock_list.return_value = self.SAMPLE_GISTS
 
-        ReviewCommand.delete_gists(output_json=True)
+        with self.assertRaises(SystemExit):
+            ReviewCommand.delete_gists(output_json=True)
 
         mock_checkbox.assert_not_called()
         mock_delete.assert_not_called()
@@ -403,7 +406,8 @@ class ListGistsTest(unittest.TestCase):
     @patch("poly.cli_commands.review.json_print")
     def test_json_output_on_error_prints_failure(self, mock_json_print, _mock_list):
         """With output_json=True, an API/OS error prints {success: false, message: ...}."""
-        ReviewCommand.list_gists(output_json=True)
+        with self.assertRaises(SystemExit):
+            ReviewCommand.list_gists(output_json=True)
 
         mock_json_print.assert_called_once()
         result = mock_json_print.call_args[0][0]
@@ -487,13 +491,13 @@ class ReviewDescriptionTest(unittest.TestCase):
     @patch("poly.cli_commands.review.GitHubAPIHandler.create_gist")
     @patch("poly.cli_commands.review.compute_diff", return_value={})
     @patch("poly.cli_commands.review.json_print")
-    def test_json_output_empty_diff_prints_failure(self, mock_json_print, mock_review, mock_create):
-        """With output_json=True, an empty diff prints {success: false, message: ...}."""
+    def test_json_output_empty_diff_is_not_an_error(self, mock_json_print, mock_review, mock_create):
+        """With output_json=True, an empty diff prints {success: true, message: ...}."""
         ReviewCommand.review(base_path="/some/my-project", output_json=True)
 
         mock_json_print.assert_called_once()
         result = mock_json_print.call_args[0][0]
-        self.assertFalse(result["success"])
+        self.assertTrue(result["success"])
         self.assertIn("message", result)
 
 

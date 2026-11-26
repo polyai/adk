@@ -67,6 +67,7 @@ logger = logging.getLogger(__name__)
 FUNCTION_REGEX = re.compile(r"{{f[nt]:([\w-]+)}}")
 # Flow step names: alphanumeric, extended Latin (C0–024F, 1E00–1EFF), and _ &,/.-
 FLOW_STEP_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF_ &,/.\-]+$")
+CONDITION_NAME_MAX_LENGTH = 50
 FLOW_REFERENCES = [
     "global_functions",
     "sms",
@@ -222,12 +223,20 @@ class FlowConfig(YamlResource):
         if not found_step:
             raise ValueError(f"Start step '{self.start_step}' not found.")
 
-        # Check description exists
-        if not self.description:
-            raise ValueError("Description cannot be empty.")
-
         if self.description != self.description.strip():
             raise ValueError("Description cannot contain leading or trailing whitespace.")
+
+        # A function step and a default or advanced step live in different folders, so
+        # only their names can show that they clash.
+        step_names = [
+            resource.resource_name
+            for resource in resource_mappings or []
+            if issubclass(resource.resource_type, BaseFlowStep)
+            and resource.flow_id == self.resource_id
+        ]
+        duplicates = sorted({name for name in step_names if step_names.count(name) > 1})
+        if duplicates:
+            raise ValueError(f"Step names must be unique within a flow. Duplicates: {duplicates}")
 
     def build_update_proto(
         self,
@@ -747,9 +756,6 @@ class FlowStep(BaseFlowStep, YamlResource):
                 "Name must contain only letters (including accented), numbers, and _ & , / . -"
             )
 
-        if self.prompt is None or not self.prompt.strip():
-            raise ValueError("Prompt cannot be empty.")
-
         # Check flow config exists in resource mappings
         found_flow = False
 
@@ -797,6 +803,13 @@ class FlowStep(BaseFlowStep, YamlResource):
                 condition.validate(resource_mappings=resource_mappings)
             except Exception as e:
                 raise ValueError(f"Condition '{condition.name}': {e}") from e
+
+        names = [condition.name.strip() for condition in self.conditions]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValueError(
+                f"Condition names must be unique within a step. Duplicates: {duplicates}"
+            )
 
         entity_ids = set(
             resource.resource_id
@@ -1126,11 +1139,6 @@ class DTMFConfig:
         )
 
 
-def _drop_unset(values: dict) -> dict:
-    """Drop keys whose override was never set, so they don't surface as nulls in YAML."""
-    return {key: value for key, value in values.items() if value is not None}
-
-
 @dataclass
 class ASRConfig:
     """ASR Configuration."""
@@ -1145,7 +1153,7 @@ class ASRConfig:
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
-        return _drop_unset({"provider": self.provider, "model": self.model})
+        return utils.drop_unset({"provider": self.provider, "model": self.model})
 
     def to_proto(self) -> FlowASRConfig:
         """Convert to proto representation."""
@@ -1176,7 +1184,7 @@ class VADConfig:
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
-        return _drop_unset(
+        return utils.drop_unset(
             {
                 "provider": self.provider,
                 "vad_start": self.vad_start,
@@ -1274,7 +1282,7 @@ class LLMConfig:
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
-        return _drop_unset(
+        return utils.drop_unset(
             {
                 "provider_model_id": self.provider_model_id,
                 "reasoning_effort": self.reasoning_effort.value,
@@ -1679,13 +1687,19 @@ class Condition(SubResource):
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         """Validate the condition resource."""
-        if not self.name:
+        name = (self.name or "").strip()
+        if not name:
             raise ValueError("Condition name cannot be empty.")
+
+        if len(name) > CONDITION_NAME_MAX_LENGTH:
+            raise ValueError(
+                f"Condition name cannot be longer than {CONDITION_NAME_MAX_LENGTH} characters."
+            )
 
         if self.condition_type not in ConditionType:
             raise ValueError(f"Invalid condition type: {self.condition_type}")
 
-        # Check child step exists in resource mappings
+        # Check child step exists in this condition's flow
         # and also all required entities exist in resource mappings
         required_entity_ids = set(self.required_entities)
         if self.condition_type != ConditionType.EXIT_FLOW:
@@ -1697,7 +1711,8 @@ class Condition(SubResource):
             if (
                 not found_step
                 and issubclass(resource.resource_type, BaseFlowStep)
-                and resource.resource_id.removeprefix(resource.flow_id + "_") == self.child_step
+                and resource.flow_id == self.flow_id
+                and resource.resource_id == f"{self.flow_id}_{self.child_step}"
             ):
                 found_step = True
 
@@ -1708,7 +1723,7 @@ class Condition(SubResource):
                 break
 
         if not found_step:
-            raise ValueError(f"Step '{self.child_step}' not found")
+            raise ValueError(f"Step '{self.child_step}' not found in this flow")
 
         if required_entity_ids:
             raise ValueError(f"Required entities not found: {required_entity_ids}")

@@ -104,6 +104,17 @@ def read_project_config(base_path: str) -> AgentStudioProject | None:
     return read_project_config(parent_path)
 
 
+def fail(message: str, output_json: bool) -> None:
+    """Report an error in the requested format and exit with status 1."""
+    from poly.output.console import error
+
+    if output_json:
+        json_print({"success": False, "error": message})
+    else:
+        error(message)
+    sys.exit(1)
+
+
 def load_project(base_path: str, output_json: bool = False) -> AgentStudioProject:
     """Read project config or exit with a helpful error if not found.
 
@@ -190,7 +201,6 @@ def compute_diff(
     If both are specified, compares the two remote versions.
     If only after is specified, compares against the previous version.
     """
-    from poly.output.console import error
 
     project = load_project(base_path, output_json=output_json)
     files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
@@ -205,25 +215,25 @@ def compute_diff(
         if after in deployment_hashes:
             after = deployment_hashes[after]
         if not versions:
-            error("No versions found.")
-            return
+            fail("No versions found.", output_json)
         version_idx = next(
             (i for i, v in enumerate(versions) if (v.get("version_hash") or "")[:9] == after[:9]),
             None,
         )
         if version_idx is None:
-            error(f"Version hash '{after}' not found.")
-            return None
+            fail(f"Version hash '{after}' not found.", output_json)
         if version_idx == len(versions) - 1:
-            error("No previous version found.")
-            return None
+            fail("No previous version found.", output_json)
         previous_version_idx = version_idx + 1
         before = (versions[previous_version_idx].get("version_hash") or "")[:9]
 
     if not after:
         after = "local"
 
-    return project.diff_remote_named_versions(before_name=before, after_name=after)
+    try:
+        return project.diff_remote_named_versions(before_name=before, after_name=after)
+    except ValueError as e:
+        fail(str(e), output_json)
 
 
 def parse_from_projection_json(
@@ -439,6 +449,29 @@ def require_experiments_enabled(project: AgentStudioProject, output_json: bool =
         sys.exit(1)
 
 
+def require_outbound_campaigns_enabled(
+    project: AgentStudioProject, output_json: bool = False, campaign: Optional[str] = None
+) -> None:
+    """Exit with an error if outbound campaigns aren't turned on for the project.
+
+    Args:
+        project: The loaded project.
+        output_json: If True, output JSON and exit on failure.
+        campaign: The campaign the command was given, added to the JSON error.
+    """
+    from poly.output.console import error
+
+    if not project.outbound_campaigns_enabled:
+        msg = "Outbound campaigns aren't turned on for this project."
+        if output_json:
+            json_print(
+                {"success": False, "error": msg, **({"campaign": campaign} if campaign else {})}
+            )
+        else:
+            error(msg)
+        sys.exit(1)
+
+
 def get_package_version() -> str:
     """Get the version of the polyai-adk package installed in the current environment.
 
@@ -616,8 +649,14 @@ def add_cohort_arguments(parser: ArgumentParser, *, deployments: bool = True) ->
         )
 
 
-def describe_data_api_error(e: "requests.HTTPError") -> str:
-    """Explain a Data API HTTP error in the caller's terms."""
+def describe_data_api_error(e: "requests.HTTPError", *, needs_pii: bool = False) -> str:
+    """Explain a Data API HTTP error in the caller's terms.
+
+    Args:
+        e: The error raised by ``requests``.
+        needs_pii: True for routes that require the PII read permission outright
+            (transcripts), so a 403 names that permission.
+    """
     response = e.response
     status = response.status_code if response is not None else None
     detail = ""
@@ -643,6 +682,8 @@ def describe_data_api_error(e: "requests.HTTPError") -> str:
     if status == 401:
         return "The API key for this region is missing or invalid. Run `poly apikey`."
     if status == 403:
+        if needs_pii:
+            return "Your API key needs PII read permission on this project."
         return "Your API key does not have permission for this project or account."
     if status == 404:
         return detail or "Not found, or the key cannot access this account."

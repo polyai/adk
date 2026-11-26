@@ -4,6 +4,7 @@ Copyright PolyAI Limited"""
 
 import json
 import uuid
+from datetime import datetime
 from typing import Any, NoReturn, Optional
 
 from google.protobuf.message import Message
@@ -23,6 +24,9 @@ from poly.resources import (
     Function,
     FunctionStep,
     Handoff,
+    OutboundCampaign,
+    OutboundCampaignNode,
+    OutboundCampaignSettings,
     ResourceMap,
     ResourceMapping,
     SMSTemplate,
@@ -48,6 +52,26 @@ class AgentStudioInterface:
     account_id: Optional[str] = None
     project_id: Optional[str] = None
     sync_client: Optional[SyncClientHandler] = None
+
+    @staticmethod
+    def get_secrets(region: str, account_id: str) -> list[dict]:
+        """List metadata for secrets belonging to an account."""
+        return PlatformAPIHandler.get_secrets(region, account_id)
+
+    @staticmethod
+    def set_secret(region: str, account_id: str, data: dict, create: bool) -> dict:
+        """Create or update an account secret without reading its stored value."""
+        return PlatformAPIHandler.set_secret(region, account_id, data, create)
+
+    @staticmethod
+    def patch_secret(region: str, account_id: str, data: dict) -> dict:
+        """Change selected key-value entries without reading stored values."""
+        return PlatformAPIHandler.patch_secret(region, account_id, data)
+
+    @staticmethod
+    def delete_secrets(region: str, account_id: str, names: list[str]) -> None:
+        """Delete one or more secrets from an account."""
+        PlatformAPIHandler.delete_secrets(region, account_id, names)
 
     @staticmethod
     def _extract_error_code(e: Exception) -> Optional[str]:
@@ -448,6 +472,9 @@ class AgentStudioInterface:
         FlowStep,
         Condition,
         ApiIntegration,
+        OutboundCampaign,
+        OutboundCampaignSettings,
+        OutboundCampaignNode,
     ]
 
     PRIORITY_DELETE_TYPES = [
@@ -555,7 +582,10 @@ class AgentStudioInterface:
         """Send all queued commands as a batch and clear the queue.
 
         Returns:
-            bool: True if the commands were sent successfully, False otherwise
+            bool: True once the commands are sent, or when there was nothing to send
+
+        Raises:
+            ValueError: If the batch could not be sent or the platform rejected it
         """
         import requests
 
@@ -585,6 +615,62 @@ class AgentStudioInterface:
             return self.sync_client.get_queued_commands()
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
+
+    def validate_outbound_campaign(self, campaign_id: str) -> dict[str, Any]:
+        """Validate a campaign on the current branch."""
+        import requests
+
+        self.sync_client.assert_branch_exists()
+        try:
+            return PlatformAPIHandler.validate_outbound_campaign(
+                self.region, self.account_id, self.project_id, self.branch_id, campaign_id
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
+
+    def dry_run_outbound_campaign(self, campaign_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Dry-run a campaign on the current branch. Nothing is sent or stored."""
+        import requests
+
+        self.sync_client.assert_branch_exists()
+        try:
+            return PlatformAPIHandler.dry_run_outbound_campaign(
+                self.region, self.account_id, self.project_id, self.branch_id, campaign_id, body
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
+
+    def start_outbound_campaign_test_step(
+        self, campaign_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Start a real test step of the live campaign."""
+        import requests
+
+        try:
+            return PlatformAPIHandler.start_outbound_campaign_test_step(
+                self.region, self.account_id, self.project_id, campaign_id, body
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
+
+    def get_outbound_campaign_test_step(self, campaign_id: str, step_id: str) -> dict[str, Any]:
+        """Read a test step of the live campaign."""
+        import requests
+
+        try:
+            return PlatformAPIHandler.get_outbound_campaign_test_step(
+                self.region, self.account_id, self.project_id, campaign_id, step_id
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
 
     def get_branches(self) -> dict[str, dict[str, Any]]:
         """Get a list of branches with full metadata.
@@ -637,7 +723,10 @@ class AgentStudioInterface:
             self._handle_api_error(e)
 
     def merge_branch(
-        self, message: Optional[str], conflict_resolutions: Optional[list[dict[str, Any]]] = None
+        self,
+        message: Optional[str],
+        conflict_resolutions: Optional[list[dict[str, Any]]] = None,
+        acknowledge_active_experiment: bool = False,
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main.
 
@@ -647,6 +736,8 @@ class AgentStudioInterface:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value (only used with custom strategy)
+            acknowledge_active_experiment (bool): Allow a merge into main while an
+                experiment is running.
 
         Returns:
             success (bool): True if the merge was successful, False otherwise
@@ -656,7 +747,9 @@ class AgentStudioInterface:
         import requests
 
         try:
-            return self.sync_client.merge_branch(message, conflict_resolutions)
+            return self.sync_client.merge_branch(
+                message, conflict_resolutions, acknowledge_active_experiment
+            )
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
@@ -1111,7 +1204,9 @@ class AgentStudioInterface:
             jwt_token: The user's JWT access token
 
         Returns:
-            list[dict]: List of PAT records.
+            list[dict]: List of PAT records. Each has the PAT's `id`, `name`, `created_at`,
+                and the first and last four characters of its secret as `key_prefix` and
+                `key_suffix`. The secret itself is only returned when the PAT is created.
         """
         return PlatformAPIHandler.get_pats_internal(region, jwt_token)
 
@@ -1145,7 +1240,13 @@ class AgentStudioInterface:
 
     @staticmethod
     def create_account_api_key_internal(
-        region: str, jwt_token: str, account_id: str, name: str, source: str = "adk"
+        region: str,
+        jwt_token: str,
+        account_id: str,
+        name: str,
+        source: str = "adk",
+        api_groups: list[str] | None = None,
+        expires_at: datetime | None = None,
     ) -> dict:
         """Create an account-scoped API key, via JWT auth.
 
@@ -1155,12 +1256,39 @@ class AgentStudioInterface:
             account_id: The account ID to scope the key to.
             name: A label for the API key.
             source: Value for the ``X-Poly-Source`` header.
+            api_groups: API groups to limit the key to. None gives a key for every API.
+            expires_at: When the key expires. None gives a key that never expires.
 
         Returns:
             dict: The full API key record, including the secret under ``key``.
         """
         return PlatformAPIHandler.create_account_api_key_internal(
-            region, jwt_token, account_id, name, source=source
+            region,
+            jwt_token,
+            account_id,
+            name,
+            source=source,
+            api_groups=api_groups,
+            expires_at=expires_at,
+        )
+
+    @staticmethod
+    def list_account_api_keys_internal(
+        region: str, jwt_token: str, account_id: str, source: str = "adk"
+    ) -> list[dict]:
+        """List an account's API keys (no secrets, only prefix and suffix), via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID whose keys to list.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The API key records.
+        """
+        return PlatformAPIHandler.list_account_api_keys_internal(
+            region, jwt_token, account_id, source=source
         )
 
     @staticmethod
@@ -1934,3 +2062,18 @@ class AgentStudioInterface:
     def query_metric(region: str, body: dict) -> dict:
         """Aggregate one metric over a window; see ``PlatformAPIHandler.query_metric``."""
         return PlatformAPIHandler.query_metric(region, body)
+
+    @staticmethod
+    def search_conversations(region: str, body: dict) -> dict:
+        """Search conversations by metric filters; see ``PlatformAPIHandler``."""
+        return PlatformAPIHandler.search_conversations(region, body)
+
+    @staticmethod
+    def search_transcripts(region: str, params: dict) -> dict:
+        """Full-text transcript search; see ``PlatformAPIHandler.search_transcripts``."""
+        return PlatformAPIHandler.search_transcripts(region, params)
+
+    @staticmethod
+    def get_transcript(region: str, conversation_id: str, project_id: str) -> dict:
+        """Fetch one conversation's full transcript."""
+        return PlatformAPIHandler.get_transcript(region, conversation_id, project_id)

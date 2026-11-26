@@ -43,6 +43,6 @@ The optional `hash` positional is a shorthand for `--after`: `poly diff sandbox`
 }
 ~~~
 
-When there are no changes to show, this becomes `{"success": false, "message": "No changes detected"}`.
+When there are no changes to show, this becomes `{"success": true, "message": "No changes detected"}`.
 
 See also [`poly status`](./status.md) for a summary of what changed, [`poly review`](./review.md) to generate a GitHub Gist of the changes and [`poly revert`](./revert.md) to discard changes.

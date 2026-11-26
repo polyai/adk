@@ -49,6 +49,11 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │       │   └── {function_step}.py
 │       └── functions/
 │           └── {function_name}.py
+├── outbound_campaigns/                 # Optional - outbound campaign drafts
+│   └── {campaign_name}/
+│       ├── campaign.yaml
+│       └── functions/
+│           └── {node_name}.py
 ├── functions/                          # Global functions (shared across flows)
 │   ├── start_function.py               # Optional - runs at call start
 │   ├── end_function.py                 # Optional - runs at call end
@@ -75,6 +80,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 | `poly validate` | Validate project configuration locally |
 | `poly review` | Diff review page: `create` (local vs remote, version hash, or `--before`/`--after`), `list`, `delete` |
 | `poly deployments` | Manage deployments (`list`, with `--env`, `--limit`, `--offset`, `--hash`, `--details`) |
+| `poly campaign` | Outbound campaigns: `validate`, `preview`, `test`, and `publish`/`pause`/`resume`/`archive` on live |
 | `poly chat` | Interactive chat session with the agent (`--environment`, `--channel`, `--sip-header`, `--functions`, `--flows`, `--state`) |
 | `poly docs` | Output resource documentation (`poly docs flows functions topics`, or `--all` for everything) |
 
@@ -128,6 +134,7 @@ Resource-specific documentation is available via `poly docs {resource} [resource
 | `functions` | Global and flow functions, decorators, state, metrics |
 | `languages` | Default and additional language configuration |
 | `mcp` | MCP servers the agent connects to |
+| `outbound_campaigns` | Outbound campaign settings, node graph and node functions |
 | `tests` | Simulated conversation test cases |
 | `safety_filters` | Content moderation settings |
 | `sms` | Text message templates |

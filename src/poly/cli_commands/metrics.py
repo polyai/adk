@@ -16,6 +16,7 @@ from poly.cli_commands.shared import (
     add_cohort_arguments,
     add_window_arguments,
     describe_data_api_error,
+    fail,
     filter_flags_to_filters,
     having_flags_to_having,
     load_project,
@@ -420,7 +421,7 @@ class MetricsCommand(BaseCommand):
         try:
             result = project.get_available_metrics()
         except requests.HTTPError as e:
-            cls._fail(describe_data_api_error(e), output_json)
+            fail(describe_data_api_error(e), output_json)
 
         if output_json:
             json_print(result)
@@ -459,9 +460,9 @@ class MetricsCommand(BaseCommand):
                 offset=args.offset,
             )
         except ValueError as e:
-            cls._fail(str(e), output_json)
+            fail(str(e), output_json)
         except requests.HTTPError as e:
-            cls._fail(describe_data_api_error(e), output_json)
+            fail(describe_data_api_error(e), output_json)
 
         if output_json:
             json_print(result)
@@ -495,9 +496,9 @@ class MetricsCommand(BaseCommand):
                 version="v1" if args.v1 else "v2",
             )
         except ValueError as e:
-            cls._fail(str(e), output_json)
+            fail(str(e), output_json)
         except requests.HTTPError as e:
-            cls._fail(describe_data_api_error(e), output_json)
+            fail(describe_data_api_error(e), output_json)
 
         headline = cls._score_headline(result["summary"])
         if output_json:
@@ -560,17 +561,6 @@ class MetricsCommand(BaseCommand):
             part for part in (f"from {start}" if start else "", f"to {end}" if end else "") if part
         )
         return f"{interval.capitalize()} buckets are whole {unit}, so the window is {span}."
-
-    @staticmethod
-    def _fail(message: str, output_json: bool) -> None:
-        """Report an error in the requested format and exit."""
-        if output_json:
-            json_print({"success": False, "error": message})
-        else:
-            from poly.output.console import error
-
-            error(message)
-        sys.exit(1)
 
     @classmethod
     def metrics_list(cls, base_path: str, output_json: bool = False) -> None:

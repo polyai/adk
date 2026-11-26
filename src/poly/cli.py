@@ -24,6 +24,7 @@ from poly.cli_commands.base import (
 )
 from poly.cli_commands.branch import BranchCommand
 from poly.cli_commands.call import CallCommand
+from poly.cli_commands.campaign import CampaignCommand
 from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
@@ -32,6 +33,7 @@ from poly.cli_commands.metrics import MetricsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.rtc import RTCCommand
+from poly.cli_commands.secrets import SecretsCommand
 from poly.cli_commands.setup import SetupCommand
 from poly.cli_commands.shared import REGION_CHOICES, get_package_version, region_type
 from poly.cli_commands.sync import (
@@ -46,6 +48,7 @@ from poly.cli_commands.sync import (
 )
 from poly.cli_commands.template import TemplateCommand
 from poly.cli_commands.testing import TestingCommand
+from poly.cli_commands.transcripts import TranscriptsCommand
 from poly.cli_commands.update import UpdateCommand, display_update_message
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
 from poly.output.json_output import json_print
@@ -73,8 +76,11 @@ COMMANDS = [
     DeploymentsCommand,
     MetricsCommand,
     ConversationsCommand,
+    TranscriptsCommand,
     AudioCacheCommand,
     FunctionsCommand,
+    CampaignCommand,
+    SecretsCommand,
     TestingCommand,
     RTCCommand,
     ChatCommand,

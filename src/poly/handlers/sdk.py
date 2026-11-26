@@ -12,6 +12,7 @@ import logging
 import os
 import uuid
 import warnings
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Optional
 
 from poly.utils import retrieve_api_key
@@ -31,7 +32,51 @@ warnings.filterwarnings("ignore", category=UserWarning, module="google.protobuf.
 class SourcererAPIError(Exception):
     """Exception raised when the Sourcerer API returns an error"""
 
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        status_code: Optional[int] = None,
+        error_code: Optional[str] = None,
+        server_message: Optional[str] = None,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_code = error_code
+        self.server_message = server_message
+
+    @classmethod
+    def from_request_error(cls, e: requests.exceptions.RequestException) -> "SourcererAPIError":
+        """Build the error for a failed request, keeping the platform's status, code and message.
+
+        The platform answers errors as JSON with `error_code` and `error_message`. A body that
+        is not a JSON object is kept as text, and an HTML error page as its status phrase.
+        """
+        response = getattr(e, "response", None)
+        if response is None:
+            return cls(f"Request failed: {e}")
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            text = response.text or ""
+            if text.lstrip().startswith("<"):
+                try:
+                    text = HTTPStatus(response.status_code).phrase
+                except ValueError:
+                    text = "Unexpected response"
+            return cls(
+                f"API Error {response.status_code}: {text}",
+                status_code=response.status_code,
+                server_message=text or None,
+            )
+        server_message = body.get("error_message") or body.get("error") or body.get("message")
+        return cls(
+            f"API Error {response.status_code}: {body}",
+            status_code=response.status_code,
+            error_code=body.get("error_code"),
+            server_message=str(server_message) if server_message else None,
+        )
 
 
 class SourcererSDK:
@@ -257,6 +302,7 @@ class SourcererSDK:
         self,
         deployment_message: str = "",
         conflict_resolutions: Optional[list[dict[str, Any]]] = None,
+        acknowledge_active_experiment: bool = False,
     ) -> dict[str, Any]:
         """Merge the current branch into the parent branch
 
@@ -270,6 +316,8 @@ class SourcererSDK:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value (only used with custom strategy)
+            acknowledge_active_experiment: Allow a merge into main while an experiment
+                is running. Without it the platform rejects that merge with AB_TEST_ACTIVE.
 
         Returns:
             Dictionary containing:
@@ -327,6 +375,9 @@ class SourcererSDK:
 
             if conflict_resolutions is not None:
                 payload["conflictResolutions"] = conflict_resolutions
+
+            if acknowledge_active_experiment:
+                payload["acknowledgeActiveExperiment"] = True
 
             logger.info(f"Merging branch {self.branch_id} to main")
             logger.debug(f"Merge payload: {payload}")
@@ -525,15 +576,7 @@ class SourcererSDK:
             response.raise_for_status()
             return int(response.json()["lastKnownSequence"])
         except requests.exceptions.RequestException as e:
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except (ValueError, KeyError):
-                    error_msg = f"API request failed: {e}"
-            else:
-                error_msg = f"Request failed: {e}"
-            raise SourcererAPIError(error_msg) from e
+            raise SourcererAPIError.from_request_error(e) from e
 
     def fetch_projection(
         self,
@@ -591,16 +634,7 @@ class SourcererSDK:
             return projection
 
         except requests.exceptions.RequestException as e:
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
-            else:
-                error_msg = f"Request failed: {str(e)}"
-
-            raise SourcererAPIError(error_msg) from e
+            raise SourcererAPIError.from_request_error(e) from e
 
     def fetch_deployment_projection(self, deployment_id: str) -> dict[str, Any]:
         """Fetch projection for a specific deployment from the API.
@@ -754,16 +788,7 @@ class SourcererSDK:
             return self.fetch_projection(force_refresh=True)
 
         except requests.exceptions.RequestException as e:
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
-            else:
-                error_msg = f"Request failed: {str(e)}"
-
-            raise SourcererAPIError(error_msg) from e
+            raise SourcererAPIError(self._rejection_message(e)) from e
 
     def get_project_data(self) -> dict[str, Any]:
         """Get the cached projection data
@@ -1096,6 +1121,29 @@ class SourcererSDK:
             return result.get("projection", result)
         except requests.exceptions.RequestException as e:
             raise SourcererAPIError(self._format_request_error(e)) from e
+
+    @staticmethod
+    def _rejection_message(e: requests.exceptions.RequestException) -> str:
+        """Describe why the platform refused a command batch, one reason per line."""
+        response = getattr(e, "response", None)
+        if response is None:
+            return f"Request failed: {e}"
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            body = {}
+
+        lines = [body.get("error_message") or f"API Error {response.status_code}: {response.text}"]
+        for issue in (body.get("data") or {}).get("issues") or []:
+            path = ".".join(str(part) for part in issue.get("path") or [])
+            lines.append(
+                f"- {path}: {issue.get('message')}" if path else f"- {issue.get('message')}"
+            )
+        if response.status_code == 413:
+            lines.append("The push is too large to send in one request. Push it in smaller parts.")
+        return "\n".join(lines)
 
     @staticmethod
     def _format_request_error(e: requests.exceptions.RequestException) -> str:

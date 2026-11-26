@@ -241,6 +241,7 @@ See [voice settings](../reference/resources/voice_settings.md), [chat settings](
 | Enforcement for a rule the model keeps working around | Guardrail (`agent_settings/guardrails.yaml`) |
 | Agent identity and tone | `agent_settings/persona.txt` |
 | A multi-step guided conversation | Flow (`flows/`) |
+| A campaign that calls or texts a list of contacts | Outbound campaign (`outbound_campaigns/`) |
 | Structured data collection from the caller | Entity + flow |
 | Deterministic branching or routing logic | Function (`functions/`) |
 | Call initialization — routing, variant selection, reading SIP headers | `functions/start_function.py` |

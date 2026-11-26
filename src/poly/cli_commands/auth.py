@@ -10,12 +10,16 @@ from argparse import ArgumentParser, Namespace, _SubParsersAction
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import REGION_CHOICES, region_type
-from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS
+from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS, AuthDetails
 from poly.handlers.interface import AgentStudioInterface
-from poly.utils import (
+from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
+    load_api_key_from_credential_file,
     save_api_key_credential_file,
 )
+
+# Agent Studio refuses to create a PAT for a user who already holds this many.
+MAX_PATS_PER_USER = 2
 
 
 def _select_region() -> str:
@@ -65,10 +69,24 @@ def authorise_or_explain(
         raise
 
 
-def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
-    """Authorise the user, fetch or create a PAT, and save it to the credential file.
+def _is_own_pat(key: str, user_pats: list[dict]) -> bool:
+    """Whether `key` is one of the signed-in user's PATs.
 
-    Waits for the key to become active before returning, so a command run
+    The PAT list only carries the first and last four characters of each secret, so the
+    match is on those.
+    """
+    return any(
+        key[:4] == pat.get("key_prefix") and key[-4:] == pat.get("key_suffix") for pat in user_pats
+    )
+
+
+def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
+    """Authorise the user, then keep their saved PAT or create one and save it.
+
+    The saved PAT for `region` is kept when it is still one of the signed-in user's PATs.
+    Otherwise a new one is created, since the platform only shows a PAT's secret once. A
+    user already at the PAT limit is told to delete one in Agent Studio first.
+    Waits for a new key to become active before returning, so a command run
     immediately afterwards (e.g. project creation) does not fail against a key
     the platform has not finished activating.
     """
@@ -92,21 +110,26 @@ def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
 
     info("Fetching API key...")
     user_pats = api_handler.get_pats(region=region, jwt_token=jwt_access_token)
-    if user_pats:
-        pat = user_pats[0].get("key")
-        if not pat:
-            error("API key not found in account data. Please contact support.")
-            sys.exit(1)
-        os.environ["POLY_ADK_KEY"] = pat
-        success(f"Found existing API Token: {mask_api_key(pat)}")
-    else:
-        info("No existing API key found in your account.")
-        ctx = console.status("[info]Creating a new API key...[/info]")
-        with ctx:
-            pat = api_handler.create_pat(region=region, jwt_token=jwt_access_token, name="adk-key")
-            os.environ["POLY_ADK_KEY"] = pat
+    saved_key = load_api_key_from_credential_file(region)
+    if saved_key and _is_own_pat(saved_key, user_pats):
+        os.environ["POLY_ADK_KEY"] = saved_key
+        success(f"Using the API key already saved for {region}: {mask_api_key(saved_key)}")
+        info(f"Credential file path: {CREDENTIALS_FILE_PATH}")
+        plain("")
+        return
 
-        success(f"Created a new API Key: {mask_api_key(pat)}")
+    if len(user_pats) >= MAX_PATS_PER_USER:
+        error(
+            f"You already have {len(user_pats)} personal access tokens on {region}, the"
+            " maximum. Delete one in Agent Studio (your account's Personal Access Token tab),"
+            " then run this command again."
+        )
+        sys.exit(1)
+
+    with console.status("[info]Creating a new API key...[/info]"):
+        pat = api_handler.create_pat(region=region, jwt_token=jwt_access_token, name="adk-key")
+    os.environ["POLY_ADK_KEY"] = pat
+    success(f"Created a new API Key: {mask_api_key(pat)}")
 
     save_api_key_credential_file(pat, region=region)
     plain("API key has been saved to your credential file for future use.")
@@ -129,11 +152,16 @@ def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
             )
 
 
-def _signin(region: str) -> str:
-    """Sign in via the Auth0 device authorization flow and return a JWT access token."""
+def _signin(region: str, auth_details: AuthDetails | None = None) -> str:
+    """Sign in via the Auth0 device authorization flow and return a JWT access token.
+
+    Args:
+        region: The region to sign in to; picks the Auth0 client unless overridden.
+        auth_details: An Auth0 client to use instead of the region's default.
+    """
     from poly.output.console import error, success
 
-    auth_details = REGION_TO_AUTH_DETAILS.get(region)
+    auth_details = auth_details or REGION_TO_AUTH_DETAILS.get(region)
     if auth_details is None:
         error(
             f"Failed to start authorization: Unknown region '{region}'. "

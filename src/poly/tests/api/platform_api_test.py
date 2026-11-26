@@ -76,6 +76,50 @@ class JwtAuthedAccountAndKeyCalls(unittest.TestCase):
         self.assertEqual(result, {"key": "sk-new", "name": ""})
 
     @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_create_account_api_key_internal_sends_groups_and_expiry_when_set(
+        self, mock_make_request
+    ):
+        """api_groups and expires_at are sent only when given, expiry as ISO 8601."""
+        from datetime import UTC, datetime
+
+        expires_at = datetime(2027, 2, 13, 10, 0, tzinfo=UTC)
+        cases = {
+            "groups": ({"api_groups": ["models"]}, {"api_groups": ["models"]}),
+            "expiry": (
+                {"expires_at": expires_at},
+                {"expires_at": "2027-02-13T10:00:00+00:00"},
+            ),
+            "both": (
+                {"api_groups": ["models"], "expires_at": expires_at},
+                {"api_groups": ["models"], "expires_at": "2027-02-13T10:00:00+00:00"},
+            ),
+            "neither": ({"api_groups": None, "expires_at": None}, {}),
+        }
+        for name, (kwargs, extra) in cases.items():
+            with self.subTest(case=name):
+                PlatformAPIHandler.create_account_api_key_internal(
+                    "studio", "jwt-token", "acc-1", "k", **kwargs
+                )
+
+                self.assertEqual(mock_make_request.call_args.kwargs["data"], {"name": "k", **extra})
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_list_account_api_keys_internal_gets_the_api_keys_endpoint(self, mock_make_request):
+        """list_account_api_keys_internal() GETs the account's api-keys with JWT auth."""
+        mock_make_request.return_value = [{"key_prefix": "sk-a", "key_suffix": "7890"}]
+
+        result = PlatformAPIHandler.list_account_api_keys_internal(
+            "studio", "jwt-token", "acc-1", source="apikey"
+        )
+
+        args, kwargs = mock_make_request.call_args
+        self.assertEqual(args[1:], ("/jupiter/v2/accounts/acc-1/api-keys", "GET"))
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer jwt-token")
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "apikey")
+        self.assertTrue(kwargs["use_jupiter_api"])
+        self.assertEqual(result, [{"key_prefix": "sk-a", "key_suffix": "7890"}])
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_create_account_api_key_internal_sends_given_source(self, mock_make_request):
         """create_account_api_key_internal() sends the caller-supplied X-Poly-Source."""
         PlatformAPIHandler.create_account_api_key_internal(
@@ -160,6 +204,19 @@ class CreateChat(unittest.TestCase):
 
 class MakeRequest(unittest.TestCase):
     """Tests for PlatformAPIHandler.make_request HTTP behaviour."""
+
+    @patch("requests.request")
+    def test_plain_value_error_is_redacted_only_for_sensitive_requests(self, mock_request):
+        response = make_mock_response()
+        decoder_error = ValueError("private decoder detail")
+        response.json.side_effect = decoder_error
+        mock_request.return_value = response
+
+        with self.assertRaises(ValueError) as caught:
+            PlatformAPIHandler.make_request("studio", "/x", headers={})
+        self.assertIs(caught.exception, decoder_error)
+        with self.assertRaisesRegex(ValueError, "^The API returned invalid secret metadata[.]$"):
+            PlatformAPIHandler.make_request("studio", "/x", sensitive=True, headers={})
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("requests.request")

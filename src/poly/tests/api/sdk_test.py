@@ -7,8 +7,12 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
+import requests
+
+from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command, CommandBatch
 from poly.handlers.sdk import SourcererAPIError, SourcererSDK
+from poly.handlers.sync_client import SyncClientHandler
 from poly.tests.testing_utils import make_mock_response
 
 
@@ -231,6 +235,45 @@ class SendCommandBatch(unittest.TestCase):
             sdk.send_command_batch()
 
 
+    def _rejected_batch_message(self, status, json_body):
+        """Send one command with the platform answering as given, and return the error text."""
+        with (
+            patch("poly.handlers.sdk.retrieve_api_key", return_value="secret-key"),
+            patch("requests.post", return_value=make_mock_response(status, json_body=json_body)),
+        ):
+            sdk = build_sdk()
+            sdk._last_known_sequence = 1
+            sdk.add_command_to_queue(self._queued_command())
+            with self.assertRaises(SourcererAPIError) as raised:
+                sdk.send_command_batch()
+        return str(raised.exception)
+
+    def test_rejection_reports_the_platforms_message_and_issues(self):
+        """A rejected batch is described by the platform's message, then one line per issue."""
+        message = self._rejected_batch_message(
+            422,
+            {
+                "error_code": "VALIDATION_FAILED",
+                "error_message": '[command 1: entityCreate "city"] Validation error',
+                "data": {"issues": [{"path": ["config", "min"], "message": "Too small"}]},
+            },
+        )
+
+        self.assertEqual(
+            message, '[command 1: entityCreate "city"] Validation error\n- config.min: Too small'
+        )
+
+    def test_request_too_large_adds_advice(self):
+        """A batch the platform refuses as too large says to push in smaller parts."""
+        message = self._rejected_batch_message(413, {"error_message": "Request body is too large"})
+
+        self.assertEqual(
+            message,
+            "Request body is too large\n"
+            "The push is too large to send in one request. Push it in smaller parts.",
+        )
+
+
 class MergeBranch(unittest.TestCase):
     """Tests for SourcererSDK.merge_branch sequence handling."""
 
@@ -285,6 +328,35 @@ class MergeBranch(unittest.TestCase):
         with self.assertRaises(SourcererAPIError):
             sdk.merge_branch(deployment_message="msg")
 
+    def test_experiment_acknowledgement_is_sent_only_when_given(self):
+        """The payload carries acknowledgeActiveExperiment only when the caller sets it."""
+        for acknowledge, expected in [(False, None), (True, True)]:
+            with self.subTest(acknowledge=acknowledge):
+                sdk, session = self._sdk_with_sequence(server_sequence=1750)
+
+                sdk.merge_branch(
+                    deployment_message="msg", acknowledge_active_experiment=acknowledge
+                )
+
+                payload = session.post.call_args.kwargs["json"]
+                self.assertEqual(payload.get("acknowledgeActiveExperiment"), expected)
+
+    def test_active_experiment_block_raises_with_its_error_code(self):
+        """A 409 AB_TEST_ACTIVE raises SourcererAPIError naming the code, so callers can spot it."""
+        sdk, session = self._sdk_with_sequence(server_sequence=1750)
+        session.post.return_value = make_mock_response(
+            409,
+            json_body={
+                "error": "End the experiment before promoting a new version to live",
+                "error_code": "AB_TEST_ACTIVE",
+            },
+        )
+
+        with self.assertRaises(SourcererAPIError) as ctx:
+            sdk.merge_branch(deployment_message="msg")
+
+        self.assertIn("AB_TEST_ACTIVE", str(ctx.exception))
+
 
 class GetBranchCallInfo(unittest.TestCase):
     """Tests for SourcererSDK.get_branch_call_info."""
@@ -338,6 +410,93 @@ class GetBranchCallInfo(unittest.TestCase):
 
         with self.assertRaises(SourcererAPIError):
             sdk.get_branch_call_info("branch-1")
+
+
+class OutboundCampaignRequests(unittest.TestCase):
+    """Tests for the outbound campaign routes and how their errors are read."""
+
+    def setUp(self):
+        patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key").start()
+        self.request = patch("requests.request").start()
+        self.addCleanup(patch.stopall)
+
+    def _validate(self, campaign_id: str = "CMPGN-1") -> dict:
+        interface = AgentStudioInterface("us-1", "acc-1", "proj-1", "main")
+        interface.sync_client = MagicMock(spec=SyncClientHandler, branch_id="main")
+        return interface.validate_outbound_campaign(campaign_id)
+
+    def _error_from(self, response) -> SourcererAPIError:
+        self.request.return_value = response
+        with self.assertRaises(SourcererAPIError) as error:
+            self._validate()
+        return error.exception
+
+    def test_campaign_id_is_quoted_into_the_url(self):
+        self.request.return_value = make_mock_response(200, json_body={"valid": True})
+
+        self._validate("CMPGN/1")
+
+        self.assertEqual(self.request.call_args.kwargs["method"], "POST")
+        self.assertEqual(
+            self.request.call_args.kwargs["url"],
+            "https://api.us.poly.ai/adk/v1/accounts/acc-1/projects/proj-1/branches/main"
+            "/outbound-campaigns/CMPGN%2F1/validate",
+        )
+
+    def test_json_error_keeps_status_code_and_message(self):
+        error = self._error_from(
+            make_mock_response(
+                412,
+                json_body={
+                    "error": "Not set up",
+                    "error_code": "CAMPAIGNS_KEY_MISSING",
+                    "error_message": "Not set up",
+                },
+            )
+        )
+
+        self.assertEqual(error.status_code, 412)
+        self.assertEqual(error.error_code, "CAMPAIGNS_KEY_MISSING")
+        self.assertEqual(error.server_message, "Not set up")
+
+    def test_error_that_is_not_json_keeps_the_body_text(self):
+        error = self._error_from(make_mock_response(502, content=b"Bad gateway"))
+
+        self.assertEqual(error.status_code, 502)
+        self.assertIsNone(error.error_code)
+        self.assertEqual(error.server_message, "Bad gateway")
+
+    def test_html_error_page_is_reduced_to_its_status(self):
+        page = (
+            b"<!DOCTYPE html>\n<html><body><pre>Cannot POST /x/CMPGN-1/validate</pre></body></html>"
+        )
+        error = self._error_from(make_mock_response(404, content=page))
+
+        self.assertEqual(error.status_code, 404)
+        self.assertEqual(error.server_message, "Not Found")
+        self.assertNotIn("<", str(error))
+
+    def test_html_error_page_with_an_unknown_status_still_reads_cleanly(self):
+        error = self._error_from(make_mock_response(520, content=b"<html>origin error</html>"))
+
+        self.assertEqual(error.status_code, 520)
+        self.assertEqual(error.server_message, "Unexpected response")
+
+    def test_error_body_that_is_a_list_is_read_as_text(self):
+        response = make_mock_response(400, json_body=["bad"], content=b'["bad"]')
+
+        error = self._error_from(response)
+
+        self.assertEqual(error.status_code, 400)
+        self.assertEqual(error.server_message, '["bad"]')
+
+    def test_no_response_has_no_status(self):
+        self.request.side_effect = requests.ConnectionError("reset")
+
+        with self.assertRaises(SourcererAPIError) as error:
+            self._validate()
+
+        self.assertIsNone(error.exception.status_code)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rich import box
@@ -28,6 +28,10 @@ from rich.theme import Theme
 from rich.tree import Tree
 
 from poly.constants import DATA_AGGS
+
+if TYPE_CHECKING:
+    from poly.project import SecretUpdate
+
 
 # Global verbose flag — set by CLI before commands run
 _verbose = False
@@ -100,12 +104,87 @@ def error(message: str) -> None:
     err_console.print(f"[error]Error:[/error] {message}")
 
 
-def warning(message: str) -> None:
-    console.print(f"[warning]Warning:[/warning] {message}")
+def warning(message: str, soft_wrap: bool = False) -> None:
+    console.print(f"[warning]Warning:[/warning] {message}", soft_wrap=soft_wrap)
 
 
 def info(message: str) -> None:
     console.print(f"[info]{message}[/info]")
+
+
+def project_label(project_id: str, projects: dict[str, str]) -> str:
+    """Label a project by name and ID, falling back to the stored ID."""
+    name = projects.get(project_id)
+    return f"{name} ({project_id})" if name and name != project_id else project_id
+
+
+def print_secrets(secrets: list[dict], projects: dict[str, str]) -> None:
+    """Display account secret metadata without reading or rendering stored values."""
+    if not secrets:
+        info("No matching account secrets.")
+        return
+    table = Table(title="Account secrets", box=box.SIMPLE)
+    table.add_column("Name", min_width=12, overflow="fold")
+    for heading in ("Description", "Type", "Project access", "Created", "Updated"):
+        table.add_column(heading, overflow="fold")
+    for secret in secrets:
+        table.add_row(
+            *[
+                Text(str(value or ""))
+                for value in (
+                    secret.get("display_name"),
+                    secret.get("description"),
+                    secret.get("value_type"),
+                    "\n".join(
+                        project_label(pid, projects) for pid in secret.get("access_config") or []
+                    )
+                    or "None",
+                    secret.get("created_at"),
+                    secret.get("last_updated"),
+                )
+            ]
+        )
+    with paged_output():
+        console.print(table)
+
+
+def print_secret_summary(
+    update: "SecretUpdate", value: str | dict | None, projects: dict[str, str]
+) -> None:
+    """Show pending metadata and key names before saving, without rendering values."""
+    before = update.existing or {}
+    secret_type = update.value_type
+    if update.type_changed:
+        secret_type = f"{before['value_type']} → {secret_type}"
+    lines = [f"Secret: {update.name}", f"Type: {secret_type}"]
+    if update.description is not None:
+        lines.append(f"Description: {update.description or '(empty)'}")
+    old_keys = set(before.get("keys") or [])
+    supplied = {k for k, v in value.items() if v is not None} if isinstance(value, dict) else set()
+    removed = set(update.delete_keys)
+    if isinstance(value, dict):
+        removed.update(k for k, v in value.items() if v is None)
+    if update.type_changed:
+        removed.update(old_keys)
+    if isinstance(value, str):
+        lines.append("Value: supplied")
+    for label, keys in (
+        ("Keys added", supplied - old_keys),
+        ("Keys updated", supplied & old_keys),
+        ("Keys removed", removed),
+    ):
+        if keys:
+            lines.append(f"{label}: {', '.join(sorted(keys))}")
+
+    def labels(ids: list[str]) -> str:
+        return ", ".join(project_label(pid, projects) for pid in ids) or "None"
+
+    previous_access = before.get("access_config") or []
+    access_label = labels(update.access)
+    if set(previous_access) != set(update.access):
+        access_label = f"{labels(previous_access)} → {access_label}"
+    lines.append(f"Project access: {access_label}")
+    console.print(Text("\n".join(lines)))
 
 
 def plain(message: str) -> None:
@@ -1396,6 +1475,15 @@ _FAILURE_STATUSES = {"failed", "error", "errored", "timed_out"}
 _ERROR_STATUSES = {"error", "errored", "timed_out"}
 
 
+def test_run_passed(result: dict) -> bool:
+    """Whether a test run finished with no failed or errored tests."""
+    return (
+        result.get("status", "pending") not in _PENDING_STATUSES
+        and not result.get("failedCount")
+        and not result.get("errorCount")
+    )
+
+
 def _build_test_table(
     test_results: list[dict],
     test_names: dict[str, str],
@@ -1904,3 +1992,218 @@ def print_aggregate(
             f"\nShowing {len(rows)} rows (limit {limit}). "
             f"Use --offset {next_offset} for the next page."
         )
+
+
+# ── Data API: conversation search and transcripts ───────────────────
+
+
+def _format_metric_value(value: Any) -> str:
+    """Format one metric value from a conversation search row."""
+    if value is None:
+        return "—"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value) if value else "—"
+    return str(value)
+
+
+def print_conversation_search(
+    result: dict[str, Any],
+    fields: list[str],
+    url_builder: Callable[[str], str] | None = None,
+) -> None:
+    """Print conversation search results with one column per requested metric field.
+
+    Args:
+        result: ``{"conversations": [...], "total", "limit", "offset"}`` from the
+            Data API. Each conversation carries ``conversation_id``,
+            ``started_at``, ``duration_seconds`` and a ``metrics`` map.
+        fields: Metric fields that were requested; each becomes a column.
+            ``duration`` is skipped because the Duration column already shows it.
+        url_builder: Optional callable(conversation_id) -> Studio URL.
+    """
+    conversations = result.get("conversations") or []
+    metric_columns = [f for f in fields if f.lower() != "duration"]
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Conversation ID", style="bold yellow", no_wrap=True)
+    table.add_column("Started", no_wrap=True)
+    table.add_column("Duration", no_wrap=True, justify="right")
+    for column in metric_columns:
+        table.add_column(column, overflow="fold", max_width=48)
+
+    missing: set[str] = set()
+    for c in conversations:
+        cid = c.get("conversation_id", "—")
+        if url_builder and cid != "—":
+            cid_display = f"[link={url_builder(cid)}]{cid}[/link]"
+        else:
+            cid_display = cid
+        started = c.get("started_at")
+        metrics = c.get("metrics") or {}
+        lookup = {str(k).lower(): v for k, v in metrics.items()}
+        row = [
+            cid_display,
+            _format_iso_timestamp(started) if started else "—",
+            _format_duration(c.get("duration_seconds")),
+        ]
+        for column in metric_columns:
+            key = column.lower()
+            if key not in lookup:
+                missing.add(column)
+            row.append(_format_metric_value(lookup.get(key)))
+        table.add_row(*row)
+
+    console.print(table)
+
+    total = result.get("total")
+    shown = len(conversations)
+    offset = result.get("offset", 0) or 0
+    if total is not None and total > offset + shown:
+        console.print(
+            f"\nShowing {offset + 1}-{offset + shown} of {total:,}. "
+            f"Use --offset {offset + shown} for the next page."
+        )
+    pii_fields = {
+        "call_summary",
+        "call_summary_heading",
+        "email_subject",
+        "poly_score_agent_quality_summary",
+        "poly_score_task_success_summary",
+        "poly_score_v2_agent_quality_summary",
+        "poly_score_v2_task_success_summary",
+    }
+    missing_pii = sorted(f for f in missing if f.lower() in pii_fields)
+    if missing_pii:
+        warning(
+            f"{', '.join(missing_pii)} not returned: these are PII fields, so the API key "
+            "needs PII read permission on the project to see them."
+        )
+
+
+def _turn_text(turn: dict[str, Any], side: str, english: bool) -> str | None:
+    """Pick the original or English text for one side of a turn."""
+    key = "user_input" if side == "user" else "agent_response"
+    if english:
+        translated = turn.get(f"english_{key}")
+        if translated:
+            return translated
+    return turn.get(key) or None
+
+
+def _turn_time(turn: dict[str, Any], side: str) -> str:
+    """Format the timestamp for one side of a turn as HH:MM:SS, or blank."""
+    key = "user_input_datetime" if side == "user" else "agent_response_datetime"
+    ts = turn.get(key)
+    if not ts:
+        return "        "
+    try:
+        return datetime.fromisoformat(str(ts)).astimezone().strftime("%H:%M:%S")
+    except (TypeError, ValueError):
+        return "        "
+
+
+def _print_turn(
+    turn: dict[str, Any],
+    *,
+    english: bool,
+    highlight: str | None = None,
+    dim: bool = False,
+    indent: str = "  ",
+) -> None:
+    """Print one transcript turn as user and agent lines with timestamps."""
+    for side, label, colour in (("user", "user: ", "green"), ("agent", "agent:", "cyan")):
+        text_value = _turn_text(turn, side, english)
+        if text_value is None:
+            continue
+        line = Text(f"{indent}{_turn_time(turn, side)} ")
+        line.append(label, style="dim" if dim else colour)
+        line.append(" ")
+        body = Text(text_value, style="dim" if dim else "")
+        if highlight:
+            body.highlight_words([highlight], style="bold yellow", case_sensitive=False)
+        line.append_text(body)
+        console.print(line)
+
+
+def print_transcript_matches(
+    result: dict[str, Any],
+    query: str,
+    *,
+    english: bool = False,
+    url_builder: Callable[[str], str] | None = None,
+) -> None:
+    """Print transcript search results: each conversation, its matched turns and context.
+
+    Args:
+        result: ``{"results": [...], "total", "limit", "offset"}`` from the Data API.
+        query: The search phrase, highlighted where it appears.
+        english: Prefer the English translation of each turn when available.
+        url_builder: Optional callable(conversation_id) -> Studio URL.
+    """
+    results = result.get("results") or []
+    for i, conv in enumerate(results):
+        cid = conv.get("conversation_id", "—")
+        matched = conv.get("matched_turns") or []
+        first_ts = next(
+            (t.get("user_input_datetime") or t.get("agent_response_datetime") for t in matched),
+            None,
+        )
+        when = f"  {_format_iso_timestamp(str(first_ts))}" if first_ts else ""
+        cid_display = f"[link={url_builder(cid)}]{cid}[/link]" if url_builder else cid
+        if i:
+            console.print()
+        console.print(
+            f"[bold yellow]{cid_display}[/bold yellow]{when}  "
+            f"[dim]{len(matched)} match{'es' if len(matched) != 1 else ''}[/dim]"
+        )
+        for j, turn in enumerate(matched):
+            context = turn.get("context") or {}
+            if j:
+                console.print("  [dim]…[/dim]")
+            for before in context.get("before") or []:
+                _print_turn(before, english=english, dim=True)
+            _print_turn(turn, english=english, highlight=query)
+            for after in context.get("after") or []:
+                _print_turn(after, english=english, dim=True)
+
+    total = result.get("total")
+    shown = len(results)
+    offset = result.get("offset", 0) or 0
+    if total is not None and total > offset + shown:
+        console.print(
+            f"\nShowing {offset + 1}-{offset + shown} of {total:,} conversations. "
+            f"Use --offset {offset + shown} for the next page."
+        )
+
+
+def print_transcript(
+    transcript: dict[str, Any],
+    *,
+    english: bool = False,
+    studio_url: str | None = None,
+) -> None:
+    """Print a full conversation transcript, one timestamped line per side of each turn.
+
+    Args:
+        transcript: ``{"conversation_id", "project_id", "turns": [...], "total_turns"}``.
+        english: Prefer the English translation of each turn when available.
+        studio_url: Optional Agent Studio URL for the conversation.
+    """
+    cid = transcript.get("conversation_id", "—")
+    cid_display = f"[link={studio_url}]{cid}[/link]" if studio_url else cid
+    turns = transcript.get("turns") or []
+    total = transcript.get("total_turns", len(turns))
+    console.print(
+        f"[bold]Conversation[/bold] [yellow]{cid_display}[/yellow]  [dim]{total} turns[/dim]"
+    )
+    console.print()
+    if not turns:
+        plain("No turns recorded for this conversation.")
+        return
+    for turn in turns:
+        _print_turn(turn, english=english)
+    console.print()
