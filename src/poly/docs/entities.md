@@ -13,7 +13,7 @@ They can also be referenced in executed python code.
 
 Each entity has:
 - **name**: Identifier (snake_case), unique within the file. Used in prompts as `{{entity:entity_name}}`.
-- **description**: What the entity represents (shown to the LLM to guide extraction).
+- **description**: What the entity represents (shown to the LLM to guide extraction). Required.
 - **entity_type**: One of the types below.
 - **config**: Type-specific settings.
 
@@ -30,6 +30,12 @@ Each entity has:
 | **address** | `{}` | Physical addresses |
 | **free_text** | `{}` | Unstructured text input |
 | **name_config** | `{}` | Person names |
+
+## Validation
+
+- **numeric**: `min` is at least 0 and `max` is at most 1,000,000. When `has_range` is `true`, `max` cannot be less than `min`.
+- **alphanumeric**: `regular_expression` must be a valid regular expression.
+- **enum** `options` and **phone_number** `country_codes`: items must be text.
 
 ## Usage
 

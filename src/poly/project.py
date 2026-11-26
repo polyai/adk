@@ -9,12 +9,14 @@ import json
 import logging
 import os
 import shutil
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from functools import cached_property
+from http import HTTPStatus
 from pathlib import PurePath
 from typing import Any, Optional, TypeAlias
 from zoneinfo import ZoneInfo
@@ -42,6 +44,7 @@ from poly.constants import (
     DATA_TRANSCRIPT_QUERY_MIN_CHARS,
     POLY_SCORE_VERSIONS,
 )
+from poly.handlers.campaigns import CampaignHandler
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
@@ -62,6 +65,8 @@ from poly.resources import (
     FunctionStep,
     MCPServer,
     MultiResourceYamlResource,
+    OutboundCampaign,
+    OutboundCampaignNode,
     Pronunciation,
     Resource,
     ResourceMap,
@@ -70,6 +75,10 @@ from poly.resources import (
     SubResourceMap,
     TestCase,
     Topic,
+)
+from poly.resources.outbound_campaign import (
+    campaign_folder_of,
+    route_targets,
 )
 from poly.resources.resource import (
     RESOURCE_CLASS_TO_NAME,
@@ -80,6 +89,7 @@ from poly.resources.resource import (
 from poly.utils import prepush
 from poly.utils.commands import queue_set_default_commands
 from poly.utils.ty_check import function_code_errors
+from poly.version import __version__ as ADK_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +104,46 @@ AB_TEST_ACTIVE = "AB_TEST_ACTIVE"
 
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
+
+
+TEST_CONTACT_KEYS = frozenset({"phone", "firstName", "lastName", "externalId", "metadata"})
+
+
+@dataclass
+class SecretUpdate:
+    """Account secret metadata and requested edits, without stored or pending values."""
+
+    name: str
+    existing: Optional[dict]
+    value_type: str
+    description: Optional[str]
+    access: list[str]
+    access_requested: bool
+    delete_keys: list[str]
+
+    @property
+    def type_changed(self) -> bool:
+        return self.existing is not None and self.value_type != self.existing["value_type"]
+
+    @property
+    def patches_keys(self) -> bool:
+        return (
+            self.existing is not None and not self.type_changed and self.value_type == "key-value"
+        )
+
+    def validate_remaining_keys(self, values: Optional[dict[str, Optional[str]]] = None) -> None:
+        """Reject a key edit that would leave a known key set empty."""
+        keys = (self.existing or {}).get("keys")
+        if not isinstance(keys, list):
+            return
+        remaining = set(keys).difference(self.delete_keys)
+        for key, value in (values or {}).items():
+            if value is None:
+                remaining.discard(key)
+            else:
+                remaining.add(key)
+        if not remaining:
+            raise ValueError("A key-value secret must retain at least one key.")
 
 
 @dataclass
@@ -398,6 +448,7 @@ class AgentStudioProject:
     project_name: Optional[str] = None
     account_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
+    _campaign_handler: CampaignHandler = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
@@ -415,6 +466,13 @@ class AgentStudioProject:
         for resources_dict in self.resources.values():
             all_resources.extend(resources_dict.values())
         return all_resources
+
+    @property
+    def campaign_handler(self) -> CampaignHandler:
+        """Get the handler that sends live campaign changes to main"""
+        if self._campaign_handler is None:
+            self._campaign_handler = CampaignHandler(self.region, self.account_id, self.project_id)
+        return self._campaign_handler
 
     @property
     def api_handler(self) -> AgentStudioInterface:
@@ -501,12 +559,15 @@ class AgentStudioProject:
             json_bytes = base64.b64decode(encoded)
             status_dict = json.loads(json_bytes.decode("utf-8"))
 
-        migration_flags = load_migration_flags(status_dict.get("migration_flags", []))
-        migration_flags = run_migrations(root_path, migration_flags, status_dict=status_dict)
+        loaded_flags = load_migration_flags(status_dict.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, loaded_flags, status_dict=status_dict)
 
         # Load resources
         resources, not_loaded_resources, slim_resources = cls._load_resources_from_status_dict(
             status_dict
+        )
+        file_structure_info = cls._saved_file_structure_info(
+            status_dict, resources, migrated=migration_flags != loaded_flags
         )
 
         last_updated_str = status_dict.get("last_updated")
@@ -522,7 +583,7 @@ class AgentStudioProject:
             resources=resources,
             root_path=root_path,
             last_updated=last_updated,
-            file_structure_info={},
+            file_structure_info=file_structure_info,
             slim_resources=slim_resources,
             branch_id=status_dict.get("branch_id", "main"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
@@ -547,6 +608,7 @@ class AgentStudioProject:
             "slim_resources": [r.to_dict() for r in self.slim_resources or []],
             "last_updated": (self.last_updated.isoformat() if self.last_updated else None),
             "file_structure_info": self.file_structure_info,
+            "adk_version": ADK_VERSION,
             "branch_id": self.branch_id,
             "project_name": self.project_name,
             "account_name": self.account_name,
@@ -559,12 +621,14 @@ class AgentStudioProject:
     @classmethod
     def from_dict(cls, data: dict, root_path: str) -> "AgentStudioProject":
         """Load whole project class from a dictionary"""
-        migration_flags = load_migration_flags(data.get("migration_flags", []))
-        migration_flags = run_migrations(root_path, migration_flags, status_dict=data)
+        loaded_flags = load_migration_flags(data.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, loaded_flags, status_dict=data)
 
         resources, not_loaded_resources, slim_resources = cls._load_resources_from_status_dict(data)
 
-        file_structure_info = cls.compute_file_structure_info(resources)
+        file_structure_info = cls._saved_file_structure_info(
+            data, resources, migrated=migration_flags != loaded_flags
+        ) or cls.compute_file_structure_info(resources)
 
         return cls(
             region=data.get("region", ""),
@@ -582,6 +646,33 @@ class AgentStudioProject:
             slim_resources=slim_resources,
             rtc_metadata=data.get("rtc_metadata"),
         )
+
+    @staticmethod
+    def _saved_file_structure_info(
+        status_dict: dict, resources: ResourceMap, migrated: bool
+    ) -> dict[str, dict[str, str]]:
+        """Return the file hashes saved in the status file, if they still describe `resources`.
+
+        Every change to the saved resources recomputes the hashes before saving, so they
+        stay valid, except when a migration changed the project on this load or a different
+        ADK version wrote them (it may format and so hash resources differently). In those
+        cases, or when they don't key exactly the loaded resources by the paths this OS gives
+        them, this returns {} and the hashes are computed when needed.
+        """
+        saved = status_dict.get("file_structure_info") or {}
+        if migrated or not saved or status_dict.get("adk_version") != ADK_VERSION:
+            return {}
+        loaded = {
+            resource.file_path: (RESOURCE_CLASS_TO_NAME[resource_type], resource_id)
+            for resource_type, resource_dict in resources.items()
+            for resource_id, resource in resource_dict.items()
+        }
+        saved_ids = {
+            path: (info.get("type"), info.get("resource_id")) for path, info in saved.items()
+        }
+        if saved_ids != loaded:
+            return {}
+        return saved
 
     @staticmethod
     def compute_file_structure_info(
@@ -895,9 +986,11 @@ class AgentStudioProject:
         # Deal with empty flow folders
         # -------
 
-        flow_folder = os.path.join(self.root_path, "flows")
-        if os.path.exists(flow_folder):
-            self._delete_empty_folders(flow_folder)
+        OutboundCampaign.remove_empty_files(self.root_path)
+        for folder in ("flows", "outbound_campaigns"):
+            folder_path = os.path.join(self.root_path, folder)
+            if os.path.exists(folder_path):
+                self._delete_empty_folders(folder_path)
 
         # Save the updated project configuration
         self.resources = incoming_resources
@@ -1058,6 +1151,49 @@ class AgentStudioProject:
             for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
         }
 
+    def _follow_moved_multi_resources(
+        self, original_resources: ResourceMap, incoming_resources: ResourceMap
+    ) -> tuple[ResourceMap, dict[tuple[type[Resource], str], Resource]]:
+        """Find saved multi-resource entries whose file was renamed upstream.
+
+        Returns:
+            The original resources with each moved entry placed where it now lives, so it
+            merges there, and each entry whose new file is not yet on disk, as it was saved,
+            by type and id. An entry whose old file is gone and new file is on disk, because
+            the same rename was made here, only merges there.
+        """
+        moved: dict[tuple[type[Resource], str], Resource] = {}
+        followed = dict(original_resources)
+        for resource_type, originals in original_resources.items():
+            if not issubclass(resource_type, MultiResourceYamlResource):
+                continue
+            incoming = incoming_resources.get(resource_type) or {}
+            for resource_id, original in originals.items():
+                if resource_id not in incoming:
+                    continue
+                old_file = _parse_multi_resource_path(original.get_path(self.root_path))[0]
+                new_file = _parse_multi_resource_path(
+                    incoming[resource_id].get_path(self.root_path)
+                )[0]
+                relocated = original.moved_to(incoming[resource_id])
+                if old_file == new_file or relocated is None:
+                    continue
+                if os.path.isfile(old_file) == os.path.exists(new_file):
+                    continue
+                if os.path.exists(new_file):
+                    followed[resource_type] = {**followed[resource_type], resource_id: relocated}
+                    continue
+                moved[(resource_type, resource_id)] = original
+                followed[resource_type] = {**followed[resource_type], resource_id: relocated}
+        return followed, moved
+
+    @staticmethod
+    def _write_yaml_or_remove(file: str, data: dict) -> None:
+        if data:
+            MultiResourceYamlResource.save_to_file(resource_utils.dump_yaml(data), file)
+        elif os.path.exists(file):
+            os.remove(file)
+
     def _update_multi_resource_yaml_resources(
         self,
         original_resources: ResourceMap,
@@ -1069,6 +1205,7 @@ class AgentStudioProject:
         on_save: Callable[[int, int], None] | None = None,
         progress_offset: int = 0,
         progress_total: int = 0,
+        moved: Optional[dict[tuple[type[Resource], str], Resource]] = None,
     ) -> tuple[list[str], int]:
         """Merge MultiResourceYaml resources when pulling
 
@@ -1077,8 +1214,13 @@ class AgentStudioProject:
         - From the incoming resources
         - From what's currently on disk (read + applying formatting)
         Then perform the merge with that and the current file contents.
+
+        `moved` holds, by type and id, the saved entries that moved to another file upstream.
+        Their local version is read from the old file, so local edits move with them.
         """
         files_with_conflicts = []
+        moved = moved or {}
+        moved_from: set[str] = set()
 
         # Merge MultiResourceYaml:
         # Compute original file data
@@ -1172,11 +1314,17 @@ class AgentStudioProject:
                     continue
                 for resource in resources.values():
                     try:
-                        mapping = self._make_resource_mapping(resource)
+                        old = moved.get((resource_type, resource.resource_id))
+                        mapping = self._make_resource_mapping(old or resource)
                         local_resource = self.read_local_resource(
                             resource=mapping,
                             resource_mappings=incoming_resource_mappings,
                         )
+                        if old is not None:
+                            local_resource = local_resource.moved_to(resource)
+                            old_path = old.get_path(self.root_path)
+                            resource_type.delete_resource(old_path, save_to_cache=True)
+                            moved_from.add(_parse_multi_resource_path(old_path)[0])
                         local_resource.save(
                             self.root_path,
                             resource_name=local_resource.name,
@@ -1216,6 +1364,8 @@ class AgentStudioProject:
                     original_data is not None
                     and resource_utils.same_yaml_data(original_data, incoming_data)
                 ):
+                    if file in moved_from:
+                        self._write_yaml_or_remove(file, local_data)
                     continue
                 # Only incoming changed: take incoming
                 if original_data is not None and resource_utils.same_yaml_data(
@@ -1240,7 +1390,7 @@ class AgentStudioProject:
                 os.remove(file)
                 continue
 
-            if merged_contents == local_content:
+            if merged_contents == local_content and file not in moved_from:
                 continue
 
             if resource_utils.contains_merge_conflict(merged_contents):
@@ -1295,6 +1445,11 @@ class AgentStudioProject:
             return []
 
         files_with_conflicts = []
+        moved: dict[tuple[type[Resource], str], Resource] = {}
+        if not force:
+            original_resources, moved = self._follow_moved_multi_resources(
+                original_resources, incoming_resources
+            )
 
         # Generate resource mappings
         incoming_resource_mappings: list[ResourceMapping] = (
@@ -1322,6 +1477,7 @@ class AgentStudioProject:
             on_save=on_save,
             progress_offset=0,
             progress_total=total,
+            moved=moved,
         )
 
         files_with_conflicts.extend(multi_conflicts)
@@ -1527,6 +1683,7 @@ class AgentStudioProject:
             updated_resources,
             new_state,
         )
+        self._assign_campaign_positions(new_state, new_resources, post_changes.new)
 
         # Queue new/updated/deleted resources
         commands = self.api_handler.get_queued_commands()
@@ -1729,12 +1886,15 @@ class AgentStudioProject:
         deleted_resources.update(subresource_changes.deleted)
 
         if not (updated_resources or new_resources or deleted_resources):
-            return False, "No changes detected", []
+            return True, "No changes detected", []
 
         # 4. Validate all resources with new state
         if not skip_validation:
             validation_errors = self.validate_resources(
-                resources_dict=new_state, resource_mappings=resource_mappings
+                resources_dict=new_state,
+                resource_mappings=resource_mappings,
+                new_resources=new_resources,
+                deleted_resources=deleted_resources,
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
@@ -1744,23 +1904,15 @@ class AgentStudioProject:
             new_state, new_resources, updated_resources, deleted_resources
         )
         if not dry_run:
-            success = self.api_handler.send_queued_commands()
+            try:
+                self.api_handler.send_queued_commands()
+            # The interface raises API failures as ValueError.
+            except ValueError as e:
+                self.branch_id = self.api_handler.branch_id
+                return False, f"{e}\nNothing was pushed.", commands
             self.branch_id = self.api_handler.branch_id
         else:
             self.api_handler.clear_command_queue()
-            success = True
-
-        if not success:
-            failed_resources = []
-            for resource_dict in [
-                new_resources,
-                updated_resources,
-                deleted_resources,
-            ]:
-                for resources in resource_dict.values():
-                    failed_resources.extend([res.name for res in resources.values()])
-            errors_names = "\n-".join(failed_resources)
-            return False, f"Failed to push resources: \n-{errors_names}", commands
 
         if dry_run:
             return True, "Dry run completed. No changes were pushed.", commands
@@ -1770,6 +1922,22 @@ class AgentStudioProject:
             self.save_config()
 
         return True, "Resources pushed successfully.", commands
+
+    @staticmethod
+    def _assign_campaign_positions(new_state: ResourceMap, *new_resources: ResourceMap) -> None:
+        """Lay out the new nodes of each campaign around the nodes it already has."""
+        campaign_ids = {
+            node.campaign_id
+            for changes in new_resources
+            for node in changes.get(OutboundCampaignNode, {}).values()
+        }
+        for campaign_id in campaign_ids:
+            nodes = [
+                node
+                for node in new_state.get(OutboundCampaignNode, {}).values()
+                if node.campaign_id == campaign_id
+            ]
+            resource_utils.assign_campaign_positions(nodes, lambda node: route_targets(node.data))
 
     @staticmethod
     def _assign_flow_positions(
@@ -1938,6 +2106,14 @@ class AgentStudioProject:
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
         prepush.pair_renamed_test_cases(state, new_resources, updated_resources, deleted_resources)
+        prepush.group_outbound_campaign_changes(
+            state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            pre_push_updated_resources,
+            pre_push_deleted_resources,
+        )
         prepush.fix_orphaned_variables(
             state,
             new_resources,
@@ -2270,12 +2446,11 @@ class AgentStudioProject:
         before_resources, before_slim_resources = self.get_remote_resources_by_name(before_name)
         after_resources, after_slim_resources = self.get_remote_resources_by_name(after_name)
 
-        if not before_resources or not after_resources:
-            logger.error(
-                "Could not retrieve resources for one or both specified names: "
-                f"before={before_name}, after={after_name}"
-            )
-            return None
+        for name, resources in ((before_name, before_resources), (after_name, after_resources)):
+            if not resources:
+                raise ValueError(
+                    f"No branch, environment or deployment version named '{name}' was found."
+                )
 
         diffs = self.diff_resource_maps(
             before_resources, before_slim_resources, after_resources, after_slim_resources
@@ -2598,6 +2773,35 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
+        if resource_class == OutboundCampaign:
+            saved_campaign = (
+                original_resource if isinstance(original_resource, OutboundCampaign) else None
+            )
+            additional_kwargs["known_identity"] = (
+                saved_campaign.identity if saved_campaign else None
+            )
+            additional_kwargs["known_status"] = saved_campaign.status if saved_campaign else None
+            additional_kwargs["known_settings"] = (
+                saved_campaign.settings if saved_campaign else None
+            )
+            additional_kwargs["had_trigger"] = any(
+                node.campaign_id == resource.resource_id and node.data.get("type") == "trigger"
+                for node in self.resources.get(OutboundCampaignNode, {}).values()
+            )
+
+        if resource_class == OutboundCampaignNode:
+            saved_node = (
+                original_resource if isinstance(original_resource, OutboundCampaignNode) else None
+            )
+            additional_kwargs["known_position"] = saved_node.position if saved_node else None
+            additional_kwargs["known_type"] = saved_node.data.get("type") if saved_node else None
+            additional_kwargs["known_label"] = saved_node.platform_name if saved_node else None
+            additional_kwargs["known_data"] = saved_node.data if saved_node else None
+            additional_kwargs["known_code"] = saved_node.code if saved_node else None
+            additional_kwargs["known_published"] = bool(
+                saved_node and saved_node.campaign_published
+            )
+
         if resource_class == MCPServer and original_resource:
             if not isinstance(original_resource, MCPServer):
                 raise TypeError(f"Original resource is not an MCPServer: {original_resource}")
@@ -2695,6 +2899,20 @@ class AgentStudioProject:
                 parent_flow = parent_lookup.get(flow_path)
                 flow_paths_to_ids[resource_utils.clean_name(flow_name)] = (
                     parent_flow.resource_id if parent_flow else self.generate_uuid(FlowConfig)
+                )
+
+        campaign_folders_to_ids = {
+            campaign.folder: campaign_id
+            for campaign_id, campaign in self.resources.get(OutboundCampaign, {}).items()
+        }
+        for campaign_path in discovered_resources.get(OutboundCampaign, []):
+            folder = campaign_folder_of(campaign_path)
+            if folder not in campaign_folders_to_ids:
+                parent_campaign = parent_lookup.get(campaign_path)
+                campaign_folders_to_ids[folder] = (
+                    parent_campaign.resource_id
+                    if parent_campaign
+                    else self.generate_uuid(OutboundCampaign)
                 )
 
         if not self.file_structure_info:
@@ -2797,6 +3015,16 @@ class AgentStudioProject:
                         resource_id = flow_id
                     elif resource_type == Document:
                         resource_id = os.path.basename(file_path).upper()
+                    elif resource_type == OutboundCampaign:
+                        resource_id = campaign_folders_to_ids[campaign_folder_of(file_path)]
+                    elif resource_type == OutboundCampaignNode:
+                        campaign_id = campaign_folders_to_ids.get(campaign_folder_of(file_path), "")
+                        node_id = (
+                            parent_resource.node_id
+                            if isinstance(parent_resource, OutboundCampaignNode)
+                            else f"{resource.data.get('type') or 'node'}-{uuid.uuid4()}"
+                        )
+                        resource_id = f"{campaign_id}:{node_id}"
                     elif parent_resource:
                         resource_id = parent_resource.resource_id
                     else:
@@ -3367,8 +3595,8 @@ class AgentStudioProject:
             list[str]: A list of validation error messages.
         """
         # Read local resources
-        new_resource_mappings, kept_resource_mappings, _ = self.find_new_kept_deleted(
-            self.discover_local_resources()
+        new_resource_mappings, kept_resource_mappings, deleted_resource_mappings = (
+            self.find_new_kept_deleted(self.discover_local_resources())
         )
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
 
@@ -3384,22 +3612,50 @@ class AgentStudioProject:
                 resource_mapping.resource_id
             ] = local_resource
 
+        new_resources: ResourceMap = {}
+        for mapping in new_resource_mappings:
+            new_resources.setdefault(mapping.resource_type, {})[mapping.resource_id] = resources[
+                mapping.resource_type
+            ][mapping.resource_id]
+        deleted_resources: ResourceMap = {}
+        for mapping in deleted_resource_mappings:
+            saved = self.resources.get(mapping.resource_type, {}).get(mapping.resource_id)
+            if saved is not None:
+                deleted_resources.setdefault(mapping.resource_type, {})[mapping.resource_id] = saved
+
         return self.validate_resources(
             resources_dict=resources,
             resource_mappings=resource_mappings,
+            new_resources=new_resources,
+            deleted_resources=deleted_resources,
         )
 
     def validate_resources(
         self,
         resources_dict: ResourceMap,
         resource_mappings: list[ResourceMapping],
+        new_resources: Optional[ResourceMap] = None,
+        deleted_resources: Optional[ResourceMap] = None,
     ) -> list[str]:
         """Validate all resources in the project.
+
+        Args:
+            resources_dict: Every local resource, by type and id.
+            resource_mappings: The mappings to resolve references with.
+            new_resources: The resources the push would create, to check deletes against.
+            deleted_resources: The saved resources the push would delete.
 
         Returns:
             list[str]: A list of validation error messages.
         """
-        validation_errors = []
+        validation_errors = [
+            f"Validation error: {error}"
+            for resource_type in {**(new_resources or {}), **(deleted_resources or {})}
+            if issubclass(resource_type, Resource)
+            for error in resource_type.validate_creates_and_deletes(
+                new_resources or {}, deleted_resources or {}
+            )
+        ]
         seen_paths: set[str] = set()
         for mapping in resource_mappings:
             if mapping.file_path in seen_paths:
@@ -3412,10 +3668,15 @@ class AgentStudioProject:
             seen_paths.add(mapping.file_path)
 
         for resource_type, resources in resources_dict.items():
+            additional_kwargs = {}
+            # Functions check their calls to other functions against those functions' parameters
+            if issubclass(resource_type, Function):
+                additional_kwargs["functions"] = resources_dict.get(Function, {})
             for resource_id, resource in resources.items():
                 try:
                     resource.validate(
                         resource_mappings=resource_mappings,
+                        **additional_kwargs,
                     )
                 except ValueError as e:
                     # ValueError already contains context, just add file path if missing
@@ -3445,34 +3706,20 @@ class AgentStudioProject:
             except ValueError as e:
                 validation_errors.append(f"Validation error: {e}")
 
-        validation_errors.extend(self._function_code_errors(resources_dict))
+        validation_errors.extend(self._function_code_errors())
         return validation_errors
 
-    def _function_code_errors(self, resources_dict: ResourceMap) -> list[str]:
-        """Unresolved imports between functions, and syntax errors in function code.
+    def _function_code_errors(self) -> list[str]:
+        """Imports between functions that don't resolve.
 
         Each file compiles on its own, so a function importing a helper that no longer exists
-        only fails at runtime; ty resolves imports across the project. It also checks syntax
-        against the platform's Python version rather than the one running the ADK. If ty can't
-        run, each function and function step is compiled instead, so syntax is still checked.
+        only fails at runtime; ty resolves imports across the project. If ty can't run, imports
+        aren't checked.
         """
-        errors = function_code_errors(self.root_path)
-        if errors is not None:
-            messages = []
-            for error in errors:
-                path = os.path.join(self.root_path, *error.path.split("/"))
-                messages.append(f"Validation error in {path}, line {error.line}: {error.message}")
-            return messages
         messages = []
-        for resource_type in (Function, FunctionStep):
-            for resource in resources_dict.get(resource_type, {}).values():
-                try:
-                    compile(resource.code or "", resource.name, "exec")
-                except SyntaxError as e:
-                    messages.append(
-                        f"Validation error in {resource.file_path}: "
-                        f"Syntax error in function code: {e}"
-                    )
+        for error in function_code_errors(self.root_path) or []:
+            path = os.path.join(self.root_path, *error.path.split("/"))
+            messages.append(f"Validation error in {path}, line {error.line}: {error.message}")
         return messages
 
     def merge_branch(
@@ -3965,6 +4212,447 @@ class AgentStudioProject:
             raise ValueError("No tests found to run based on the provided criteria.")
 
         return matched
+
+    @property
+    def outbound_campaigns_enabled(self) -> bool:
+        """Whether outbound campaigns are turned on for this project in Agent Studio."""
+        return self.api_handler.feature_flag_enabled(
+            key="outbound-campaigns",
+            region=self.region,
+            project_id=self.project_id,
+            account_id=self.account_id,
+            default=False,
+        )
+
+    def get_campaign(self, name: str) -> OutboundCampaign:
+        """Return the pulled campaign with this name or folder name.
+
+        Raises:
+            ValueError: if no campaign matches, or several share the name.
+        """
+        campaigns = list(self.resources.get(OutboundCampaign, {}).values())
+        known = ", ".join(sorted(campaign.name for campaign in campaigns)) or "none"
+        return self._match_campaign(
+            name, campaigns, f"No campaign named '{name}'. Campaigns: {known}."
+        )
+
+    @staticmethod
+    def _match_campaign(
+        name: str, campaigns: list[OutboundCampaign], not_found: str
+    ) -> OutboundCampaign:
+        found = [
+            campaign
+            for campaign in campaigns
+            if name in (campaign.name, campaign.platform_label, campaign.folder)
+        ]
+        if len(found) > 1:
+            folders = ", ".join(sorted(campaign.folder for campaign in found))
+            raise ValueError(
+                f"More than one campaign is named '{name}'. Name it by its folder instead: "
+                f"{folders}."
+            )
+        if not found:
+            raise ValueError(not_found)
+        return found[0]
+
+    def get_live_campaign(self, name: str) -> OutboundCampaign:
+        """Return the campaign on main with this name or folder name, as main has it.
+
+        Raises:
+            ValueError: if main has no campaign by that name, or several.
+        """
+        resources, _ = self.api_handler.pull_branch_resources("main")
+        live = list(resources.get(OutboundCampaign, {}).values())
+        known = ", ".join(sorted(campaign.name for campaign in live)) or "none"
+        return self._match_campaign(
+            name,
+            live,
+            f"No campaign named '{name}' on main. A campaign made on a branch must be merged "
+            f"first. Campaigns on main: {known}.",
+        )
+
+    def campaign_node_names(self, campaign: OutboundCampaign) -> dict[str, str]:
+        """Return the names of a pushed campaign's nodes, by node id."""
+        return {
+            node.node_id: node.name
+            for node in self.resources.get(OutboundCampaignNode, {}).values()
+            if node.campaign_id == campaign.resource_id
+        }
+
+    def _live_campaign_node_names(self, campaign: OutboundCampaign) -> dict[str, str]:
+        resources, _ = self.api_handler.pull_branch_resources("main")
+        return {
+            node.node_id: node.name
+            for node in resources.get(OutboundCampaignNode, {}).values()
+            if node.campaign_id == campaign.resource_id
+        }
+
+    @staticmethod
+    def _campaign_node_id(campaign: OutboundCampaign, names: dict[str, str], node: str) -> str:
+        if node in names:
+            return node
+        ids = {resource_utils.clean_name(name): node_id for node_id, name in names.items()}
+        if resource_utils.clean_name(node) in ids:
+            return ids[resource_utils.clean_name(node)]
+        known = ", ".join(sorted(names.values())) or "none"
+        raise ValueError(f"Campaign '{campaign.name}' has no node named '{node}'. Nodes: {known}.")
+
+    @staticmethod
+    def _campaign_steps_with_node_names(
+        result: dict[str, Any], names: dict[str, str]
+    ) -> dict[str, Any]:
+        def name(node_id: str) -> str:
+            return names.get(node_id) or node_id
+
+        named = dict(result)
+        if "steps" in result:
+            named["steps"] = []
+            for step in result.get("steps") or []:
+                step = dict(step)
+                if step.get("node_id"):
+                    step["node"] = name(step["node_id"])
+                if step.get("next_node_id"):
+                    step["next_node"] = name(step["next_node_id"])
+                named["steps"].append(step)
+        if result.get("stopped_at"):
+            named["stopped_at_node"] = name(result["stopped_at"])
+        if result.get("resume_node_id"):
+            named["resume_node"] = name(result["resume_node_id"])
+        failure = result.get("error")
+        if isinstance(failure, dict) and failure.get("node_id"):
+            named["error"] = {**failure, "node": name(failure["node_id"])}
+        return named
+
+    @staticmethod
+    def _campaign_error(
+        action: str, campaign: OutboundCampaign, error: SourcererAPIError
+    ) -> SourcererAPIError:
+        reason = error.server_message or str(error)
+        if not error.server_message and error.status_code:
+            try:
+                reason = f"HTTP {error.status_code} {HTTPStatus(error.status_code).phrase}"
+            except ValueError:
+                reason = f"HTTP {error.status_code}"
+        reason = reason.replace(campaign.resource_id, campaign.name)
+        message = f"Could not {action} campaign '{campaign.name}': {reason}"
+        if not error.server_message:
+            if error.error_code == "OUTBOUND_CAMPAIGNS_DISABLED":
+                message += "\nOutbound campaigns aren't turned on for this project."
+        return SourcererAPIError(
+            message,
+            status_code=error.status_code,
+            error_code=error.error_code,
+            server_message=error.server_message,
+        )
+
+    def validate_campaign(self, name: str) -> dict[str, Any]:
+        """Check the campaign as pushed to the current branch.
+
+        Returns:
+            The platform's result: `valid`, plus `errors` and `warnings`, each issue naming
+            its node by name in `node` and in its `message`.
+        """
+        campaign = self.get_campaign(name)
+        try:
+            result = self.api_handler.validate_outbound_campaign(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("validate", campaign, e) from e
+        names = self.campaign_node_names(campaign)
+        for key in ("errors", "warnings"):
+            result[key] = [
+                self._campaign_issue_with_node_names(issue, names)
+                for issue in result.get(key) or []
+            ]
+        return result
+
+    @staticmethod
+    def _replace_campaign_node_ids(text: str, names: dict[str, str]) -> str:
+        for node_id in sorted(names, key=len, reverse=True):
+            if names[node_id]:
+                text = text.replace(node_id, names[node_id])
+        return text
+
+    @classmethod
+    def _campaign_issue_with_node_names(
+        cls, issue: dict[str, Any], names: dict[str, str]
+    ) -> dict[str, Any]:
+        named = dict(issue)
+        if issue.get("node_id"):
+            named["node"] = names.get(issue["node_id"]) or issue["node_id"]
+        if issue.get("message") is not None:
+            named["message"] = cls._replace_campaign_node_ids(str(issue["message"]), names)
+        return named
+
+    @staticmethod
+    def _send_outcome(
+        send_result: Optional[str], send_state: Optional[dict[str, Any]]
+    ) -> Optional[dict[str, Any]]:
+        if send_result == "":
+            raise ValueError("A result can't be empty. Leave it out for none.")
+        if send_result is None and not send_state:
+            return None
+        return {"result": send_result, "state": dict(send_state or {})}
+
+    def preview_campaign(
+        self,
+        name: str,
+        contact_data: dict[str, Any],
+        sample_outputs: Optional[dict[str, dict[str, Any]]] = None,
+        start_node: Optional[str] = None,
+        send_result: Optional[str] = None,
+        send_state: Optional[dict[str, Any]] = None,
+        ask_branches: Optional[bool] = None,
+        last_send: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Walk a made-up contact through the campaign on the current branch. Nothing is sent.
+
+        Nodes are given by name (or id): `start_node`, and the keys of `sample_outputs`. The
+        result names each node, next to its id: `node` and `next_node` on each step, and
+        `stopped_at_node`, `resume_node` and the error's `node`.
+        `send_result` and `send_state` say what the call or text at `start_node` reported,
+        when carrying on from one. `last_send` is the `last_send` the previous step returned:
+        a dry run keeps nothing between steps, so it reaches `journey.last_send` only if sent.
+
+        Raises:
+            ValueError: if the contact, sample outputs or last send aren't JSON objects, a last
+                send is given without a node to carry on from, or a node name matches no node.
+        """
+        if not isinstance(contact_data, dict):
+            raise ValueError("Contact data must be a JSON object.")
+        if sample_outputs is not None and (
+            not isinstance(sample_outputs, dict)
+            or not all(isinstance(output, dict) for output in sample_outputs.values())
+        ):
+            raise ValueError("Sample outputs must be a JSON object of node name to object.")
+        if last_send is not None:
+            if not isinstance(last_send, dict):
+                raise ValueError("The last send must be a JSON object.")
+            if not start_node:
+                raise ValueError("Only a step that carries on from a node has a last send.")
+            journey = contact_data.get("journey")
+            contact_data = {
+                **contact_data,
+                "journey": {
+                    **(journey if isinstance(journey, dict) else {}),
+                    "last_send": last_send,
+                },
+            }
+        campaign = self.get_campaign(name)
+        names = self.campaign_node_names(campaign)
+        body: dict[str, Any] = {"contactData": contact_data}
+        if sample_outputs:
+            body["sampleOutputs"] = {
+                self._campaign_node_id(campaign, names, node): output
+                for node, output in sample_outputs.items()
+            }
+        if start_node:
+            body["startNodeId"] = self._campaign_node_id(campaign, names, start_node)
+        if outcome := self._send_outcome(send_result, send_state):
+            if not start_node:
+                raise ValueError(
+                    "Only a step that carries on from a node can say how a call or text went. "
+                    "Give the node to carry on from too."
+                )
+            body["sendOutcome"] = outcome
+        if ask_branches is not None:
+            body["askBranches"] = ask_branches
+        try:
+            result = self.api_handler.dry_run_outbound_campaign(campaign.resource_id, body)
+        except SourcererAPIError as e:
+            raise self._campaign_error("preview", campaign, e) from e
+        return self._campaign_steps_with_node_names(result, names)
+
+    def _campaign_test_body(
+        self,
+        campaign: OutboundCampaign,
+        contact: dict[str, Any],
+        start_node: Optional[str],
+        run: Optional[dict[str, str]],
+        send_result: Optional[str],
+        send_state: Optional[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not isinstance(contact, dict) or not isinstance(contact.get("phone"), str):
+            raise ValueError("The test contact needs a phone number.")
+        unknown = sorted(set(contact) - TEST_CONTACT_KEYS)
+        if unknown:
+            raise ValueError(
+                f"The test contact has keys the platform doesn't take: {', '.join(unknown)}. "
+                "Use phone, firstName, lastName, externalId and metadata, and put other columns "
+                "in metadata."
+            )
+        outcome = self._send_outcome(send_result, send_state)
+        if outcome is not None and run is None:
+            raise ValueError(
+                "Only a later test step can say how a call or text went. Give the previous "
+                "step's run too."
+            )
+        if (run is None) != (start_node is None):
+            raise ValueError(
+                "A later test step needs both the node to carry on from and the previous "
+                "step's run; a first step needs neither."
+            )
+        body: dict[str, Any] = {"contact": contact}
+        if run is not None:
+            if not isinstance(run, dict):
+                raise ValueError("The run must be a JSON object.")
+            missing = [
+                key for key in ("contact_id", "enrolment_id", "graph_hash") if not run.get(key)
+            ]
+            if missing:
+                raise ValueError(f"The run is missing {', '.join(missing)}.")
+            names = self._live_campaign_node_names(campaign)
+            body["startNodeId"] = self._campaign_node_id(campaign, names, start_node)
+            body["run"] = {
+                "contactId": run["contact_id"],
+                "enrolmentId": run["enrolment_id"],
+                "graphHash": run["graph_hash"],
+            }
+        if outcome is not None:
+            body["sendOutcome"] = outcome
+        return body
+
+    def check_campaign_test(
+        self,
+        campaign: OutboundCampaign,
+        contact: dict[str, Any],
+        start_node: Optional[str] = None,
+        run: Optional[dict[str, str]] = None,
+        send_result: Optional[str] = None,
+        send_state: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Check a test step's inputs without starting it, as `start_campaign_test` would.
+
+        Takes the same arguments as `start_campaign_test`.
+
+        Raises:
+            ValueError: if the inputs would be refused.
+        """
+        self._campaign_test_body(campaign, contact, start_node, run, send_result, send_state)
+
+    def start_campaign_test(
+        self,
+        campaign: OutboundCampaign,
+        contact: dict[str, Any],
+        start_node: Optional[str] = None,
+        run: Optional[dict[str, str]] = None,
+        send_result: Optional[str] = None,
+        send_state: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Start one real test step of the live campaign, which calls and texts its contact.
+
+        A first step takes neither `start_node` nor `run`; a later step needs both, from the
+        step before it. Carrying on from a call or text, `send_result` and `send_state` say
+        what it reported.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+            contact: The test contact: phone, firstName, lastName, externalId and metadata.
+            start_node: The node to carry on from, by its name (or id) on main.
+            run: The run the previous step returned.
+            send_result: How the call or text at `start_node` went.
+            send_state: What that call or text reported back.
+
+        Returns:
+            The platform's answer: the new step's `step_id` and its `run`.
+
+        Raises:
+            ValueError: if the contact has no phone or keys the platform doesn't take, the step
+                inputs don't fit together, or `start_node` names no node of the campaign.
+            SourcererAPIError: if the step could not be started.
+        """
+        body = self._campaign_test_body(campaign, contact, start_node, run, send_result, send_state)
+        try:
+            return self.api_handler.start_outbound_campaign_test_step(campaign.resource_id, body)
+        except SourcererAPIError as e:
+            raise self._campaign_error("test", campaign, e) from e
+
+    def publish_campaign(self, campaign: OutboundCampaign) -> None:
+        """Publish the campaign's draft to live, so it starts contacting people.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self.campaign_handler.publish(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("publish", campaign, e) from e
+
+    def pause_campaign(self, campaign: OutboundCampaign) -> None:
+        """Pause the live campaign.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self.campaign_handler.pause(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("pause", campaign, e) from e
+
+    def resume_campaign(self, campaign: OutboundCampaign) -> None:
+        """Resume the paused live campaign, so it contacts people again.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self.campaign_handler.resume(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("resume", campaign, e) from e
+
+    def archive_campaign(self, campaign: OutboundCampaign) -> None:
+        """Archive the campaign on live.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+        """
+        try:
+            self.campaign_handler.archive(campaign.resource_id)
+        except SourcererAPIError as e:
+            raise self._campaign_error("archive", campaign, e) from e
+
+    def wait_for_campaign_test_step(
+        self,
+        campaign: OutboundCampaign,
+        step_id: str,
+        timeout: float = 600,
+        poll_interval: float = 5,
+    ) -> dict[str, Any]:
+        """Poll a test step until it stops running and return it.
+
+        Its `result` names each node as main has it, as `preview_campaign`'s does.
+
+        Args:
+            campaign: The campaign as main has it, from `get_live_campaign`.
+            step_id: The step `start_campaign_test` returned.
+            timeout: Seconds to wait for the step to stop running.
+            poll_interval: Seconds between polls.
+
+        Raises:
+            TimeoutError: if it is still queued or running after `timeout` seconds.
+            SourcererAPIError: if a poll fails.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                step = self.api_handler.get_outbound_campaign_test_step(
+                    campaign.resource_id, step_id
+                )
+            except SourcererAPIError as e:
+                raise self._campaign_error("check the test step of", campaign, e) from e
+            if step.get("status") not in ("queued", "running"):
+                if step.get("result"):
+                    names = self._live_campaign_node_names(campaign)
+                    step = {
+                        **step,
+                        "result": self._campaign_steps_with_node_names(step["result"], names),
+                    }
+                return step
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Test step {step_id} of campaign '{campaign.name}' is still "
+                    f"{step.get('status')} after {timeout:g} seconds."
+                )
+            time.sleep(poll_interval)
 
     def trigger_tests(self, test_ids: list[str], name: str | None = None) -> dict:
         """Trigger tests for the project.
@@ -4563,6 +5251,216 @@ class AgentStudioProject:
             ]
         except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
             return [f"Invalid schema: {e}"]
+
+    def list_secrets(self, project_only: bool = False) -> list[dict]:
+        """List account secret metadata, optionally filtering to this project's access."""
+        secrets = AgentStudioInterface.get_secrets(self.region, self.account_id)
+        if project_only:
+            return [
+                secret
+                for secret in secrets
+                if self.project_id in (secret.get("access_config") or [])
+            ]
+        return secrets
+
+    def get_secret_metadata(self, name: str) -> Optional[dict]:
+        """Find a secret in the metadata list without requesting its value."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("A nonempty secret name is required.")
+        return next(
+            (secret for secret in self.list_secrets() if secret.get("display_name") == name), None
+        )
+
+    @staticmethod
+    def resolve_secret_type(
+        existing: Optional[dict], value_type: Optional[str], delete_keys: Optional[list[str]]
+    ) -> str:
+        """Resolve the requested type and check whether individual keys can be deleted."""
+        stored_type = existing["value_type"] if existing is not None else None
+        if value_type is None:
+            value_type = stored_type or "single"
+        if value_type not in ("single", "key-value"):
+            raise ValueError("Secret type must be single or key-value.")
+        if delete_keys:
+            if stored_type is not None and value_type != stored_type:
+                raise ValueError("--delete-key cannot be used when changing secret type.")
+            if stored_type != "key-value":
+                raise ValueError("--delete-key requires an existing key-value secret.")
+        return value_type
+
+    def set_secret(
+        self,
+        name: str,
+        value: Optional[str | dict[str, Optional[str]]] = None,
+        *,
+        description: Optional[str] = None,
+        value_type: Optional[str] = None,
+        projects: Optional[list[str]] = None,
+        no_projects: bool = False,
+        grant: Optional[list[str]] = None,
+        revoke: Optional[list[str]] = None,
+        delete_keys: Optional[list[str]] = None,
+    ) -> dict:
+        """Save an account secret immediately, preserving omitted value and metadata.
+
+        Changing type replaces the entire value. Updates that keep the key-value
+        type preserve omitted keys and accept None to delete a key.
+        """
+        update = self.prepare_secret_update(
+            name,
+            self.get_secret_metadata(name),
+            description=description,
+            value_type=value_type,
+            projects=projects,
+            no_projects=no_projects,
+            grant=grant,
+            revoke=revoke,
+            delete_keys=delete_keys,
+        )
+        return self.save_secret_update(update, value)
+
+    def get_account_projects(self) -> dict[str, str]:
+        """Return visible project names keyed by their IDs."""
+        return AgentStudioInterface.get_projects(self.region, self.account_id)
+
+    def prepare_secret_update(
+        self,
+        name: str,
+        existing: Optional[dict],
+        *,
+        description: Optional[str] = None,
+        value_type: Optional[str] = None,
+        projects: Optional[list[str]] = None,
+        no_projects: bool = False,
+        grant: Optional[list[str]] = None,
+        revoke: Optional[list[str]] = None,
+        delete_keys: Optional[list[str]] = None,
+        account_projects: Optional[dict[str, str]] = None,
+    ) -> SecretUpdate:
+        """Validate metadata edits and resolve the access list before collecting values."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("A nonempty secret name is required.")
+        for project_ids in (projects, grant, revoke):
+            if project_ids is not None and (
+                not isinstance(project_ids, list)
+                or not all(isinstance(project, str) and project.strip() for project in project_ids)
+            ):
+                raise ValueError("Project IDs must be a list of nonempty strings.")
+        if description is not None and not isinstance(description, str):
+            raise ValueError("Secret descriptions must be strings.")
+        if (projects is not None and no_projects) or (
+            (projects is not None or no_projects) and (grant or revoke)
+        ):
+            raise ValueError("Choose project replacement, --no-projects, or --grant/--revoke.")
+        if set(grant or []) & set(revoke or []):
+            raise ValueError("The same project cannot be both granted and revoked.")
+        if not existing and (grant or revoke):
+            raise ValueError("--grant and --revoke require an existing secret.")
+        if delete_keys is not None and (
+            not isinstance(delete_keys, list)
+            or not all(isinstance(key, str) and key for key in delete_keys)
+        ):
+            raise ValueError("Keys to delete must be a list of nonempty strings.")
+
+        value_type = self.resolve_secret_type(existing, value_type, delete_keys)
+        access = list(existing.get("access_config") or []) if existing else [self.project_id]
+        # Allow revoking stale IDs that are still on the secret's access list.
+        requested_projects = set(projects or []) | set(grant or [])
+        requested_projects.update(project for project in (revoke or []) if project not in access)
+        if requested_projects:
+            if account_projects is None:
+                account_projects = self.get_account_projects()
+            unknown_projects = requested_projects.difference(account_projects)
+            if unknown_projects:
+                raise ValueError(
+                    "Project IDs not found or not visible in this account: "
+                    + ", ".join(sorted(unknown_projects))
+                )
+        if projects is not None:
+            access = projects
+        elif no_projects:
+            access = []
+        else:
+            access = [project for project in access if project not in (revoke or [])]
+            access.extend(grant or [])
+        if not all(isinstance(project, str) and project.strip() for project in access):
+            raise ValueError("Project IDs must be nonempty strings.")
+        return SecretUpdate(
+            name=name,
+            existing=existing,
+            value_type=value_type,
+            description=description,
+            access=list(dict.fromkeys(access)),
+            access_requested=projects is not None or no_projects or bool(grant or revoke),
+            delete_keys=delete_keys or [],
+        )
+
+    def save_secret_update(
+        self, update: SecretUpdate, value: Optional[str | dict[str, Optional[str]]]
+    ) -> dict:
+        """Validate the supplied value and apply the prepared edits."""
+        existing = update.existing
+        delete_keys = update.delete_keys
+        if value is None and update.type_changed:
+            raise ValueError("Changing secret type requires a complete replacement value.")
+        if value is None and existing is None:
+            raise ValueError("A value is required to create a secret.")
+        if value is not None:
+            if update.value_type == "key-value":
+                if (
+                    not isinstance(value, dict)
+                    or not value
+                    or not all(
+                        isinstance(key, str)
+                        and key
+                        and (isinstance(item, str) or (update.patches_keys and item is None))
+                        for key, item in value.items()
+                    )
+                ):
+                    raise ValueError(
+                        "Key-value input requires a nonempty object with nonempty keys and string "
+                        "values. Use null only to delete keys when updating a key-value secret."
+                    )
+            elif not isinstance(value, str) or not value:
+                raise ValueError("A single-value secret requires a nonempty string.")
+
+        if update.patches_keys and (value is not None or delete_keys):
+            changes = dict(value or {})
+            if set(changes) & set(delete_keys or []):
+                raise ValueError("A key cannot be supplied in both the value and --delete-key.")
+            update.validate_remaining_keys(changes)
+            changes.update(dict.fromkeys(delete_keys or []))
+            body = {"display_name": update.name, "secret_value": changes}
+            if update.description is not None:
+                body["description"] = update.description
+            if update.access_requested:
+                body["access_config"] = update.access
+            return AgentStudioInterface.patch_secret(self.region, self.account_id, body)
+
+        body = {
+            "display_name": update.name,
+            "description": update.description
+            if update.description is not None
+            else ((existing or {}).get("description") or ""),
+            "value_type": update.value_type,
+            "access_config": update.access,
+        }
+        if value is not None:
+            body["secret_value"] = value
+        return AgentStudioInterface.set_secret(
+            self.region, self.account_id, body, create=existing is None
+        )
+
+    def delete_secrets(self, names: list[str]) -> None:
+        """Request deletion of the named account secrets in one batch."""
+        if (
+            not isinstance(names, list)
+            or not names
+            or not all(isinstance(name, str) and name.strip() for name in names)
+        ):
+            raise ValueError("At least one nonempty secret name is required.")
+        unique_names = list(dict.fromkeys(names))
+        AgentStudioInterface.delete_secrets(self.region, self.account_id, unique_names)
 
     def get_custom_metrics(self) -> list[dict]:
         """List all custom metrics for the project.

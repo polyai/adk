@@ -64,6 +64,9 @@ exclude = [
     "F403",
     "F405",
 ]
+"src/poly/tests/test_projects/**/outbound_campaigns/**" = [
+    "F821",
+]
 
 [tool.coverage.run]
 omit = [
@@ -132,6 +135,7 @@ version_toml = ["pyproject.toml:project.version"]
 # Keep skills/*/SKILL.md metadata.version in lockstep with the CLI version.
 # Validated in CI by scripts/validate_skills.py.
 version_variables = [
+    "src/poly/version.py:__version__",
     "skills/poly-adk-branching/SKILL.md:version",
     "skills/poly-adk-conversations/SKILL.md:version",
     "skills/poly-adk-rtc/SKILL.md:version",
@@ -152,7 +156,7 @@ insertion_flag = "<!-- version list -->"
 
 [project]
 name = "polyai-adk"
-version = "0.80.1"
+version = "0.91.2"
 description = "Agent Development Kit (ADK) — a CLI for building, testing, and deploying PolyAI voice and chat agents, self-serve"
 readme = "README.md"
 requires-python = ">=3.14.0"

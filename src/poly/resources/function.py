@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import ast
+import inspect
 import logging
 import os
 import re
@@ -11,7 +12,7 @@ import typing as ty
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property, lru_cache
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from google.protobuf.message import Message
 
@@ -160,6 +161,17 @@ def parse_latency_control(latency_control_data: dict) -> FunctionLatencyControl:
         delay_responses=delay_responses,
         randomize=latency_control_data.get("randomize", False),
     )
+
+
+def _literal(node: ast.expr) -> Any:
+    """Return the value of a literal node, or its source text if the node is not a literal.
+
+    A signed number such as `-1` is a unary operation, not a constant.
+    """
+    try:
+        return ast.literal_eval(node)
+    except ValueError:
+        return ast.unparse(node)
 
 
 @dataclass
@@ -725,12 +737,46 @@ class Function(Resource):
 
         return code
 
-    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+    def validate(
+        self,
+        resource_mappings: list[ResourceMapping] = None,
+        functions: Optional[dict[str, "Function"]] = None,
+        **kwargs,
+    ) -> None:
         """Validate the resource.
+
+        Args:
+            resource_mappings: Every resource in the project, for checking references.
+            functions: The project's functions by resource ID, for checking calls to them.
 
         Raises:
             ValidationError: If the resource is not valid.
         """
+        # A function step takes the name of its flow step rather than a function name.
+        if self.function_type != FunctionType.FUNCTION_STEP:
+            utils.validate_python_name(self.name, "Function name")
+
+        if self.function_type in (FunctionType.START, FunctionType.END):
+            if self.parameters:
+                raise ValueError("Start and end functions do not support @func_parameter.")
+            if self.latency_control and self.latency_control.enabled:
+                raise ValueError("Start and end functions do not support @func_latency_control.")
+
+        for parameter in self.parameters:
+            utils.validate_python_name(parameter.name, "Parameter name")
+            if not isinstance(parameter.description, str) or not parameter.description.strip():
+                raise ValueError(f"Parameter '{parameter.name}' description cannot be empty.")
+
+        for variable_name in sorted(utils.extract_variable_names_from_code(self.code)):
+            utils.validate_python_name(variable_name, "State variable name")
+
+        # Check for syntax errors
+        try:
+            compile(self.code, self.name, "exec")
+        except SyntaxError as e:
+            logger.debug(f"Syntax error validating code={self.code!r}")
+            raise ValueError(f"Syntax error in function code: {e}")
+
         # Check function def exists in code
         default_params = ["conv: Conversation"]
         if self.function_type in (FunctionType.TRANSITION, FunctionType.FUNCTION_STEP):
@@ -758,6 +804,12 @@ class Function(Resource):
 
         # Validate latency control settings
         if self.latency_control and self.latency_control.enabled:
+            for argument, value in (
+                ("delay_before_responses_start", self.latency_control.initial_delay),
+                ("silence_after_each_response", self.latency_control.interval),
+            ):
+                if type(value) is not int:
+                    raise ValueError(f"{argument} must be an integer, got {value!r}.")
             if not (0 <= self.latency_control.initial_delay <= 10):
                 raise ValueError(
                     "delay_before_responses_start must be between 0 and 10, "
@@ -774,6 +826,11 @@ class Function(Resource):
             for dr in self.latency_control.delay_responses:
                 if not dr.message:
                     raise ValueError("Delay response message cannot be empty.")
+                if type(dr.duration) is not int or dr.duration < 0:
+                    raise ValueError(
+                        "Delay response duration must be an integer of 0 or more, "
+                        f"got {dr.duration!r} for '{dr.message}'."
+                    )
 
                 references = utils.get_references_from_prompt(
                     dr.message, DELAY_CONTROL_REFERENCES, raise_on_invalid=True
@@ -839,6 +896,68 @@ class Function(Resource):
                         raise ValueError(
                             f"conv.goto_flow('{target_flow}') references a flow that does not exist."
                         )
+
+        if resource_mappings:
+            self._validate_function_calls(resource_mappings, functions or {})
+
+    def _validate_function_calls(
+        self, resource_mappings: list[ResourceMapping], functions: dict[str, "Function"]
+    ) -> None:
+        """Check each `conv.functions.<name>(...)` and `flow.functions.<name>(...)` call.
+
+        The runtime calls a global function with `conv` first, and a flow's function with
+        `conv` and `flow` first, so the call's own arguments must fit the rest of its `def`,
+        which is the called function's `@func_parameter`s.
+        """
+        for node in ast.walk(utils.parse_python(self.code)):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            owner = node.func.value
+            if not (
+                isinstance(owner, ast.Attribute)
+                and owner.attr == "functions"
+                and isinstance(owner.value, ast.Name)
+                and owner.value.id in ("conv", "flow")
+            ):
+                continue
+            call = f"{owner.value.id}.functions.{node.func.attr}"
+            if owner.value.id == "conv":
+                prefix, flow_name = "fn", None
+            elif self.flow_name:
+                prefix, flow_name = "ft", self.flow_name
+            else:
+                continue
+            target = next(
+                (
+                    r
+                    for r in resource_mappings
+                    if r.resource_type is Function
+                    and r.resource_prefix == prefix
+                    and r.resource_name == node.func.attr
+                    and (flow_name is None or r.flow_name == flow_name)
+                ),
+                None,
+            )
+            if target is None:
+                where = f" in flow '{flow_name}'" if flow_name else ""
+                raise ValueError(f"{call} calls a function that does not exist{where}.")
+            callee = functions.get(target.resource_id)
+            if (
+                callee is None
+                or any(isinstance(a, ast.Starred) for a in node.args)
+                or any(k.arg is None for k in node.keywords)
+            ):
+                continue
+            signature = inspect.Signature(
+                [
+                    inspect.Parameter(p.name, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                    for p in callee.parameters
+                ]
+            )
+            try:
+                signature.bind(*node.args, **{k.arg: k.value for k in node.keywords})
+            except TypeError as e:
+                raise ValueError(f"{call}(...) {e}.") from None
 
     @staticmethod
     @lru_cache(maxsize=2048)
@@ -947,17 +1066,17 @@ class Function(Resource):
         randomize = False
 
         for kw in decorator.keywords:
-            if kw.arg == "delay_before_responses_start" and isinstance(kw.value, ast.Constant):
-                initial_delay = kw.value.value
-            elif kw.arg == "silence_after_each_response" and isinstance(kw.value, ast.Constant):
-                interval = kw.value.value
+            if kw.arg == "delay_before_responses_start":
+                initial_delay = _literal(kw.value)
+            elif kw.arg == "silence_after_each_response":
+                interval = _literal(kw.value)
             elif kw.arg == "randomize" and isinstance(kw.value, ast.Constant):
                 randomize = bool(kw.value.value)
             elif kw.arg == "delay_responses" and isinstance(kw.value, ast.List):
                 for i, elt in enumerate(kw.value.elts):
                     if isinstance(elt, ast.Tuple) and len(elt.elts) == 2:
                         msg = elt.elts[0].value if isinstance(elt.elts[0], ast.Constant) else ""
-                        dur = elt.elts[1].value if isinstance(elt.elts[1], ast.Constant) else 0
+                        dur = _literal(elt.elts[1])
                         # Preserve existing ID when the message text matches.
                         existing_id = None
                         if known_latency_control and known_latency_control.delay_responses:

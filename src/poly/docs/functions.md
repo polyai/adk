@@ -44,8 +44,12 @@ flows/{flow_name}/
 - **`@func_latency_control(...)`** (optional): Configure delay messages while the function runs.
   Supports `delay_before_responses_start`, `silence_after_each_response`, `delay_responses`, and
   `randomize` (shuffle delay response order on each invocation; default `False`).
+  `delay_before_responses_start` and `silence_after_each_response` are integers from 0 to 10, and each `delay_responses` duration is an integer of 0 or more.
 
 Function steps do not support `@func_parameter` or `@func_description`.
+Start and end functions do not support `@func_parameter` or `@func_latency_control`.
+
+Function and parameter names use only letters, digits and underscores, don't start with a digit, and aren't Python reserved words.
 
 ### Parameter types
 
@@ -95,6 +99,8 @@ Prefer naming after the **event that should trigger the call** (e.g. `first_name
 ### Calling other functions
 - Global: `conv.functions.my_global_function(...)`
 - Flow: `flow.functions.my_flow_function(...)`
+
+The called function must exist (a global one for `conv.functions`, one in the same flow for `flow.functions`), and the call's arguments must match its parameters after `conv` (and `flow`).
 
 ## Special functions
 

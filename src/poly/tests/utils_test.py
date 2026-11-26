@@ -32,6 +32,7 @@ from poly.resources import (
     FlowConfig,
     Function,
     Handoff,
+    OutboundCampaignNode,
     ResourceMapping,
     SMSTemplate,
     Variable,
@@ -1681,6 +1682,53 @@ class ClearUnusedSettingsFromFlowStepTest(unittest.TestCase):
         self.assertEqual(queued[0].type, "clear_step_settings")
         self.assertEqual(queued[0].clear_step_settings.flow_id, self.FLOW_ID)
         self.assertEqual(queued[0].clear_step_settings.step_id, self.STEP_ID)
+
+
+class RelabelCampaignNodesFirstTest(unittest.TestCase):
+    def test_each_node_is_relabelled_after_the_node_giving_up_its_label(self):
+        def node(node_id: str, saved_label: str, name: str) -> types.SimpleNamespace:
+            return types.SimpleNamespace(
+                resource_id=node_id, campaign_id="C", saved_label=saved_label, name=name
+            )
+
+        updated = {
+            OutboundCampaignNode: {
+                "a": node("a", "x", "y"),
+                "b": node("b", "y", "z"),
+                "c": node("c", "z", "w"),
+            }
+        }
+        pre_push_updated: dict = {}
+
+        prepush.relabel_campaign_nodes_first(updated, {}, pre_push_updated, {})
+
+        self.assertEqual(list(pre_push_updated[OutboundCampaignNode]), ["c", "b", "a"])
+
+
+class ResourceLookupTest(unittest.TestCase):
+    def setUp(self):
+        self.mappings = [
+            ResourceMapping("H1", Handoff, "Reception", None, None, None),
+            ResourceMapping("F1", Function, "Reception", None, None, None),
+        ]
+
+    def test_name_and_id_lookups_match_the_resource_type(self):
+        self.assertEqual(
+            resource_utils.resource_name_for_id("H1", Handoff, self.mappings), "Reception"
+        )
+        self.assertEqual(
+            resource_utils.resource_id_for_name("Reception", Function, self.mappings), "F1"
+        )
+
+    def test_unknown_or_missing_mappings_give_none(self):
+        self.assertIsNone(resource_utils.resource_name_for_id("F1", Handoff, self.mappings))
+        self.assertIsNone(resource_utils.resource_id_for_name("Reception", Handoff, None))
+
+    def test_drop_unset_keeps_falsy_values_that_are_set(self):
+        self.assertEqual(
+            resource_utils.drop_unset({"a": None, "b": 0, "c": "", "d": False}),
+            {"b": 0, "c": "", "d": False},
+        )
 
 
 class JsonIoTests(unittest.TestCase):

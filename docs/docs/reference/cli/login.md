@@ -13,7 +13,9 @@ For first-time onboarding, [`poly setup`](./setup.md) runs this same sign-in flo
 
 1. Prompts for a region if `--region` is not supplied.
 2. Opens a browser window for sign-in via the Auth0 device authorization flow.
-3. Fetches or creates an ADK key for your user and saves it to `~/.poly/credentials.json` under the chosen region.
+3. Keeps the ADK key already saved in `~/.poly/credentials.json` for the chosen region if it is still one of your personal access tokens. Otherwise it creates a new one and saves it there.
+
+Agent Studio shows a personal access token's secret only when it is created, so signing in on another machine creates another token. Each user can hold two per region. If you already have two and `poly login` needs a new one, it stops and asks you to delete one in the **Personal Access Token** tab of your Agent Studio account.
 
 On an enterprise region (`us-1`, `uk-1`, `euw-1`) your account must already be provisioned by PolyAI. If it isn't, the command stops with a message saying so; `studio` is the self-serve region, where signing in creates your workspace.
 
