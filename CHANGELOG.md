@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.91.3 (2026-11-26)
+
+### Bug Fixes
+
+- Place poly call through the WebRTC bridge ([#446](https://github.com/polyai/adk/pull/446),
+  [`e1ef3e7`](https://github.com/polyai/adk/commit/e1ef3e76967668f68cccbfc3190ffa483853c48e))
+
+
 ## v0.91.2 (2026-11-26)
 
 ### Performance Improvements
