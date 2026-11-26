@@ -24,7 +24,7 @@ Commands are listed under section headers so related ones stay together:
 |---|---|
 | Getting started | `init`, `setup`, `login`, `apikey`, `studio`, `project` |
 | Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch`, `test`, `rtc`, `chat`, `call` |
-| Builder API | `deployments`, `metrics`, `conversations`, `audio-cache`, `functions` |
+| Builder API | `deployments`, `metrics`, `conversations`, `audio-cache`, `functions`, `campaign` |
 | Other | `template`, `docs`, `completion` |
 
 Each command also supports its own help output. For example:
@@ -89,6 +89,7 @@ poly push --help
 | [`poly rtc`](./cli/rtc.md) | Manage per-environment Real-Time Configuration |
 | [`poly audio-cache`](./cli/audio-cache.md) | Inspect and replace cached TTS audio |
 | [`poly functions`](./cli/functions.md) | Run and validate Functions via the REST API |
+| [`poly campaign`](./cli/campaign.md) | Validate, preview, test, publish, pause, resume and archive outbound campaigns |
 | [`poly studio`](./cli/studio.md) | Open the project in the Agent Studio web app |
 
 ## Shared flags
@@ -162,6 +163,10 @@ poly audio-cache bulk-delete --ids id1,id2 --json
 poly audio-cache synthesize <entry_id> --text "Hello" --json
 poly functions execute <function_name> --args '{"x": 1}' --json
 poly functions validate --json
+poly campaign validate 'Appointment reminders' --json
+poly campaign preview 'Appointment reminders' --phone +15550100 --json
+poly campaign test 'Appointment reminders' --phone +15550100 --json
+poly campaign pause 'Appointment reminders' --json
 poly apikey --region studio --json
 ~~~
 

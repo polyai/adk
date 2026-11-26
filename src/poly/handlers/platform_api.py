@@ -7,10 +7,12 @@ import io
 import json
 import logging
 import os
+import re
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from urllib.parse import quote
 
 from ruamel.yaml import YAML
 
@@ -20,6 +22,7 @@ from poly.utils import raise_if_no_credentials, retrieve_api_key
 
 logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/adk/v1/accounts"
+SECRETS_URL = "/adk/v1/accounts/{account_id}/secrets"
 PROJECTS_URL = "/adk/v1/accounts/{account_id}/projects"
 PROJECT_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}"
 DEPLOYMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/deployments"
@@ -76,12 +79,25 @@ FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT = 30
+OUTBOUND_CAMPAIGN_TEST_START_TIMEOUT = (10, 300)
+OUTBOUND_CAMPAIGN_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/branches/{branch_id}"
+    "/outbound-campaigns/{path}"
+)
+
 # Data API routes, served on the regional api.<region>.poly.ai hosts.
 DATA_METRICS_URL = "/api/v1/metrics"
 DATA_METRICS_AGGREGATE_URL = "/api/v1/metrics/aggregate"
 DATA_CONVERSATIONS_SEARCH_URL = "/api/v1/conversations/search"
 DATA_TRANSCRIPTS_SEARCH_URL = "/api/v1/transcripts/search"
 DATA_TRANSCRIPT_URL = "/api/v1/transcripts/conversation/{conversation_id}"
+# Voice calls (`poly call`): the WebRTC bridge, served on the regional api.<region>.poly.ai hosts.
+CALL_BRIDGE_URL = "/webrtc-bridge"
+CALLS_URL = CALL_BRIDGE_URL + "/api/v1/call"
+CALL_URL = CALLS_URL + "/{call_id}"
+CALL_TOKEN_HEADER = "X-Call-Token"
+CALL_REQUEST_TIMEOUT_SECONDS = 15
 
 
 class PlatformAPIHandler:
@@ -124,6 +140,97 @@ class PlatformAPIHandler:
         raise ValueError(f"Unknown region: {region}")
 
     @staticmethod
+    def get_call_bridge_url(region: str) -> str:
+        """Get the base URL of the WebRTC bridge that places voice calls in a region.
+
+        Args:
+            region (str): The region name
+        Returns:
+            str: The bridge base URL
+        """
+        return PlatformAPIHandler.get_base_url(region) + CALL_BRIDGE_URL
+
+    @staticmethod
+    def _call_headers(auth: dict) -> dict:
+        """Headers for a WebRTC bridge request.
+
+        The bridge takes its own credentials in place of the API key, and the request
+        still carries the headers that trace it back to the ADK.
+
+        Args:
+            auth (dict): The credential and content headers for the request
+        Returns:
+            dict: The complete request headers
+        """
+        return {
+            "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+            "X-Poly-Source": "adk",
+            **auth,
+        }
+
+    @staticmethod
+    def create_call(region: str, auth_token: str, body: dict) -> dict:
+        """Provision a voice call on the WebRTC bridge.
+
+        Args:
+            region (str): The region name
+            auth_token (str): The studio token that authorizes the call
+            body (dict): The call request (mode, variant, caller label)
+        Returns:
+            dict: The call id and the credentials for the rest of the call
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            CALLS_URL,
+            method="POST",
+            data=body,
+            headers=PlatformAPIHandler._call_headers(
+                {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
+            ),
+            timeout=CALL_REQUEST_TIMEOUT_SECONDS,
+        )
+
+    @staticmethod
+    def post_call_signaling(region: str, path: str, call_token: str, body: dict) -> dict:
+        """Post one signalling step of a voice call to the WebRTC bridge.
+
+        Args:
+            region (str): The region name
+            path (str): The step's path on the bridge, from the call's credentials
+            call_token (str): The call's own short-lived token
+            body (dict): The step's payload
+        Returns:
+            dict: The bridge's reply, empty when the step returns no content
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            CALL_BRIDGE_URL + path,
+            method="POST",
+            data=body,
+            headers=PlatformAPIHandler._call_headers(
+                {CALL_TOKEN_HEADER: call_token, "Content-Type": "application/json"}
+            ),
+            timeout=CALL_REQUEST_TIMEOUT_SECONDS,
+        )
+
+    @staticmethod
+    def delete_call(region: str, call_id: str, call_token: str) -> None:
+        """End a voice call on the WebRTC bridge.
+
+        Args:
+            region (str): The region name
+            call_id (str): The call to end
+            call_token (str): The call's own short-lived token
+        """
+        PlatformAPIHandler.make_request(
+            region,
+            CALL_URL.format(call_id=quote(call_id, safe="")),
+            method="DELETE",
+            headers=PlatformAPIHandler._call_headers({CALL_TOKEN_HEADER: call_token}),
+            timeout=CALL_REQUEST_TIMEOUT_SECONDS,
+        )
+
+    @staticmethod
     def make_request(
         region: str,
         endpoint: str,
@@ -134,6 +241,8 @@ class PlatformAPIHandler:
         files: ty.Optional[dict] = None,
         response_format: str = "json",
         use_jupiter_api: bool = False,
+        timeout: ty.Optional[ty.Union[float, tuple[float, float]]] = None,
+        sensitive: bool = False,
     ) -> dict:
         """Make a request to the Platform API.
 
@@ -150,6 +259,9 @@ class PlatformAPIHandler:
             response_format (str): How to parse the response. "json" (default)
                 or "yaml".
             use_jupiter_api (bool): Whether to use the Jupiter API.
+            timeout (float | tuple[float, float] | None): Seconds to wait for the server to
+                connect and to send data, or a (connect, read) pair. None waits forever.
+            sensitive (bool): Suppress payload logs and redact errors for secrets.
 
         Returns:
             dict: The parsed response.
@@ -174,29 +286,55 @@ class PlatformAPIHandler:
         logger.info(f"Making {method} request to {url}")
 
         # Use requests.request() to handle all HTTP methods uniformly
-        api_response = requests.request(
-            method=method,
-            url=url,
-            headers=headers,
-            params=params,
-            allow_redirects=False,
-            files=files,
-            data=json.dumps(data) if data and not files else None,
-        )
-
-        logger.debug(
-            f"Request/response url={url!r} body={data!r}"
-            f" status_code={api_response.status_code!r} response={api_response.text!r}"
-        )
-
         try:
-            api_response.raise_for_status()
-        except requests.HTTPError:
-            logger.debug(
-                f"Error in request status_code={api_response.status_code!r}"
-                f" response={api_response.text!r}"
+            api_response = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                allow_redirects=False,
+                files=files,
+                data=json.dumps(data) if data and not files else None,
+                timeout=30 if sensitive and timeout is None else timeout,
             )
+        except requests.RequestException:
+            if sensitive:
+                from poly.handlers.sdk import SourcererAPIError
+
+                raise SourcererAPIError("Secret request failed; check your connection.") from None
             raise
+
+        if sensitive:
+            status = api_response.status_code
+            if not 200 <= status < 300:
+                from poly.handlers.sdk import SourcererAPIError
+
+                message = f"Secret request failed (HTTP {status})."
+                if 400 <= status < 500:
+                    details = PlatformAPIHandler._secret_error_details(api_response, data)
+                    if details:
+                        message += f" {details}"
+                if status in (401, 403):
+                    message += " Check your API key and account secrets permissions."
+                elif status == 404:
+                    message += (
+                        " The account-secrets API or requested secret was not found; "
+                        "check the account, secret name and API availability in your region."
+                    )
+                raise SourcererAPIError(message) from None
+        else:
+            logger.debug(
+                f"Request/response url={url!r} body={data!r}"
+                f" status_code={api_response.status_code!r} response={api_response.text!r}"
+            )
+            try:
+                api_response.raise_for_status()
+            except requests.HTTPError:
+                logger.debug(
+                    f"Error in request status_code={api_response.status_code!r}"
+                    f" response={api_response.text!r}"
+                )
+                raise
 
         if api_response.status_code == 204:
             logger.info(f"Request to {url} successful (no content)")
@@ -210,13 +348,124 @@ class PlatformAPIHandler:
             result = ry.load(content)
             return dict(result) if result else {}
 
+        decode_error = ValueError if sensitive else json.JSONDecodeError
         try:
             parsed = api_response.json()
-        except json.JSONDecodeError as e:
+        except decode_error as e:
+            if sensitive:
+                raise ValueError("The API returned invalid secret metadata.") from None
             raise ValueError(f"Failed to parse JSON response: {e}")
 
         logger.info(f"Request to {url} successful")
         return parsed
+
+    @staticmethod
+    def _secret_error_details(response, data: ty.Optional[dict]) -> str:
+        """Read the API's structured client error without exposing a request or response body."""
+        try:
+            error = response.json()
+        except ValueError:
+            return ""
+        if not isinstance(error, dict):
+            return ""
+        code = error.get("error_code")
+        message = error.get("error_message")
+        if not isinstance(code, str) or not isinstance(message, str):
+            return ""
+
+        # The gateway can wrap a downstream JSON error inside its error_message.
+        if message.lstrip().startswith(("{", "[")):
+            try:
+                nested = json.loads(message)
+            except ValueError:
+                return ""
+            if not isinstance(nested, dict):
+                return ""
+            code = nested.get("error_code", code)
+            message = nested.get("error_message")
+        if not isinstance(code, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", code):
+            return ""
+        if (
+            not isinstance(message, str)
+            or not message.strip()
+            or message.lstrip().startswith(("{", "["))
+        ):
+            return ""
+
+        details = f"{code}: {message}"
+        value = (data or {}).get("secret_value")
+        values = value.values() if isinstance(value, dict) else [value]
+        for item in values:
+            if (
+                isinstance(item, str)
+                and item
+                and (item in details or json.dumps(item)[1:-1] in details)
+            ):
+                return ""
+        return details
+
+    @staticmethod
+    def _secret_metadata(record: dict) -> dict:
+        """Accept metadata fields only, even if a server unexpectedly returns a value."""
+        if not isinstance(record, dict):
+            raise ValueError("The API returned invalid secret metadata.")
+        fields = {
+            "id",
+            "account_id",
+            "display_name",
+            "description",
+            "value_type",
+            "access_config",
+            "created_at",
+            "last_updated",
+            "keys",
+        }
+        return {key: value for key, value in record.items() if key in fields}
+
+    @staticmethod
+    def get_secrets(region: str, account_id: str) -> list[dict]:
+        """List account secret metadata without making a named value read."""
+        records = PlatformAPIHandler.make_request(
+            region, SECRETS_URL.format(account_id=account_id), sensitive=True
+        )
+        if not isinstance(records, list):
+            raise ValueError("The API returned invalid secret metadata.")
+        return [PlatformAPIHandler._secret_metadata(record) for record in records]
+
+    @staticmethod
+    def set_secret(region: str, account_id: str, data: dict, create: bool) -> dict:
+        """Create or replace an account secret and return metadata only."""
+        record = PlatformAPIHandler.make_request(
+            region,
+            SECRETS_URL.format(account_id=account_id),
+            method="POST" if create else "PUT",
+            data=data,
+            sensitive=True,
+        )
+        return PlatformAPIHandler._secret_metadata(record)
+
+    @staticmethod
+    def patch_secret(region: str, account_id: str, data: dict) -> dict:
+        """Patch selected key-value entries and accept metadata only in the reply."""
+        record = PlatformAPIHandler.make_request(
+            region,
+            SECRETS_URL.format(account_id=account_id),
+            method="PATCH",
+            data=data,
+            sensitive=True,
+        )
+        return PlatformAPIHandler._secret_metadata(record)
+
+    @staticmethod
+    def delete_secrets(region: str, account_id: str, names: list[str]) -> None:
+        """Delete account secrets. The endpoint requires display_name as an array in the body."""
+        PlatformAPIHandler.make_request(
+            region,
+            SECRETS_URL.format(account_id=account_id),
+            method="DELETE",
+            data={"display_name": names},
+            sensitive=True,
+        )
 
     @staticmethod
     def get_accessible_regions(regions: list[str]) -> list[str]:
@@ -1840,6 +2089,82 @@ class PlatformAPIHandler:
         """
         endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    @staticmethod
+    def validate_outbound_campaign(
+        region: str, account_id: str, project_id: str, branch_id: str, campaign_id: str
+    ) -> dict:
+        """Validate a campaign as it is on `branch_id`.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            campaign_id: The campaign ID.
+
+        Returns:
+            dict: {"valid": bool, "errors": [...], "warnings": [...]}.
+        """
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id=quote(branch_id, safe=""),
+            path=f"{quote(campaign_id, safe='')}/validate",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "POST", timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
+        )
+
+    @staticmethod
+    def dry_run_outbound_campaign(
+        region: str,
+        account_id: str,
+        project_id: str,
+        branch_id: str,
+        campaign_id: str,
+        body: dict,
+    ) -> dict:
+        """Dry-run a campaign on `branch_id`. Nothing is sent or stored."""
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id=quote(branch_id, safe=""),
+            path=f"{quote(campaign_id, safe='')}/dry-run",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "POST", data=body, timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
+        )
+
+    @staticmethod
+    def start_outbound_campaign_test_step(
+        region: str, account_id: str, project_id: str, campaign_id: str, body: dict
+    ) -> dict:
+        """Start a real test step of the live campaign, on main."""
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id="main",
+            path=f"{quote(campaign_id, safe='')}/test-steps",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "POST", data=body, timeout=OUTBOUND_CAMPAIGN_TEST_START_TIMEOUT
+        )
+
+    @staticmethod
+    def get_outbound_campaign_test_step(
+        region: str, account_id: str, project_id: str, campaign_id: str, step_id: str
+    ) -> dict:
+        """Read a test step of the live campaign, on main."""
+        endpoint = OUTBOUND_CAMPAIGN_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            branch_id="main",
+            path=f"{quote(campaign_id, safe='')}/test-steps/{quote(step_id, safe='')}",
+        )
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "GET", timeout=OUTBOUND_CAMPAIGN_REQUEST_TIMEOUT
+        )
 
     @staticmethod
     def get_available_metrics(region: str, project_id: ty.Optional[str] = None) -> dict:

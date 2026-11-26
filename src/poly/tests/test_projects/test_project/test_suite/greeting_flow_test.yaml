@@ -5,6 +5,7 @@ language: en-GB
 tags:
 - booking
 - smoke
+agent_memory: {}
 api_mocks:
   customer_api:
     get_confirmation_status:

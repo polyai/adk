@@ -449,19 +449,38 @@ def require_experiments_enabled(project: AgentStudioProject, output_json: bool =
         sys.exit(1)
 
 
+def require_outbound_campaigns_enabled(
+    project: AgentStudioProject, output_json: bool = False, campaign: Optional[str] = None
+) -> None:
+    """Exit with an error if outbound campaigns aren't turned on for the project.
+
+    Args:
+        project: The loaded project.
+        output_json: If True, output JSON and exit on failure.
+        campaign: The campaign the command was given, added to the JSON error.
+    """
+    from poly.output.console import error
+
+    if not project.outbound_campaigns_enabled:
+        msg = "Outbound campaigns aren't turned on for this project."
+        if output_json:
+            json_print(
+                {"success": False, "error": msg, **({"campaign": campaign} if campaign else {})}
+            )
+        else:
+            error(msg)
+        sys.exit(1)
+
+
 def get_package_version() -> str:
     """Get the version of the polyai-adk package installed in the current environment.
 
     Returns:
         The version string of the package.
     """
-    from importlib.metadata import version
+    from poly.version import __version__
 
-    try:
-        _version = version(PACKAGE_NAME)
-    except Exception:
-        _version = "unknown"
-    return _version
+    return __version__
 
 
 def get_latest_version(timeout: float = PYPI_TIMEOUT_SECONDS) -> str:

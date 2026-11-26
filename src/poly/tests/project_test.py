@@ -5,6 +5,7 @@ Uses test project in tests/test_project
 Copyright PolyAI Limited
 """
 
+import base64
 import dataclasses
 import json
 import os
@@ -19,7 +20,6 @@ from unittest.mock import MagicMock, patch
 from google.protobuf.json_format import MessageToDict
 
 import poly.resources.resource_utils as resource_utils
-from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
@@ -75,7 +75,7 @@ from poly.resources.flows import (
 from poly.resources.function import FunctionParameters, FunctionType
 from poly.resources.outbound_campaign import NODE_FIELDS
 from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
-from poly.resources.test_suite import TestCaseApiOperationMock
+from poly.resources.test_suite import TestCaseAgentMemory, TestCaseApiOperationMock
 from poly.tests.testing_utils import (
     campaign_entity,
     campaign_function,
@@ -2396,9 +2396,13 @@ class PushProjectTest(unittest.TestCase):
         updated = kwargs["updated_resources"][TestCase]
         self.assertEqual(list(updated), ["TEST-greeting_flow"])
         self.assertEqual(updated["TEST-greeting_flow"].name, "Greeting flow test")
-        # Only the name changed, so no sub-resource commands are sent.
+        # Only the name changed, so no sub-resource commands are sent, and the
+        # api_mocks and `agent_memory: {}` stay on the same Studio test case.
         self.assertNotIn(TestCaseAssertion, kwargs["updated_resources"])
         self.assertNotIn(TestCaseTags, kwargs["updated_resources"])
+        self.assertNotIn(TestCaseApiOperationMock, kwargs["updated_resources"])
+        self.assertNotIn(TestCaseAgentMemory, kwargs["updated_resources"])
+        self.assertEqual(updated["TEST-greeting_flow"].agent_memory.memory, {})
         self.assertEqual(
             set(project.resources[TestCase]), {"TEST-greeting_flow", "TEST-webchat_smoke"}
         )
@@ -2462,6 +2466,18 @@ class PushProjectTest(unittest.TestCase):
         self.assertEqual(
             set(kwargs["deleted_resources"][TestCase]),
             {"TEST-greeting_flow", "TEST-greeting_twin"},
+        )
+        # The recreated case starts with agentMemory null, so `{}` and the mocks are re-sent.
+        [new_id] = kwargs["new_resources"][TestCase]
+        memories = list(kwargs["updated_resources"][TestCaseAgentMemory].values())
+        self.assertEqual([m.resource_id for m in memories], [new_id])
+        self.assertTrue(memories[0].build_update_proto().HasField("agent_memory"))
+        self.assertEqual(
+            [
+                m.test_case_id
+                for m in kwargs["updated_resources"][TestCaseApiOperationMock].values()
+            ],
+            [new_id],
         )
 
     def test_push_project_force_does_not_delete_remote_only_resources(self):
@@ -2869,6 +2885,82 @@ class StatusFileWritesTest(unittest.TestCase):
 
         self.assertEqual(self.project.branch_id, "BRANCH-new")
         save_config.assert_called_once()
+
+
+class SavedFileHashesTest(unittest.TestCase):
+    """Loading a project reuses the file hashes saved in the status file when they're valid."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+        self.root = _copy_test_project(self)
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), self.root)
+        project.save_config(write_project_yaml=True)
+        self.expected = AgentStudioProject.compute_file_structure_info(project.resources)
+        self.status_file = os.path.join(self.root, STATUS_FILE)
+
+    def _edit_status(self, edit) -> None:
+        with open(self.status_file, "rb") as f:
+            status = json.loads(base64.b64decode(f.read()))
+        edit(status)
+        with open(self.status_file, "wb") as f:
+            f.write(base64.b64encode(json.dumps(status).encode("utf-8")))
+
+    def test_saved_hashes_are_reused(self):
+        with patch.object(AgentStudioProject, "compute_file_structure_info") as compute:
+            project = AgentStudioProject.from_file_path(self.root)
+
+        compute.assert_not_called()
+        self.assertEqual(project.file_structure_info, self.expected)
+
+    def test_hashes_from_another_adk_version_are_not_reused(self):
+        """Another version may format resources differently, so its hashes can't be trusted."""
+        self._edit_status(lambda status: status.update(adk_version="0.0.1"))
+
+        project = AgentStudioProject.from_file_path(self.root)
+
+        self.assertEqual(project.file_structure_info, {})
+
+    def test_hashes_are_not_reused_when_a_migration_ran(self):
+        self._edit_status(lambda status: status.update(migration_flags=[]))
+
+        project = AgentStudioProject.from_file_path(self.root)
+
+        self.assertEqual(project.file_structure_info, {})
+
+    def test_hashes_missing_a_resource_are_not_reused(self):
+        def drop_one(status):
+            status["file_structure_info"].pop(next(iter(status["file_structure_info"])))
+
+        self._edit_status(drop_one)
+
+        project = AgentStudioProject.from_file_path(self.root)
+
+        self.assertEqual(project.file_structure_info, {})
+
+    def test_hashes_saved_with_another_path_separator_are_not_reused(self):
+        """A status file committed on Windows and loaded on macOS or Linux, or the other way."""
+        other_separator = "/" if os.sep == "\\" else "\\"
+
+        def swap_separators(status):
+            status["file_structure_info"] = {
+                path.replace(os.sep, other_separator): info
+                for path, info in status["file_structure_info"].items()
+            }
+
+        self._edit_status(swap_separators)
+
+        project = AgentStudioProject.from_file_path(self.root)
+
+        self.assertEqual(project.file_structure_info, {})
+
+    def test_from_dict_computes_hashes_it_cannot_reuse(self):
+        data = deepcopy(PROJECT_DATA)
+        data["adk_version"] = "0.0.1"
+
+        project = AgentStudioProject.from_dict(data, self.root)
+
+        self.assertEqual(project.file_structure_info, self.expected)
 
 
 class StageSetDefaultCommandsTest(unittest.TestCase):
@@ -8775,7 +8867,6 @@ class CreateCallSessionTest(unittest.TestCase):
             "artifactVersion": "artifact-v1",
             "lambdaDeploymentVersion": "lambda-v1",
             "authToken": "studio-token",
-            "gatewayWsUrl": "wss://webrtc-gateway.test.polyai.app",
         }
 
     def test_draft_returns_call_session(self):
@@ -8785,14 +8876,9 @@ class CreateCallSessionTest(unittest.TestCase):
         session = self.project.create_call_session("draft", variant="VARIANT-x")
 
         self.mock_api_handler.get_branch_call_info.assert_called_once_with(self.project.branch_id)
-        self.assertEqual(session.account_id, self.project.account_id)
-        self.assertEqual(session.project_id, self.project.project_id)
         self.assertEqual(session.variant_id, "VARIANT-x")
-        self.assertEqual(session.artifact_version, "artifact-v1")
-        self.assertEqual(session.lambda_deployment_version, "lambda-v1")
         self.assertEqual(session.auth_token, "studio-token")
-        self.assertEqual(session.gateway_ws_url, "wss://webrtc-gateway.test.polyai.app")
-        self.assertEqual(session.mode, DEFAULT_CALL_MODE)
+        self.assertEqual(session.region, self.project.region)
 
     def test_draft_defaults_empty_variant(self):
         """A missing variant is normalised to an empty string."""
@@ -8809,30 +8895,15 @@ class CreateCallSessionTest(unittest.TestCase):
 
         self.mock_api_handler.get_branch_call_info.assert_not_called()
 
-    def test_incomplete_response_raises_value_error(self):
-        """A response missing any required field is rejected, naming the field."""
-        for missing in (
-            "artifactVersion",
-            "lambdaDeploymentVersion",
-            "authToken",
-            "gatewayWsUrl",
-        ):
+    def test_response_without_a_token_raises_value_error(self):
+        """A response with no studio token is rejected, naming the field."""
+        for token in ("", None):
             info = self._valid_call_info()
-            info[missing] = ""
+            info["authToken"] = token
             self.mock_api_handler.get_branch_call_info.return_value = info
             with self.assertRaises(ValueError) as ctx:
                 self.project.create_call_session("draft")
-            self.assertIn(missing, str(ctx.exception))
-
-    def test_incomplete_response_does_not_leak_auth_token(self):
-        """The validation error must never echo the authToken credential."""
-        info = self._valid_call_info()
-        info["authToken"] = "super-secret-token"
-        info["gatewayWsUrl"] = ""  # trigger the error with the token still present
-        self.mock_api_handler.get_branch_call_info.return_value = info
-        with self.assertRaises(ValueError) as ctx:
-            self.project.create_call_session("draft")
-        self.assertNotIn("super-secret-token", str(ctx.exception))
+            self.assertIn("authToken", str(ctx.exception))
 
 
 class PullRemoteRenameTest(unittest.TestCase):

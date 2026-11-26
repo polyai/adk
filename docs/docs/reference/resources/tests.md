@@ -67,6 +67,7 @@ The directory is optional. Create it only when you have test cases to define.
 | `caller_number` | No | The number the simulated call arrives from. See [mock call context](#mock-call-context). |
 | `sip_headers` | No | SIP headers a carrier would send with an inbound call. |
 | `integration_attributes` | No | Attributes a channel or connector passes in. |
+| `agent_memory` | No | The Agent Memory profile the agent sees as `conv.memory`. Absent means not mocked, and `{}` means a first-time caller. See [mock agent memory](#mock-agent-memory). |
 | `api_mocks` | No | Mocked responses for [API integration](./api_integrations.md) operations. See [API mocks](#api-mocks). |
 | `prompt_assertions` | No | List of natural-language statements that must hold about the agent's behavior. Each is evaluated by an LLM judge. |
 | `function_call_assertions` | No | List of expected function calls and their argument values. To assert a handoff in a project with handoff reasons, use `builtin_handoff`. |
@@ -150,6 +151,38 @@ Types come from YAML, which means quoting matters:
 | `expiry: "2026-08-12"` | text |
 
 Dates must be quoted. An unquoted `expiry: 2026-08-12` is a YAML date, which the agent cannot receive, and `poly push` rejects it rather than guessing what you meant.
+
+## Mock agent memory
+
+`agent_memory` sets the Agent Memory profile the agent sees, read as `conv.memory`, so returning-caller and first-time-caller paths each get a test case of their own. When it is set, it **replaces** `conv.memory` for the whole run, and nothing stored for the caller is read.
+
+```yaml
+name: Returning caller skips the name question
+scenario: Book a table for Friday at 7pm.
+channel: voice
+language: en-GB
+agent_memory:
+  first_name: Sam
+  last_booking:
+    date: "2026-08-14"
+    party_size: 2
+prompt_assertions:
+- The agent greets the caller as Sam without asking for their name
+```
+
+There are three states, and each one means something different:
+
+| YAML | Meaning |
+|------|---------|
+| field absent | Not mocked. The run reads whatever profile is stored for the caller's identifier. |
+| `agent_memory: {}` | A first-time caller, with nothing on file. |
+| `agent_memory:` with fields | A returning caller with exactly those fields. |
+
+A flow that branches on `conv.memory` wants both a returning-caller case and a first-time-caller case. `caller_number` alone doesn't make a returning caller, so use `agent_memory` for that.
+
+Values follow the same type rules as `integration_attributes`: they keep their YAML type, nested maps and lists are supported, and dates must be quoted. Use synthetic values only, never real customer data.
+
+Pulling, renaming and pushing a case keep `{}` and an absent field distinct.
 
 ## API mocks
 
@@ -280,6 +313,7 @@ prompt_assertions:
 - `simulated_at`, if set, must be a valid ISO 8601 datetime
 - `caller_number`, if set, must be text — an unquoted number is rejected rather than converted
 - `integration_attributes` values must be text, numbers, `true`/`false`, `null`, lists, or nested maps; an unquoted date is rejected with the quoted form to use instead; keys must be text
+- `agent_memory`, if set, must be a map; its values follow the same type rules as `integration_attributes`
 - `api_mocks`: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `respond.status` must be a valid HTTP status code (100–599); `respond.body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation
 - each `function_call_assertions[*].name` must match a global function under `functions/`, a flow function under `flows/<flow>/functions/`, or `builtin_handoff`, the platform tool the agent calls to hand off when the project has handoff reasons
 - each argument's `value_type` must be one of `string`, `integer`, `float`, `boolean`
