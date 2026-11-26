@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.91.1 (2026-11-26)
+
+### Bug Fixes
+
+- Check conv.functions and flow.functions calls against the called function
+  ([#447](https://github.com/polyai/adk/pull/447),
+  [`466dadf`](https://github.com/polyai/adk/commit/466dadf85de520e3a6b3e2deb5bc8278bf3f9d58))
+
+
 ## v0.91.0 (2026-11-25)
 
 ### Features

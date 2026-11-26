@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import ast
+import inspect
 import logging
 import os
 import re
@@ -736,8 +737,17 @@ class Function(Resource):
 
         return code
 
-    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+    def validate(
+        self,
+        resource_mappings: list[ResourceMapping] = None,
+        functions: Optional[dict[str, "Function"]] = None,
+        **kwargs,
+    ) -> None:
         """Validate the resource.
+
+        Args:
+            resource_mappings: Every resource in the project, for checking references.
+            functions: The project's functions by resource ID, for checking calls to them.
 
         Raises:
             ValidationError: If the resource is not valid.
@@ -886,6 +896,68 @@ class Function(Resource):
                         raise ValueError(
                             f"conv.goto_flow('{target_flow}') references a flow that does not exist."
                         )
+
+        if resource_mappings:
+            self._validate_function_calls(resource_mappings, functions or {})
+
+    def _validate_function_calls(
+        self, resource_mappings: list[ResourceMapping], functions: dict[str, "Function"]
+    ) -> None:
+        """Check each `conv.functions.<name>(...)` and `flow.functions.<name>(...)` call.
+
+        The runtime calls a global function with `conv` first, and a flow's function with
+        `conv` and `flow` first, so the call's own arguments must fit the rest of its `def`,
+        which is the called function's `@func_parameter`s.
+        """
+        for node in ast.walk(utils.parse_python(self.code)):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            owner = node.func.value
+            if not (
+                isinstance(owner, ast.Attribute)
+                and owner.attr == "functions"
+                and isinstance(owner.value, ast.Name)
+                and owner.value.id in ("conv", "flow")
+            ):
+                continue
+            call = f"{owner.value.id}.functions.{node.func.attr}"
+            if owner.value.id == "conv":
+                prefix, flow_name = "fn", None
+            elif self.flow_name:
+                prefix, flow_name = "ft", self.flow_name
+            else:
+                continue
+            target = next(
+                (
+                    r
+                    for r in resource_mappings
+                    if r.resource_type is Function
+                    and r.resource_prefix == prefix
+                    and r.resource_name == node.func.attr
+                    and (flow_name is None or r.flow_name == flow_name)
+                ),
+                None,
+            )
+            if target is None:
+                where = f" in flow '{flow_name}'" if flow_name else ""
+                raise ValueError(f"{call} calls a function that does not exist{where}.")
+            callee = functions.get(target.resource_id)
+            if (
+                callee is None
+                or any(isinstance(a, ast.Starred) for a in node.args)
+                or any(k.arg is None for k in node.keywords)
+            ):
+                continue
+            signature = inspect.Signature(
+                [
+                    inspect.Parameter(p.name, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                    for p in callee.parameters
+                ]
+            )
+            try:
+                signature.bind(*node.args, **{k.arg: k.value for k in node.keywords})
+            except TypeError as e:
+                raise ValueError(f"{call}(...) {e}.") from None
 
     @staticmethod
     @lru_cache(maxsize=2048)

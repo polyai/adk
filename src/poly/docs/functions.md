@@ -100,6 +100,8 @@ Prefer naming after the **event that should trigger the call** (e.g. `first_name
 - Global: `conv.functions.my_global_function(...)`
 - Flow: `flow.functions.my_flow_function(...)`
 
+The called function must exist (a global one for `conv.functions`, one in the same flow for `flow.functions`), and the call's arguments must match its parameters after `conv` (and `flow`).
+
 ## Special functions
 
 ### Start function (`start_function.py`)
