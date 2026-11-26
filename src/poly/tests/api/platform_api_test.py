@@ -262,6 +262,19 @@ class CreateChat(unittest.TestCase):
 class MakeRequest(unittest.TestCase):
     """Tests for PlatformAPIHandler.make_request HTTP behaviour."""
 
+    @patch("requests.request")
+    def test_plain_value_error_is_redacted_only_for_sensitive_requests(self, mock_request):
+        response = make_mock_response()
+        decoder_error = ValueError("private decoder detail")
+        response.json.side_effect = decoder_error
+        mock_request.return_value = response
+
+        with self.assertRaises(ValueError) as caught:
+            PlatformAPIHandler.make_request("studio", "/x", headers={})
+        self.assertIs(caught.exception, decoder_error)
+        with self.assertRaisesRegex(ValueError, "^The API returned invalid secret metadata[.]$"):
+            PlatformAPIHandler.make_request("studio", "/x", sensitive=True, headers={})
+
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("requests.request")
     def test_default_headers_include_api_key_and_adk_metadata(self, mock_request, _mock_key):

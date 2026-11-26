@@ -163,7 +163,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 
 ## Best practices
 
-- Run [`poly campaign validate`](../cli/campaign.md#poly-campaign-validate) after every push, before you publish.
+- Run [`poly campaign validate`](../cli/campaign.md#poly-campaign-validate) and `poly campaign preview` after every push, before you publish.
 - Name nodes after what they do, like `Reminder call`, so routes read clearly.
 - Keep node names stable: renaming a node other than the trigger gives it a new identity and history.
 - Make a campaign on a branch, merge it, then publish it from `main`.
@@ -183,7 +183,7 @@ def map_contacts(contacts: list[dict], outbound_campaign: OutboundCampaign):
 
     ---
 
-    Validate, publish, pause, resume and archive a campaign.
+    Validate, preview, test, publish, pause, resume and archive a campaign.
     [Open `poly campaign`](../cli/campaign.md)
 
 </div>

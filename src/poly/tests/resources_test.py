@@ -1092,6 +1092,121 @@ def test_code(conv: Conversation, test_param: int):
             flow_name="Test Flow" if function_type == FunctionType.TRANSITION else None,
         )
 
+    def _callees(self) -> tuple[list[ResourceMapping], dict[str, Function]]:
+        """A global and a transition function that the tests call, with their mappings."""
+        callees = [
+            (
+                Function(
+                    resource_id="FUNCTION-lookup_booking",
+                    name="lookup_booking",
+                    description="desc",
+                    code="",
+                    parameters=[
+                        FunctionParameters(id="p1", name="booking_ref", description="d", type="string"),
+                        FunctionParameters(id="p2", name="surname", description="d", type="string"),
+                    ],
+                    latency_control=FunctionLatencyControl(),
+                    function_type=FunctionType.GLOBAL,
+                ),
+                "fn",
+            ),
+            (
+                Function(
+                    resource_id="FUNCTION-confirm",
+                    name="confirm",
+                    description="desc",
+                    code="",
+                    parameters=[
+                        FunctionParameters(id="p3", name="answer", description="d", type="string"),
+                    ],
+                    latency_control=FunctionLatencyControl(),
+                    function_type=FunctionType.TRANSITION,
+                    flow_id="flow-1",
+                    flow_name="Test Flow",
+                ),
+                "ft",
+            ),
+        ]
+        mappings = [
+            ResourceMapping(
+                resource_id=function.resource_id,
+                resource_name=function.name,
+                resource_type=Function,
+                file_path=f"{function.name}.py",
+                resource_prefix=prefix,
+                flow_name=function.flow_name,
+            )
+            for function, prefix in callees
+        ]
+        return mappings, {function.resource_id: function for function, _ in callees}
+
+    def _calling(self, call: str, function_type: FunctionType = FunctionType.GLOBAL) -> Function:
+        """A function whose body is the given call."""
+        func = self._global_function(function_type=function_type)
+        func.code += f"    {call}\n"
+        return func
+
+    def test_validate_function_calls_that_fit_pass(self):
+        """Calls that bind to the called function's own arguments validate."""
+        mappings, functions = self._callees()
+        for call, function_type in [
+            ("conv.functions.lookup_booking('AB12', 'Smith')", FunctionType.GLOBAL),
+            (
+                "conv.functions.lookup_booking(booking_ref='AB12', surname='Smith')",
+                FunctionType.GLOBAL,
+            ),
+            ("conv.functions.lookup_booking(*refs)", FunctionType.GLOBAL),
+            ("flow.functions.confirm(answer='yes')", FunctionType.TRANSITION),
+        ]:
+            with self.subTest(call=call):
+                func = self._calling(call, function_type)
+                self.assertIsNone(func.validate(resource_mappings=mappings, functions=functions))
+
+    def test_validate_function_call_with_wrong_arguments_raises(self):
+        """A call the called function's def can't accept is reported with the reason."""
+        mappings, functions = self._callees()
+        for call, function_type, reason in [
+            (
+                "conv.functions.lookup_booking('AB12', 'Smith', mock_scenario='')",
+                FunctionType.GLOBAL,
+                "got an unexpected keyword argument 'mock_scenario'",
+            ),
+            (
+                "conv.functions.lookup_booking('AB12')",
+                FunctionType.GLOBAL,
+                "missing a required argument: 'surname'",
+            ),
+            (
+                "conv.functions.lookup_booking('AB12', 'Smith', 'extra')",
+                FunctionType.GLOBAL,
+                "too many positional arguments",
+            ),
+            (
+                "flow.functions.confirm(conv, flow, 'yes')",
+                FunctionType.TRANSITION,
+                "too many positional arguments",
+            ),
+        ]:
+            with self.subTest(call=call):
+                func = self._calling(call, function_type)
+                with self.assertRaises(ValueError) as cm:
+                    func.validate(resource_mappings=mappings, functions=functions)
+                self.assertIn(f"{call.split('(')[0]}(...) {reason}", str(cm.exception))
+
+    def test_validate_call_to_a_missing_function_raises(self):
+        """conv.functions needs a global function, and flow.functions one in the same flow."""
+        mappings, functions = self._callees()
+        for call, function_type in [
+            ("conv.functions.missing()", FunctionType.GLOBAL),
+            ("conv.functions.confirm(answer='yes')", FunctionType.TRANSITION),
+            ("flow.functions.lookup_booking('AB12', 'Smith')", FunctionType.TRANSITION),
+        ]:
+            with self.subTest(call=call):
+                func = self._calling(call, function_type)
+                with self.assertRaises(ValueError) as cm:
+                    func.validate(resource_mappings=mappings, functions=functions)
+                self.assertIn("calls a function that does not exist", str(cm.exception))
+
     def test_validate_ascii_function_and_parameter_names_pass(self):
         """ASCII identifiers are accepted for the function and its parameters."""
         func = self._global_function(
@@ -4051,9 +4166,7 @@ conditions:
                     prompt=prompt,
                     position={"x": 0.0, "y": 0.0},
                 )
-                self.assertIsNone(
-                    empty_prompt_step.validate(resource_mappings=resource_mappings)
-                )
+                self.assertIsNone(empty_prompt_step.validate(resource_mappings=resource_mappings))
 
         # Test with missing flow config
         invalid_step = FlowStep(
@@ -4402,9 +4515,7 @@ conditions:
         """A condition pointing at a step in its own flow validates."""
         condition = self._step_condition_to("step-2")
 
-        self.assertIsNone(
-            condition.validate(resource_mappings=self._step_mappings_in_two_flows())
-        )
+        self.assertIsNone(condition.validate(resource_mappings=self._step_mappings_in_two_flows()))
 
     def test_validate_condition_child_step_in_other_flow_raises(self):
         """A condition pointing at another flow's step is rejected."""

@@ -2,6 +2,39 @@
 
 <!-- version list -->
 
+## v0.91.2 (2026-11-26)
+
+### Performance Improvements
+
+- Reuse saved file hashes when loading a project ([#405](https://github.com/polyai/adk/pull/405),
+  [`dfc7a5c`](https://github.com/polyai/adk/commit/dfc7a5c23b9b73242d4856f3dc93daeb22cca6b4))
+
+
+## v0.91.1 (2026-11-26)
+
+### Bug Fixes
+
+- Check conv.functions and flow.functions calls against the called function
+  ([#447](https://github.com/polyai/adk/pull/447),
+  [`466dadf`](https://github.com/polyai/adk/commit/466dadf85de520e3a6b3e2deb5bc8278bf3f9d58))
+
+
+## v0.91.0 (2026-11-25)
+
+### Features
+
+- Add account secrets CLI commands ([#434](https://github.com/polyai/adk/pull/434),
+  [`621189c`](https://github.com/polyai/adk/commit/621189cbf3d0a42a1ab442f812d9f475c0a53480))
+
+
+## v0.90.0 (2026-11-24)
+
+### Features
+
+- Add poly campaign preview and test ([#376](https://github.com/polyai/adk/pull/376),
+  [`2b4b543`](https://github.com/polyai/adk/commit/2b4b543881b20d7141f159288e551a0c33f61a0b))
+
+
 ## v0.89.0 (2026-11-23)
 
 ### Features

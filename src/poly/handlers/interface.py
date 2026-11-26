@@ -54,6 +54,26 @@ class AgentStudioInterface:
     sync_client: Optional[SyncClientHandler] = None
 
     @staticmethod
+    def get_secrets(region: str, account_id: str) -> list[dict]:
+        """List metadata for secrets belonging to an account."""
+        return PlatformAPIHandler.get_secrets(region, account_id)
+
+    @staticmethod
+    def set_secret(region: str, account_id: str, data: dict, create: bool) -> dict:
+        """Create or update an account secret without reading its stored value."""
+        return PlatformAPIHandler.set_secret(region, account_id, data, create)
+
+    @staticmethod
+    def patch_secret(region: str, account_id: str, data: dict) -> dict:
+        """Change selected key-value entries without reading stored values."""
+        return PlatformAPIHandler.patch_secret(region, account_id, data)
+
+    @staticmethod
+    def delete_secrets(region: str, account_id: str, names: list[str]) -> None:
+        """Delete one or more secrets from an account."""
+        PlatformAPIHandler.delete_secrets(region, account_id, names)
+
+    @staticmethod
     def _extract_error_code(e: Exception) -> Optional[str]:
         """Extract the error_code field from an API error response body.
 
@@ -604,6 +624,48 @@ class AgentStudioInterface:
         try:
             return PlatformAPIHandler.validate_outbound_campaign(
                 self.region, self.account_id, self.project_id, self.branch_id, campaign_id
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
+
+    def dry_run_outbound_campaign(self, campaign_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Dry-run a campaign on the current branch. Nothing is sent or stored."""
+        import requests
+
+        self.sync_client.assert_branch_exists()
+        try:
+            return PlatformAPIHandler.dry_run_outbound_campaign(
+                self.region, self.account_id, self.project_id, self.branch_id, campaign_id, body
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
+
+    def start_outbound_campaign_test_step(
+        self, campaign_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Start a real test step of the live campaign."""
+        import requests
+
+        try:
+            return PlatformAPIHandler.start_outbound_campaign_test_step(
+                self.region, self.account_id, self.project_id, campaign_id, body
+            )
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError.from_request_error(e) from e
+        except ValueError as e:
+            raise SourcererAPIError(str(e)) from e
+
+    def get_outbound_campaign_test_step(self, campaign_id: str, step_id: str) -> dict[str, Any]:
+        """Read a test step of the live campaign."""
+        import requests
+
+        try:
+            return PlatformAPIHandler.get_outbound_campaign_test_step(
+                self.region, self.account_id, self.project_id, campaign_id, step_id
             )
         except requests.exceptions.RequestException as e:
             raise SourcererAPIError.from_request_error(e) from e
