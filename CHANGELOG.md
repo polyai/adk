@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.92.0 (2026-11-26)
+
+### Features
+
+- Mock agent memory on test cases ([#448](https://github.com/polyai/adk/pull/448),
+  [`948c38c`](https://github.com/polyai/adk/commit/948c38c2e0625d3cf20c1ef5564a5b0f17977c13))
+
+
 ## v0.91.3 (2026-11-26)
 
 ### Bug Fixes
