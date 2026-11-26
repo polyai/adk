@@ -3,4 +3,4 @@
 Copyright PolyAI Limited
 """
 
-__version__ = "0.78.0"
+__version__ = "0.91.0"
