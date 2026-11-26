@@ -7,9 +7,11 @@ import copy
 import datetime
 import importlib
 import importlib.resources
+import os
 import pkgutil
 import platform
 import re
+import shutil
 import sys
 import tempfile
 import threading
@@ -52,6 +54,7 @@ from poly.resources.flows import (
     VADConfig,
 )
 from poly.utils import prepush, stub_gen
+from poly.utils.locked_file import open_locked, read_locked
 
 
 class MergeUtilsTests(unittest.TestCase):
@@ -1936,6 +1939,39 @@ class StripStringsTests(unittest.TestCase):
 
     def test_removes_zero_width_no_break_spaces(self):
         self.assertEqual(resource_utils.strip_strings("Hello\ufeff\nWorld"), "Hello\nWorld")
+
+
+class LockedFileTest(unittest.TestCase):
+    """Tests for the lock poly commands hold while reading or writing the status file."""
+
+    def setUp(self):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        self.path = os.path.join(folder, "status")
+
+    def test_a_read_waits_for_a_rewrite_to_finish(self):
+        """Without the lock, a command reading mid-rewrite sees part of the file."""
+        read = []
+        with open_locked(self.path) as f:
+            f.write(b"half")
+            f.flush()
+            reader = threading.Thread(target=lambda: read.append(read_locked(self.path)))
+            reader.start()
+            reader.join(0.2)
+            self.assertTrue(reader.is_alive())
+            f.write(b" and the rest")
+        reader.join(15)
+
+        self.assertEqual(read, [b"half and the rest"])
+
+    def test_a_rewrite_keeps_only_the_new_content(self):
+        with open_locked(self.path) as f:
+            f.write(b"longer content")
+        with open_locked(self.path) as f:
+            f.write(b"short")
+            f.truncate()
+
+        self.assertEqual(read_locked(self.path), b"short")
 
 
 if __name__ == "__main__":
