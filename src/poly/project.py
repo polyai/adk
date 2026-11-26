@@ -3633,10 +3633,15 @@ class AgentStudioProject:
             seen_paths.add(mapping.file_path)
 
         for resource_type, resources in resources_dict.items():
+            additional_kwargs = {}
+            # Functions check their calls to other functions against those functions' parameters
+            if issubclass(resource_type, Function):
+                additional_kwargs["functions"] = resources_dict.get(Function, {})
             for resource_id, resource in resources.items():
                 try:
                     resource.validate(
                         resource_mappings=resource_mappings,
+                        **additional_kwargs,
                     )
                 except ValueError as e:
                     # ValueError already contains context, just add file path if missing

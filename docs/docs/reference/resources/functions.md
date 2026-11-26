@@ -146,6 +146,7 @@ Adding this decorator to a function enables latency control for it. It accepts:
 - Function and `@func_parameter` names use only letters, digits and underscores, don't start with a digit, and aren't Python reserved words.
 - Global and transition functions must have a non-empty `@func_description`, and the description text can't have leading or trailing whitespace — both raise a `ValueError` on push.
 - Every `@func_parameter` needs a description.
+- A `conv.functions.<name>(...)` call must name a global function, and a `flow.functions.<name>(...)` call a function in the same flow. Its arguments must match that function's parameters after `conv` (and `flow`).
 - `delay_before_responses_start` and `silence_after_each_response` (`@func_latency_control`) must each be an integer between 0 and 10, and `delay_responses` cannot be empty once latency control is enabled — all three raise a `ValueError` on push otherwise.
 
 ## Parameter types
