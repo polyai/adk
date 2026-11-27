@@ -28,7 +28,7 @@ By default shows all deployments. Pass `--limit` to cap the number of entries sh
 | `--limit` | Maximum number of versions to show. Shows all by default. |
 | `--offset` | Number of versions to skip. Defaults to `0`. |
 | `--hash` | Hash of the version to start listing from. Overrides `--offset`. |
-| `--details` | Output each deployment with detailed information. |
+| `--details` | Output each deployment with detailed information, including its change summary when it has one (see [`poly deployments show`](#poly-deployments-show)). |
 
 !!! tip "Use `--details` for readable output"
 
@@ -63,6 +63,8 @@ poly deployments show abc123def --env live
 | `--env`, `-e` | Environment to query. Choices: `sandbox`, `pre-release`, `live`. Defaults to `sandbox`|
 
 Sandbox is the source of truth for the linear version history — pre-release and live promotions carry the same version hashes forward.
+
+When Agent Studio has written a change summary for the deployment, it is printed under the message: a one-line headline, then the changes grouped by area, such as Flows or Knowledge base. A summary covering one area lists its changes without the area. Agent Studio writes the summary shortly after a publish or promotion, by comparing the version with the one the environment served before. First deployments, rollbacks and versions from before summaries have none. `poly deployments list --details` prints the same summary for each deployment. In `--json` output, it is `deployment.deployment_metadata.change_summary`.
 
 When you set an `--env` other than sandbox, it shows the included deployments between that deployment and the previous one. Use this for auditing what changes were included.
 

@@ -21,6 +21,8 @@ from poly.output.console import (
     print_available_metrics,
     print_branch_history,
     print_conversation_search,
+    print_deployment_show,
+    print_deployments,
     print_experiment_detail,
     print_experiments,
     print_merge_conflict_interactive_header,
@@ -606,6 +608,108 @@ class PrintMergeConflictInteractiveHeaderTest(unittest.TestCase):
 
         self.assertIn("Parent (Release 1)", output)
         self.assertNotIn("Main", output)
+
+
+_CHANGE_SUMMARY = {
+    "headline": "Adds weekend opening hours and a booking flow",
+    "base": "previous_version",
+    "groups": [
+        {
+            "area": "Flows",
+            "changes": [{"text": "Adds a booking flow that asks for the party size."}],
+        },
+        {
+            "area": "Knowledge base",
+            "changes": [{"text": "Opening hours now include Saturday and Sunday."}],
+        },
+    ],
+    "generated_at": "2026-11-27T14:00:00Z",
+    "from_version": "aaa111bbb",
+    "to_version": "abc123def",
+}
+
+
+def _deployment(change_summary: dict | None = None) -> dict:
+    """Build a deployment record as the deployments list returns it."""
+    meta = {"deployment_type": "merge", "deployment_message": "Weekend hours"}
+    if change_summary is not None:
+        meta["change_summary"] = change_summary
+    return {
+        "id": "dep-1",
+        "version_hash": "abc123def456",
+        "created_at": "Fri, 27 Nov 2026 14:00:00 GMT",
+        "created_by": "miles",
+        "client_env": "live",
+        "deployment_metadata": meta,
+    }
+
+
+class PrintChangeSummaryTest(unittest.TestCase):
+    """Tests for the change summary in `deployments show` and `deployments list --details`."""
+
+    def _render_show(self, deployment: dict) -> str:
+        with console.capture() as capture:
+            print_deployment_show(deployment, {}, [])
+        return capture.get()
+
+    def test_show_prints_headline_and_changes_under_their_areas(self):
+        """A summary over several areas prints the headline, then each area and its changes."""
+        output = self._render_show(_deployment(_CHANGE_SUMMARY))
+
+        self.assertIn("Summary: Adds weekend opening hours and a booking flow", output)
+        self.assertIn("  Flows\n    • Adds a booking flow that asks for the party size.", output)
+        self.assertIn(
+            "  Knowledge base\n    • Opening hours now include Saturday and Sunday.", output
+        )
+
+    def test_single_area_summary_leaves_the_area_out(self):
+        """A summary covering one area lists its changes without the area heading."""
+        summary = dict(_CHANGE_SUMMARY, groups=_CHANGE_SUMMARY["groups"][:1])
+
+        output = self._render_show(_deployment(summary))
+
+        self.assertIn("  • Adds a booking flow that asks for the party size.", output)
+        self.assertNotIn("Flows", output)
+
+    def test_deployment_without_a_summary_prints_no_summary(self):
+        """Older deployments, first deployments and rollbacks have no summary to print."""
+        output = self._render_show(_deployment())
+
+        self.assertIn("Message: Weekend hours", output)
+        self.assertNotIn("Summary:", output)
+
+    def test_summary_with_no_groups_is_treated_as_absent(self):
+        """A stored summary with nothing in it prints nothing, as in Agent Studio."""
+        output = self._render_show(_deployment(dict(_CHANGE_SUMMARY, groups=[])))
+
+        self.assertNotIn("Summary:", output)
+
+    def test_model_written_text_is_not_parsed_as_markup(self):
+        """Square brackets in the summary are printed as written."""
+        summary = dict(
+            _CHANGE_SUMMARY,
+            headline="Renames [bold]greeting[/bold]",
+            groups=[{"area": "Agent", "changes": [{"text": "Says [red]hello[/red] first."}]}],
+        )
+
+        output = self._render_show(_deployment(summary))
+
+        self.assertIn("Summary: Renames [bold]greeting[/bold]", output)
+        self.assertIn("• Says [red]hello[/red] first.", output)
+
+    def test_list_details_prints_the_summary(self):
+        """`deployments list --details` prints each deployment's summary under its message."""
+        with console.capture() as capture:
+            print_deployments([_deployment(_CHANGE_SUMMARY)], {}, details=True)
+
+        self.assertIn("Summary: Adds weekend opening hours and a booking flow", capture.get())
+
+    def test_list_table_leaves_the_summary_out(self):
+        """The default table keeps to one row per deployment."""
+        with console.capture() as capture:
+            print_deployments([_deployment(_CHANGE_SUMMARY)], {})
+
+        self.assertNotIn("Summary:", capture.get())
 
 
 _EXPERIMENT = {

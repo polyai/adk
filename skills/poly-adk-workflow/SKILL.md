@@ -139,6 +139,7 @@ Merging into `main` deploys to `sandbox` automatically. From there, promotion is
 ```bash
 poly deployments promote --from sandbox --to pre-release --dry-run
 poly deployments list             # what is deployed where
+poly deployments show <hash>      # one version, with a summary of what it changed
 ```
 
 **Never promote to `pre-release` or `live` unless the user explicitly asks** — `live` is production. Use `--dry-run` first to preview, and re-run tests against each environment after promoting. See `poly deployments --help` for the full surface, including rollback.
