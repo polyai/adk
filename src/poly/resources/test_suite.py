@@ -234,9 +234,9 @@ class TestCaseAssertion(SubResource):
         if self.prompts:
             response["prompt_assertions"] = self.prompts
         if self.function_calls:
+            # Kept in list order: the test runner expects the calls in this order.
             response["function_call_assertions"] = [
-                function_call.to_yaml_dict()
-                for function_call in sorted(self.function_calls, key=lambda call: call.name)
+                function_call.to_yaml_dict() for function_call in self.function_calls
             ]
         return response
 

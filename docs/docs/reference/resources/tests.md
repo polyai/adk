@@ -266,7 +266,7 @@ function_call_assertions:
         value_type: integer
 ~~~
 
-Only function name and argument values are asserted. The function does not have to be the only call in the conversation, and the order of calls is not checked.
+Only function name and argument values are asserted. Other calls can happen before, between or after the asserted ones, but the asserted calls must happen in the order they are listed: a call that happens before one listed above it fails as out of order.
 
 ## Example
 

@@ -11055,8 +11055,8 @@ class TestCaseTests(unittest.TestCase):
             language="en-GB",
         )
 
-    def test_assertions_sorted_by_name(self):
-        """Function call assertions and their arguments serialize in alphabetical order."""
+    def test_assertions_keep_order_and_arguments_sorted(self):
+        """Function call assertions keep their order; their arguments serialize sorted."""
         assertions = TestCaseAssertion(
             resource_id="TEST-ordering",
             name="assertions",
@@ -11081,11 +11081,40 @@ class TestCaseTests(unittest.TestCase):
 
         self.assertEqual(
             [call["name"] for call in function_calls],
-            ["book_appointment", "lookup_order", "transfer_call"],
+            ["transfer_call", "book_appointment", "lookup_order"],
         )
         self.assertEqual(
             [arg["parameter_name"] for arg in function_calls[0]["arguments"]],
             ["apple", "monkey", "zebra"],
+        )
+
+    def test_reordering_function_call_assertions_is_pushed(self):
+        """Reordering the assertions changes the hash and pushes the new order."""
+
+        def test_case(order: list[str]) -> TestCase:
+            return TestCase.from_yaml_dict(
+                {
+                    "name": "Booking",
+                    "scenario": "Book a table.",
+                    "channel": "voice",
+                    "language": "en-GB",
+                    "function_call_assertions": [{"name": name} for name in order],
+                },
+                resource_id="TEST-booking",
+                name="Booking",
+            )
+
+        original = test_case(["start_booking", "confirm_booking"])
+        reordered = test_case(["confirm_booking", "start_booking"])
+
+        self.assertNotEqual(original.compute_hash(), reordered.compute_hash())
+        _, updated, _ = reordered.get_new_updated_deleted_subresources(old_resource=original)
+        self.assertEqual(
+            [
+                assertion.function_call.name
+                for assertion in updated[0].build_update_proto().assertions
+            ],
+            ["confirm_booking", "start_booking"],
         )
 
     def test_to_yaml_dict_from_yaml_dict_roundtrip(self):

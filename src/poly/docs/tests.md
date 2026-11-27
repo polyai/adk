@@ -27,7 +27,7 @@ Each test case has these fields:
 - **agent_memory** (map, optional): The Agent Memory profile the agent sees as `conv.memory`. Absent means not mocked, and `{}` means a first-time caller.
 - **api_mocks** (map, optional): Mock responses for API integration operations, so the simulation runner returns these instead of calling the real API.
 - **prompt_assertions** (list, optional): Expected behaviours in the agent's response.
-- **function_call_assertions** (list, optional): Expected function calls and argument values.
+- **function_call_assertions** (list, optional): Expected function calls and argument values, in the order the agent should make them.
 
 ## Example
 
