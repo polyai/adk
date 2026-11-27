@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from rich import box
 from rich.console import Console, Group
 from rich.live import Live
+from rich.padding import Padding
 from rich.pager import Pager, SystemPager
 from rich.panel import Panel
 from rich.spinner import Spinner
@@ -910,6 +911,34 @@ def _format_deployment_timestamp(created_at: str) -> str:
         return "-"
 
 
+def _print_change_summary(meta: dict[str, Any]) -> None:
+    """Print the change summary Agent Studio stored on a deployment, if it has one.
+
+    Changes are grouped by area, and a summary covering one area leaves the area out.
+    The text is model-written, so it is printed as plain text rather than parsed as markup.
+
+    Args:
+        meta: The deployment's ``deployment_metadata``.
+    """
+    summary = meta.get("change_summary") or {}
+    groups = [group for group in summary.get("groups") or [] if group.get("changes")]
+    if not groups:
+        return
+
+    console.print(Text.assemble("Summary: ", summary.get("headline") or "-"))
+    show_areas = len(groups) > 1
+    for group in groups:
+        if show_areas:
+            area = Text(group.get("area") or "Other", style="label")
+            console.print(Padding(area, (0, 0, 0, 2), expand=False))
+        changes = Table.grid(padding=(0, 1, 0, 0))
+        changes.add_column(no_wrap=True)
+        changes.add_column()
+        for change in group["changes"]:
+            changes.add_row("•", Text(change.get("text") or ""))
+        console.print(Padding(changes, (0, 0, 0, 4 if show_areas else 2), expand=False))
+
+
 def print_deployments(
     versions: list[dict[str, Any]], active_deployment_hashes: dict[str, str], details: bool = False
 ) -> None:
@@ -976,6 +1005,7 @@ def print_deployments(
             console.print(f"Lambda Deployment Version: {lambda_deployment_version or '—'}")
             console.print(f"Client Environment: {client_env or '—'}")
             console.print(f"Message: {deployment_message}")
+            _print_change_summary(meta)
             console.print()
 
     if table:
@@ -1028,6 +1058,7 @@ def print_deployment_show(
     console.print(f"Lambda Deployment Version: {lambda_deployment_version or '—'}")
     console.print(f"Client Environment: {client_env or '—'}")
     console.print(f"Message: {deployment_message}")
+    _print_change_summary(meta)
     console.print()
 
     if included_deployments:

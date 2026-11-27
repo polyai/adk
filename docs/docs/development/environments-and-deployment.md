@@ -28,7 +28,7 @@ Promotion is a step at a time. `--to pre-release` promotes from sandbox and `--t
 
 Because a promotion moves an existing version rather than building a new one, what you verified in sandbox is what arrives in live.
 
-`poly deployments list` and `poly deployments show` tell you what is deployed where, and `poly deployments rollback` returns an environment to an earlier version.
+`poly deployments list` and `poly deployments show` tell you what is deployed where, and `poly deployments rollback` returns an environment to an earlier version. `poly deployments show` also prints a plain-language summary of what a version changed, when Agent Studio has written one.
 
 ## Verify at each step
 
